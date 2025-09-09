@@ -3,15 +3,14 @@ services:
     build:
       context: .
       dockerfile: backend.Dockerfile
-    container_name: PSAT-backend
-    # 把你本机的数据/模型/矢量文件挂进去（方便替换&持久化）
+    # Mount local data/model/shapefile directories for easy replacement & persistence
     volumes:
       - ./backend/data:/app/data
       - ./backend/models:/app/models
       - ./backend/shapefiles:/app/shapefiles
     ports:
-      - "8000:8000"   # 可选，方便直接调试后端
-    # 如果需要设置时区或环境变量，可在这里追加:
+      - "8000:8000"   # Optional: allows direct backend debugging
+    # Add timezone or environment variables here if needed:
     # environment:
     #   - TZ=Asia/Singapore
 
@@ -19,7 +18,6 @@ services:
     build:
       context: .
       dockerfile: frontend.Dockerfile
-    container_name: PSAT-frontend
     depends_on:
       - backend
     ports:
