@@ -1,5 +1,5 @@
 export default function SegmentsTable({ rows }: { rows: Record<string, string>[] }) {
-	if (!rows?.length) return <p>暂无数据</p>
+	if (!rows?.length) return <p>No Data</p>
 	const columns = Object.keys(rows[0])
 
 	return (
