@@ -14,7 +14,7 @@ export default function Home() {
 
     return (
         <div style={{ margin:'24px auto', maxWidth:1100, fontFamily:'system-ui, sans-serif' }}>
-            <h1>Home Page</h1>
+            <h1>Home</h1>
             <p>Backend status: <b>{status}</b></p>
             {error && <p style={{ color:'crimson' }}>error：{error}</p>}
             <p>Rows: <b>{rows.length}</b></p>
