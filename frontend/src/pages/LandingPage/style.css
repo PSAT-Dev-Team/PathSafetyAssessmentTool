@@ -81,52 +81,29 @@
   transform: translateY(-2px);
 }
 
-/* 页脚：左侧版本号 + 右侧 CycleRAP */
 .landing-footer {
   position: absolute;
   inset-inline: 0;
-  bottom: 8px;
+  bottom: 0;
+  height: 40px;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
+  padding: 0 8px;
   z-index: 25;
+  background: transparent;
 }
 
 .version-info {
-  font-size: clamp(12px, 2.2vw, 18px);
+  font-size: 16px;
   color: #111;
   font-weight: 500;
+  line-height: 20px;
 }
 
 .cyclerap-logo-bottom {
-  width: clamp(120px, 18vw, 250px);
-  height: auto;
+  height: 100%;
+  width: auto;
   object-fit: contain;
   opacity: 1;
-}
-
-/* 响应式：窄屏时让说明图 & 按钮居中 */
-@media (max-width: 768px) {
-  .right-rail {
-    top: 6%;
-  }
-  .psat-description {
-    right: 50%;
-    transform: translateX(50%);
-    bottom: 140px;
-    width: clamp(200px, 70vw, 420px);
-  }
-  .start-btn {
-    right: 50%;
-    transform: translateX(50%);
-    width: clamp(220px, 80vw, 520px);
-  }
-}
-
-/* 减少动画偏好 */
-@media (prefers-reduced-motion: reduce) {
-  .start-btn { transition: none; }
-  .start-btn:hover,
-  .start-btn:active { transform: none; }
 }
