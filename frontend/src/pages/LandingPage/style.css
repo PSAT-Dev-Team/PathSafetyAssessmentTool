@@ -1,0 +1,132 @@
+/* 只作用于 LandingPage：把 reset 限定在 .landing-root 范围内 */
+.landing-root,
+.landing-root * {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 页面背景 & 基础布局 */
+.landing-root {
+  position: relative;
+  min-height: 100svh; /* 移动端更稳 */
+  display: block;
+  font-family: 'Montserrat', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif;
+  background-image: url("./assets/PSAT Landing Page BG.png"); /* 相对本 CSS 文件 */
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  overflow: hidden;
+}
+
+/* 右侧品牌区（两张 logo 竖排） */
+.right-rail {
+  position: absolute;
+  top: 12%;
+  right: 2%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.psat-logo {
+  max-width: clamp(160px, 28vw, 440px);
+  max-height: 35vh;
+  height: auto;
+  object-fit: contain;
+}
+
+.psat-logo.name {
+  max-width: clamp(160px, 28vw, 440px);
+}
+
+/* 说明图片：位于按钮上方靠右 */
+.psat-description {
+  position: absolute;
+  right: 2%;
+  bottom: 160px; /* 保持在按钮之上 */
+  width: clamp(180px, 22vw, 360px);
+  display: block;
+  z-index: 20;
+}
+
+/* START 按钮 */
+.start-btn {
+  position: absolute;
+  right: 2%;
+  bottom: 80px;
+  width: clamp(220px, 28vw, 520px);
+  padding: 18px 0;
+  border: 0;
+  border-radius: 50px;
+  font: 700 1.6rem/1 'Montserrat', system-ui, sans-serif;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+  box-shadow: 0 10px 30px rgba(46, 204, 113, 0.4);
+  cursor: pointer;
+  transition: transform .25s ease, box-shadow .25s ease;
+  z-index: 20;
+}
+
+.start-btn:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 18px 36px rgba(46, 204, 113, 0.55);
+}
+
+.start-btn:active {
+  transform: translateY(-2px);
+}
+
+/* 页脚：左侧版本号 + 右侧 CycleRAP */
+.landing-footer {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 8px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 12px;
+  z-index: 25;
+}
+
+.version-info {
+  font-size: clamp(12px, 2.2vw, 18px);
+  color: #111;
+  font-weight: 500;
+}
+
+.cyclerap-logo-bottom {
+  width: clamp(120px, 18vw, 250px);
+  height: auto;
+  object-fit: contain;
+  opacity: 1;
+}
+
+/* 响应式：窄屏时让说明图 & 按钮居中 */
+@media (max-width: 768px) {
+  .right-rail {
+    top: 6%;
+  }
+  .psat-description {
+    right: 50%;
+    transform: translateX(50%);
+    bottom: 140px;
+    width: clamp(200px, 70vw, 420px);
+  }
+  .start-btn {
+    right: 50%;
+    transform: translateX(50%);
+    width: clamp(220px, 80vw, 520px);
+  }
+}
+
+/* 减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .start-btn { transition: none; }
+  .start-btn:hover,
+  .start-btn:active { transform: none; }
+}
