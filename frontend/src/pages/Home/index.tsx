@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
 import { fetchSegments, ping } from '../../api'
-import SegmentsTable from '../../components/SegmentsTable'
+
+interface FileResponse {
+  dirs: string[];
+}
 
 export default function Home() {
     const [status, setStatus] = useState('checking...')
-    const [rows, setRows] = useState<Record<string, string>[]>([])
+    const [fileData, setFileData] = useState<FileResponse | null>(null)
     const [error, setError] = useState<string | null>(null)
 
     useEffect(() => {
         ping().then(r => setStatus(r.status)).catch(() => setStatus('offline'))
-        fetchSegments().then(setRows).catch(e => setError(String(e)))
+        fetchSegments().then(setFileData).catch(e => setError(String(e)))
     }, [])
 
     return (
@@ -17,8 +20,16 @@ export default function Home() {
             <h1>Home</h1>
             <p>Backend status: <b>{status}</b></p>
             {error && <p style={{ color:'crimson' }}>error:{error}</p>}
-            <p>Rows: <b>{rows.length}</b></p>
-            <SegmentsTable rows={rows} />
+            <p>Files:</p>
+            {fileData && fileData.dirs.length > 0 ? (
+                <ul>
+                    {fileData.dirs.map((dirs, index) => (
+                        <li key={index}>{dirs}</li>
+                    ))}
+                </ul>
+            ) : (
+                <p>No files found</p>
+            )}
         </div>
     )
 }
