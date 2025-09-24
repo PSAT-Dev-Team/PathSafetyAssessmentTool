@@ -7,3 +7,10 @@ html, body {
 * {
   box-sizing: border-box;
 }
+
+@font-face {
+  font-family: 'Big Noodle Titling';
+  src: url('./assets/fonts/big_noodle_titling.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
