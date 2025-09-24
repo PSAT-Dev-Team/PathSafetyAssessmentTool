@@ -23,37 +23,22 @@ export default function LandingPage() {
           decoding="async"
           draggable={false}
         />
-        <img
-          src={psatName}
-          alt="PSAT wordmark"
-          className="psat-logo name"
-          loading="eager"
-          decoding="async"
-          draggable={false}
-        />
+
+        <h1 className="psat-logo name">path safety assessmenty tool</h1>
+
+        <p className="psat-logo description">an evidence-based risk evaluation model for active mobility users</p>
+
+        <button
+          type="button"
+          className="start-btn"
+          onClick={startPSAT}
+          aria-label="Start PSAT"
+        >
+          START
+        </button>
       </aside>
 
-      {/* 说明图片（按钮上方） */}
-      <img
-        src={psatDesc2}
-        alt="PSAT description"
-        className="psat-description"
-        loading="eager"
-        decoding="async"
-        draggable={false}
-      />
 
-      {/* START 按钮 */}
-      <button
-        type="button"
-        className="start-btn"
-        onClick={startPSAT}
-        aria-label="Start PSAT"
-      >
-        START
-      </button>
-
-      {/* 底部：版本 + CycleRAP 标识 */}
       <footer className="landing-footer">
         <span className="version-info">v{APP_META.version} ({APP_META.buildDate})</span>
         <img
