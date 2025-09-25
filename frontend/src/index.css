@@ -4,6 +4,10 @@ html, body {
   height: 100%;
 }
 
+:root {
+    --sidebar-w: 250px;
+}
+
 * {
   box-sizing: border-box;
 }

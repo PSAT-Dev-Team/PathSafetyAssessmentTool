@@ -1,0 +1,10 @@
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-main {
+  margin-inline-start: var(--sidebar-w);
+  padding: 24px;
+  /* 让内容区域在小屏也好看一点 */
+  max-width: 1200px;
+}
