@@ -5,8 +5,13 @@ from . import bp
 @bp.get("/list")
 def list_dirs_in_data():
     data_dir = Path(current_app.config["DATA_DIR"]).resolve()
-    if not data_dir.exists() or not data_dir.is_dir():
-        return jsonify({"error": f"DATA_DIR not found: {data_dir}"}), 500
+
+    # 如果目录不存在，就创建
+    if not data_dir.exists():
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+    if not data_dir.is_dir():
+        return jsonify({"error": f"DATA_DIR is not a directory: {data_dir}"}), 500
 
     # 仅目录，排除以 '.' 开头的隐藏项，并按名称排序
     dirs = sorted(
