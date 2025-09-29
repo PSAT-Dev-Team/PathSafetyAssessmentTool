@@ -83,7 +83,6 @@ export default function Home() {
 
   return (
     <div className="home-root">
-      {/* 搜索区 */}
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
@@ -133,14 +132,12 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 表格区 */}
       <div className="table-wrap">
         <table className="project-table">
           <thead>
             <tr>
               <th style={{ width: 48 }}></th>
               <th>Project Name</th>
-              {/* 未来可加 <th>Updated</th> <th>Created</th> */}
             </tr>
           </thead>
           <tbody>
@@ -177,7 +174,6 @@ export default function Home() {
         </table>
       </div>
 
-      {/* 选择 + 操作区 */}
       <div className="actions-panel">
         <div className="selection-box">
           <span className="selection-label">Selected:</span>

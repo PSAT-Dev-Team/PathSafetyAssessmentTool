@@ -1,8 +1,15 @@
-import { NavLink, useNavigate, useLocation } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
+import { Button } from "@chakra-ui/react"
+
 import "./sidebar.css";
 
+const LINKS = [
+  { to: "/home", label: "Home" },
+  { to: "/coding", label: "Coding" },
+  { to: "/analysis", label: "Analysis" },
+]
+
 export default function Sidebar() {
-  const navigate = useNavigate();
   const { pathname } = useLocation();
 
   return (
@@ -10,10 +17,22 @@ export default function Sidebar() {
       {/* Top: PSAT + buttons */}
       <div className="psat-side-top">
         <div className="psat-brand">PSAT</div>
+        
         <div className="psat-actions">
-          <NavLink to="/home" className="psat-btn" data-active={pathname.startsWith("/home")}>Home</NavLink>
-          <NavLink to="/coding" className="psat-btn" data-active={pathname.startsWith("/coding")}>Coding</NavLink>
-          <NavLink to="/analysis" className="psat-btn" data-active={pathname.startsWith("/analysis")}>Analysis</NavLink>
+          {LINKS.map(({ to, label }) => {
+            const active = pathname.startsWith(to)
+            return (
+              <Button
+                asChild
+                key={to}
+                colorPalette="gray"
+                variant={active ? "solid" : "outline"}
+                size="sm"
+              >
+                <NavLink to={to}>{label}</NavLink>
+              </Button>
+            )
+          })}
         </div>
       </div>
 
@@ -25,9 +44,14 @@ export default function Sidebar() {
 
       {/* Bottom: Create Project */}
       <div className="psat-side-bottom">
-        <button className="psat-btn primary" onClick={() => navigate("/projects/create")}>
-          Create Project
-        </button>
+          <Button
+            asChild
+            colorPalette={"grey"}
+            variant={"solid"}
+            size="sm"
+          >
+            <NavLink to="/projects/create">Create Project</NavLink>
+          </Button>
       </div>
     </aside>
   );
