@@ -1,16 +1,26 @@
-import { NavLink, useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@chakra-ui/react"
 
 import "./sidebar.css";
 
 const LINKS = [
   { to: "/home", label: "Home" },
-  { to: "/coding", label: "Coding" },
   { to: "/analysis", label: "Analysis" },
 ]
 
 export default function Sidebar() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  
+
+  const createProject = () => {
+    navigate(`/projects/create`);
+  }
+
+  const navigateSidebar = (to: string) => {
+    navigate(to);
+  }
+
 
   return (
     <aside className="psat-sidebar" aria-label="PSAT sidebar">
@@ -23,34 +33,33 @@ export default function Sidebar() {
             const active = pathname.startsWith(to)
             return (
               <Button
-                asChild
+                onClick={() => navigateSidebar(to)}
                 key={to}
                 colorPalette="gray"
                 variant={active ? "solid" : "outline"}
                 size="sm"
               >
-                <NavLink to={to}>{label}</NavLink>
+                {label}
               </Button>
             )
           })}
         </div>
       </div>
 
-      {/* Middle: placeholder (将来按页面切换成不同功能区) */}
+      {/* Middle: placeholder */}
       <div className="psat-side-middle">
-        {/* 占位内容：你可以根据 pathname 渲染不同的小部件 */}
         <div className="placeholder">Placeholder</div>
       </div>
 
       {/* Bottom: Create Project */}
       <div className="psat-side-bottom">
           <Button
-            asChild
-            colorPalette={"grey"}
-            variant={"solid"}
+            onClick={createProject}
+            colorPalette="grey"
+            variant="solid"
             size="sm"
           >
-            <NavLink to="/projects/create">Create Project</NavLink>
+            Create Project
           </Button>
       </div>
     </aside>
