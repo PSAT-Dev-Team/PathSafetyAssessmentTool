@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchSegments, ping } from "../../api";
+import { Button } from "@chakra-ui/react"
+import { useNavigate } from "react-router-dom";
+
+
 import "./style.css";
 
 interface FileResponse {
@@ -27,6 +31,9 @@ export default function Home() {
 
   // selection
   const [selected, setSelected] = useState<string | null>(null);
+
+  const navigate = useNavigate();
+
 
   useEffect(() => {
     ping()
@@ -68,9 +75,7 @@ export default function Home() {
   const loadProject = async () => {
     if (!selected) return;
     // 例：跳转到项目详情路由
-    // navigate(`/project/${encodeURIComponent(selected)}`);
-    console.log("LOAD project:", selected);
-    alert(`LOAD project: ${selected}`);
+    navigate(`/coding/${encodeURIComponent(selected)}`);
   };
 
   const deleteProject = async () => {
@@ -175,27 +180,20 @@ export default function Home() {
       </div>
 
       <div className="actions-panel">
-        <div className="selection-box">
-          <span className="selection-label">Selected:</span>
-          <span className="selection-value">{selected ?? "—"}</span>
-        </div>
         <div className="buttons">
-          <button
-            className="btn primary"
+          <Button
             onClick={loadProject}
+            colorPalette={"blue"}
             disabled={!selected}
-            aria-disabled={!selected}
           >
             Load Project
-          </button>
-          <button
-            className="btn danger"
+          </Button>
+          <Button
             onClick={deleteProject}
             disabled={!selected}
-            aria-disabled={!selected}
           >
             Delete Project
-          </button>
+          </Button>
         </div>
       </div>
     </div>
