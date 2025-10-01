@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import LandingPage from "./pages/LandingPage";
-import Home from "./pages/Home";
-import CodingPage from "./pages/CodingPage"
+import LandingPage from "./pages/LandingPage/landingPage";
+import Home from "./pages/Home/home";
+import CodingPage from "./pages/CodingPage/codingPage"
 import AppLayout from "./layouts/AppLayout";
 
 // Temp pages

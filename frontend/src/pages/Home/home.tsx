@@ -3,8 +3,7 @@ import { fetchSegments, ping } from "../../api";
 import { Button } from "@chakra-ui/react"
 import { useNavigate } from "react-router-dom";
 
-
-import "./style.css";
+import "./home.css";
 
 interface FileResponse {
   dirs: string[];
@@ -101,39 +100,6 @@ export default function Home() {
             />
           </div>
 
-          <div className="search-item">
-            <label>Search by date (updated)</label>
-            <div className="date-range">
-              <input
-                type="date"
-                value={updatedFrom}
-                onChange={(e) => setUpdatedFrom(e.target.value)}
-              />
-              <span className="range-sep">to</span>
-              <input
-                type="date"
-                value={updatedTo}
-                onChange={(e) => setUpdatedTo(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="search-item">
-            <label>Search by date created</label>
-            <div className="date-range">
-              <input
-                type="date"
-                value={createdFrom}
-                onChange={(e) => setCreatedFrom(e.target.value)}
-              />
-              <span className="range-sep">to</span>
-              <input
-                type="date"
-                value={createdTo}
-                onChange={(e) => setCreatedTo(e.target.value)}
-              />
-            </div>
-          </div>
         </div>
       </div>
 
