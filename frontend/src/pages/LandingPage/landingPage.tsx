@@ -1,9 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import "./style.css";
+import "./landingPage.css";
 
 import psatLogo2 from "./assets/PSAT Logo 2.png";
-import psatName from "./assets/PSAT NAME.png";
-import psatDesc2 from "./assets/PSAT Description 2.png";
 import cyclerapLogo from "./assets/CycleRAP-logo.png";
 import { APP_META } from "../../appMeta";
 
