@@ -1,21 +1,121 @@
-from flask import current_app, jsonify
+# app/api/projects/routes.py
+from flask import Blueprint, jsonify, request
 from pathlib import Path
+import traceback
 from . import bp
 
-@bp.get("/list")
-def list_dirs_in_data():
-    data_dir = Path(current_app.config["DATA_DIR"]).resolve()
+# —— 复用你现有的服务层 —— #
+from app.services.project_manager import project_manager, Project   # 若路径不同，按你的真实包路径改
+import app.services.serializer as serializer
+import app.services.cycleRAP_interface as CRI
 
-    # 如果目录不存在，就创建
-    if not data_dir.exists():
-        data_dir.mkdir(parents=True, exist_ok=True)
+# 进程级上下文（替代 streamlit 的 session_state）
+_CTX = {"ready": False, "pm": None}
 
-    if not data_dir.is_dir():
-        return jsonify({"error": f"DATA_DIR is not a directory: {data_dir}"}), 500
+def get_ctx():
+    """Lazy 初始化：首次调用时把旧代码依赖都准备好；之后复用。"""
+    if _CTX["ready"]:
+        return _CTX
 
-    # 仅目录，排除以 '.' 开头的隐藏项，并按名称排序
-    dirs = sorted(
-        [p.name for p in data_dir.iterdir() if p.is_dir() and not p.name.startswith(".")],
-        key=str.lower
-    )
-    return jsonify({"dirs": dirs})
+    # === 原来在 Streamlit 里手动做的 init，这里等价放到后端 ===
+    pm = project_manager()                               # 载入配置与扫描项目列表
+    # serializer 的 BaseTable/parse/serialize 不需要额外 init；若你有 data_loader，可 try/except
+    try:
+        # 可选：如果你确实有 serializer.data_loader.initialise()
+        import app.services.serializer as _s
+        if hasattr(_s, "data_loader") and hasattr(_s.data_loader, "initialise"):
+            _s.data_loader.initialise()
+    except Exception:
+        pass
+
+    # CycleRAP 资源目录（按你以前用的 src_path/CycleRAP）
+    CRI.cycleRAP_interface.initialise(pm.src_path / "CycleRAP")
+
+    _CTX.update({"pm": pm, "ready": True})
+    return _CTX
+
+# ───────────────────────── Endpoints ─────────────────────────
+
+@bp.post("/bootstrap")
+def bootstrap():
+    """显式触发一次初始化（幂等）。前端可在应用启动时打一下。"""
+    try:
+        ctx = get_ctx()
+        return jsonify({"status": "ok", "ready": ctx["ready"]})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e), "trace": traceback.format_exc()}), 500
+
+@bp.get("")
+def list_projects():
+    """列出项目名称（等价你原先 list_names）。"""
+    ctx = get_ctx()
+    names = ctx["pm"].list_names()
+    return jsonify({"projects": names})
+
+@bp.get("/<project_name>")
+def get_project(project_name: str):
+    """读取项目的元数据、可用版本等（只读）。"""
+    ctx = get_ctx()
+    proj: Project = ctx["pm"].project(project_name)
+    ver = proj.latest()
+    return jsonify({
+        "name": proj.metadata.project_name,
+        "versions": [v.path.name for v in proj.versions],
+        "latest": ver.path.name
+    })
+
+@bp.get("/<project_name>/versions/latest/attributes")
+def get_latest_attributes(project_name: str):
+    """返回最新版 attributes.csv（转成 JSON 给前端表格渲染）。"""
+    ctx = get_ctx()
+    proj: Project = ctx["pm"].project(project_name)
+    df = proj.latest().attributes.df
+    return jsonify({"rows": df.to_dict(orient="records")})
+
+@bp.post("/<project_name>/score")
+def calculate_score(project_name: str):
+    """
+    用 Excel 宏算分：
+    1) 取项目最新版 attributes DataFrame
+    2) 调用 cycleRAP_interface.calculate_cycleRAP_score
+    3) 写回 results.csv 并保存
+    """
+    ctx = get_ctx()
+    proj: Project = ctx["pm"].project(project_name)
+    ver = proj.latest()
+
+    attrs = ver.attributes.df
+    # 如果前端 POST 传了临时修改过的 attributes，可合并覆盖：
+    payload = request.get_json(silent=True) or {}
+    if "attributes" in payload:
+        attrs = serializer.Attributes(values=None)
+        attrs.df = serializer.pd.DataFrame(payload["attributes"])  # 保持列名一致
+
+    # 计算分数（依赖 Windows + Excel 宏环境）
+    results_df = CRI.cycleRAP_interface.calculate_cycleRAP_score(attrs)
+
+    # 写回并持久化
+    ver._results = serializer.Results()
+    ver.results.df = results_df
+    proj.save_all()
+
+    return jsonify({"ok": True, "result_rows": results_df.to_dict(orient="records")})
+
+@bp.post("/<project_name>/treatments")
+def evaluate_treatments(project_name: str):
+    """
+    用 Excel 的 STM 宏生成治理建议：
+    - 需要 GeoData + Attributes
+    """
+    ctx = get_ctx()
+    proj: Project = ctx["pm"].project(project_name)
+    ver = proj.latest()
+
+    gdf = proj.geo_data.df
+    attrs = ver.attributes.df
+
+    treatment_tbl = CRI.cycleRAP_interface.evaluate_treatment_suggestions(gdf, attrs)
+    ver._treatment = treatment_tbl
+    proj.save_all()
+
+    return jsonify({"ok": True, "rows": treatment_tbl.df.to_dict(orient="records")})

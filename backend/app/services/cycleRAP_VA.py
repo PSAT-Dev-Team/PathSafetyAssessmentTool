@@ -42,7 +42,7 @@ hardcoded_video_filename = "Footage39.MP4"
 # !pip install folium matplotlib mapclassify
 # !pip install openpyxl
 import cv2
-import os
+import os 
 import shutil
 import pandas as pd
 import geopy.distance
@@ -52,7 +52,8 @@ import numpy as np
 import math
 from glob import glob
 from pathlib import Path
-from cycle_rap_processing_gopro_footage import gdfify, extractGPS, extractSpeed, getDuration, geoCode, snaptoLink, getTimestamp, calculate_average_time_difference
+from app.services.cycle_rap_processing_gopro_footage import gdfify, extractGPS, extractSpeed, getDuration, geoCode, snaptoLink, getTimestamp, calculate_average_time_difference
+
 # from shapely.geometry import LineString, Point, shape, MultiLineString
 #import folium
 # import IPython.display as display

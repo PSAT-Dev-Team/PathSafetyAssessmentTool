@@ -1,6 +1,6 @@
 from enum import IntEnum, Enum
 from collections import defaultdict
-from cycleRAP_VA import get_full_path
+from app.services.cycleRAP_VA import get_full_path
 from pathlib import Path
 
 CYCLERAPVER = "CycleRAP_v2.11.xlsm" # NOTE: Deprecated, use the one in cycleRAP_interface.py instead
