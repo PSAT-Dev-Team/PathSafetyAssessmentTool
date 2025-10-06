@@ -1,0 +1,302 @@
+{
+    "attribute_default": {
+        "Area type": 2,
+        "Facility Type": 2,
+        "Facility access": 1,
+        "Loose or slippery surface": 2,
+        "Tram or Train Rails": 2,
+        "Major Surface Deformation or Drain Opening": 2,
+        "Fixed Obstacle on Facility": 2,
+        "Non-Fixed Obstacle on Facility": 2,
+        "Delineation": 1,
+        "Light Segregation": 1,
+        "Facility Width per Direction": 2,
+        "Flow Direction": 2,
+        "Width Restriction": 2,
+        "Adjacent Road Lane 0-1m": 2,
+        "Adjacent Vehicle Parking 0-1m": 2,
+        "Adjacent Severe Hazard 0-1m": 2,
+        "Adjacent object or level change 0-1m": 2,
+        "Adjacent Sidewalk 0-1m": 2,
+        "Adjacent Road Lane 1-3m": 2,
+        "Adjacent Vehicle Parking 1-3m": 2,
+        "Adjacent Severe Hazard 1-3m": 2,
+        "Adjacent object or level change 1-3m": 2,
+        "Adjacent Sidewalk 1-3m": 2,
+        "Grade": 1,
+        "Curvature": 2,
+        "Street Lighting": 1,
+        "Pedestrian Crossing": 2,
+        "Intersecting Bicycle Facility": 2,
+        "Intersection Approach": 2,
+        "Intersection or Road Crossing": 2,
+        "Crossing Facility": 2,
+        "Number of lanes \u2013 adjacent road": 2,
+        "Number of lanes \u2013 intersecting road": 1,
+        "Property Access": 2,
+        "Peak pedestrian flow along or across facility": 1,
+        "Peak bicycle/LV traffic flow": 1,
+        "Observed proportion of cargo bikes and mopeds": 1,
+        "Bicycle/LV speed \u2013 average": 1,
+        "Bicycle/LV speed differential": 1,
+        "Road AADT": 50,
+        "Heavy vehicle flow": 1,
+        "Road speed limit": 10,
+        "Road operating speed (mean)": 30,
+        "Road operating speed (unit)": 1
+    },
+    "treatment_remedy": [
+        {
+            "description": "Upgrade existing facility to an on-road bicycle lane with light segregation",
+            "attribute_1": 14,
+            "code_remedy_1": 4,
+            "attribute_2": 22,
+            "code_remedy_2": 1,
+            "attribute_3": 15,
+            "code_remedy_3": 1
+        },
+        {
+            "description": "Upgrade existing facility to an on-road bicycle lane with safety barrier (Adjacent road lane 0-1m)",
+            "attribute_1": 26,
+            "code_remedy_1": 2,
+            "attribute_2": 15,
+            "code_remedy_2": 1,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Upgrade existing facility to an on-road bicycle lane with safety barrier (Adjacent road lane 1-3m)",
+            "attribute_1": 31,
+            "code_remedy_1": 2,
+            "attribute_2": 15,
+            "code_remedy_2": 2,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Upgrade existing facility to a cycling-priority street",
+            "attribute_1": 55,
+            "code_remedy_1": 20,
+            "attribute_2": 15,
+            "code_remedy_2": 1,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Upgrade existing facility to a cycling-priority street (mph)",
+            "attribute_1": 55,
+            "code_remedy_1": 12,
+            "attribute_2": 15,
+            "code_remedy_2": 2,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Upgrade existing facility to a multi-use path",
+            "attribute_1": 14,
+            "code_remedy_1": 2,
+            "attribute_2": 23,
+            "code_remedy_2": 3,
+            "attribute_3": 15,
+            "code_remedy_3": 1
+        },
+        {
+            "description": "Upgrade existing facility to an off-road bicycle path",
+            "attribute_1": 14,
+            "code_remedy_1": 3,
+            "attribute_2": 15,
+            "code_remedy_2": 1,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Upgrade existing facility to a one-way bicycle facility",
+            "attribute_1": 24,
+            "code_remedy_1": 1,
+            "attribute_2": 15,
+            "code_remedy_2": 1,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Improve surface conditions",
+            "attribute_1": 16,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Install light segregation",
+            "attribute_1": 22,
+            "code_remedy_1": 1,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Install lighting",
+            "attribute_1": 38,
+            "code_remedy_1": 1,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Clear facility \u2013 Remove fixed obstacle/s",
+            "attribute_1": 19,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Clear facility \u2013 Remove non-fixed obstacle/s",
+            "attribute_1": 20,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Clear facility \u2013 Remove width restriction",
+            "attribute_1": 25,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Improve facility access",
+            "attribute_1": 15,
+            "code_remedy_1": 1,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Redesign the curve",
+            "attribute_1": 37,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Widen the facility",
+            "attribute_1": 23,
+            "code_remedy_1": 3,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Install protective barrier",
+            "attribute_1": 28,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Improve delineation",
+            "attribute_1": 21,
+            "code_remedy_1": 1,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Review intersection approach",
+            "attribute_1": 41,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Improve safety of crossing design",
+            "attribute_1": 43,
+            "code_remedy_1": 1,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Evaluate need for grade separation",
+            "attribute_1": 42,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Reconfigure or remove parking",
+            "attribute_1": 27,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Review configuration of train/tram rails",
+            "attribute_1": 17,
+            "code_remedy_1": 2,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Install traffic calming (km/h)",
+            "attribute_1": 55,
+            "code_remedy_1": 30,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Install traffic calming (mph)",
+            "attribute_1": 55,
+            "code_remedy_1": 20,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Vehicles speed control",
+            "attribute_1": 55,
+            "code_remedy_1": 30,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        },
+        {
+            "description": "Bicycles speed control",
+            "attribute_1": 50,
+            "code_remedy_1": 1,
+            "attribute_2": null,
+            "code_remedy_2": null,
+            "attribute_3": null,
+            "code_remedy_3": null
+        }
+    ]
+}

@@ -4,18 +4,18 @@ import re
 import os
 import json
 import datetime
-import global_var
-import serializer
+import app.services.global_var as global_var
+import app.services.serializer as serializer
 import pandas as pd
 import shutil
 import geopandas as gpd
-import cycleRAP_interface
+import app.services.cycleRAP_interface as cycleRAP_interface
 import requests
 from pathlib import Path
 from functools import cached_property
 from shapely.geometry import LineString, Point
 from shapely import wkt
-from cycleRAP_VA import gdfify, get_full_path
+from app.services.cycleRAP_VA import gdfify, get_full_path
 
 # Handles the specific project version and data
 class ProjectVersion:
@@ -338,10 +338,9 @@ class Project:
 class project_manager:
     DEFAULT_CONFIG = {
         # Folder paths
-        "destination_folder": "des",
+        "destination_folder": "data",
         "source_folder": "src", 
         "in_folder": "IN",
-        "shapefile_file": "shp/FootPath_Mar2025/Footpath.shp",
         "CycleRAP_source": global_var.CYCLERAPVER,
         # Video config
         "capture_frequency": 10,  # GPS sampling rate in Hz
@@ -349,17 +348,12 @@ class project_manager:
         "project_prefix": "",
         # Persistent states
         "current_project": None,
-        # API keys and URLs
-        "Datamall_API_key": None,
-        "TrafficFlow_Url": None,
-        "TrafficSpeedBands_URL": None
     }
 
     def __init__(self):
         # Path variables
         self.des_path : Path            = None
         self.src_path : Path            = None
-        self.shp_path : Path            = None
         self.in_path  : Path            = None
         self.cycleRAP_model_src : Path  = None
 
@@ -688,14 +682,10 @@ class project_manager:
         # Set paths from config
         self.des_path   = Path(get_full_path(config.get("destination_folder")))
         self.src_path   = Path(get_full_path(config.get("source_folder")))
-        self.shp_path   = Path(get_full_path(config.get("shapefile_file")))
         self.in_path    = Path(get_full_path(config.get("in_folder")))
         self.capture_freq       = config.get("capture_frequency")
         self.cycleRAP_model_src = config.get("CycleRAP_source")
         self.project_name       = config.get("current_project")
-
-        # Load shapefile
-        self.shapefile = gdfify(gpd.read_file(self.shp_path)[['geometry']])
 
         return config
 

@@ -2,7 +2,7 @@ import re
 import shutil
 import pythoncom
 import json
-import global_var
+import app.services.global_var as global_var
 import pandas as pd
 import geopandas as gpd
 import requests
