@@ -21,10 +21,7 @@ def get_ctx():
     pm = project_manager()                               # 载入配置与扫描项目列表
     # serializer 的 BaseTable/parse/serialize 不需要额外 init；若你有 data_loader，可 try/except
     try:
-        # 可选：如果你确实有 serializer.data_loader.initialise()
-        import app.services.serializer as _s
-        if hasattr(_s, "data_loader") and hasattr(_s.data_loader, "initialise"):
-            _s.data_loader.initialise()
+        serializer.data_loader.initialise()
     except Exception:
         pass
 
@@ -71,6 +68,18 @@ def get_latest_attributes(project_name: str):
     proj: Project = ctx["pm"].project(project_name)
     df = proj.latest().attributes.df
     return jsonify({"rows": df.to_dict(orient="records")})
+
+@bp.get("/<project_name>/geodata")
+def get_geodata(project_name: str):
+    """返回项目的 GeoData（GeoJSON FeatureCollection）。"""
+    import json
+    ctx = get_ctx()  # 复用现有的 init 上下文
+    proj = ctx["pm"].project(project_name)
+    gdf = proj.geo_data.df  # GeoPandas GeoDataFrame
+
+    # GeoDataFrame -> GeoJSON 字符串，再转成 dict 让 jsonify 友好输出
+    geojson_obj = json.loads(gdf.to_json())
+    return jsonify(geojson_obj)
 
 @bp.post("/<project_name>/score")
 def calculate_score(project_name: str):
