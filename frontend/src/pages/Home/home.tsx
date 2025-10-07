@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchSegments, ping } from "../../api";
+import { fetchProjectList, ping } from "../../api";
 import { Button } from "@chakra-ui/react"
 import { useNavigate } from "react-router-dom";
 
 import "./home.css";
 
-interface FileResponse {
-  dirs: string[];
+interface FileListResponse {
+  projects: string[];
 }
 
 // 未来如果后端返回更多字段，可以直接扩展这个类型
@@ -17,43 +17,45 @@ interface ProjectItem {
 }
 
 export default function Home() {
+
+  // Status
   const [status, setStatus] = useState("checking...");
   const [error, setError] = useState<string | null>(null);
-  const [raw, setRaw] = useState<FileResponse | null>(null);
 
-  // filters
+  // Project List
+  const [Projectlist, setProjectList] = useState<FileListResponse | null>(null);
+
+  // Filter
   const [nameQuery, setNameQuery] = useState("");
-  const [updatedFrom, setUpdatedFrom] = useState<string>(""); // placeholder
-  const [updatedTo, setUpdatedTo] = useState<string>("");     // placeholder
-  const [createdFrom, setCreatedFrom] = useState<string>(""); // placeholder
-  const [createdTo, setCreatedTo] = useState<string>("");     // placeholder
 
-  // selection
+  // Selected Project
   const [selected, setSelected] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
 
+  // Use effect
   useEffect(() => {
     ping()
       .then((r) => setStatus(r.status))
       .catch(() => setStatus("offline"));
 
-    fetchSegments()
-      .then((data) => setRaw(data))
+    fetchProjectList()
+      .then((data) => setProjectList(data))
       .catch((e) => setError(String(e)));
   }, []);
 
-  // 统一把后端的 dirs 映射成表格数据
+  // UseMemo projects
   const projects: ProjectItem[] = useMemo(() => {
-    if (!raw?.dirs) return [];
-    return raw.dirs
+    if (!Projectlist?.projects) return [];
+    console.log(Projectlist)
+    return Projectlist.projects
       .slice()
       .sort((a, b) => a.localeCompare(b))
       .map((name) => ({ name }));
-  }, [raw]);
+  }, [Projectlist]);
 
-  // 仅名称过滤（日期过滤等后端有时间字段后再启用）
+  // for Filters
   const filtered = useMemo(() => {
     const q = nameQuery.trim().toLowerCase();
     let list = projects;
@@ -68,6 +70,7 @@ export default function Home() {
     return list;
   }, [projects, nameQuery /*, updatedFrom, updatedTo, createdFrom, createdTo */]);
 
+  
   const onRowClick = (name: string) => setSelected(name);
 
   // 你可按需要替换为真实后端接口
