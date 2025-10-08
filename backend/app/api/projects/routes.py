@@ -33,15 +33,6 @@ def get_ctx():
 
 # ───────────────────────── Endpoints ─────────────────────────
 
-@bp.post("/bootstrap")
-def bootstrap():
-    """显式触发一次初始化（幂等）。前端可在应用启动时打一下。"""
-    try:
-        ctx = get_ctx()
-        return jsonify({"status": "ok", "ready": ctx["ready"]})
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e), "trace": traceback.format_exc()}), 500
-
 @bp.get("")
 def list_projects():
     """列出项目名称（等价你原先 list_names）。"""
