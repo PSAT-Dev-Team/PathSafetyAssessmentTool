@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { fetchProjectDetail, fetchProjectAttributes, fetchProjectGeoJSON } from "../../api";
 import type { FeatureCollection, Feature } from "geojson";
+import { Flex, NumberInput } from "@chakra-ui/react"
 
 // 兜底类型
 type ProjectDetail = { name: string; versions: string[]; latest: string };
@@ -27,6 +28,9 @@ export default function CodingPage() {
 
   const [showAllAttrs, setShowAllAttrs] = useState(false);
   const [showAllGeo, setShowAllGeo] = useState(false);
+
+  const [currentPage, setCurrentPage] = useState("1")
+
 
   const load = useCallback(async () => {
     if (!name) return;
@@ -204,6 +208,20 @@ export default function CodingPage() {
           </details>
         </div>
       )}
+    
+    <Flex justify="space-between">
+      <p>1/10</p>
+      <NumberInput.Root
+        maxW="100px"
+        min={1}
+        max={10}
+        value={currentPage}
+        onValueChange={(e) => setCurrentPage(e.value)}
+      >
+        <NumberInput.Control />
+        <NumberInput.Input />
+    </NumberInput.Root>
+    </Flex>
     </div>
   );
 }
