@@ -338,7 +338,7 @@ class Project:
 class project_manager:
     DEFAULT_CONFIG = {
         # Folder paths
-        "destination_folder": "data",
+        "destination_folder": "../data",
         "source_folder": "src", 
         "in_folder": "IN",
         "CycleRAP_source": global_var.CYCLERAPVER,
