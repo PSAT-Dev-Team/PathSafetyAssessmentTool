@@ -1,5 +1,5 @@
 {
-    "destination_folder": "data",
+    "destination_folder": "../data",
     "source_folder": "src",
     "in_folder": "IN",
     "CycleRAP_source": "CycleRAP_v2.11.xlsm",
