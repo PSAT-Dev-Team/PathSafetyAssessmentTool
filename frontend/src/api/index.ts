@@ -51,3 +51,13 @@ export async function fetchProjectGeoJSON(projectName: string): Promise<FeatureC
   }
   return res.json()
 }
+
+// ===== types =====
+export type AttrMappings = Record<string, Record<string, string>>; // 字段名 -> { "1": "Outer Urban", ... }
+
+// ===== fetch mappings (数字 -> 文本) =====
+export async function fetchAttributeMappings(): Promise<AttrMappings> {
+  const r = await fetch("/api/projects/attribute-mappings");
+  if (!r.ok) throw new Error("Failed to load attribute mappings");
+  return r.json();
+}

@@ -1,65 +1,84 @@
-import { Card, CardHeader, CardBody, Heading, Box, Text } from "@chakra-ui/react";
-
-type AttributeRow = Record<string, string | number | boolean | null>;
+import { Card, Heading, Box, Text, NativeSelect, Input, SimpleGrid } from "@chakra-ui/react"; // 🔧 引入 SimpleGrid
+import { useMemo } from "react";
+import type { AttributeRow, AttrMappings } from "../../../api";
 
 type Props = {
   row: AttributeRow | null;
-  index: number;
+  mappings?: AttrMappings;
   panelHeight?: number; // px
+  onChange?: (key: string, value: string | number | boolean | null) => void;
 };
 
-export default function AttributesPanel({ row, index, panelHeight = 420 }: Props) {
+export default function AttributesPanel({ row, mappings = {}, panelHeight = 420, onChange }: Props) {
+  const entries = useMemo(() => (row ? Object.entries(row) : []), [row]);
+
+  if (!row) {
+    return (
+      <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
+        <Card.Header><Heading size="sm">Attributes</Heading></Card.Header>
+        <Card.Body><Text color="gray.500">No attributes</Text></Card.Body>
+      </Card.Root>
+    );
+  }
+
   return (
-    <Card.Root>
-      <CardHeader>
-        <Heading size="sm">Attributes (index #{index})</Heading>
-      </CardHeader>
-      <CardBody>
-        {row ? (
-          <Box
-            as="table"
-            w="100%"
-            fontSize="sm"
-            sx={{ borderCollapse: "collapse" }}
-            border="1px solid"
-            borderColor="gray.200"
-            borderRadius="md"
-            display="block"
-            h={`${panelHeight}px`}
-            overflowY="auto"
-          >
-            <tbody>
-              {Object.entries(row).map(([k, v]) => (
-                <tr key={k}>
-                  <td
-                    style={{
-                      width: "40%",
-                      padding: "6px 8px",
-                      borderBottom: "1px solid var(--chakra-colors-gray-100)",
-                      fontWeight: 600,
-                      background: "var(--chakra-colors-gray-50)",
-                      position: "sticky",
-                      left: 0,
+    <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
+      <Card.Header>
+        <Heading size="sm">Attributes</Heading>
+      </Card.Header>
+
+      <Card.Body minH={0} overflowY="auto" pt="2">
+        {/* 🔧 用 SimpleGrid 做两列布局：base 1 列，md 及以上 2 列 */}
+        <SimpleGrid columns={{ base: 1, md: 2 }} gap="4">
+          {entries.map(([k, v]) => {
+            const dict = mappings[k];
+            const strVal =
+              typeof v === "string" ? v :
+              typeof v === "number" ? String(v) :
+              typeof v === "boolean" ? (v ? "true" : "false") :
+              (v ?? "");
+
+            return (
+              // 🔧 每个字段是一个网格格子（列内仍是上下布局：标题 + 控件）
+              <Box key={k} display="flex" flexDirection="column" gap="1">
+                <Text fontSize="xs" color="gray.600" fontWeight="semibold">
+                  {k}
+                </Text>
+
+                {dict ? (
+                  <NativeSelect.Root size="sm" width="100%" mt="auto">
+                    <NativeSelect.Field
+                      value={strVal}
+                      onChange={(e) => onChange?.(k, e.target.value)}
+                    >
+                      {!dict[strVal] && strVal !== "" && (
+                        <option value={strVal}>{`(Unknown) ${strVal}`}</option>
+                      )}
+                      {Object.entries(dict).map(([code, label]) => (
+                        <option key={code} value={code}>{label}</option>
+                      ))}
+                    </NativeSelect.Field>
+                    <NativeSelect.Indicator />
+                  </NativeSelect.Root>
+                ) : (
+                  <Input
+                    size="sm"
+                    value={strVal}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const num = Number(raw);
+                      onChange?.(
+                        k,
+                        raw !== "" && Number.isFinite(num) && /^\d+(\.\d+)?$/.test(raw) ? num : raw
+                      );
                     }}
-                  >
-                    {k}
-                  </td>
-                  <td
-                    style={{
-                      padding: "6px 8px",
-                      borderBottom: "1px solid var(--chakra-colors-gray-100)",
-                    }}
-                  >
-                    {typeof v === "object" ? JSON.stringify(v) : String(v ?? "")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Box>
-        ) : (
-          <Text color="gray.500">No attributes</Text>
-        )}
-      </CardBody>
+                  />
+                )}
+              </Box>
+            );
+          })}
+        </SimpleGrid>
+      </Card.Body>
     </Card.Root>
   );
 }

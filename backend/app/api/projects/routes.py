@@ -1,8 +1,11 @@
 # app/api/projects/routes.py
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_from_directory, abort, make_response
 from pathlib import Path
 import traceback
 from . import bp
+from werkzeug.utils import safe_join
+from pathlib import Path
+import app.services.global_var as global_var
 
 # —— 复用你现有的服务层 —— #
 from app.services.project_manager import project_manager, Project   # 若路径不同，按你的真实包路径改
@@ -71,6 +74,61 @@ def get_geodata(project_name: str):
     # GeoDataFrame -> GeoJSON 字符串，再转成 dict 让 jsonify 友好输出
     geojson_obj = json.loads(gdf.to_json())
     return jsonify(geojson_obj)
+
+@bp.get("/<project_name>/images/<path:filename>")
+def get_project_image(project_name: str, filename: str):
+    """
+    返回指定项目下 images 目录里的图片文件：
+    GET /api/projects/<project_name>/images/<filename>
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+
+    # 计算 {data}/{project}/images 目录
+    images_dir: Path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
+
+    # 目录存在性检查
+    if not images_dir.exists() or not images_dir.is_dir():
+        abort(404, description="Images folder not found")
+
+    # 使用 safe_join 防止目录穿越
+    safe_path = safe_join(str(images_dir), filename)
+    if safe_path is None:
+        abort(400, description="Invalid image path")
+
+    file_path = Path(safe_path).resolve()
+    # 仍旧双保险校验：必须在 images_dir 之下
+    if not str(file_path).startswith(str(images_dir)):
+        abort(400, description="Invalid image path")
+
+    if not file_path.exists() or not file_path.is_file():
+        abort(404, description="Image not found")
+
+    # 使用 send_from_directory 返回，带条件缓存
+    resp = send_from_directory(images_dir, file_path.name, conditional=True)
+    # 可选：加一点 Cache-Control（视你的部署需要调整）
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+@bp.get("/attribute-mappings")
+def get_attribute_mappings():
+    """
+    返回 Attributes 的字段映射（数字 -> 文字），例如：
+    {
+      "Area type": {"1":"Inner Urban","2":"Outer Urban","3":"Rural","4":"Industrial"},
+      "Facility Type": {"1":"Sidewalk", "2":"Multi-Use Path", ...},
+      ...
+    }
+    仅为有枚举映射的字段生成，连续数值（如 AADT、速度）不包含在内。
+    """
+    mappings = {}
+    for field, mapping in (serializer.Attributes.CHOICES or {}).items():
+        if not mapping:  # None：表示该字段不是枚举
+            continue
+        # 反转：数字 -> 文字；转成 str key 方便前端用
+        reverse = {str(code): label for (label, code) in mapping.items()}
+        mappings[field] = reverse
+    return jsonify(mappings)
 
 @bp.post("/<project_name>/score")
 def calculate_score(project_name: str):
