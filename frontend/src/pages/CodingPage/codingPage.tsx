@@ -51,6 +51,8 @@ export default function CodingPage() {
   const [attrMappings, setAttrMappings] = useState<AttrMappings>({});
   const len = attrs.length;
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageInput, setPageInput] = useState(String(currentPage));
+
   const currentIndex = useMemo(
     () => Math.max(0, Math.min(len - 1, currentPage - 1)),
     [currentPage, len]
@@ -145,6 +147,29 @@ export default function CodingPage() {
     setCurrentPage(clamped);
   }, [len]);
 
+  useEffect(() => {
+    setPageInput(String(currentPage));
+  }, [currentPage]);
+
+  const commitPage = useCallback(
+    (valStr: string) => {
+      const raw = Number(valStr);
+      if (!Number.isFinite(raw)) return;
+      const clamped = Math.min(Math.max(1, len || 1), raw);
+      gotoPage(clamped);
+    },
+    [gotoPage, len]
+  );
+
+  useEffect(() => {
+    const t = setTimeout(() => commitPage(pageInput), 300);
+    return () => clearTimeout(t);
+  }, [pageInput, commitPage]);
+
+
+
+
+
   if (!name) {
     return <Box p="4"><Text color="red.500">Invalid project name.</Text></Box>;
   }
@@ -186,13 +211,18 @@ export default function CodingPage() {
             min={1}
             max={len || 1}
             defaultValue={String(currentPage)}
-            onValueChange={(e) => {
-              const v = Number(e.value);
-              if (Number.isFinite(v)) gotoPage(v);
-            }}
+            value={pageInput}                    // ← 受控
+            onValueChange={(e) => setPageInput(e.value)}
           >
             <NumberInput.Control />
-            <NumberInput.Input />
+            <NumberInput.Input
+              onBlur={() => commitPage(pageInput)}        // 失焦立刻提交
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter") {
+                  ev.currentTarget.blur();                // 触发 onBlur 提交
+                }
+              }}
+            />
           </NumberInput.Root>
         </Flex>
       </Flex>
