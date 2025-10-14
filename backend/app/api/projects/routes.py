@@ -6,11 +6,20 @@ from . import bp
 from werkzeug.utils import safe_join
 from pathlib import Path
 import app.services.global_var as global_var
+import pandas as pd
 
 # —— 复用你现有的服务层 —— #
 from app.services.project_manager import project_manager, Project   # 若路径不同，按你的真实包路径改
 import app.services.serializer as serializer
 import app.services.cycleRAP_interface as CRI
+
+
+# util
+def ok(data, code=200):
+    return jsonify(data), code
+
+def fail(message, code=400):
+    return jsonify({"error": message}), code
 
 # 进程级上下文（替代 streamlit 的 session_state）
 _CTX = {"ready": False, "pm": None}
@@ -177,3 +186,23 @@ def evaluate_treatments(project_name: str):
     proj.save_all()
 
     return jsonify({"ok": True, "rows": treatment_tbl.df.to_dict(orient="records")})
+
+@bp.put("/<string:name>/attributes")
+def update_attributes(name: str):
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    proj = pm.project(name)
+    if not proj:
+        return fail("Project not found", 404)
+
+    data = request.get_json(silent=True) or {}
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        return fail("Invalid payload", 400)
+
+    # 写入到最新版本
+    ver = proj.latest()
+    ver.attributes.df = pd.DataFrame(rows)
+    ver.attributes.df_dirty = True
+    proj.save_all()  # 若跨天会新建新版本
+    return ok({"ok": True})

@@ -7,9 +7,10 @@ type Props = {
   mappings?: AttrMappings;
   panelHeight?: number; // px
   onChange?: (key: string, value: string | number | boolean | null) => void;
+  onEdit?: (field: string, value: string | number | boolean | null) => void; // ← 新增
 };
 
-export default function AttributesPanel({ row, mappings = {}, panelHeight = 420, onChange }: Props) {
+export default function AttributesPanel({ row, mappings = {}, panelHeight = 420, onChange, onEdit }: Props) {
   const entries = useMemo(() => (row ? Object.entries(row) : []), [row]);
 
   if (!row) {
@@ -49,7 +50,11 @@ export default function AttributesPanel({ row, mappings = {}, panelHeight = 420,
                   <NativeSelect.Root size="sm" width="100%" mt="auto">
                     <NativeSelect.Field
                       value={strVal}
-                      onChange={(e) => onChange?.(k, e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value === "" ? null : e.target.value;
+                        onChange?.(k, val);
+                        onEdit?.(k, val);         // ← 新增：同步写回父级 attrs[currentIndex]
+                      }}
                     >
                       {!dict[strVal] && strVal !== "" && (
                         <option value={strVal}>{`(Unknown) ${strVal}`}</option>
@@ -67,10 +72,10 @@ export default function AttributesPanel({ row, mappings = {}, panelHeight = 420,
                     onChange={(e) => {
                       const raw = e.target.value;
                       const num = Number(raw);
-                      onChange?.(
-                        k,
-                        raw !== "" && Number.isFinite(num) && /^\d+(\.\d+)?$/.test(raw) ? num : raw
-                      );
+                      const val =
+                        raw !== "" && Number.isFinite(num) && /^\d+(\.\d+)?$/.test(raw) ? num : (raw === "" ? null : raw);
+                      onChange?.(k, val);
+                      onEdit?.(k, val);         // ← 新增：同步写回父级 attrs[currentIndex]
                     }}
                   />
                 )}

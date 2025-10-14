@@ -61,3 +61,13 @@ export async function fetchAttributeMappings(): Promise<AttrMappings> {
   if (!r.ok) throw new Error("Failed to load attribute mappings");
   return r.json();
 }
+
+export async function saveAttributes(project: string, rows: AttributeRow[]) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/attributes`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rows }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  return res.json();
+}
