@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 from shapely import wkt
 from pathlib import Path
+from pandas.errors import EmptyDataError
 
 # Mapping
 risk_category                   = {'Default': 0,'Low': 1, 'Medium': 2, 'High': 3, 'Extreme': 4}
@@ -74,28 +75,43 @@ class BaseTable:
     def serialize(self, file_path: Path):
         file_path.parent.mkdir(parents=True, exist_ok=True)
         ext = file_path.suffix.lower()
+        df = self.df if getattr(self, "df", None) is not None else pd.DataFrame()
         if ext == ".csv":
-            self.df.to_csv(file_path, index=False)
+            df.to_csv(file_path, index=False)
         elif ext == ".xlsx":
-            self.df.to_excel(file_path, index=False)
+            df.to_excel(file_path, index=False)
         elif ext == ".json":
-            self.df.to_json(file_path, orient="records", indent=2)
+            df.to_json(file_path, orient="records")
         else:
-            raise ValueError(f"Unsupported file format: {ext}")
+            raise ValueError(f"Unsupported file type: {ext}")
+        self.df_dirty = False
 
     def parse(self, file_path: Path):
+        """从磁盘读取表；文件不存在或为空时，初始化空表并标记 dirty。"""
+        # 1) 不存在 / 空文件：初始化空 df
+        if not file_path.exists() or file_path.stat().st_size == 0:  # ← 关键：为空文件直接兜底
+            self.df = pd.DataFrame()
+            self.df_dirty = True
+            return
+
         ext = file_path.suffix.lower()
         if ext == ".csv":
             try:
                 self.df = pd.read_csv(file_path, encoding="utf-8")
             except UnicodeDecodeError:
                 self.df = pd.read_csv(file_path, encoding="latin1")
+            except EmptyDataError:  # ← 关键：即便遇到空内容也兜底
+                self.df = pd.DataFrame()
+                self.df_dirty = True
+                return
         elif ext == ".xlsx":
             self.df = pd.read_excel(file_path)
         elif ext == ".json":
             self.df = pd.read_json(file_path)
         else:
-            raise ValueError(f"Unsupported file format: {ext}")
+            raise ValueError(f"Unsupported file type: {ext}")
+
+        self.df_dirty = False
     
 class Attributes(BaseTable):
     class Fields:

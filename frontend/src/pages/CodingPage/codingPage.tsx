@@ -11,18 +11,23 @@ import {
   Button,
 } from "@chakra-ui/react";
 import type { Feature, FeatureCollection, LineString, Geometry } from "geojson";
+import { toaster } from "../../components/ui/toaster";
+
 
 import {
   fetchProjectDetail,
   fetchProjectAttributes,
   fetchProjectGeoJSON,
-  fetchAttributeMappings
+  fetchAttributeMappings,
 } from "../../api";
+
 import type { AttributeRow } from "../../api";
 
 import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
 import GeoDataPanel from "./components/GeoDataPanel"; // ← 用你之前的组件（保持文件名/路径）
+import { saveAttributes } from "../../api";
+
 
 // 兜底类型
 type ProjectDetail = { name: string; versions: string[]; latest: string };
@@ -127,6 +132,19 @@ export default function CodingPage() {
     return () => { cancelled = true; };
   }, []);
 
+  // 保存
+  useEffect(() => {
+    function handleSave() {
+      if (!name || !attrs) return;
+      saveAttributes(name, attrs)
+        .then(() => toaster.create({ title: "Saved", description: "Attributes persisted.", type: "success" }))
+        .catch((e) => toaster.create({ title: "Save failed", description: String(e?.message ?? e), type: "error" }));
+    }
+
+    window.addEventListener("psat:save", handleSave);
+    return () => window.removeEventListener("psat:save", handleSave);
+  }, [name, attrs]);
+
   // 编辑副本
   useEffect(() => {
     setEditedRow(currentAttr ? { ...currentAttr } : null);
@@ -139,6 +157,16 @@ export default function CodingPage() {
     },
     []
   );
+
+  const editCurrentAttr = (field: string, value: string | number | boolean | null) => {
+    if (!attrs) return;
+    setAttrs(prev => {
+      if (!prev) return prev;
+      const next = [...prev];
+      next[currentIndex] = { ...next[currentIndex], [field]: value };
+      return next;
+    });
+  };
 
   // 翻页
   const gotoPage = useCallback((page: number) => {
@@ -247,6 +275,7 @@ export default function CodingPage() {
             mappings={attrMappings}
             panelHeight={PANEL_HEIGHT - CONTROLS_H}
             onChange={onAttrChange}
+            onEdit={editCurrentAttr} 
           />
           {/* 下半：翻页按钮条（贴底） */}
           <Flex
@@ -290,6 +319,7 @@ export default function CodingPage() {
                 : null
             }
             index={currentIndex}
+            onJump={(i) => setCurrentPage(i + 1)}  
           />
         </GridItem>
       </Grid>

@@ -46,7 +46,13 @@ class ProjectVersion:
     def snapshot_metadata(self) -> serializer.SnapshotMetadata:
         if self._snapshot_metadata is None:
             snapshot = serializer.SnapshotMetadata()
-            snapshot.parse(self.path / self.STR_SNAPSHOT_METADATA)
+            path = self.path / self.STR_SNAPSHOT_METADATA
+            if path.exists():
+                snapshot.parse(path)
+            else:
+                # 第一次创建当天版本：文件还不存在，先给个空 df 并标记 dirty
+                snapshot.df = pd.DataFrame()
+                snapshot.df_dirty = True
             self._snapshot_metadata = snapshot
         return self._snapshot_metadata
 
@@ -207,7 +213,10 @@ class Project:
         return ver_obj
     
     def save_all(self):
-        if self.latest().date != datetime.date.today():
+        yyyymmdd = datetime.datetime.now().strftime("%Y%m%d")
+        today_ver_path = self.project_path / "versions" / yyyymmdd
+        if not today_ver_path.exists():
+            # 只有在今天目录真的不存在时，才创建新版本
             self.create_new_version(self.latest())
 
         self.metadata.serialize(self.project_path)

@@ -1,5 +1,6 @@
 import { Box, Text, VStack, HStack, Button, Flex, Spacer } from "@chakra-ui/react";
 import { Grid, GridItem } from "@chakra-ui/react"
+
 type CodingSidebarProps = {
   projectName: string;
   onCalculate: () => Promise<void> | void;

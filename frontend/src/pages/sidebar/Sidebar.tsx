@@ -46,12 +46,16 @@ export default function Sidebar() {
     });
   }, []);
 
-  const onSave = useCallback(async () => {
+  const onSave = async () => {
+    // 发出保存请求；让 CodingPage 去真正保存
+    window.dispatchEvent(new CustomEvent("psat:save"));
+
     toaster.create({
-      description: "saved~~",
+      title: "Save requested",
+      description: "Saving current attributes…",
       type: "success",
     });
-  }, []);
+  };
 
   const onExit = useCallback(() => {
     navigate(`/home`);
