@@ -71,3 +71,21 @@ export async function saveAttributes(project: string, rows: AttributeRow[]) {
   if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
   return res.json();
 }
+
+export async function listSourceFolders(opts?: { signal?: AbortSignal }) {
+  const res = await fetch("/api/projects/folders", { signal: opts?.signal });
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return (data?.items ?? []) as string[];
+}
+
+export async function createProjectFromFolder(project_name: string, folder_name: string) {
+  const res = await fetch("/api/projects/folders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_name, folder_name }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  // 返回形如 { ok: true, name: "<project>" }
+  return (await res.json()) as { ok?: boolean; name?: string };
+}

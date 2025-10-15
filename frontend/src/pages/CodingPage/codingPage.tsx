@@ -194,10 +194,6 @@ export default function CodingPage() {
     return () => clearTimeout(t);
   }, [pageInput, commitPage]);
 
-
-
-
-
   if (!name) {
     return <Box p="4"><Text color="red.500">Invalid project name.</Text></Box>;
   }
