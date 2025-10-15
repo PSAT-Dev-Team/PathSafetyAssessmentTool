@@ -7,11 +7,19 @@ from werkzeug.utils import safe_join
 from pathlib import Path
 import app.services.global_var as global_var
 import pandas as pd
+import os
+import exifread
+from shapely.geometry import Point
+import geopandas as gpd
+import shutil
+
+
 
 # —— 复用你现有的服务层 —— #
 from app.services.project_manager import project_manager, Project   # 若路径不同，按你的真实包路径改
 import app.services.serializer as serializer
 import app.services.cycleRAP_interface as CRI
+import app.services.cycleRAP_VA as cycleRAP_VA
 
 
 # util
@@ -23,6 +31,8 @@ def fail(message, code=400):
 
 # 进程级上下文（替代 streamlit 的 session_state）
 _CTX = {"ready": False, "pm": None}
+
+
 
 def get_ctx():
     """Lazy 初始化：首次调用时把旧代码依赖都准备好；之后复用。"""
@@ -206,3 +216,144 @@ def update_attributes(name: str):
     ver.attributes.df_dirty = True
     proj.save_all()  # 若跨天会新建新版本
     return ok({"ok": True})
+
+#-----------------------------------------------------------------------------------
+
+def dms_to_decimal(dms, ref):
+    deg = dms[0].num / dms[0].den
+    minute = dms[1].num / dms[1].den
+    sec = dms[2].num / dms[2].den
+    dec = deg + minute/60 + sec/3600
+    return -dec if ref in ['S','W'] else dec
+
+def get_image_folder_geo(folder_path):
+    records = []
+    for fname in sorted(os.listdir(folder_path)):
+        if not fname.lower().endswith(('.jpg', '.jpeg')):
+            continue
+        img_path = os.path.join(folder_path, fname)
+        with open(img_path, 'rb') as f:
+            tags = exifread.process_file(f, details=False)
+
+        # 必要的 GPS tag
+        if {'GPS GPSLatitude', 'GPS GPSLongitude',
+            'GPS GPSLatitudeRef', 'GPS GPSLongitudeRef'}.issubset(tags):
+            
+            lat = dms_to_decimal(tags['GPS GPSLatitude'].values,
+                                tags['GPS GPSLatitudeRef'].printable)
+            lon = dms_to_decimal(tags['GPS GPSLongitude'].values,
+                                tags['GPS GPSLongitudeRef'].printable)
+            
+            records.append({
+                'latitude':  lat,
+                'longitude': lon,
+                'filename':  fname
+            })
+
+    df = pd.DataFrame(records)
+    # geometry 列
+    df['geometry'] = [Point(xy) for xy in zip(df.longitude, df.latitude)]
+    return gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+
+def get_All_Img_Folder(folder_path, filename_df, imagePath):
+    """
+    folder_path:      源文件夹，里面有你要拷贝的 .jpg
+    filename_df:      包含 FILENAME 列的 DataFrame
+    imagePath:        目标保存路径，会自动创建
+    """
+    # 1. 校验源文件夹
+    if not os.path.isdir(folder_path):
+        raise FileNotFoundError(f"The folder at {folder_path} does not exist or is not a directory.")
+    
+    # 2. 确保目标文件夹存在
+    os.makedirs(imagePath, exist_ok=True)
+    
+    # 3. 按 FILENAME 列里的名字去拷贝
+    for img_name in filename_df['FILENAME']:
+        src = os.path.join(folder_path, img_name)
+        dst = os.path.join(imagePath, img_name)
+        
+        if os.path.isfile(src):
+            shutil.copy2(src, dst)
+        else:
+            # 跟 Zip 版里类似，记录一下未找到的文件
+            print(f"Image {img_name} not found in folder {folder_path}.")
+    
+    # 4. 返回原 DataFrame 以便后续流程
+    return filename_df
+
+@bp.get("/folders")
+def list_input_folders():
+    """
+    列出输入根目录下可用的子目录（folder-only）
+    GET /api/projects/folders
+    响应: { items: [ "FolderA", "FolderB", ... ] }
+    """
+    ctx = get_ctx()                 # ← 用你已有的 get_ctx()
+    pm = ctx["pm"]
+    in_path: Path = pm.in_path
+
+    if not in_path.exists():
+        return ok({"items": []})
+
+    items = [f for f in os.listdir(in_path) if (in_path / f).is_dir()]
+    items.sort()
+    return ok({"items": items})
+
+@bp.post("/folders")
+def create_project_from_folder():
+    """
+    根据输入目录（folder）创建新项目：
+    Body: { "project_name": "My Project", "folder_name": "SomeFolder" }
+    """
+    data = request.get_json(silent=True) or {}
+    project_name = (data.get("project_name") or "").strip()
+    folder_name = data.get("folder_name")
+
+    if not project_name:
+        return fail("project_name is required", 400)
+    if "_" in project_name:
+        return fail("Project name cannot contain underscores (_)", 400)
+    if not folder_name:
+        return fail("folder_name is required", 400)
+
+    ctx = get_ctx()                 # ← 用你已有的 get_ctx()
+    pm = ctx["pm"]
+    in_path: Path = pm.in_path
+    out_path: Path = pm.des_path
+
+    src_dir: Path = in_path / folder_name
+    if not src_dir.exists() or not src_dir.is_dir():
+        return fail("folder not found", 404)
+
+    project_path = out_path / project_name
+    if project_path.exists():
+        return fail("Project already exists", 409)
+
+    # 1) EXIF 提取坐标
+    df = get_image_folder_geo(str(src_dir))
+    df = df.rename(columns={"latitude": "LATITUDE", "longitude": "LONGITUDE", "filename": "FILENAME"})
+
+    # 2) 地理编码 + 采样
+    df = cycleRAP_VA.geoCode(df)
+    df = cycleRAP_VA.get_geo_points_by_distance(df, min_distance=10)
+    if "geometry" not in df.columns:
+        return fail("Missing 'geometry' after geocoding", 500)
+
+    gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+
+    # 3) 转 LineString
+    extracted_geo_data = cycleRAP_VA.convert_points_to_linestrings(gdf)
+    
+    # 4) 初始化项目目录结构（本地创建即可）
+    project_path.mkdir(parents=True, exist_ok=True)
+
+    # 5) 拷贝/链接图片到项目 images/ 目录
+    images_dir = project_path / global_var.PROJECT_IMAGES_FOLDER
+    images_dir.mkdir(parents=True, exist_ok=True)
+    extracted_geo_data = get_All_Img_Folder(src_dir, extracted_geo_data, images_dir)
+
+    # 6) 注册项目
+    pm.create_project(project_name, extracted_geo_data, folder_name)
+
+    return ok({"ok": True, "name": project_name})

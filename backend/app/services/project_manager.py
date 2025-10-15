@@ -50,7 +50,6 @@ class ProjectVersion:
             if path.exists():
                 snapshot.parse(path)
             else:
-                # 第一次创建当天版本：文件还不存在，先给个空 df 并标记 dirty
                 snapshot.df = pd.DataFrame()
                 snapshot.df_dirty = True
             self._snapshot_metadata = snapshot
@@ -58,11 +57,10 @@ class ProjectVersion:
 
     @snapshot_metadata.setter
     def snapshot_metadata(self, value: serializer.SnapshotMetadata):
-        raise TypeError("metadata must be serializer.SnapshotMetadata")
         if not isinstance(value, serializer.SnapshotMetadata):
-            self._snapshot_metadata = value
-            self._snapshot_metadata.df_dirty = True
-        # print(f"SETTING SNAPSHOT TO {value.df}")
+            raise TypeError("metadata must be serializer.SnapshotMetadata")
+        self._snapshot_metadata = value
+        self._snapshot_metadata.df_dirty = True
 
     @property
     def attributes(self) -> serializer.Attributes:
@@ -349,7 +347,7 @@ class project_manager:
         # Folder paths
         "destination_folder": "../data",
         "source_folder": "src", 
-        "in_folder": "IN",
+        "in_folder": "../in",
         "CycleRAP_source": global_var.CYCLERAPVER,
         # Video config
         "capture_frequency": 10,  # GPS sampling rate in Hz
@@ -460,75 +458,9 @@ class project_manager:
         # Craft version 1 snapshot metadata
         snapshot_dataframe = serializer.SnapshotMetadata(size)
 
+
         # Craft default attributes 
         attribute_dataframe = serializer.Attributes(size, self.cyclerap_interface.attribute_default_values)
-
-        ########################## Set speed limit attribute ##########################
-        
-        #-------------------------- Parameter Configuration --------------------------#
-        MAX_DISTANCE = 30.0   # Maximum Search distance (meters)
-        
-        #------------------------------ Data Preparation ------------------------------#
-        # Load Speed limit shapefile and convert CRS to SVY21
-        speed_gdf = gpd.read_file("shp/Speed_limit/ROADATTRIBUTELINE_SPEEDLIMITS.shp").to_crs(epsg=3414)
-        spatial_index_speed = speed_gdf.sindex
-        
-        # Load Road Operating Speed shapefile, csv file and convert CRS to SVY21
-        ros_gdf = gpd.read_file("shp/LinkID_Shape_File/31Oct24_Link_FUL.shp").to_crs(epsg=3414)
-        spatial_index_ros = ros_gdf.sindex
-        
-        ros_csv = pd.read_csv("shp/LinkID_Shape_File/TSE_AdHocReq_ERP2AverageSpeedData_250425.csv", header=None)
-        ros_csv.columns = ros_csv.iloc[0]
-        ros_csv = ros_csv.drop(index=0).reset_index(drop=True)
-        ros_csv["LINKID"] = ros_csv["LINKID"].astype(str)
-        ros_csv.set_index("LINKID", inplace=True)
-
-
-        #------------------------------ Data Processing ------------------------------#
-        # Loop through every image
-        for idx, row in geo_tbl.df.iterrows():
-            
-            first_point = Point(row['LineString'].coords[0])
-            buffer_bounds = first_point.buffer(20.0).bounds
-            
-            # Set Speed Limit ========================================================
-            # Query possible nearby speed limit lines
-            candidate_idx_speed = list(spatial_index_speed.intersection(buffer_bounds))
-            candidates_speed = speed_gdf.iloc[candidate_idx_speed].copy()
-
-            if not candidates_speed.empty:
-                # Find nearest speed limit segment
-                candidates_speed['dist_to_pt'] = candidates_speed.geometry.distance(first_point)
-                nearest_row = candidates_speed.loc[candidates_speed['dist_to_pt'].idxmin()]
-                
-                if nearest_row['dist_to_pt'] <= MAX_DISTANCE:
-                    attribute_dataframe.loc[idx, 'Road speed limit'] = nearest_row['SPEEDLIMIT']
-                    
-            else:
-                #TODO: No nearby speed limit found
-                pass
-            
-            # Set Road Operating Speed ================================================
-            candidates_idx_ros = list(spatial_index_ros.intersection(buffer_bounds))
-            candidate_ros = ros_gdf.iloc[candidates_idx_ros].copy()
-            candidate_ros["distance"] = candidate_ros.geometry.distance(first_point)
-            nearby_roads_ros = candidate_ros[candidate_ros["distance"] <= MAX_DISTANCE]
-            
-            if not nearby_roads_ros.empty:
-                
-                # Nearest road
-                nearby_roads_ros = nearby_roads_ros.loc[nearby_roads_ros["distance"].idxmin()]
-                link_id = str(nearby_roads_ros["LK_ID_NUM"])
-                if link_id in ros_csv.index:
-                    result = ros_csv.loc[link_id]
-                    attribute_dataframe.loc[idx, 'Road operating speed (mean)'] = result["AVERAGE_HOURLY_SPEED"]
-                else:
-                    #TODO: Set as defult Road Operating Speed
-                    pass
-            #TODO: AADT
-        
-        
-        ####################################################################################
         
         # Create project
         new_project = Project(proj_root)
