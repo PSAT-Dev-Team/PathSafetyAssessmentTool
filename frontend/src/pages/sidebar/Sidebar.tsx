@@ -46,6 +46,14 @@ export default function Sidebar() {
     });
   }, []);
 
+  const onAutoCodeOne = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("psat:autocode:one"));
+  }, []);
+
+  const onAutoCodeAll = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("psat:autocode:all"));
+  }, []);
+
   const onSave = async () => {
     // 发出保存请求；让 CodingPage 去真正保存
     window.dispatchEvent(new CustomEvent("psat:save"));
@@ -93,6 +101,8 @@ export default function Sidebar() {
             onCalculate={onCalculate}
             onSave={onSave}
             onExit={onExit}
+            onAutoCodeOne={onAutoCodeOne}   // ★ 新增
+            onAutoCodeAll={onAutoCodeAll}   // ★ 新增
           />
         ) : (
           <div className="placeholder">Placeholder</div>
