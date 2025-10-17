@@ -10,9 +10,7 @@ import pandas as pd
 import shutil
 import geopandas as gpd
 import app.services.cycleRAP_interface as cycleRAP_interface
-import requests
 from pathlib import Path
-from functools import cached_property
 from shapely.geometry import LineString, Point
 from shapely import wkt
 from app.services.cycleRAP_VA import gdfify, get_full_path

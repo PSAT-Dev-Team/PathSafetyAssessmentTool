@@ -1,5 +1,5 @@
 import { useLocation, useNavigate, useMatch } from "react-router-dom";
-import { Button } from "@chakra-ui/react";
+import { Button, Separator } from "@chakra-ui/react";
 import { useMemo, useCallback } from "react";
 import { toaster } from "../../components/ui/toaster";
 
@@ -94,6 +94,8 @@ export default function Sidebar() {
       </div>
 
       {/* Middle */}
+      <Separator />
+
       <div className="psat-side-middle">
         {inCoding && projectName ? (
           <CodingSidebar
