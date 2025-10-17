@@ -33,3 +33,5 @@ shapefiles/
 *.tmp
 *.bak
 *.swp
+
+backend_log.txt
