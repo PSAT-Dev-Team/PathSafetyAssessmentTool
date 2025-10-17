@@ -1,6 +1,6 @@
 import re
 import shutil
-import pythoncom
+# import pythoncom  # Windows-only, not used in this module
 import json
 import app.services.global_var as global_var
 import pandas as pd
