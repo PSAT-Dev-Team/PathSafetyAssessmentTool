@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchProjectList, ping } from "../../api";
-import { Button } from "@chakra-ui/react"
-import { useNavigate } from "react-router-dom";
+import { fetchProjectList, ping, deleteProject as apiDeleteProject } from "../../api";
+import {
+  Button,
+  Dialog,
+  Portal,
+  CloseButton,
+  Text,
+} from "@chakra-ui/react";import { useNavigate } from "react-router-dom";
 
 import "./home.css";
 
@@ -30,6 +35,11 @@ export default function Home() {
 
   // Selected Project
   const [selected, setSelected] = useState<string | null>(null);
+
+  // Delete dialog state
+  const [openDelete, setOpenDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
@@ -61,12 +71,6 @@ export default function Home() {
     let list = projects;
     if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
 
-    // 下面是日期过滤的占位逻辑（等有 createdAt / updatedAt 时启用）
-    // if (updatedFrom) list = list.filter(p => p.updatedAt && p.updatedAt >= `${updatedFrom}T00:00:00`);
-    // if (updatedTo)   list = list.filter(p => p.updatedAt && p.updatedAt <= `${updatedTo}T23:59:59`);
-    // if (createdFrom) list = list.filter(p => p.createdAt && p.createdAt >= `${createdFrom}T00:00:00`);
-    // if (createdTo)   list = list.filter(p => p.createdAt && p.createdAt <= `${createdTo}T23:59:59`);
-
     return list;
   }, [projects, nameQuery /*, updatedFrom, updatedTo, createdFrom, createdTo */]);
 
@@ -80,12 +84,33 @@ export default function Home() {
     navigate(`/coding/${encodeURIComponent(selected)}`);
   };
 
-  const deleteProject = async () => {
+// 打开确认对话框
+  const askDelete = () => {
     if (!selected) return;
-    // 例：调用删除 API（请替换为你的真实接口）
-    // await fetch('/api/project/delete', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: selected })});
-    console.log("DELETE project:", selected);
-    alert(`DELETE project: ${selected}`);
+    setDeleteErr(null);
+    setOpenDelete(true);
+  };
+
+  // 真正删除
+  const confirmDelete = async () => {
+    if (!selected) return;
+    try {
+      setDeleting(true);
+      setDeleteErr(null);
+      await apiDeleteProject(selected);
+      // 本地把它从列表移除
+      setProjectList((prev) =>
+        prev
+          ? { projects: prev.projects.filter((n) => n !== selected) }
+          : prev
+      );
+      setSelected(null);
+      setOpenDelete(false);
+    } catch (e: any) {
+      setDeleteErr(e?.message ?? "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -102,7 +127,6 @@ export default function Home() {
               onChange={(e) => setNameQuery(e.target.value)}
             />
           </div>
-
         </div>
       </div>
 
@@ -150,21 +174,49 @@ export default function Home() {
 
       <div className="actions-panel">
         <div className="buttons">
-          <Button
-            onClick={loadProject}
-            colorPalette={"blue"}
-            disabled={!selected}
-          >
+          <Button onClick={loadProject} colorPalette="blue" disabled={!selected}>
             Load Project
           </Button>
-          <Button
-            onClick={deleteProject}
-            disabled={!selected}
-          >
+          <Button onClick={askDelete} disabled={!selected}>
             Delete Project
           </Button>
         </div>
       </div>
+
+      {/* 删除确认 Dialog */}
+      <Dialog.Root open={openDelete} onOpenChange={(d) => setOpenDelete(d.open)}>
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Delete project?</Dialog.Title>
+              </Dialog.Header>
+              <Dialog.Body>
+                This will permanently remove{" "}<strong>{selected}</strong> and its files.
+              </Dialog.Body>
+              <Dialog.Footer>
+                <Dialog.ActionTrigger asChild>
+                  <Button variant="outline" disabled={deleting}>
+                    Cancel
+                  </Button>
+                </Dialog.ActionTrigger>
+                <Button
+                  colorPalette="red"
+                  onClick={confirmDelete}
+                  loading={deleting}
+                >
+                  Delete
+                </Button>
+              </Dialog.Footer>
+
+              <Dialog.CloseTrigger asChild>
+                <CloseButton size="sm" />
+              </Dialog.CloseTrigger>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
     </div>
   );
 }
