@@ -1,3 +1,11 @@
 flask
 flask-cors
 pandas
+geopandas
+shapely
+openpyxl
+requests
+
+# Platform-specific dependencies
+# Windows-only: Required for Excel COM automation (CycleRAP score calculation)
+pywin32; sys_platform == 'win32'

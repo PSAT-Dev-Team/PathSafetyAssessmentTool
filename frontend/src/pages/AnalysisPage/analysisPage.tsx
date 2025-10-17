@@ -1,313 +1,238 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Box,
   Flex,
   Text,
   Button,
-  Grid,
-  GridItem,
-  createListCollection,
+  Tabs,
 } from "@chakra-ui/react";
-import {
-  SelectContent,
-  SelectItem,
-  SelectRoot,
-  SelectTrigger,
-  SelectValueText,
-} from "@chakra-ui/react";
-import AttributesDropdown from "./components/AttributesDropdown";
-import MapView from "./components/MapView";
+import { fetchProjectList } from "../../api";
+import "../Home/home.css"; // Reuse home page styles
 
-// Define the structure for filter fields
-interface FilterFields {
-  projectName: string;
-  lastUpdated: string;
-  size: string;
-  dateCreated: string;
-  dataset: string;
-  tags: string;
+interface FileListResponse {
+  projects: string[];
 }
 
-// Dropdown options for each field
-const projectNameOptions = createListCollection({
-  items: [
-    { label: "All Projects", value: "all" },
-    { label: "Project Alpha", value: "alpha" },
-    { label: "Project Beta", value: "beta" },
-    { label: "Project Gamma", value: "gamma" },
-    { label: "Project Delta", value: "delta" },
-  ],
-});
+interface ProjectItem {
+  name: string;
+}
 
-const lastUpdatedOptions = createListCollection({
-  items: [
-    { label: "Any Time", value: "any" },
-    { label: "Last 24 Hours", value: "24h" },
-    { label: "Last Week", value: "week" },
-    { label: "Last Month", value: "month" },
-    { label: "Last Year", value: "year" },
-  ],
-});
-
-const sizeOptions = createListCollection({
-  items: [
-    { label: "Any Size", value: "any" },
-    { label: "Small (< 10 MB)", value: "small" },
-    { label: "Medium (10-100 MB)", value: "medium" },
-    { label: "Large (100-500 MB)", value: "large" },
-    { label: "Extra Large (> 500 MB)", value: "xlarge" },
-  ],
-});
-
-const dateCreatedOptions = createListCollection({
-  items: [
-    { label: "Any Date", value: "any" },
-    { label: "2024", value: "2024" },
-    { label: "2023", value: "2023" },
-    { label: "2022", value: "2022" },
-    { label: "Older", value: "older" },
-  ],
-});
-
-const datasetOptions = createListCollection({
-  items: [
-    { label: "All Datasets", value: "all" },
-    { label: "Safety Assessment", value: "safety" },
-    { label: "Traffic Analysis", value: "traffic" },
-    { label: "Infrastructure", value: "infrastructure" },
-    { label: "Environmental", value: "environmental" },
-  ],
-});
-
-const tagsOptions = createListCollection({
-  items: [
-    { label: "All Tags", value: "all" },
-    { label: "Cycling", value: "cycling" },
-    { label: "Pedestrian", value: "pedestrian" },
-    { label: "Urban", value: "urban" },
-    { label: "Rural", value: "rural" },
-    { label: "High Priority", value: "priority" },
-  ],
-});
+type TreatmentPhase = "pre" | "post";
 
 export default function AnalysisPage() {
-  const [filters, setFilters] = useState<FilterFields>({
-    projectName: "all",
-    lastUpdated: "any",
-    size: "any",
-    dateCreated: "any",
-    dataset: "all",
-    tags: "all",
-  });
+  // Tab state - switches between Pre-Treatment and Post-Treatment
+  const [phase, setPhase] = useState<TreatmentPhase>("pre");
 
-  // Handle dropdown changes
-  const handleFilterChange = (field: keyof FilterFields, value: string) => {
-    setFilters((prev) => ({ ...prev, [field]: value }));
+  // Project list state
+  const [projectList, setProjectList] = useState<FileListResponse | null>(null);
+  const [postTreatmentList, setPostTreatmentList] = useState<FileListResponse | null>(null);
+
+  // Filter and selection states
+  const [nameQuery, setNameQuery] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+
+  // Fetch projects on mount and when phase changes
+  useEffect(() => {
+    if (phase === "pre") {
+      // Fetch from Pre-Treatment folder (current default)
+      fetchProjectList()
+        .then((data) => setProjectList(data))
+        .catch((e) => console.error("Failed to fetch pre-treatment projects:", e));
+    } else {
+      // TODO: Fetch from Post-Treatment folder
+      // For now, using placeholder - you'll need to create an API endpoint for this
+      // fetchPostTreatmentList()
+      //   .then((data) => setPostTreatmentList(data))
+      //   .catch((e) => console.error("Failed to fetch post-treatment projects:", e));
+
+      // Placeholder: Empty list for post-treatment
+      setPostTreatmentList({ projects: [] });
+    }
+  }, [phase]);
+
+  // Process projects based on current phase
+  const projects: ProjectItem[] = useMemo(() => {
+    const list = phase === "pre" ? projectList : postTreatmentList;
+    if (!list?.projects) return [];
+    return list.projects
+      .slice()
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ name }));
+  }, [projectList, postTreatmentList, phase]);
+
+  // Apply filters
+  const filtered = useMemo(() => {
+    const q = nameQuery.trim().toLowerCase();
+    let list = projects;
+    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+    return list;
+  }, [projects, nameQuery]);
+
+  const onRowClick = (name: string) => setSelected(name);
+
+  const analyzeProject = async () => {
+    if (!selected) return;
+    console.log(`Analyzing ${phase}-treatment project:`, selected);
+    // TODO: Navigate to analysis view or show analysis dashboard
+    alert(`Analyzing ${phase}-treatment project: ${selected}`);
   };
 
-  // Handle View Project button click
-  const handleViewProject = () => {
-    console.log("Selected filters:", filters);
-    // Add your logic here to view/filter projects
-    alert(`Viewing projects with filters:\n${JSON.stringify(filters, null, 2)}`);
+  const compareProjects = async () => {
+    if (!selected) return;
+    console.log(`Comparing project:`, selected);
+    // TODO: Open comparison view
+    alert(`Feature coming soon: Compare pre/post treatment for ${selected}`);
   };
 
   return (
-    <Box w="100%" h="100vh">
+    <Box className="home-root">
       {/* Header */}
-      <Box mb="6" px="6" pt="6">
+      <Box mb="6">
         <Text fontSize="2xl" fontWeight="bold" mb="2">
-          Treatment Dashboard
+          Analysis Dashboard
         </Text>
-        <Text fontSize="sm" color="gray.600">
-          Select 1 or more project of interest to start treatment
+        <Text fontSize="sm" color="fg.muted">
+          Select a project to analyze pre-treatment or post-treatment data
         </Text>
       </Box>
 
-      {/* Filter Fields */}
-      <Box
-        borderWidth="1px"
-        borderRadius="lg"
-        p="6"
-        bg="white"
-        _dark={{ bg: "gray.800" }}
+      {/* Phase Tabs */}
+      <Tabs.Root
+        value={phase}
+        onValueChange={(e) => {
+          setPhase(e.value as TreatmentPhase);
+          setSelected(null); // Clear selection when switching tabs
+          setNameQuery(""); // Clear search when switching tabs
+        }}
+        variant="enclosed"
         mb="6"
-        mx="6"
       >
-        <Grid templateColumns={{ base: "1fr", md: "repeat(6, 1fr)" }} gap="4">
-          {/* Project Name */}
-          <GridItem>
-            <Text fontSize="sm" fontWeight="semibold" mb="2">
-              Project Name
-            </Text>
-            <SelectRoot
-              collection={projectNameOptions}
-              size="md"
-              value={[filters.projectName]}
-              onValueChange={(e) =>
-                handleFilterChange("projectName", e.value[0])
-              }
-            >
-              <SelectTrigger>
-                <SelectValueText placeholder="Select project" />
-              </SelectTrigger>
-              <SelectContent>
-                {projectNameOptions.items.map((item) => (
-                  <SelectItem key={item.value} item={item}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectRoot>
-          </GridItem>
+        <Tabs.List>
+          <Tabs.Trigger value="pre">
+            Pre-Treatment
+          </Tabs.Trigger>
+          <Tabs.Trigger value="post">
+            Post-Treatment
+          </Tabs.Trigger>
+        </Tabs.List>
+      </Tabs.Root>
 
-          {/* Last Updated */}
-          <GridItem>
-            <Text fontSize="sm" fontWeight="semibold" mb="2">
-              Last Updated
-            </Text>
-            <SelectRoot
-              collection={lastUpdatedOptions}
-              size="md"
-              value={[filters.lastUpdated]}
-              onValueChange={(e) =>
-                handleFilterChange("lastUpdated", e.value[0])
-              }
-            >
-              <SelectTrigger>
-                <SelectValueText placeholder="Select time period" />
-              </SelectTrigger>
-              <SelectContent>
-                {lastUpdatedOptions.items.map((item) => (
-                  <SelectItem key={item.value} item={item}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectRoot>
-          </GridItem>
-
-          {/* Size */}
-          <GridItem>
-            <Text fontSize="sm" fontWeight="semibold" mb="2">
-              Size
-            </Text>
-            <SelectRoot
-              collection={sizeOptions}
-              size="md"
-              value={[filters.size]}
-              onValueChange={(e) => handleFilterChange("size", e.value[0])}
-            >
-              <SelectTrigger>
-                <SelectValueText placeholder="Select size range" />
-              </SelectTrigger>
-              <SelectContent>
-                {sizeOptions.items.map((item) => (
-                  <SelectItem key={item.value} item={item}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectRoot>
-          </GridItem>
-
-          {/* Date Created */}
-          <GridItem>
-            <Text fontSize="sm" fontWeight="semibold" mb="2">
-              Date Created
-            </Text>
-            <SelectRoot
-              collection={dateCreatedOptions}
-              size="md"
-              value={[filters.dateCreated]}
-              onValueChange={(e) =>
-                handleFilterChange("dateCreated", e.value[0])
-              }
-            >
-              <SelectTrigger>
-                <SelectValueText placeholder="Select date" />
-              </SelectTrigger>
-              <SelectContent>
-                {dateCreatedOptions.items.map((item) => (
-                  <SelectItem key={item.value} item={item}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectRoot>
-          </GridItem>
-
-          {/* Dataset */}
-          <GridItem>
-            <Text fontSize="sm" fontWeight="semibold" mb="2">
-              Dataset
-            </Text>
-            <SelectRoot
-              collection={datasetOptions}
-              size="md"
-              value={[filters.dataset]}
-              onValueChange={(e) => handleFilterChange("dataset", e.value[0])}
-            >
-              <SelectTrigger>
-                <SelectValueText placeholder="Select dataset" />
-              </SelectTrigger>
-              <SelectContent>
-                {datasetOptions.items.map((item) => (
-                  <SelectItem key={item.value} item={item}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectRoot>
-          </GridItem>
-
-          {/* Tags */}
-          <GridItem>
-            <Text fontSize="sm" fontWeight="semibold" mb="2">
-              Tags
-            </Text>
-            <SelectRoot
-              collection={tagsOptions}
-              size="md"
-              value={[filters.tags]}
-              onValueChange={(e) => handleFilterChange("tags", e.value[0])}
-            >
-              <SelectTrigger>
-                <SelectValueText placeholder="Select tag" />
-              </SelectTrigger>
-              <SelectContent>
-                {tagsOptions.items.map((item) => (
-                  <SelectItem key={item.value} item={item}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectRoot>
-          </GridItem>
-        </Grid>
-
-        {/* View Project Button */}
-        <Flex justify="center" mt="8">
-          <Button
-            colorScheme="blue"
-            size="lg"
-            px="12"
-            onClick={handleViewProject}
-          >
-            View Project
-          </Button>
+      {/* Info banner for current phase */}
+      <Box
+        p="4"
+        mb="4"
+        borderRadius="lg"
+        bg={phase === "pre" ? "orange.subtle" : "green.subtle"}
+        borderWidth="1px"
+        borderColor={phase === "pre" ? "orange.emphasized" : "green.emphasized"}
+      >
+        <Flex align="center" gap="2">
+          <Text fontWeight="semibold" fontSize="sm">
+            {phase === "pre" ? "🈲 Pre-Treatment Projects" : "✅ Post-Treatment Projects"}
+          </Text>
+          <Text fontSize="sm" color="fg.muted">
+            {phase === "pre"
+              ? "Viewing projects prior to treatment implementation"
+              : "Viewing projects after treatment implementation"}
+          </Text>
         </Flex>
       </Box>
 
-      {/* Attributes Dropdown Section - Separate Box */}
-      <Box mx="6" mb="6">
-        <AttributesDropdown />
-      </Box>
+      {/* Search Panel */}
+      <div className="search-panel">
+        <div className="search-row">
+          <div className="search-item">
+            <label htmlFor="nameQuery">Search by project name</label>
+            <input
+              id="nameQuery"
+              type="text"
+              placeholder="Type project name…"
+              value={nameQuery}
+              onChange={(e) => setNameQuery(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
 
-      {/* Map Section - Separate Box */}
-      <Box mx="6" mb="6">
-        <MapView />
-      </Box>
+      {/* Project Table */}
+      <div className="table-wrap">
+        <table className="project-table">
+          <thead>
+            <tr>
+              <th style={{ width: 48 }}></th>
+              <th>Project Name</th>
+              <th style={{ width: 120 }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="empty">
+                  {phase === "post"
+                    ? "No post-treatment projects available yet. Implement treatments and re-assess to see data here."
+                    : "No projects found"}
+                </td>
+              </tr>
+            ) : (
+              filtered.map((p) => {
+                const isSelected = selected === p.name;
+                return (
+                  <tr
+                    key={p.name}
+                    className={isSelected ? "row selected" : "row"}
+                    onClick={() => onRowClick(p.name)}
+                  >
+                    <td>
+                      <input
+                        type="radio"
+                        name="projectSelect"
+                        checked={isSelected}
+                        onChange={() => onRowClick(p.name)}
+                        aria-label={`Select ${p.name}`}
+                      />
+                    </td>
+                    <td title={p.name}>{p.name}</td>
+                    <td>
+                      <Box
+                        as="span"
+                        px="2"
+                        py="1"
+                        borderRadius="md"
+                        fontSize="xs"
+                        fontWeight="semibold"
+                        bg={phase === "pre" ? "orange.subtle" : "green.subtle"}
+                        color={phase === "pre" ? "orange.fg" : "green.fg"}
+                      >
+                        {phase === "pre" ? "Pre" : "Post"}
+                      </Box>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="actions-panel">
+        <div className="buttons">
+          <Button
+            onClick={analyzeProject}
+            colorPalette="blue"
+            disabled={!selected}
+          >
+            Analyze Project
+          </Button>
+          <Button
+            onClick={compareProjects}
+            colorPalette="purple"
+            disabled={!selected}
+          >
+            Compare Pre/Post
+          </Button>
+        </div>
+      </div>
     </Box>
   );
 }

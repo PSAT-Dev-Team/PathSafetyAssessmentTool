@@ -8,6 +8,7 @@ import "./sidebar.css";
 
 const LINKS = [
   { to: "/home", label: "Home" },
+  { to: "/treatment", label: "Treatment" },
   { to: "/analysis", label: "Analysis" },
 ];
 
@@ -37,6 +38,7 @@ export default function Sidebar() {
 
   const inCoding = pathname.startsWith("/coding");
   const onHome = pathname === "/home";
+  const onTreatment = pathname === "/treatment";
   const onAnalysis = pathname === "/analysis";
 
   const onCalculate = useCallback(async () => {
@@ -99,8 +101,8 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Bottom: Create Project — 只在 /home 时出现 */}
-      {(onHome || onAnalysis) && (
+      {/* Bottom: Create Project — 只在 /home 或 /treatment 或 /analysis 时出现 */}
+      {(onHome || onTreatment || onAnalysis) && (
         <div className="psat-side-bottom">
           <Button onClick={createProject} colorPalette="gray" variant="surface" size="sm">
             Create Project
