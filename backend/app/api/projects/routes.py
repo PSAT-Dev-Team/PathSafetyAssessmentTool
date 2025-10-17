@@ -15,8 +15,11 @@ import shutil
 
 
 
-# —— 复用你现有的服务层 —— #
-from app.services.project_manager import project_manager, Project   # 若路径不同，按你的真实包路径改
+
+
+
+# —— Reuse your existing service layer —— #
+from app.services.project_manager import project_manager, Project   # If the path is different, change to your real package path
 import app.services.serializer as serializer
 import app.services.cycleRAP_interface as CRI
 import app.services.cycleRAP_VA as cycleRAP_VA
@@ -33,25 +36,25 @@ def ok(data, code=200):
 def fail(message, code=400):
     return jsonify({"error": message}), code
 
-# 进程级上下文（替代 streamlit 的 session_state）
+# Process-level context (replaces Streamlit's session_state)
 _CTX = {"ready": False, "pm": None}
 
 
 
 def get_ctx():
-    """Lazy 初始化：首次调用时把旧代码依赖都准备好；之后复用。"""
+    """Lazy init: prepare the old-code dependencies the first time and reuse thereafter."""
     if _CTX["ready"]:
         return _CTX
 
-    # === 原来在 Streamlit 里手动做的 init，这里等价放到后端 ===
-    pm = project_manager()                               # 载入配置与扫描项目列表
-    # serializer 的 BaseTable/parse/serialize 不需要额外 init；若你有 data_loader，可 try/except
+    # === Previously done manually in Streamlit; equivalent init moved to backend ===
+    pm = project_manager()                               # Load config and scan project list
+    # serializer's BaseTable/parse/serialize do not need extra init; if you have data_loader, try/except
     try:
         serializer.data_loader.initialise()
     except Exception:
         pass
 
-    # CycleRAP 资源目录（按你以前用的 src_path/CycleRAP）
+    # CycleRAP resource directory (same as your former src_path/CycleRAP)
     CRI.cycleRAP_interface.initialise(pm.src_path / "CycleRAP")
 
     _CTX.update({"pm": pm, "ready": True})
@@ -61,14 +64,14 @@ def get_ctx():
 
 @bp.get("")
 def list_projects():
-    """列出项目名称（等价你原先 list_names）。"""
+    """List project names (equivalent to your original list_names)."""
     ctx = get_ctx()
     names = ctx["pm"].list_names()
     return jsonify({"projects": names})
 
 @bp.get("/<project_name>")
 def get_project(project_name: str):
-    """读取项目的元数据、可用版本等（只读）。"""
+    """Read project metadata and available versions (read-only)."""
     ctx = get_ctx()
     proj: Project = ctx["pm"].project(project_name)
     ver = proj.latest()
@@ -80,7 +83,7 @@ def get_project(project_name: str):
 
 @bp.get("/<project_name>/versions/latest/attributes")
 def get_latest_attributes(project_name: str):
-    """返回最新版 attributes.csv（转成 JSON 给前端表格渲染）。"""
+    """Return the latest attributes.csv (converted to JSON for front-end table rendering)."""
     ctx = get_ctx()
     proj: Project = ctx["pm"].project(project_name)
     df = proj.latest().attributes.df
@@ -88,67 +91,67 @@ def get_latest_attributes(project_name: str):
 
 @bp.get("/<project_name>/geodata")
 def get_geodata(project_name: str):
-    """返回项目的 GeoData（GeoJSON FeatureCollection）。"""
+    """Return the project's GeoData (GeoJSON FeatureCollection)."""
     import json
-    ctx = get_ctx()  # 复用现有的 init 上下文
+    ctx = get_ctx()  # Reuse the existing init context
     proj = ctx["pm"].project(project_name)
     gdf = proj.geo_data.df  # GeoPandas GeoDataFrame
 
-    # GeoDataFrame -> GeoJSON 字符串，再转成 dict 让 jsonify 友好输出
+    # GeoDataFrame -> GeoJSON string, then to dict for jsonify-friendly output
     geojson_obj = json.loads(gdf.to_json())
     return jsonify(geojson_obj)
 
 @bp.get("/<project_name>/images/<path:filename>")
 def get_project_image(project_name: str, filename: str):
     """
-    返回指定项目下 images 目录里的图片文件：
+    Return an image file under the project's images directory:
     GET /api/projects/<project_name>/images/<filename>
     """
     ctx = get_ctx()
     pm = ctx["pm"]
 
-    # 计算 {data}/{project}/images 目录
+    # Compute {data}/{project}/images directory
     images_dir: Path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
 
-    # 目录存在性检查
+    # Directory existence check
     if not images_dir.exists() or not images_dir.is_dir():
         abort(404, description="Images folder not found")
 
-    # 使用 safe_join 防止目录穿越
+    # Use safe_join to prevent directory traversal
     safe_path = safe_join(str(images_dir), filename)
     if safe_path is None:
         abort(400, description="Invalid image path")
 
     file_path = Path(safe_path).resolve()
-    # 仍旧双保险校验：必须在 images_dir 之下
+    # Double-check: must be under images_dir
     if not str(file_path).startswith(str(images_dir)):
         abort(400, description="Invalid image path")
 
     if not file_path.exists() or not file_path.is_file():
         abort(404, description="Image not found")
 
-    # 使用 send_from_directory 返回，带条件缓存
+    # Return via send_from_directory with conditional caching
     resp = send_from_directory(images_dir, file_path.name, conditional=True)
-    # 可选：加一点 Cache-Control（视你的部署需要调整）
+    # Optional: add Cache-Control (adjust as needed for your deployment)
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 
 @bp.get("/attribute-mappings")
 def get_attribute_mappings():
     """
-    返回 Attributes 的字段映射（数字 -> 文字），例如：
+    Return field mappings for Attributes (numeric -> text), e.g.:
     {
       "Area type": {"1":"Inner Urban","2":"Outer Urban","3":"Rural","4":"Industrial"},
       "Facility Type": {"1":"Sidewalk", "2":"Multi-Use Path", ...},
       ...
     }
-    仅为有枚举映射的字段生成，连续数值（如 AADT、速度）不包含在内。
+    Only fields with enumerations are included; continuous values (e.g., AADT, speed) are excluded.
     """
     mappings = {}
     for field, mapping in (serializer.Attributes.CHOICES or {}).items():
-        if not mapping:  # None：表示该字段不是枚举
+        if not mapping:  # None: indicates the field is not an enumeration
             continue
-        # 反转：数字 -> 文字；转成 str key 方便前端用
+        # Reverse mapping: number -> label; use str keys for front-end convenience
         reverse = {str(code): label for (label, code) in mapping.items()}
         mappings[field] = reverse
     return jsonify(mappings)
@@ -156,26 +159,26 @@ def get_attribute_mappings():
 @bp.post("/<project_name>/score")
 def calculate_score(project_name: str):
     """
-    用 Excel 宏算分：
-    1) 取项目最新版 attributes DataFrame
-    2) 调用 cycleRAP_interface.calculate_cycleRAP_score
-    3) 写回 results.csv 并保存
+    Use Excel macro to calculate scores:
+    1) Take the project's latest attributes DataFrame
+    2) Call cycleRAP_interface.calculate_cycleRAP_score
+    3) Write back results.csv and save
     """
     ctx = get_ctx()
     proj: Project = ctx["pm"].project(project_name)
     ver = proj.latest()
 
     attrs = ver.attributes.df
-    # 如果前端 POST 传了临时修改过的 attributes，可合并覆盖：
+    # If the front end POSTs temporarily modified attributes, merge/override them:
     payload = request.get_json(silent=True) or {}
     if "attributes" in payload:
         attrs = serializer.Attributes(values=None)
-        attrs.df = serializer.pd.DataFrame(payload["attributes"])  # 保持列名一致
+        attrs.df = serializer.pd.DataFrame(payload["attributes"])  # Keep column names consistent
 
-    # 计算分数（依赖 Windows + Excel 宏环境）
+    # Calculate scores (depends on Windows + Excel macro environment)
     results_df = CRI.cycleRAP_interface.calculate_cycleRAP_score(attrs)
 
-    # 写回并持久化
+    # Write back and persist
     ver._results = serializer.Results()
     ver.results.df = results_df
     proj.save_all()
@@ -185,8 +188,8 @@ def calculate_score(project_name: str):
 @bp.post("/<project_name>/treatments")
 def evaluate_treatments(project_name: str):
     """
-    用 Excel 的 STM 宏生成治理建议：
-    - 需要 GeoData + Attributes
+    Use the Excel STM macro to generate treatment suggestions:
+    - Requires GeoData + Attributes
     """
     ctx = get_ctx()
     proj: Project = ctx["pm"].project(project_name)
@@ -214,11 +217,11 @@ def update_attributes(name: str):
     if not isinstance(rows, list):
         return fail("Invalid payload", 400)
 
-    # 写入到最新版本
+    # Write to the latest version
     ver = proj.latest()
     ver.attributes.df = pd.DataFrame(rows)
     ver.attributes.df_dirty = True
-    proj.save_all()  # 若跨天会新建新版本
+    proj.save_all()  # If a day rolls over, a new version may be created
     return ok({"ok": True})
 
 #-----------------------------------------------------------------------------------
@@ -239,7 +242,7 @@ def get_image_folder_geo(folder_path):
         with open(img_path, 'rb') as f:
             tags = exifread.process_file(f, details=False)
 
-        # 必要的 GPS tag
+        # Required GPS tags
         if {'GPS GPSLatitude', 'GPS GPSLongitude',
             'GPS GPSLatitudeRef', 'GPS GPSLongitudeRef'}.issubset(tags):
             
@@ -255,24 +258,24 @@ def get_image_folder_geo(folder_path):
             })
 
     df = pd.DataFrame(records)
-    # geometry 列
+    # geometry column
     df['geometry'] = [Point(xy) for xy in zip(df.longitude, df.latitude)]
     return gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
 
 def get_All_Img_Folder(folder_path, filename_df, imagePath):
     """
-    folder_path:      源文件夹，里面有你要拷贝的 .jpg
-    filename_df:      包含 FILENAME 列的 DataFrame
-    imagePath:        目标保存路径，会自动创建
+    folder_path:      Source folder containing the .jpg files to copy
+    filename_df:      DataFrame containing a FILENAME column
+    imagePath:        Destination path to save; will be created if not present
     """
-    # 1. 校验源文件夹
+    # 1. Validate source folder
     if not os.path.isdir(folder_path):
         raise FileNotFoundError(f"The folder at {folder_path} does not exist or is not a directory.")
     
-    # 2. 确保目标文件夹存在
+    # 2. Ensure destination folder exists
     os.makedirs(imagePath, exist_ok=True)
     
-    # 3. 按 FILENAME 列里的名字去拷贝
+    # 3. Copy by names in the FILENAME column
     for img_name in filename_df['FILENAME']:
         src = os.path.join(folder_path, img_name)
         dst = os.path.join(imagePath, img_name)
@@ -280,20 +283,20 @@ def get_All_Img_Folder(folder_path, filename_df, imagePath):
         if os.path.isfile(src):
             shutil.copy2(src, dst)
         else:
-            # 跟 Zip 版里类似，记录一下未找到的文件
+            # Similar to the Zip version: record missing files
             print(f"Image {img_name} not found in folder {folder_path}.")
     
-    # 4. 返回原 DataFrame 以便后续流程
+    # 4. Return the original DataFrame for downstream use
     return filename_df
 
 @bp.get("/folders")
 def list_input_folders():
     """
-    列出输入根目录下可用的子目录（folder-only）
+    List available subfolders under the input root (folders only)
     GET /api/projects/folders
-    响应: { items: [ "FolderA", "FolderB", ... ] }
+    Response: { items: [ "FolderA", "FolderB", ... ] }
     """
-    ctx = get_ctx()                 # ← 用你已有的 get_ctx()
+    ctx = get_ctx()                 # ← Use your existing get_ctx()
     pm = ctx["pm"]
     in_path: Path = pm.in_path
 
@@ -307,7 +310,7 @@ def list_input_folders():
 @bp.post("/folders")
 def create_project_from_folder():
     """
-    根据输入目录（folder）创建新项目：
+    Create a new project based on an input directory (folder):
     Body: { "project_name": "My Project", "folder_name": "SomeFolder" }
     """
     data = request.get_json(silent=True) or {}
@@ -321,7 +324,7 @@ def create_project_from_folder():
     if not folder_name:
         return fail("folder_name is required", 400)
 
-    ctx = get_ctx()                 # ← 用你已有的 get_ctx()
+    ctx = get_ctx()                 # ← Use your existing get_ctx()
     pm = ctx["pm"]
     in_path: Path = pm.in_path
     out_path: Path = pm.des_path
@@ -334,11 +337,11 @@ def create_project_from_folder():
     if project_path.exists():
         return fail("Project already exists", 409)
 
-    # 1) EXIF 提取坐标
+    # 1) Extract EXIF coordinates
     df = get_image_folder_geo(str(src_dir))
     df = df.rename(columns={"latitude": "LATITUDE", "longitude": "LONGITUDE", "filename": "FILENAME"})
 
-    # 2) 地理编码 + 采样
+    # 2) Geocoding + sampling
     df = cycleRAP_VA.geoCode(df)
     df = cycleRAP_VA.get_geo_points_by_distance(df, min_distance=10)
     if "geometry" not in df.columns:
@@ -346,18 +349,18 @@ def create_project_from_folder():
 
     gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
 
-    # 3) 转 LineString
+    # 3) Convert to LineString
     extracted_geo_data = cycleRAP_VA.convert_points_to_linestrings(gdf)
     
-    # 4) 初始化项目目录结构（本地创建即可）
+    # 4) Initialize project directory structure (create locally)
     project_path.mkdir(parents=True, exist_ok=True)
 
-    # 5) 拷贝/链接图片到项目 images/ 目录
+    # 5) Copy/link images into the project's images/ directory
     images_dir = project_path / global_var.PROJECT_IMAGES_FOLDER
     images_dir.mkdir(parents=True, exist_ok=True)
     extracted_geo_data = get_All_Img_Folder(src_dir, extracted_geo_data, images_dir)
 
-    # 6) 注册项目
+    # 6) Register project
     pm.create_project(project_name, extracted_geo_data, folder_name)
 
     return ok({"ok": True, "name": project_name})
@@ -365,14 +368,14 @@ def create_project_from_folder():
 @bp.delete("/<project_name>")
 def delete_project(project_name: str):
     """
-    删除整个项目（内存列表 + 磁盘目录）：
+    Delete an entire project (in-memory list + on-disk directory):
     DELETE /api/projects/<project_name>
     """
     ctx = get_ctx()
     pm = ctx["pm"]
 
     try:
-        pm.delete_project(project_name)  # 会调用 Project._delete() 删除目录，并从列表移除
+        pm.delete_project(project_name)  # Calls Project._delete() to remove the directory and drop from the list
         return ok({"ok": True, "name": project_name})
     except KeyError:
         return fail("Project not found", 404)
@@ -382,24 +385,24 @@ def delete_project(project_name: str):
     
 
 def _get_ctx_gis():
-    """在进程上下文里懒加载 GIS（避免每次请求都重新读 shp）。"""
+    """Lazily load GIS into the process context (avoid re-reading SHP each request)."""
     ctx = get_ctx()
     if "gis" not in ctx:
-        # 你的 gis_mapping 里通常有 LayerStore + GIS，默认读取 shp 目录
+        # In your gis_mapping you typically have LayerStore + GIS; default to read SHP directory
         store = gis.LayerStore.default(base_dir="shp")
         ctx["gis"] = gis.GIS(store)
     return ctx["gis"]
 
 def _resolve_image_path(pm, project_name: str, attrs_row: pd.Series, index: int, gdf: pd.DataFrame | gpd.GeoDataFrame) -> Path:
     """
-    根据 GeoData/Attributes 解析 images 下的图片路径，并打印调试信息。
+    Resolve image path under images/ based on GeoData/Attributes and print debug info.
     """
     images_dir: Path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
     if not images_dir.exists():
         print(f"[autocode] images_dir NOT FOUND: {images_dir}")
         raise FileNotFoundError(f"Images folder not found: {images_dir}")
 
-    tried = []  # 记录尝试过的相对文件名/通配
+    tried = []  # record attempted relative filenames/patterns
     candidates = {}
 
     def _pick(d: dict) -> str | None:
@@ -409,7 +412,7 @@ def _resolve_image_path(pm, project_name: str, attrs_row: pd.Series, index: int,
                 return Path(v).name
         return None
 
-    # ① GeoData 当前行
+    # ① Current row from GeoData
     fname_gdf = None
     try:
         geo_row = gdf.iloc[index].to_dict()
@@ -417,19 +420,19 @@ def _resolve_image_path(pm, project_name: str, attrs_row: pd.Series, index: int,
     except Exception as e:
         print(f"[autocode] read gdf row error idx={index}: {e}")
 
-    # ② Attributes 当前行
+    # ② Current row from Attributes
     fname_attr = None
     try:
         fname_attr = _pick(attrs_row.to_dict())
     except Exception as e:
         print(f"[autocode] read attrs row error idx={index}: {e}")
 
-    # 记录候选名
+    # Record candidates
     candidates["from_gdf"] = fname_gdf
     candidates["from_attrs"] = fname_attr
     print(f"[autocode] idx={index} candidates={candidates} images_dir={images_dir}")
 
-    # 优先 gdf，然后 attrs
+    # Prefer gdf, then attrs
     for fname in [fname_gdf, fname_attr]:
         if not fname:
             continue
@@ -439,7 +442,7 @@ def _resolve_image_path(pm, project_name: str, attrs_row: pd.Series, index: int,
             print(f"[autocode] HIT (direct): {direct}")
             return direct
 
-        # 模糊：同名不同扩展名 / 不区分大小写
+        # Fuzzy: same name different extension / case-insensitive
         stem = Path(fname).stem
         globs = [f"*{fname}", f"{stem}.*"]
         for pat in globs:
@@ -449,7 +452,7 @@ def _resolve_image_path(pm, project_name: str, attrs_row: pd.Series, index: int,
                 print(f"[autocode] HIT (glob {pat}): {hits[0]}")
                 return hits[0]
 
-    # ③ 序号兜底
+    # ③ Index-based fallback
     for base in (f"{index+1:04d}", f"{index:04d}"):
         for ext in (".jpg", ".jpeg", ".png"):
             cand = (images_dir / (base + ext)).resolve()
@@ -458,7 +461,7 @@ def _resolve_image_path(pm, project_name: str, attrs_row: pd.Series, index: int,
                 print(f"[autocode] HIT (index-pattern): {cand}")
                 return cand
 
-    # ④ 打印目录样本，帮助排查
+    # ④ Print a directory sample to help debugging
     try:
         files = sorted([p.name for p in images_dir.iterdir() if p.is_file()])
         sample = files[:30]
@@ -467,7 +470,7 @@ def _resolve_image_path(pm, project_name: str, attrs_row: pd.Series, index: int,
         print(f"[autocode] listdir error: {e}")
         sample = []
 
-    # 失败
+    # Failure
     msg = (
         f"Image for row {index} not found under {images_dir}\n"
         f"candidates={candidates}\n"
@@ -479,29 +482,29 @@ def _resolve_image_path(pm, project_name: str, attrs_row: pd.Series, index: int,
 
 def _row_start_point(geom) -> Point:
     """
-    从 GeoData 的 LineString 取起点（你之前也要求“只用最开始的点”）
+    Get the start point from a LineString in GeoData (you previously required “use only the first point”).
     """
     if geom is None:
         raise ValueError("Missing geometry")
     if isinstance(geom, LineString):
         x, y = list(geom.coords)[0]
         return Point(x, y)
-    # 若是点，就直接返回
+    # If it's already a Point, return it
     if isinstance(geom, Point):
         return geom
     raise TypeError(f"Unsupported geometry type: {type(geom)}")
 
 def _apply_gis_rules(gis_inst, start_pt: Point, updates: dict):
     """
-    把 GIS 规则应用到属性字典里（这里保持轻量——不改你的 gis_mapping 逻辑，只调用它）。
-    你可以按旧逻辑增删。以下示例仅展示典型字段。
+    Apply GIS rules to the attribute dict (keep it lightweight—don’t change your gis_mapping logic, just call it).
+    You can add/remove according to your old logic. The following shows typical fields.
     """
-    # 注意：gis_mapping 内部一般使用 EPSG:3414 的米制坐标。
-    # 如果 start_pt 是 WGS84，请转换；如果你的 GeoData 已经是 4326，需要转到 3414：
+    # Note: gis_mapping typically uses EPSG:3414 metric coordinates.
+    # If start_pt is WGS84, convert it; if your GeoData is in 4326, convert to 3414:
     try:
         mpt = gis.to_metric_point(start_pt)
     except Exception:
-        mpt = start_pt  # 如果你的项目几何已经在 3414，这行就不会出错
+        mpt = start_pt  # If your project geometry is already 3414, this won’t error
 
     # Area type
     try:
@@ -511,7 +514,7 @@ def _apply_gis_rules(gis_inst, start_pt: Point, updates: dict):
     except Exception:
         pass
 
-    # Bus stop / bus lane / parking / MRT 等
+    # Bus stop / bus lane / parking / MRT etc.
     try:
         if gis_inst.is_bus_stop(mpt):
             updates["Peak pedestrian flow along or across facility"] = 2
@@ -539,10 +542,10 @@ def _apply_gis_rules(gis_inst, start_pt: Point, updates: dict):
 @bp.post("/<project_name>/autocode")
 def autocode_row(project_name: str):
     """
-    Auto-code 单张（当前页）：
+    Auto-code a single row (current page):
     POST /api/projects/<project_name>/autocode
     body: { "index": number, "save": boolean }
-    返回：{ ok, index, updates, newRow }
+    returns: { ok, index, updates, newRow }
     """
     payload = request.get_json(silent=True) or {}
     if "index" not in payload:
@@ -555,7 +558,7 @@ def autocode_row(project_name: str):
     proj = pm.project(project_name)
     ver = proj.latest()
 
-    # 取当前行 attributes + geodata
+    # Fetch current row from attributes + geodata
     attrs_df: pd.DataFrame = ver.attributes.df
     if idx < 0 or idx >= len(attrs_df):
         return fail("index out of range", 400)
@@ -568,13 +571,13 @@ def autocode_row(project_name: str):
     geom = gdf.geometry.iloc[idx] if hasattr(gdf, "geometry") else gdf.iloc[idx]["geometry"]
     start_pt = _row_start_point(geom)
 
-    # 找图片路径
+    # Resolve image path
     try:
         img_path = _resolve_image_path(pm, project_name, row, idx, gdf)
     except Exception as e:
         return fail(f"Resolve image failed: {e}", 400)
 
-    # 1) CV 模型自动编码（不改 prediction.py 的接口）
+    # 1) CV model auto-code (do not change prediction.py interface)
     try:
         cv_updates: dict = cv_pred.CycleRAP_Coding_Helper.autocode(str(img_path))
     except Exception as e:
@@ -582,24 +585,24 @@ def autocode_row(project_name: str):
 
     updates = dict(cv_updates or {})
 
-    # 2) GIS 覆写/补充
+    # 2) GIS overrides/supplements
     try:
         gis_inst = _get_ctx_gis()
         _apply_gis_rules(gis_inst, start_pt, updates)
     except Exception:
-        # GIS 失败不致命
+        # GIS failure is non-fatal
         pass
 
-    # 3) 合并到当前行
+    # 3) Merge into the current row
     new_row = row.copy()
     for k, v in updates.items():
         if k in new_row.index:
             new_row[k] = v
         else:
-            # 若新字段在表里不存在，你可以选择忽略或新增
+            # If the new field does not exist in the table, choose to ignore or add
             pass
 
-    # 4) 落盘（可选）
+    # 4) Persist (optional)
     if save:
         ver.attributes.df.iloc[idx] = new_row
         ver.attributes.df_dirty = True
@@ -615,10 +618,10 @@ def autocode_row(project_name: str):
 @bp.post("/<project_name>/autocode/all")
 def autocode_all(project_name: str):
     """
-    Auto-code 全部（批量）：
+    Auto-code all rows (batch):
     POST /api/projects/<project_name>/autocode/all
     body: { "save": boolean }
-    返回每行的更新统计
+    Returns update stats for each row
     """
     payload = request.get_json(silent=True) or {}
     save = bool(payload.get("save", True))
