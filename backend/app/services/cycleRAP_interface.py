@@ -3,14 +3,15 @@ import re
 import json
 import shutil
 import datetime
-import pythoncom
+# import pythoncom  # Windows-only, imported conditionally via platform_compat
 import app.services.global_var as global_var
 import pandas as pd
-import win32com.client as win32
+# import win32com.client as win32  # Windows-only, imported conditionally via platform_compat
 from pathlib import Path
 from openpyxl import load_workbook
 import geopandas as gpd
 from app.services.serializer import ProjectGeoData, Treatment, Attributes
+from app.services.platform_compat import get_pythoncom, get_excel_client, check_windows_feature
 
 ATTRIBUTE_STARTING_INDEX = 12
 CYCLERAP_SOURCE = "CycleRAP_v2.11.xlsm"
@@ -57,7 +58,17 @@ class cycleRAP_interface:
         Write `attributes_df` to the 'Upload_data' sheet of the CycleRAP workbook,
         invoke the CalculateResults macro, then return the 'Risk Results' sheet
         as a pandas DataFrame.
+
+        Note: This method requires Windows and the pywin32 package for Excel COM automation.
         """
+        # Platform check: Ensure we're on Windows with pywin32 installed
+        # This will raise RuntimeError if not available
+        check_windows_feature("CycleRAP score calculation (Excel automation)")
+
+        # Get Windows-specific modules dynamically
+        pythoncom = get_pythoncom()
+        win32 = get_excel_client()
+
         file_path = Path(cls.source_dir) / CYCLERAP_SOURCE
         pythoncom.CoInitialize()
         try:
@@ -120,6 +131,19 @@ class cycleRAP_interface:
 
     @classmethod
     def evaluate_treatment_suggestions(cls, gpd_df : gpd.GeoDataFrame, attributes_df : pd.DataFrame) -> Treatment:
+        """
+        Evaluate treatment suggestions using the CycleRAP Excel workbook.
+
+        Note: This method requires Windows and the pywin32 package for Excel COM automation.
+        """
+        # Platform check: Ensure we're on Windows with pywin32 installed
+        # This will raise RuntimeError if not available
+        check_windows_feature("Treatment evaluation (Excel automation)")
+
+        # Get Windows-specific modules dynamically
+        pythoncom = get_pythoncom()
+        win32 = get_excel_client()
+
         file_path = Path(cls.source_dir) / CYCLERAP_SOURCE
         pythoncom.CoInitialize()
         try:
