@@ -89,3 +89,47 @@ export async function createProjectFromFolder(project_name: string, folder_name:
   // 返回形如 { ok: true, name: "<project>" }
   return (await res.json()) as { ok?: boolean; name?: string };
 }
+
+// Delete Project
+export async function deleteProject(projectName: string) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    // 尝试输出后端的错误信息
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(msg || "Delete failed");
+  }
+  // 预计返回 { ok: true, name: string }
+  return (await res.json()) as { ok?: boolean; name?: string };
+}
+
+// src/api/index.ts
+
+export async function autocodeRow(projectName: string, index: number, save = true) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/autocode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ index, save }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  return (await res.json()) as {
+    ok: boolean;
+    index: number;
+    updates: Record<string, any>;
+    newRow: Record<string, any>;
+  };
+}
+
+export async function autocodeAll(projectName: string, save = true) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/autocode/all`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ save }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  return (await res.json()) as {
+    ok: boolean;
+    items: Array<{ index: number; ok: boolean; updates?: any; error?: string }>;
+  };
+}

@@ -22,6 +22,7 @@ import {
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
+import { autocodeRow, autocodeAll } from "../../api";
 
 import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
@@ -90,6 +91,40 @@ export default function CodingPage() {
     return s.trim() ? s.trim() : undefined;
   }, [currentFeature]);
 
+
+  // 监听：Auto-code current
+  useEffect(() => {
+    if (!name) return;
+    const handler = async () => {
+      try {
+        toaster.create({ description: "Auto-coding current…", type: "info" });
+        await autocodeRow(name, currentIndex);   // ★ 实际调用
+        toaster.create({ title: "Done", description: "Current image auto-coded.", type: "success" });
+        // 如果后端会返回更新后的 attributes，这里可以合并 setAttrs(...)
+      } catch (e: any) {
+        toaster.create({ title: "Auto-code failed", description: String(e?.message ?? e), type: "error" });
+      }
+    };
+    window.addEventListener("psat:autocode:one", handler);
+    return () => window.removeEventListener("psat:autocode:one", handler);
+  }, [name, currentIndex]);
+
+  // 监听：Auto-code all
+  useEffect(() => {
+    if (!name) return;
+    const handler = async () => {
+      try {
+        toaster.create({ description: "Auto-coding all…", type: "info" });
+        await autocodeAll(name);                  // ★ 实际调用
+        toaster.create({ title: "Done", description: "All images auto-coded.", type: "success" });
+        // 同理：可按后端返回刷新 attrs
+      } catch (e: any) {
+        toaster.create({ title: "Auto-code failed", description: String(e?.message ?? e), type: "error" });
+      }
+    };
+    window.addEventListener("psat:autocode:all", handler);
+    return () => window.removeEventListener("psat:autocode:all", handler);
+  }, [name]);
 
   // 拉数据
   useEffect(() => {
