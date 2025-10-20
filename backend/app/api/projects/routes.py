@@ -552,46 +552,156 @@ def autocode_gis(project_name: str):
 
 @bp.post("/<project_name>/autocode/all")
 def autocode_all(project_name: str):
+    """
+    Modes:
+      A) Single (backward-compatible):
+         Body: { imageRef: "...", coords: [[lon,lat],...], index?: int }
+      B) Bulk - all rows:
+         Body: { all: true }  (optionally { save: true } to persist)
+      C) Bulk - selected indices:
+         Body: { indices: [0,2,5], save?: true }
+
+    Returns:
+      - For single: { updates: {...}, saved: bool }
+      - For bulk: {
+          saved: bool,
+          total: N,
+          ok: K,
+          fail: M,
+          errors: [{ index, reason }],
+        }
+    """
     try:
         payload = request.get_json(force=True, silent=True) or {}
-        image_ref = payload.get("imageRef")
-        coords = payload.get("coords")
-        if not image_ref or not coords:
-            return fail("imageRef and coords are required", 400)
 
-        # 调用 /image
-        with current_app.test_request_context(method="POST", json={"imageRef": image_ref}):
-            img_resp, img_code = autocode_image(project_name)
-        if img_code >= 400:
-            # 直接返回子路由的错误
-            return img_resp, img_code
+        # ---------- detect mode ----------
+        run_all: bool = bool(payload.get("all"))
+        indices = payload.get("indices")
+        has_single_fields = ("imageRef" in payload) or ("coords" in payload) or ("index" in payload)
 
-        # 调用 /gis
-        with current_app.test_request_context(method="POST", json={"coords": coords}):
-            gis_resp, gis_code = autocode_gis(project_name)
-        if gis_code >= 400:
-            return gis_resp, gis_code
+        # Always ensure models/layers first
+        _ensure_models_ready()
 
-        img_updates = (img_resp.get_json() or {}).get("updates", {})
-        gis_updates = (gis_resp.get_json() or {}).get("updates", {})
-        merged = {**img_updates, **gis_updates}
-
-        # 可选：写回 attributes 指定 index
         ctx = get_ctx()
-        proj = ctx["pm"].project(project_name)
+        pm = ctx["pm"]
+        proj = pm.project(project_name)
         ver = proj.latest()
-        idx = payload.get("index")
-        if isinstance(idx, int) and 0 <= idx < len(ver.attributes.df):
-            for field, code in merged.items():
-                ver.attributes.df.at[idx, field] = code
-            ver.save_all()
-            return ok({"updates": merged, "saved": True})
 
-        return ok({"updates": merged, "saved": False})
+        # ---------- helpers to resolve per-row data ----------
+        import math
+        from shapely.geometry import LineString as _LS
+
+        def _resolve_image_ref(idx: int) -> str | None:
+            row = ver.attributes.df.iloc[idx] if 0 <= idx < len(ver.attributes.df) else None
+            if row is not None:
+                for key in ("Image Reference", "Image_Reference", "image", "img"):
+                    if key in row and pd.notna(row[key]) and str(row[key]).strip():
+                        return str(row[key]).strip()
+            # no reliable fallback here; images 存在性强依赖 attributes
+            return None
+
+        def _resolve_coords(idx: int):
+            if 0 <= idx < len(proj.geo_data.df):
+                geom = proj.geo_data.df.geometry.iloc[idx]
+                if geom is not None and isinstance(geom, _LS) and not geom.is_empty:
+                    # shapely coords -> [[lon,lat], ...]
+                    return [list(c) for c in list(geom.coords)]
+            return None
+
+        def _call_autocode_pair(image_ref: str, coords):
+            """Reuse your existing endpoints to avoid duplicating rules."""
+            # /image
+            with current_app.test_request_context(method="POST", json={"imageRef": image_ref}):
+                img_resp, img_code = autocode_image(project_name)
+            if img_code >= 400:
+                return None, img_resp.get_json().get("error", f"/image {img_code}")
+
+            # /gis
+            with current_app.test_request_context(method="POST", json={"coords": coords}):
+                gis_resp, gis_code = autocode_gis(project_name)
+            if gis_code >= 400:
+                return None, gis_resp.get_json().get("error", f"/gis {gis_code}")
+
+            img_updates = (img_resp.get_json() or {}).get("updates", {})
+            gis_updates = (gis_resp.get_json() or {}).get("updates", {})
+            merged = {**img_updates, **gis_updates}
+            return merged, None
+
+        # ---------- SINGLE mode (backward compatible) ----------
+        if has_single_fields and not run_all and not indices:
+            image_ref = payload.get("imageRef")
+            coords = payload.get("coords")
+            if not image_ref or not coords:
+                return fail("imageRef and coords are required", 400)
+
+            merged, err = _call_autocode_pair(image_ref, coords)
+            if err:
+                return fail(err, 500)
+
+            # optional write-back
+            idx = payload.get("index")
+            if isinstance(idx, int) and 0 <= idx < len(ver.attributes.df):
+                for field, code in (merged or {}).items():
+                    ver.attributes.df.at[idx, field] = code
+                ver.save_all()
+                return ok({"updates": merged, "saved": True})
+
+            return ok({"updates": merged, "saved": False})
+
+        # ---------- BULK mode ----------
+        # indices: explicit list OR all rows
+        if not indices:
+            indices = list(range(len(ver.attributes.df)))
+        else:
+            # sanitize
+            indices = [i for i in indices if isinstance(i, int) and 0 <= i < len(ver.attributes.df)]
+
+        save = bool(payload.get("save", True))  # default save in bulk
+        errors = []
+        ok_count = 0
+
+        # Pre-compute images dir for speed
+        images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
+
+        for idx in indices:
+            try:
+                image_ref = _resolve_image_ref(idx)
+                coords = _resolve_coords(idx)
+                if not image_ref:
+                    errors.append({"index": idx, "reason": "missing imageRef"})
+                    continue
+                if not coords:
+                    errors.append({"index": idx, "reason": "missing LineString coords"})
+                    continue
+
+                merged, err = _call_autocode_pair(image_ref, coords)
+                if err:
+                    errors.append({"index": idx, "reason": err})
+                    continue
+
+                # write into df row
+                for field, code in (merged or {}).items():
+                    ver.attributes.df.at[idx, field] = code
+
+                ok_count += 1
+
+            except Exception as e:
+                traceback.print_exc()
+                errors.append({"index": idx, "reason": str(e)})
+
+        if save and ok_count > 0:
+            ver.save_all()
+
+        return ok({
+            "saved": bool(save and ok_count > 0),
+            "total": len(indices),
+            "ok": ok_count,
+            "fail": len(errors),
+            "errors": errors,
+        })
 
     except ServiceUnavailable as e:
         return fail(str(e), 503)
     except Exception as e:
         traceback.print_exc()
         return fail(f"autocode_all error: {e}", 500)
-
