@@ -194,33 +194,42 @@ export default function CodingPage() {
     if (!name) return;
 
     const handler = async () => {
-      if (autoCoding) return; // ✅ guard: already running
+      if (autoCoding) return;
       try {
         setAutoCoding(true);
-        setAutoCodeMsg("Starting…");
-        setProgress(5);
+        setAutoCodeMsg("CV + GIS for all records…");
+        setProgress(10);
 
-        if (!imgRef) throw new Error("Missing imageRef");
-        if (!currentFeature || currentFeature.geometry?.type !== "LineString") {
-          throw new Error("Missing LineString geometry");
+        // ✅ 批量模式：让后端对整个项目逐行处理并保存
+        const r = await autocodeAll(name, { all: true, save: true });
+
+        // r 是 bulk 结果：{ saved, total, ok, fail, errors }
+        setProgress(90);
+        // 批量后一般需要重拉 attributes 才能看到更新
+        try {
+          const a = (await fetchProjectAttributes(name)) as { rows: AttributeRow[] };
+          setAttrs(a?.rows ?? []);
+        } catch {
+          // 可忽略，UI 仍然会提示
         }
-        const line = (currentFeature.geometry as LineString).coordinates;
-
-        setAutoCodeMsg("CV + GIS…");
-        setProgress(60);
-        const r = await autocodeAll(name, { imageRef: imgRef, coords: line, index: currentIndex });
-
-        setAutoCodeMsg("Applying updates…");
-        setProgress(85);
-        applyUpdatesToCurrentRow(r?.updates ?? {});
 
         setProgress(100);
-        setAutoCodeMsg(r?.saved ? "Saved" : "Updated");
-        toaster.create({
-          title: "Auto-code (all) done",
-          description: r?.saved ? "Updated & saved." : "Updated (unsaved).",
-          type: "success",
-        });
+        setAutoCodeMsg("Completed");
+        // 结果提示
+        if ("total" in r) {
+          toaster.create({
+            title: "Auto-code (all) done",
+            description: `Total: ${r.total}, OK: ${r.ok}, Failed: ${r.fail}`,
+            type: r.fail > 0 ? "warning" : "success",
+          });
+        } else {
+          // （防守分支，几乎不会走到）
+          toaster.create({
+            title: "Auto-code (all) done",
+            description: r?.saved ? "Updated & saved." : "Updated (unsaved).",
+            type: "success",
+          });
+        }
       } catch (e: any) {
         toaster.create({
           title: "Auto-code failed",
@@ -232,12 +241,11 @@ export default function CodingPage() {
       }
     };
 
-
-
     // 事件名：window.dispatchEvent(new Event("psat:autocode:all"))
     window.addEventListener("psat:autocode:all", handler);
     return () => window.removeEventListener("psat:autocode:all", handler);
-  }, [name, imgRef, currentFeature, currentIndex, applyUpdatesToCurrentRow]);
+  }, [name, autoCoding]);
+
 
 
   // 拉数据
@@ -467,22 +475,34 @@ export default function CodingPage() {
         </GridItem>
 
         {/* 第一行：Attributes */}
-        <GridItem>
-          <AttributesPanel
-            row={editedRow}
-            mappings={attrMappings}
-            panelHeight={PANEL_HEIGHT - CONTROLS_H}
-            onChange={onAttrChange}
-            onEdit={editCurrentAttr} 
-          />
-          {/* 下半：翻页按钮条（贴底） */}
+        <GridItem
+          display="flex"
+          flexDirection="column"
+          minH={`${PANEL_HEIGHT}px`} // 右侧总高度至少与左侧面板一致
+        >
+          {/* 面板容器：占据剩余空间，允许内部滚动 */}
+          <Box flex="1 1 auto" minH={0} >
+            <AttributesPanel
+              row={editedRow}
+              mappings={attrMappings}
+              panelHeight={PANEL_HEIGHT - CONTROLS_H} // 保持你原来的传值
+              onChange={onAttrChange}
+              onEdit={editCurrentAttr}
+            />
+          </Box>
+
+          {/* 底部按钮条：固定在列底，避免被内容覆盖 */}
           <Flex
+            flex="0 0 auto"
             h={`${CONTROLS_H}px`}
             w="100%"
             minW={0}
             align="center"
             gap="4"
             pt="2"
+            position="relative"
+            zIndex={1}
+            bg="bg"              // Chakra v3 语义色，防止半透明内容“透”下来
           >
             <Button
               flex="1"
@@ -507,6 +527,7 @@ export default function CodingPage() {
             </Button>
           </Flex>
         </GridItem>
+
 
         {/* 第二行：GeoData 跨两列（在 md 及以上），在手机上一列自然会排在下面 */}
         <GridItem colSpan={{ base: 1, md: 2 }}>

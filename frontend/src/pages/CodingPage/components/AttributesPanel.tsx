@@ -1,7 +1,18 @@
-import { Card, Heading, Box, Text, NativeSelect, Input, SimpleGrid, Separator } from "@chakra-ui/react";
 import { useMemo } from "react";
 import type { AttributeRow, AttrMappings } from "../../../api";
+import {
+  Card,
+  Heading,
+  Box,
+  Text,
+  NativeSelect,
+  Input,
+  SimpleGrid,
+  Separator,
+  Tabs,
+} from "@chakra-ui/react";
 
+/** ====== Props ====== */
 type Props = {
   row: AttributeRow | null;
   mappings?: AttrMappings;
@@ -10,7 +21,7 @@ type Props = {
   onEdit?: (field: string, value: string | number | boolean | null) => void;
 };
 
-/** 1) 将“截图里的顺序”固化为分组顺序（标题就是分组名） */
+/** ====== Group ordering (tab order) ====== */
 const GROUP_ORDER = [
   "Facility configuration",
   "Flow & Speed",
@@ -20,9 +31,7 @@ const GROUP_ORDER = [
   "Others",
 ] as const;
 
-/** 2) 每个分组下的字段“显示名”，按领导给的顺序。
- *   右侧是“规范化键名”（你自己项目里的真实 key），先给出常见写法；不一致就到 KEY_ALIASES 里补。
- */
+/** ====== Display fields under each group (keep your original order) ====== */
 const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
   "Facility configuration": [
     "Facility configuration",
@@ -79,13 +88,10 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
     "Number of lanes – adjacent road",
     "Number of lanes – intersecting road",
   ],
-  Others: [], // 自动填充
+  Others: [],
 };
 
-/** 3) 规范化：把各种写法映射到你数据里的真实 key。
- *    左边是“显示名或常见别名”，右边是 row 里的字段 key。
- *    👉 把你项目里的 key 补全到右侧（很关键）。
- */
+/** ====== Aliases: display name -> real key in row ====== */
 const KEY_ALIASES: Record<string, string> = {
   // Facility configuration
   "Facility configuration": "facility_config",
@@ -111,7 +117,7 @@ const KEY_ALIASES: Record<string, string> = {
   "Road AADT": "Road AADT",
   "Road Operating speed (mean)": "Road operating speed (mean)",
   "Road Operating speed (unit)": "Road operating speed (unit)",
-  "Road speed limit": "Road speed limit", 
+  "Road speed limit": "Road speed limit",
 
   // Facility clear width
   "Facility Access": "Facility access",
@@ -143,15 +149,16 @@ const KEY_ALIASES: Record<string, string> = {
   "Number of lanes – intersecting road": "Number of lanes – intersecting road",
 };
 
-/** 小工具：把 row 的 entries 分配到分组；没命中的进 Others */
+/** ====== Utils ====== */
 function groupEntries(row: AttributeRow) {
   const allEntries = Object.entries(row) as [string, unknown][];
-  // 反向索引：真实key -> 所在分组 + 顺序
+
+  // reverse index: real key -> group & order
   const keyToGroup: Record<string, { group: string; order: number }> = {};
   for (const group of GROUP_ORDER) {
     const list = GROUP_RULES[group];
     list.forEach((displayName, i) => {
-      const key = KEY_ALIASES[displayName] ?? displayName; // 兜底：显示名就是 key
+      const key = KEY_ALIASES[displayName] ?? displayName;
       keyToGroup[key] = { group, order: i };
     });
   }
@@ -169,7 +176,7 @@ function groupEntries(row: AttributeRow) {
     }
   }
 
-  // 按每个分组内部原始顺序排序（与 GROUP_RULES 中的顺序一致）
+  // keep original order as in GROUP_RULES
   for (const g of GROUP_ORDER) {
     grouped[g].sort((a, b) => {
       const oa = keyToGroup[a[0]]?.order ?? 1e9;
@@ -184,90 +191,133 @@ function groupEntries(row: AttributeRow) {
 const toDisplayString = (v: unknown): string => {
   if (v === null || v === undefined) return "";
   if (typeof v === "boolean") return v ? "true" : "false";
-  return String(v); // number / string / 其他统统转字符串
+  return String(v);
 };
 
-
-export default function AttributesPanel({ row, mappings = {}, panelHeight = 420, onChange, onEdit }: Props) {
+/** ====== Component ====== */
+export default function AttributesPanel({
+  row,
+  mappings = {},
+  panelHeight = 420,
+  onChange,
+  onEdit,
+}: Props) {
   const grouped = useMemo(() => (row ? groupEntries(row) : null), [row]);
+
+  // collect groups with fields (for tabs)
+  const groupsWithFields = useMemo(() => {
+    if (!grouped) return [];
+    return GROUP_ORDER.filter((g) => (grouped[g] ?? []).length > 0);
+  }, [grouped]);
+
+  const defaultTab = groupsWithFields[0] ?? "Facility configuration";
 
   if (!row) {
     return (
       <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
-        <Card.Header><Heading size="sm">Attributes</Heading></Card.Header>
-        <Card.Body><Text color="gray.500">No attributes</Text></Card.Body>
+        <Card.Header>
+          <Heading size="sm">Attributes</Heading>
+        </Card.Header>
+        <Card.Body>
+          <Text color="gray.500">No attributes</Text>
+        </Card.Body>
       </Card.Root>
     );
   }
 
   return (
     <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
-      <Card.Header><Heading size="sm">Attributes</Heading></Card.Header>
+      <Card.Header>
+        <Heading size="sm">Attributes</Heading>
+      </Card.Header>
 
-      <Card.Body minH={0} overflowY="auto" pt="2">
-        {GROUP_ORDER.map((groupName, gi) => {
-          const fields = grouped![groupName] ?? [];
-          if (!fields.length) return null;
+      {/* Tabs occupy the body; content area scrolls independently */}
+      <Card.Body display="flex" flexDir="column" minH={0} p="0">
+        <Tabs.Root defaultValue={defaultTab}>
+          <Tabs.List px="2" py="2" overflowX="auto" gap="1">
+            {groupsWithFields.map((g) => (
+              <Tabs.Trigger key={g} value={g}>
+                {g}
+              </Tabs.Trigger>
+            ))}
+          </Tabs.List>
 
-          return (
-            <Box key={groupName} mb="5">
-              {gi !== 0 && <Separator mb="3" />}
-              <Text fontSize="sm" fontWeight="bold" mb="2" textDecoration="underline" color="teal.700" >
-                {groupName}
-              </Text>
+          {/* A separator under the tab list for subtle structure */}
+          <Separator />
 
-              {/* 两列栅格：小屏1列，大屏2列 */}
-              <SimpleGrid columns={{ base: 1, md: 2 }} gap="4">
-                {fields.map(([k, v]) => {
-                  const dict = mappings[k];
-                  const strVal: string = toDisplayString(v);
+          {groupsWithFields.map((groupName, gi) => {
+            const fields = grouped![groupName] ?? [];
+            return (
+              <Tabs.Content key={groupName} value={groupName}>
+                {/* Scrollable area for this tab */}
+                <Box minH={0} h={`${panelHeight - 150}px`} overflowY="auto" px="4" py="3">
 
-                  return (
-                    <Box key={k} display="flex" flexDirection="column" gap="1">
-                      <Text fontSize="xs" color="gray.600" fontWeight="semibold">{k}</Text>
+                  {/* Responsive grid: 1 col on small, 2 cols on md+ */}
+                  <SimpleGrid columns={{ base: 1, md: 2 }} gap="4">
+                    {fields.map(([k, v]) => {
+                      const dict = mappings[k];
+                      const strVal: string = toDisplayString(v);
 
-                      {dict ? (
-                        <NativeSelect.Root size="sm" width="100%" mt="auto">
-                          <NativeSelect.Field
-                            value={strVal}
-                            onChange={(e) => {
-                              const val = e.target.value === "" ? null : e.target.value;
-                              onChange?.(k, val);
-                              onEdit?.(k, val);
-                            }}
-                          >
-                            {!dict[strVal] && strVal !== "" && (
-                              <option value={strVal}>{`(Unknown) ${strVal}`}</option>
-                            )}
-                            {Object.entries(dict).map(([code, label]) => (
-                              <option key={code} value={code}>{label}</option>
-                            ))}
-                          </NativeSelect.Field>
-                          <NativeSelect.Indicator />
-                        </NativeSelect.Root>
-                      ) : (
-                        <Input
-                          size="sm"
-                          value={strVal}
-                          onChange={(e) => {
-                            const raw = e.target.value;
-                            const num = Number(raw);
-                            const val =
-                              raw !== "" && Number.isFinite(num) && /^\d+(\.\d+)?$/.test(raw)
-                                ? num
-                                : (raw === "" ? null : raw);
-                            onChange?.(k, val);
-                            onEdit?.(k, val);
-                          }}
-                        />
-                      )}
-                    </Box>
-                  );
-                })}
-              </SimpleGrid>
-            </Box>
-          );
-        })}
+                      return (
+                        <Box key={k} display="flex" flexDirection="column" gap="1">
+                          <Text fontSize="xs" color="gray.600" fontWeight="semibold">
+                            {k}
+                          </Text>
+
+                          {dict ? (
+                            <NativeSelect.Root size="sm" width="100%" mt="auto">
+                              <NativeSelect.Field
+                                value={strVal}
+                                onChange={(e) => {
+                                  const val = e.target.value === "" ? null : e.target.value;
+                                  onChange?.(k, val);
+                                  onEdit?.(k, val);
+                                }}
+                              >
+                                {/* Preserve unknown code if present */}
+                                {!dict[strVal] && strVal !== "" && (
+                                  <option value={strVal}>{`(Unknown) ${strVal}`}</option>
+                                )}
+                                {Object.entries(dict).map(([code, label]) => (
+                                  <option key={code} value={code}>
+                                    {label}
+                                  </option>
+                                ))}
+                              </NativeSelect.Field>
+                              <NativeSelect.Indicator />
+                            </NativeSelect.Root>
+                          ) : (
+                            <Input
+                              size="sm"
+                              value={strVal}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                const num = Number(raw);
+                                const val =
+                                  raw !== "" &&
+                                  Number.isFinite(num) &&
+                                  /^\d+(\.\d+)?$/.test(raw)
+                                    ? num
+                                    : raw === ""
+                                    ? null
+                                    : raw;
+                                onChange?.(k, val);
+                                onEdit?.(k, val);
+                              }}
+                            />
+                          )}
+                        </Box>
+                      );
+                    })}
+                  </SimpleGrid>
+
+                  {/* Subtle spacing and separator before next tab content */}
+                  {gi !== groupsWithFields.length - 1 && <Box h="3" />}
+                </Box>
+              </Tabs.Content>
+            );
+          })}
+        </Tabs.Root>
       </Card.Body>
     </Card.Root>
   );
