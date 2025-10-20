@@ -1,4 +1,4 @@
 from flask import Blueprint
 
-bp = Blueprint("projects", __name__)
+bp = Blueprint("cyclerap", __name__)
 from . import routes  # noqa

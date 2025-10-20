@@ -1,10 +1,17 @@
 # app/api/projects/routes.py
-from flask import Blueprint, jsonify, request, send_from_directory, abort, make_response
+from flask import (
+    Blueprint,
+    jsonify,
+    request,
+    send_from_directory,
+    abort,
+    make_response,
+    current_app,     # ✅ 一次性在顶层导入
+)
 from pathlib import Path
 import traceback
 from . import bp
 from werkzeug.utils import safe_join
-from pathlib import Path
 import app.services.global_var as global_var
 import pandas as pd
 import os
@@ -12,6 +19,13 @@ import exifread
 from shapely.geometry import Point,LineString 
 import geopandas as gpd
 import shutil
+# ---- init guards (thread-safe & error memo) ----
+import threading
+from werkzeug.exceptions import ServiceUnavailable
+
+_INIT_LOCK = threading.Lock()
+_INIT_ERR = {"cv": None, "gis": None}
+_MODELS_READY = {"cv": False, "gis": False}
 
 
 
@@ -20,10 +34,11 @@ from app.services.project_manager import project_manager, Project   # If the pat
 import app.services.serializer as serializer
 import app.services.cycleRAP_interface as CRI
 import app.services.cycleRAP_VA as cycleRAP_VA
-# --- Auto-code API (single & bulk) ---
 
+from pathlib import Path
 from app.services import prediction as cv_pred
 from app.services import gis_mapping as gis
+import app.services.global_var as global_var
 
 
 # util
@@ -38,7 +53,7 @@ _CTX = {"ready": False, "pm": None}
 
 
 
-def get_ctx():
+def get_ctx(): 
     """Lazy init: prepare the old-code dependencies the first time and reuse thereafter."""
     if _CTX["ready"]:
         return _CTX
@@ -56,6 +71,65 @@ def get_ctx():
 
     _CTX.update({"pm": pm, "ready": True})
     return _CTX
+
+_MODELS_READY = {"cv": False, "gis": False}
+
+def _ensure_models_ready():
+    """Load CV / GIS only once (thread-safe). Memoize init errors as 503."""
+    with _INIT_LOCK:
+        # If CV init failed before, short-circuit with 503
+        if _INIT_ERR["cv"]:
+            raise ServiceUnavailable(_INIT_ERR["cv"])
+
+        if not _MODELS_READY["cv"]:
+            try:
+                ctx = get_ctx()
+                pm = ctx["pm"]
+
+                # Model dir resolution:
+                # 1) env: MODEL_DIR
+                # 2) common dirs near repo/backend/src
+                from os import getenv
+                from pathlib import Path as _P
+
+                candidates = []
+                env_dir = getenv("MODEL_DIR")
+                if env_dir:
+                    candidates.append(_P(env_dir))
+
+                repo_root = _P(__file__).resolve().parents[3]  # .../backend
+                candidates += [
+                    repo_root / "model",
+                    repo_root / "models",
+                    pm.src_path.parent / "model",
+                    pm.src_path.parent / "models",
+                ]
+
+                model_dir = None
+                for d in candidates:
+                    if (d / "path_seg.pt").exists():
+                        model_dir = d.resolve()
+                        break
+
+                if model_dir is None:
+                    tried = "\n".join(str(p) for p in candidates)
+                    raise RuntimeError(f"Cannot find model_dir (missing path_seg.pt). Tried:\n{tried}")
+
+                # YOLO models load
+                cv_pred.CycleRAP_Coding_Helper.initialise(model_dir)
+                _MODELS_READY["cv"] = True
+
+            except Exception as e:
+                _INIT_ERR["cv"] = f"CV init failed: {e}"
+                # Next calls will short-circuit quickly
+                raise ServiceUnavailable(_INIT_ERR["cv"])
+
+        # GIS 部分一般是惰性读取（LayerStore.default 内部），这里只做标记
+        if not _MODELS_READY["gis"]:
+            _MODELS_READY["gis"] = True
+
+
+
 
 # ───────────────────────── Endpoints ─────────────────────────
 
@@ -380,283 +454,144 @@ def delete_project(project_name: str):
         traceback.print_exc()
         return fail(f"Delete failed: {e}", 500)
     
-
-def _get_ctx_gis():
-    """Lazily load GIS into the process context (avoid re-reading SHP each request)."""
-    ctx = get_ctx()
-    if "gis" not in ctx:
-        # In your gis_mapping you typically have LayerStore + GIS; default to read SHP directory
-        store = gis.LayerStore.default(base_dir="shp")
-        ctx["gis"] = gis.GIS(store)
-    return ctx["gis"]
-
-def _resolve_image_path(pm, project_name: str, attrs_row: pd.Series, index: int, gdf: pd.DataFrame | gpd.GeoDataFrame) -> Path:
-    """
-    Resolve image path under images/ based on GeoData/Attributes and print debug info.
-    """
-    images_dir: Path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
-    if not images_dir.exists():
-        print(f"[autocode] images_dir NOT FOUND: {images_dir}")
-        raise FileNotFoundError(f"Images folder not found: {images_dir}")
-
-    tried = []  # record attempted relative filenames/patterns
-    candidates = {}
-
-    def _pick(d: dict) -> str | None:
-        for k in ["FILENAME", "filename", "Image", "image", "img", "image_file", "image_path", "Frame"]:
-            v = d.get(k)
-            if isinstance(v, str) and v.strip():
-                return Path(v).name
-        return None
-
-    # ① Current row from GeoData
-    fname_gdf = None
+@bp.post("/<project_name>/autocode/image")
+def autocode_image(project_name: str):
     try:
-        geo_row = gdf.iloc[index].to_dict()
-        fname_gdf = _pick(geo_row)
+        _ensure_models_ready()
+
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        payload = request.get_json(force=True, silent=True) or {}
+        image_ref = payload.get("imageRef")
+        if not image_ref:
+            return fail("imageRef is required", 400)
+
+        img_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / image_ref).resolve()
+        if not img_path.exists():
+            return fail(f"image not found: {img_path.name}", 404)
+
+        updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path)  # returns dict
+        updates = {k: v for k, v in (updates or {}).items() if v is not None}
+        return ok({"updates": updates})
+
+    except ServiceUnavailable as e:
+        return fail(str(e), 503)
     except Exception as e:
-        print(f"[autocode] read gdf row error idx={index}: {e}")
+        traceback.print_exc()
+        return fail(f"autocode_image error: {e}", 500)
 
-    # ② Current row from Attributes
-    fname_attr = None
+
+@bp.post("/<project_name>/autocode/gis")
+def autocode_gis(project_name: str):
     try:
-        fname_attr = _pick(attrs_row.to_dict())
-    except Exception as e:
-        print(f"[autocode] read attrs row error idx={index}: {e}")
+        _ensure_models_ready()
 
-    # Record candidates
-    candidates["from_gdf"] = fname_gdf
-    candidates["from_attrs"] = fname_attr
-    print(f"[autocode] idx={index} candidates={candidates} images_dir={images_dir}")
+        payload = request.get_json(force=True, silent=True) or {}
+        coords = payload.get("coords")  # [[lon, lat], ...]
+        if not coords or not isinstance(coords, list) or not isinstance(coords[0], list):
+            return fail("coords (LineString) is required", 400)
 
-    # Prefer gdf, then attrs
-    for fname in [fname_gdf, fname_attr]:
-        if not fname:
-            continue
-        direct = (images_dir / fname).resolve()
-        tried.append(str(direct))
-        if direct.exists():
-            print(f"[autocode] HIT (direct): {direct}")
-            return direct
+        # 起点（WGS84）
+        start_lon, start_lat = coords[0]
+        from shapely.geometry import Point
+        pt = Point(start_lon, start_lat)
 
-        # Fuzzy: same name different extension / case-insensitive
-        stem = Path(fname).stem
-        globs = [f"*{fname}", f"{stem}.*"]
-        for pat in globs:
-            tried.append(f"[glob]{pat}")
-            hits = list(images_dir.glob(pat))
-            if hits:
-                print(f"[autocode] HIT (glob {pat}): {hits[0]}")
-                return hits[0]
+        # backend/shapefiles 作为基准目录
+        backend_root = Path(__file__).resolve().parents[3]  # .../backend
+        shp_dir = (backend_root / "shapefiles").resolve()
+        if not shp_dir.exists():
+            return fail(f"Shapefile base dir not found: {shp_dir}", 500)
 
-    # ③ Index-based fallback
-    for base in (f"{index+1:04d}", f"{index:04d}"):
-        for ext in (".jpg", ".jpeg", ".png"):
-            cand = (images_dir / (base + ext)).resolve()
-            tried.append(str(cand))
-            if cand.exists():
-                print(f"[autocode] HIT (index-pattern): {cand}")
-                return cand
+        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
+        _gis = gis.GIS(layer_store)
 
-    # ④ Print a directory sample to help debugging
-    try:
-        files = sorted([p.name for p in images_dir.iterdir() if p.is_file()])
-        sample = files[:30]
-        print(f"[autocode] images_dir file count={len(files)}, sample={sample}")
-    except Exception as e:
-        print(f"[autocode] listdir error: {e}")
-        sample = []
+        updates: dict[str, int | float] = {}
 
-    # Failure
-    msg = (
-        f"Image for row {index} not found under {images_dir}\n"
-        f"candidates={candidates}\n"
-        f"tried={tried[:30]}\n"
-        f"dir_sample={sample}"
-    )
-    raise FileNotFoundError(msg)
-
-
-def _row_start_point(geom) -> Point:
-    """
-    Get the start point from a LineString in GeoData (you previously required “use only the first point”).
-    """
-    if geom is None:
-        raise ValueError("Missing geometry")
-    if isinstance(geom, LineString):
-        x, y = list(geom.coords)[0]
-        return Point(x, y)
-    # If it's already a Point, return it
-    if isinstance(geom, Point):
-        return geom
-    raise TypeError(f"Unsupported geometry type: {type(geom)}")
-
-def _apply_gis_rules(gis_inst, start_pt: Point, updates: dict):
-    """
-    Apply GIS rules to the attribute dict (keep it lightweight—don’t change your gis_mapping logic, just call it).
-    You can add/remove according to your old logic. The following shows typical fields.
-    """
-    # Note: gis_mapping typically uses EPSG:3414 metric coordinates.
-    # If start_pt is WGS84, convert it; if your GeoData is in 4326, convert to 3414:
-    try:
-        mpt = gis.to_metric_point(start_pt)
-    except Exception:
-        mpt = start_pt  # If your project geometry is already 3414, this won’t error
-
-    # Area type
-    try:
-        area = gis_inst.get_area_type(mpt)
-        if area is not None:
-            updates["Area type"] = area
-    except Exception:
-        pass
-
-    # Bus stop / bus lane / parking / MRT etc.
-    try:
-        if gis_inst.is_bus_stop(mpt):
-            updates["Peak pedestrian flow along or across facility"] = 2
-    except Exception:
-        pass
-
-    try:
-        if gis_inst.is_bus_lane(mpt):
-            updates["Heavy vehicle flow"] = 2
-    except Exception:
-        pass
-
-    try:
-        if gis_inst.is_parking(mpt):
-            updates["Adjacent Vehicle Parking 0-1m"] = 1
-    except Exception:
-        pass
-
-    try:
-        if gis_inst.is_mrt(mpt):
+        # Rules
+        if _gis.is_mrt(pt):
             updates["Peak pedestrian flow along or across facility"] = 3
-    except Exception:
-        pass
+        if _gis.is_bus_lane(pt):
+            updates["Heavy vehicle flow"] = 2
+        if _gis.is_parking(pt):
+            updates["Adjacent Vehicle Parking 0-1m"] = 1
+        if _gis.is_bus_stop(pt):
+            # overrides 3 → 2
+            updates["Peak pedestrian flow along or across facility"] = 2
 
-@bp.post("/<project_name>/autocode")
-def autocode_row(project_name: str):
-    """
-    Auto-code a single row (current page):
-    POST /api/projects/<project_name>/autocode
-    body: { "index": number, "save": boolean }
-    returns: { ok, index, updates, newRow }
-    """
-    payload = request.get_json(silent=True) or {}
-    if "index" not in payload:
-        return fail("Missing 'index'", 400)
-    idx = int(payload["index"])
-    save = bool(payload.get("save", True))
+        area = _gis.get_area_type(pt)
+        updates["Area type"] = int(area)
 
-    ctx = get_ctx()
-    pm = ctx["pm"]
-    proj = pm.project(project_name)
-    ver = proj.latest()
+        updates["Road AADT"] = 5000
 
-    # Fetch current row from attributes + geodata
-    attrs_df: pd.DataFrame = ver.attributes.df
-    if idx < 0 or idx >= len(attrs_df):
-        return fail("index out of range", 400)
-    row = attrs_df.iloc[idx]
+        res = _gis.get_peak_pedestrian_flow(pt, dist=10)
+        bpks = (res or {}).get("before_peaks")
+        spks = (res or {}).get("sensor_peaks")
 
-    gdf = proj.geo_data.df
-    if idx >= len(gdf):
-        return fail("geodata index out of range", 400)
+        def apply_peak(peaks):
+            if not peaks:
+                return
+            if int(peaks.get("MICROMOBILITY", 0)) > 50:
+                updates["Peak bicycle/LV traffic flow"] = 2
+            if int(peaks.get("OTHER", 0)) > 50:
+                updates["Peak pedestrian flow along or across facility"] = 3
 
-    geom = gdf.geometry.iloc[idx] if hasattr(gdf, "geometry") else gdf.iloc[idx]["geometry"]
-    start_pt = _row_start_point(geom)
+        if spks:
+            apply_peak(spks)
+        elif bpks:
+            apply_peak(bpks)
 
-    # Resolve image path
-    try:
-        img_path = _resolve_image_path(pm, project_name, row, idx, gdf)
+        return ok({"updates": updates})
+
+    except ServiceUnavailable as e:
+        return fail(str(e), 503)
     except Exception as e:
-        return fail(f"Resolve image failed: {e}", 400)
+        traceback.print_exc()
+        return fail(f"autocode_gis error: {e}", 500)
 
-    # 1) CV model auto-code (do not change prediction.py interface)
-    try:
-        cv_updates: dict = cv_pred.CycleRAP_Coding_Helper.autocode(str(img_path))
-    except Exception as e:
-        return fail(f"CV autocode failed: {e}", 500)
 
-    updates = dict(cv_updates or {})
-
-    # 2) GIS overrides/supplements
-    try:
-        gis_inst = _get_ctx_gis()
-        _apply_gis_rules(gis_inst, start_pt, updates)
-    except Exception:
-        # GIS failure is non-fatal
-        pass
-
-    # 3) Merge into the current row
-    new_row = row.copy()
-    for k, v in updates.items():
-        if k in new_row.index:
-            new_row[k] = v
-        else:
-            # If the new field does not exist in the table, choose to ignore or add
-            pass
-
-    # 4) Persist (optional)
-    if save:
-        ver.attributes.df.iloc[idx] = new_row
-        ver.attributes.df_dirty = True
-        proj.save_all()
-
-    return ok({
-        "ok": True,
-        "index": idx,
-        "updates": updates,
-        "newRow": new_row.to_dict(),
-    })
 
 @bp.post("/<project_name>/autocode/all")
 def autocode_all(project_name: str):
-    """
-    Auto-code all rows (batch):
-    POST /api/projects/<project_name>/autocode/all
-    body: { "save": boolean }
-    Returns update stats for each row
-    """
-    payload = request.get_json(silent=True) or {}
-    save = bool(payload.get("save", True))
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        image_ref = payload.get("imageRef")
+        coords = payload.get("coords")
+        if not image_ref or not coords:
+            return fail("imageRef and coords are required", 400)
 
-    ctx = get_ctx()
-    pm = ctx["pm"]
-    proj = pm.project(project_name)
-    ver = proj.latest()
+        # 调用 /image
+        with current_app.test_request_context(method="POST", json={"imageRef": image_ref}):
+            img_resp, img_code = autocode_image(project_name)
+        if img_code >= 400:
+            # 直接返回子路由的错误
+            return img_resp, img_code
 
-    attrs_df: pd.DataFrame = ver.attributes.df
-    gdf = proj.geo_data.df
+        # 调用 /gis
+        with current_app.test_request_context(method="POST", json={"coords": coords}):
+            gis_resp, gis_code = autocode_gis(project_name)
+        if gis_code >= 400:
+            return gis_resp, gis_code
 
-    updates_list = []
-    gis_inst = _get_ctx_gis()
+        img_updates = (img_resp.get_json() or {}).get("updates", {})
+        gis_updates = (gis_resp.get_json() or {}).get("updates", {})
+        merged = {**img_updates, **gis_updates}
 
-    for idx in range(min(len(attrs_df), len(gdf))):
-        row = attrs_df.iloc[idx]
-        geom = gdf.geometry.iloc[idx] if hasattr(gdf, "geometry") else gdf.iloc[idx]["geometry"]
-        try:
-            start_pt = _row_start_point(geom)
-            img_path = _resolve_image_path(pm, project_name, row, idx, gdf)
-            cv_updates: dict = cv_pred.CycleRAP_Coding_Helper.autocode(str(img_path))
-            updates = dict(cv_updates or {})
-            _apply_gis_rules(gis_inst, start_pt, updates)
+        # 可选：写回 attributes 指定 index
+        ctx = get_ctx()
+        proj = ctx["pm"].project(project_name)
+        ver = proj.latest()
+        idx = payload.get("index")
+        if isinstance(idx, int) and 0 <= idx < len(ver.attributes.df):
+            for field, code in merged.items():
+                ver.attributes.df.at[idx, field] = code
+            ver.save_all()
+            return ok({"updates": merged, "saved": True})
 
-            # merge
-            new_row = row.copy()
-            for k, v in updates.items():
-                if k in new_row.index:
-                    new_row[k] = v
-            updates_list.append({"index": idx, "ok": True, "updates": updates})
-            if save:
-                ver.attributes.df.iloc[idx] = new_row
-        except Exception as e:
-            updates_list.append({"index": idx, "ok": False, "error": str(e)})
+        return ok({"updates": merged, "saved": False})
 
-    if save:
-        ver.attributes.df_dirty = True
-        proj.save_all()
+    except ServiceUnavailable as e:
+        return fail(str(e), 503)
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"autocode_all error: {e}", 500)
 
-    return ok({"ok": True, "items": updates_list})
