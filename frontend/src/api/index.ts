@@ -104,32 +104,83 @@ export async function deleteProject(projectName: string) {
   return (await res.json()) as { ok?: boolean; name?: string };
 }
 
-// src/api/index.ts
-
-export async function autocodeRow(projectName: string, index: number, save = true) {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/autocode`, {
+export async function autocodeImage(project: string, imageRef: string) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ index, save }),
+    body: JSON.stringify({ imageRef }),
   });
-  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
-  return (await res.json()) as {
-    ok: boolean;
-    index: number;
-    updates: Record<string, any>;
-    newRow: Record<string, any>;
-  };
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as { updates: Record<string, number> };
 }
 
-export async function autocodeAll(projectName: string, save = true) {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/autocode/all`, {
+export async function autocodeGIS(project: string, coords: number[][]) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/gis`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ save }),
+    body: JSON.stringify({ coords }),
   });
-  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
-  return (await res.json()) as {
-    ok: boolean;
-    items: Array<{ index: number; ok: boolean; updates?: any; error?: string }>;
-  };
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as { updates: Record<string, number> };
+}
+
+// ---- types ----
+export type AutoCodeSinglePayload = {
+  imageRef: string;
+  coords: number[][];
+  index?: number;
+}; // ← 兼容你现有的
+
+export type AutoCodeBulkAllPayload = {
+  all: true;
+  save?: boolean; // default true on server
+};
+
+export type AutoCodeBulkIndicesPayload = {
+  indices: number[];
+  save?: boolean;
+};
+
+export type AutoCodeSingleResult = {
+  updates: Record<string, number | string>;
+  saved?: boolean;
+};
+
+export type AutoCodeBulkResult = {
+  saved: boolean;
+  total: number;
+  ok: number;
+  fail: number;
+  errors: { index: number; reason: string }[];
+};
+
+type AutoCodeAllPayload =
+  | AutoCodeSinglePayload
+  | AutoCodeBulkAllPayload
+  | AutoCodeBulkIndicesPayload;
+
+type AutoCodeAllResult = AutoCodeSingleResult | AutoCodeBulkResult;
+
+// ---- helper to read JSON error bodies when available ----
+async function readError(res: Response) {
+  const text = await res.text();
+  try {
+    const j = JSON.parse(text);
+    return j?.error || text;
+  } catch {
+    return text;
+  }
+}
+
+// ---- API ----
+export async function autocodeAll(project: string, payload: AutoCodeAllPayload): Promise<AutoCodeAllResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/all`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await readError(res));
+  }
+  return (await res.json()) as AutoCodeAllResult;
 }

@@ -9,7 +9,12 @@ import {
   Spinner,
   NumberInput,
   Button,
+  Portal,
+  Progress,
+  Card,
+  CardBody
 } from "@chakra-ui/react";
+
 import type { Feature, FeatureCollection, LineString, Geometry } from "geojson";
 import { toaster } from "../../components/ui/toaster";
 
@@ -22,7 +27,8 @@ import {
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
-import { autocodeRow, autocodeAll } from "../../api";
+import { autocodeImage, autocodeGIS, autocodeAll } from "../../api";
+
 
 import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
@@ -47,6 +53,11 @@ export default function CodingPage() {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
   }, [projectName]);
+
+  const [autoCoding, setAutoCoding] = useState(false);
+  const [autoCodeMsg, setAutoCodeMsg] = useState<string>("");
+  const [progress, setProgress] = useState<number>(0);
+
 
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [attrs, setAttrs] = useState<AttributeRow[]>([]);
@@ -78,53 +89,164 @@ export default function CodingPage() {
     return !!f && f.geometry?.type === "LineString";
   }
 
-  const currentFeature = useMemo<Feature<LineString, any> | null>(() => {
-    if (!geoFeatures || len === 0) return null;
-    const f = geoFeatures[currentIndex];
-    return isLineStringFeature(f) ? f : null;
-  }, [geoFeatures, currentIndex, len]);
+  // ✅ 补：当前要素（LineString），便于统一读取
+  const currentFeature = useMemo<Feature | null>(() => {
+    return geoFeatures[currentIndex] ?? null;
+  }, [geoFeatures, currentIndex]);
 
-  // 如果你要从 feature 里拿图片引用，建议也把 undefined/null 处理好
+  // ✅ 补：当前图片引用（多兜底：优先 attrs，其次 feature.properties）
   const imgRef = useMemo<string | undefined>(() => {
-    const v = currentFeature?.properties?.["Image Reference"];
-    const s = typeof v === "string" ? v : v != null ? String(v) : "";
-    return s.trim() ? s.trim() : undefined;
-  }, [currentFeature]);
+    const fromAttr =
+      (attrs?.[currentIndex] as any)?.["Image Reference"] ??
+      (attrs?.[currentIndex] as any)?.["image"] ??
+      (attrs?.[currentIndex] as any)?.["img"];
 
+    const p = (currentFeature?.properties as any) || {};
+    const fromFeature =
+      p?.["Image Reference"] ??
+      p?.["Image_Reference"] ??
+      p?.["image"] ??
+      p?.["img"];
 
-  // 监听：Auto-code current
+    // 关键：返回 undefined（而不是 null）
+    return (fromAttr ?? fromFeature) || undefined;
+  }, [attrs, currentIndex, currentFeature]);
+
+  // ✅ 补：把 { 字段名: 数值代码 } 合并到“当前行”
+  const applyUpdatesToCurrentRow = useCallback(
+    (updates: Record<string, number | string | boolean | null>) => {
+      if (!updates || Object.keys(updates).length === 0) return;
+      setAttrs((prev) => {
+        const copy = [...prev];
+        if (copy[currentIndex]) {
+          copy[currentIndex] = { ...copy[currentIndex], ...updates };
+        }
+        return copy;
+      });
+    },
+    [setAttrs, currentIndex]
+  );
+
+  // ✅ 监听：仅对当前记录进行自动编码（先 CV 后 GIS，再合并）
   useEffect(() => {
+    // 这里假设你已有 `name`（项目名）。如果变量名不同，请替换。
+    // 需要保证：name、imgRef、currentFeature（LineString）都准备好。
     if (!name) return;
+
     const handler = async () => {
+      if (autoCoding) return; // ✅ guard: already running
+
       try {
-        toaster.create({ description: "Auto-coding current…", type: "info" });
-        await autocodeRow(name, currentIndex);   // ★ 实际调用
-        toaster.create({ title: "Done", description: "Current image auto-coded.", type: "success" });
-        // 如果后端会返回更新后的 attributes，这里可以合并 setAttrs(...)
+        setAutoCoding(true);
+        setAutoCodeMsg("Starting…");
+        setProgress(5);
+
+        if (!imgRef) throw new Error("Missing imageRef");
+        if (!currentFeature || currentFeature.geometry?.type !== "LineString") {
+          throw new Error("Missing LineString geometry");
+        }
+        const line = (currentFeature.geometry as LineString).coordinates;
+
+        setAutoCodeMsg("Running Computer Vision…");
+        setProgress(35);
+        const cvPromise = autocodeImage(name, imgRef);
+
+        setAutoCodeMsg("Running GIS rules…");
+        setProgress(65);
+        const gisPromise = autocodeGIS(name, line);
+
+        const [cv, g] = await Promise.all([cvPromise, gisPromise]);
+
+        setAutoCodeMsg("Merging updates…");
+        setProgress(85);
+        const merged = { ...(cv?.updates ?? {}), ...(g?.updates ?? {}) };
+        applyUpdatesToCurrentRow(merged);
+
+        setProgress(100);
+        setAutoCodeMsg("Done");
+        toaster.create({
+          title: "Auto-code (current) done",
+          description: "CV + GIS updates applied to current row.",
+          type: "success",
+        });
       } catch (e: any) {
-        toaster.create({ title: "Auto-code failed", description: String(e?.message ?? e), type: "error" });
+        toaster.create({
+          title: "Auto-code failed",
+          description: String(e?.message ?? e),
+          type: "error",
+        });
+      } finally {
+        // 稍微停 300ms 让 100% 有个完成感
+        setTimeout(() => { setAutoCoding(false); setAutoCodeMsg(""); setProgress(0); }, 300);
       }
     };
+
+
+
+    // 事件名：你可以在别处 window.dispatchEvent(new Event("psat:autocode:one"))
     window.addEventListener("psat:autocode:one", handler);
     return () => window.removeEventListener("psat:autocode:one", handler);
-  }, [name, currentIndex]);
+  }, [name, imgRef, currentFeature, applyUpdatesToCurrentRow]);
 
-  // 监听：Auto-code all
+  // ✅ 监听：一键（可让后端顺带保存）。
+  // 如果你暂时不想后端保存，把 autocodeAll 改成前端串行调用 image+gis 即可。
   useEffect(() => {
     if (!name) return;
+
     const handler = async () => {
+      if (autoCoding) return;
       try {
-        toaster.create({ description: "Auto-coding all…", type: "info" });
-        await autocodeAll(name);                  // ★ 实际调用
-        toaster.create({ title: "Done", description: "All images auto-coded.", type: "success" });
-        // 同理：可按后端返回刷新 attrs
+        setAutoCoding(true);
+        setAutoCodeMsg("CV + GIS for all records…");
+        setProgress(10);
+
+        // ✅ 批量模式：让后端对整个项目逐行处理并保存
+        const r = await autocodeAll(name, { all: true, save: true });
+
+        // r 是 bulk 结果：{ saved, total, ok, fail, errors }
+        setProgress(90);
+        // 批量后一般需要重拉 attributes 才能看到更新
+        try {
+          const a = (await fetchProjectAttributes(name)) as { rows: AttributeRow[] };
+          setAttrs(a?.rows ?? []);
+        } catch {
+          // 可忽略，UI 仍然会提示
+        }
+
+        setProgress(100);
+        setAutoCodeMsg("Completed");
+        // 结果提示
+        if ("total" in r) {
+          toaster.create({
+            title: "Auto-code (all) done",
+            description: `Total: ${r.total}, OK: ${r.ok}, Failed: ${r.fail}`,
+            type: r.fail > 0 ? "warning" : "success",
+          });
+        } else {
+          // （防守分支，几乎不会走到）
+          toaster.create({
+            title: "Auto-code (all) done",
+            description: r?.saved ? "Updated & saved." : "Updated (unsaved).",
+            type: "success",
+          });
+        }
       } catch (e: any) {
-        toaster.create({ title: "Auto-code failed", description: String(e?.message ?? e), type: "error" });
+        toaster.create({
+          title: "Auto-code failed",
+          description: String(e?.message ?? e),
+          type: "error",
+        });
+      } finally {
+        setTimeout(() => { setAutoCoding(false); setAutoCodeMsg(""); setProgress(0); }, 300);
       }
     };
+
+    // 事件名：window.dispatchEvent(new Event("psat:autocode:all"))
     window.addEventListener("psat:autocode:all", handler);
     return () => window.removeEventListener("psat:autocode:all", handler);
-  }, [name]);
+  }, [name, autoCoding]);
+
+
 
   // 拉数据
   useEffect(() => {
@@ -252,6 +374,59 @@ export default function CodingPage() {
   return (
     <Box p="4">
       {/* 顶部信息与分页 */}
+      {autoCoding && (
+      <Portal>
+        <Box
+          position="fixed"
+          inset={0}
+          bg="blackAlpha.400"
+          backdropFilter="blur(2px)"
+          zIndex={1000}
+          aria-busy="true"
+        >
+          {/* 顶部可控进度条（Chakra v3 语法） */}
+          <Progress.Root
+            value={progress}         // 受控
+            min={0}
+            max={100}
+            orientation="horizontal"
+            colorPalette="blue"
+            variant="subtle"
+            size="sm"
+            position="absolute"
+            top={0}
+            left={0}
+            right={0}
+            zIndex={1001}
+          >
+            <Progress.Track>
+              <Progress.Range />
+            </Progress.Track>
+            {/* 可选：右上角展示百分比 */}
+            {/* <Progress.ValueText /> */}
+          </Progress.Root>
+
+
+          {/* 中央卡片 */}
+          <Flex minH="100vh" align="center" justify="center" p="4">
+            <Card.Root shadow="lg" borderRadius="2xl" maxW="sm" w="full">
+              <CardBody>
+                <Flex align="center" gap="3">
+                  <Spinner />
+                  <Box>
+                    <Text fontWeight="bold">Auto-coding…</Text>
+                    <Text fontSize="sm" color="gray.600">
+                      {autoCodeMsg || "Please wait while models run."}
+                    </Text>
+                  </Box>
+                </Flex>
+              </CardBody>
+            </Card.Root>
+          </Flex>
+        </Box>
+      </Portal>
+    )}
+
       <Flex justify="space-between" align="center" mb="3">
         <Box>
           <Text fontSize="lg" fontWeight="bold">{detail?.name ?? name}</Text>
@@ -300,22 +475,34 @@ export default function CodingPage() {
         </GridItem>
 
         {/* 第一行：Attributes */}
-        <GridItem>
-          <AttributesPanel
-            row={editedRow}
-            mappings={attrMappings}
-            panelHeight={PANEL_HEIGHT - CONTROLS_H}
-            onChange={onAttrChange}
-            onEdit={editCurrentAttr} 
-          />
-          {/* 下半：翻页按钮条（贴底） */}
+        <GridItem
+          display="flex"
+          flexDirection="column"
+          minH={`${PANEL_HEIGHT}px`} // 右侧总高度至少与左侧面板一致
+        >
+          {/* 面板容器：占据剩余空间，允许内部滚动 */}
+          <Box flex="1 1 auto" minH={0} >
+            <AttributesPanel
+              row={editedRow}
+              mappings={attrMappings}
+              panelHeight={PANEL_HEIGHT - CONTROLS_H} // 保持你原来的传值
+              onChange={onAttrChange}
+              onEdit={editCurrentAttr}
+            />
+          </Box>
+
+          {/* 底部按钮条：固定在列底，避免被内容覆盖 */}
           <Flex
+            flex="0 0 auto"
             h={`${CONTROLS_H}px`}
             w="100%"
             minW={0}
             align="center"
             gap="4"
             pt="2"
+            position="relative"
+            zIndex={1}
+            bg="bg"              // Chakra v3 语义色，防止半透明内容“透”下来
           >
             <Button
               flex="1"
@@ -340,6 +527,7 @@ export default function CodingPage() {
             </Button>
           </Flex>
         </GridItem>
+
 
         {/* 第二行：GeoData 跨两列（在 md 及以上），在手机上一列自然会排在下面 */}
         <GridItem colSpan={{ base: 1, md: 2 }}>
