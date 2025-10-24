@@ -111,7 +111,7 @@ export async function autocodeImage(project: string, imageRef: string) {
     body: JSON.stringify({ imageRef }),
   });
   if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as { updates: Record<string, number> };
+  return (await res.json()) as { updates: Record<string, number>; changed_fields: string[] };
 }
 
 export async function autocodeGIS(project: string, coords: number[][]) {
@@ -121,7 +121,7 @@ export async function autocodeGIS(project: string, coords: number[][]) {
     body: JSON.stringify({ coords }),
   });
   if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as { updates: Record<string, number> };
+  return (await res.json()) as { updates: Record<string, number>; changed_fields: string[] };
 }
 
 // ---- types ----
@@ -144,6 +144,7 @@ export type AutoCodeBulkIndicesPayload = {
 export type AutoCodeSingleResult = {
   updates: Record<string, number | string>;
   saved?: boolean;
+  changed_fields?: string[];
 };
 
 export type AutoCodeBulkResult = {
@@ -152,6 +153,7 @@ export type AutoCodeBulkResult = {
   ok: number;
   fail: number;
   errors: { index: number; reason: string }[];
+  changed_by_row?: Record<number, string[]>;
 };
 
 type AutoCodeAllPayload =
