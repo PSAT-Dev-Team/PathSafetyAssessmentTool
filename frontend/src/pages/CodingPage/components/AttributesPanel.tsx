@@ -20,6 +20,7 @@ type Props = {
   onChange?: (key: string, value: string | number | boolean | null) => void;
   onEdit?: (field: string, value: string | number | boolean | null) => void;
   changedFields?: string[]; // Fields that were changed by auto-coding
+  fieldSources?: Record<string, string>; // Field name -> "CV" | "GIS"
 };
 
 /** ====== Group ordering (tab order) ====== */
@@ -203,6 +204,7 @@ export default function AttributesPanel({
   onChange,
   onEdit,
   changedFields = [],
+  fieldSources = {},
 }: Props) {
   const grouped = useMemo(() => (row ? groupEntries(row) : null), [row]);
 
@@ -263,6 +265,7 @@ export default function AttributesPanel({
                       const dict = mappings[k];
                       const strVal: string = toDisplayString(v);
                       const isChanged = changedFieldsSet.has(k);
+                      const source = fieldSources[k]; // "CV" | "GIS" | undefined
 
                       return (
                         <Box
@@ -279,11 +282,11 @@ export default function AttributesPanel({
                         >
                           <Text
                             fontSize="xs"
-                            color={isChanged ? "yellow.900" : "gray.600"}
+                            color={isChanged ? { base: "yellow.900", _dark: "yellow.900" } : "gray.600"}
                             fontWeight={isChanged ? "bold" : "semibold"}
                           >
                             {k}
-                            {isChanged && " ✨"}
+                            {isChanged && source && ` ✨ (${source})`}
                           </Text>
 
                           {dict ? (
@@ -299,7 +302,10 @@ export default function AttributesPanel({
                                   borderColor: isChanged ? "#D69E2E" : undefined,
                                   borderWidth: isChanged ? "2px" : undefined,
                                   backgroundColor: isChanged ? "#FEFCBF" : undefined,
-                                  color: "#000000",
+                                }}
+                                color={isChanged ? "gray.900" : undefined}
+                                _dark={{
+                                  color: isChanged ? "gray.900" : undefined,
                                 }}
                               >
                                 {/* Preserve unknown code if present */}
@@ -335,7 +341,10 @@ export default function AttributesPanel({
                               borderColor={isChanged ? "yellow.500" : undefined}
                               borderWidth={isChanged ? "2px" : undefined}
                               bg={isChanged ? "yellow.50" : undefined}
-                              color="gray.900"
+                              color={isChanged ? "gray.900" : undefined}
+                              _dark={{
+                                color: isChanged ? "gray.900" : undefined,
+                              }}
                               _focus={{
                                 borderColor: isChanged ? "yellow.600" : "blue.500",
                                 boxShadow: isChanged ? "0 0 0 1px var(--chakra-colors-yellow-600)" : undefined,

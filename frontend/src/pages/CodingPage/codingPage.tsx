@@ -60,6 +60,8 @@ export default function CodingPage() {
 
   // Track which fields were changed by auto-coding for each row
   const [changedFieldsByRow, setChangedFieldsByRow] = useState<Record<number, string[]>>({});
+  // Track the source (CV/GIS) for each changed field
+  const [fieldSourcesByRow, setFieldSourcesByRow] = useState<Record<number, Record<string, string>>>({});
 
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [attrs, setAttrs] = useState<AttributeRow[]>([]);
@@ -168,10 +170,21 @@ export default function CodingPage() {
         const gisChanged = g?.changed_fields ?? [];
         const allChanged = [...new Set([...cvChanged, ...gisChanged])];
 
+        // Build field sources mapping
+        const fieldSources: Record<string, string> = {};
+        cvChanged.forEach(field => { fieldSources[field] = "CV"; });
+        gisChanged.forEach(field => { fieldSources[field] = "GIS"; }); // GIS overrides CV
+
         // Update changed fields tracking for current row
         setChangedFieldsByRow(prev => ({
           ...prev,
           [currentIndex]: allChanged
+        }));
+
+        // Update field sources tracking for current row
+        setFieldSourcesByRow(prev => ({
+          ...prev,
+          [currentIndex]: fieldSources
         }));
 
         applyUpdatesToCurrentRow(merged);
@@ -217,12 +230,17 @@ export default function CodingPage() {
         // ✅ 批量模式：让后端对整个项目逐行处理并保存
         const r = await autocodeAll(name, { all: true, save: true });
 
-        // r 是 bulk 结果：{ saved, total, ok, fail, errors, changed_by_row }
+        // r 是 bulk 结果：{ saved, total, ok, fail, errors, changed_by_row, sources_by_row }
         setProgress(90);
 
         // Update changed fields tracking if available
         if ("changed_by_row" in r && r.changed_by_row) {
           setChangedFieldsByRow(r.changed_by_row);
+        }
+
+        // Update field sources tracking if available
+        if ("sources_by_row" in r && r.sources_by_row) {
+          setFieldSourcesByRow(r.sources_by_row);
         }
 
         // 批量后一般需要重拉 attributes 才能看到更新
@@ -237,9 +255,14 @@ export default function CodingPage() {
         setAutoCodeMsg("Completed");
         // 结果提示
         if ("total" in r) {
+          // Log errors to console for debugging
+          if (r.fail > 0 && r.errors && r.errors.length > 0) {
+            console.error("Auto-coding errors:", r.errors);
+          }
+
           toaster.create({
             title: "Auto-code (all) done",
-            description: `Total: ${r.total}, OK: ${r.ok}, Failed: ${r.fail}`,
+            description: `Total: ${r.total}, OK: ${r.ok}, Failed: ${r.fail}${r.fail > 0 ? " (check console for details)" : ""}`,
             type: r.fail > 0 ? "warning" : "success",
           });
         } else {
@@ -509,6 +532,7 @@ export default function CodingPage() {
               onChange={onAttrChange}
               onEdit={editCurrentAttr}
               changedFields={changedFieldsByRow[currentIndex] || []}
+              fieldSources={fieldSourcesByRow[currentIndex] || {}}
             />
           </Box>
 

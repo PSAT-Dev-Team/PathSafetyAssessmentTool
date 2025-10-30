@@ -145,6 +145,7 @@ export type AutoCodeSingleResult = {
   updates: Record<string, number | string>;
   saved?: boolean;
   changed_fields?: string[];
+  field_sources?: Record<string, string>; // field name -> "CV" | "GIS"
 };
 
 export type AutoCodeBulkResult = {
@@ -154,6 +155,7 @@ export type AutoCodeBulkResult = {
   fail: number;
   errors: { index: number; reason: string }[];
   changed_by_row?: Record<number, string[]>;
+  sources_by_row?: Record<number, Record<string, string>>; // row index -> field -> source
 };
 
 type AutoCodeAllPayload =
