@@ -8,8 +8,8 @@ import "./sidebar.css";
 
 const LINKS = [
   { to: "/home", label: "Home" },
-  { to: "/treatment", label: "Treatment" },
   { to: "/analysis", label: "Analysis" },
+  { to: "/treatment", label: "Treatment" },
 ];
 
 export default function Sidebar() {

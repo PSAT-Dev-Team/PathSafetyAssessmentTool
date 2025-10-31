@@ -19,6 +19,8 @@ type Props = {
   panelHeight?: number; // px
   onChange?: (key: string, value: string | number | boolean | null) => void;
   onEdit?: (field: string, value: string | number | boolean | null) => void;
+  changedFields?: string[]; // Fields that were changed by auto-coding
+  fieldSources?: Record<string, string>; // Field name -> "CV" | "GIS"
 };
 
 /** ====== Group ordering (tab order) ====== */
@@ -201,8 +203,13 @@ export default function AttributesPanel({
   panelHeight = 420,
   onChange,
   onEdit,
+  changedFields = [],
+  fieldSources = {},
 }: Props) {
   const grouped = useMemo(() => (row ? groupEntries(row) : null), [row]);
+
+  // Create a Set for fast lookup of changed fields
+  const changedFieldsSet = useMemo(() => new Set(changedFields), [changedFields]);
 
   // collect groups with fields (for tabs)
   const groupsWithFields = useMemo(() => {
@@ -257,11 +264,29 @@ export default function AttributesPanel({
                     {fields.map(([k, v]) => {
                       const dict = mappings[k];
                       const strVal: string = toDisplayString(v);
+                      const isChanged = changedFieldsSet.has(k);
+                      const source = fieldSources[k]; // "CV" | "GIS" | undefined
 
                       return (
-                        <Box key={k} display="flex" flexDirection="column" gap="1">
-                          <Text fontSize="xs" color="gray.600" fontWeight="semibold">
+                        <Box
+                          key={k}
+                          display="flex"
+                          flexDirection="column"
+                          gap="1"
+                          p="2"
+                          borderRadius="md"
+                          bg={isChanged ? "yellow.100" : "transparent"}
+                          borderWidth={isChanged ? "2px" : "0px"}
+                          borderColor={isChanged ? "yellow.500" : "transparent"}
+                          transition="all 0.2s"
+                        >
+                          <Text
+                            fontSize="xs"
+                            color={isChanged ? { base: "yellow.900", _dark: "yellow.900" } : "gray.600"}
+                            fontWeight={isChanged ? "bold" : "semibold"}
+                          >
                             {k}
+                            {isChanged && source && ` ✨ (${source})`}
                           </Text>
 
                           {dict ? (
@@ -272,6 +297,15 @@ export default function AttributesPanel({
                                   const val = e.target.value === "" ? null : e.target.value;
                                   onChange?.(k, val);
                                   onEdit?.(k, val);
+                                }}
+                                style={{
+                                  borderColor: isChanged ? "#D69E2E" : undefined,
+                                  borderWidth: isChanged ? "2px" : undefined,
+                                  backgroundColor: isChanged ? "#FEFCBF" : undefined,
+                                }}
+                                color={isChanged ? "gray.900" : undefined}
+                                _dark={{
+                                  color: isChanged ? "gray.900" : undefined,
                                 }}
                               >
                                 {/* Preserve unknown code if present */}
@@ -303,6 +337,17 @@ export default function AttributesPanel({
                                     : raw;
                                 onChange?.(k, val);
                                 onEdit?.(k, val);
+                              }}
+                              borderColor={isChanged ? "yellow.500" : undefined}
+                              borderWidth={isChanged ? "2px" : undefined}
+                              bg={isChanged ? "yellow.50" : undefined}
+                              color={isChanged ? "gray.900" : undefined}
+                              _dark={{
+                                color: isChanged ? "gray.900" : undefined,
+                              }}
+                              _focus={{
+                                borderColor: isChanged ? "yellow.600" : "blue.500",
+                                boxShadow: isChanged ? "0 0 0 1px var(--chakra-colors-yellow-600)" : undefined,
                               }}
                             />
                           )}

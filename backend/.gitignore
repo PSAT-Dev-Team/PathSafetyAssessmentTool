@@ -26,7 +26,7 @@ Thumbs.db
 
 # Data files (if you don't want to commit real data)
 data/
-model/
+models/
 shapefiles/
 
 # Temporary files
