@@ -227,8 +227,8 @@ export default function CodingPage() {
         setAutoCodeMsg("CV + GIS for all records…");
         setProgress(10);
 
-        // ✅ 批量模式：让后端对整个项目逐行处理并保存
-        const r = await autocodeAll(name, { all: true, save: true });
+        // ✅ 批量模式：让后端对整个项目逐行处理（不保存，等用户点击Save）
+        const r = await autocodeAll(name, { all: true, save: false });
 
         // r 是 bulk 结果：{ saved, total, ok, fail, errors, changed_by_row, sources_by_row }
         setProgress(90);
@@ -243,12 +243,9 @@ export default function CodingPage() {
           setFieldSourcesByRow(r.sources_by_row);
         }
 
-        // 批量后一般需要重拉 attributes 才能看到更新
-        try {
-          const a = (await fetchProjectAttributes(name)) as { rows: AttributeRow[] };
-          setAttrs(a?.rows ?? []);
-        } catch {
-          // 可忽略，UI 仍然会提示
+        // Use the returned updated attributes (in-memory, not saved yet)
+        if ("updated_attributes" in r && r.updated_attributes) {
+          setAttrs(r.updated_attributes);
         }
 
         setProgress(100);
