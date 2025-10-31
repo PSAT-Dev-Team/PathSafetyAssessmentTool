@@ -171,7 +171,7 @@ class Project:
             for p in version_dir.iterdir()
             if p.is_dir() and p.name.isdigit() and len(p.name) == 8
         ]
-        self.versions.sort(key=lambda v: v.date, reverse=True)
+        self.versions.sort(key=lambda v: v.date, reverse=True) # v is a ProjectVersion object, reverse=True sorts date in descending order
 
     def latest(self) -> ProjectVersion:
         if not self.versions:
