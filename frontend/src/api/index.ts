@@ -156,6 +156,7 @@ export type AutoCodeBulkResult = {
   errors: { index: number; reason: string }[];
   changed_by_row?: Record<number, string[]>;
   sources_by_row?: Record<number, Record<string, string>>; // row index -> field -> source
+  updated_attributes?: AttributeRow[]; // The updated attributes (in-memory, not saved)
 };
 
 type AutoCodeAllPayload =
