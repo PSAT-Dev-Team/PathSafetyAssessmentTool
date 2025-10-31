@@ -475,7 +475,7 @@ def autocode_image(project_name: str):
 
         updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path)  # returns dict
         updates = {k: v for k, v in (updates or {}).items() if v is not None}
-        return ok({"updates": updates})
+        return ok({"updates": updates, "changed_fields": list(updates.keys())})
 
     except ServiceUnavailable as e:
         return fail(str(e), 503)
@@ -543,7 +543,7 @@ def autocode_gis(project_name: str):
         elif bpks:
             apply_peak(bpks)
 
-        return ok({"updates": updates})
+        return ok({"updates": updates, "changed_fields": list(updates.keys())})
 
     except ServiceUnavailable as e:
         return fail(str(e), 503)
@@ -595,12 +595,27 @@ def autocode_all(project_name: str):
         from shapely.geometry import LineString as _LS
 
         def _resolve_image_ref(idx: int) -> str | None:
-            row = ver.attributes.df.iloc[idx] if 0 <= idx < len(ver.attributes.df) else None
-            if row is not None:
-                for key in ("Image Reference", "Image_Reference", "image", "img"):
-                    if key in row and pd.notna(row[key]) and str(row[key]).strip():
-                        return str(row[key]).strip()
-            # no reliable fallback here; images 存在性强依赖 attributes
+            # Primary source: geo_data (where image references are stored during project creation)
+            if 0 <= idx < len(proj.geo_data.df):
+                geo_row = proj.geo_data.df.iloc[idx]
+                for key in ("Image Reference", "Image_Reference", "image", "img", "FILENAME"):
+                    if key in geo_row and pd.notna(geo_row[key]) and str(geo_row[key]).strip():
+                        img_ref = str(geo_row[key]).strip()
+                        # Verify file exists
+                        img_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / img_ref).resolve()
+                        if img_path.exists():
+                            return img_ref
+
+            # Fallback: attributes table (in case it was copied there)
+            if 0 <= idx < len(ver.attributes.df):
+                attr_row = ver.attributes.df.iloc[idx]
+                for key in ("Image Reference", "Image_Reference", "image", "img", "FILENAME"):
+                    if key in attr_row and pd.notna(attr_row[key]) and str(attr_row[key]).strip():
+                        img_ref = str(attr_row[key]).strip()
+                        # Verify file exists
+                        img_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / img_ref).resolve()
+                        if img_path.exists():
+                            return img_ref
             return None
 
         def _resolve_coords(idx: int):
@@ -617,18 +632,29 @@ def autocode_all(project_name: str):
             with current_app.test_request_context(method="POST", json={"imageRef": image_ref}):
                 img_resp, img_code = autocode_image(project_name)
             if img_code >= 400:
-                return None, img_resp.get_json().get("error", f"/image {img_code}")
+                return None, None, img_resp.get_json().get("error", f"/image {img_code}")
 
             # /gis
             with current_app.test_request_context(method="POST", json={"coords": coords}):
                 gis_resp, gis_code = autocode_gis(project_name)
             if gis_code >= 400:
-                return None, gis_resp.get_json().get("error", f"/gis {gis_code}")
+                return None, None, gis_resp.get_json().get("error", f"/gis {gis_code}")
 
-            img_updates = (img_resp.get_json() or {}).get("updates", {})
-            gis_updates = (gis_resp.get_json() or {}).get("updates", {})
+            img_data = img_resp.get_json() or {}
+            gis_data = gis_resp.get_json() or {}
+
+            img_updates = img_data.get("updates", {})
+            gis_updates = gis_data.get("updates", {})
             merged = {**img_updates, **gis_updates}
-            return merged, None
+
+            # Track which fields came from CV vs GIS
+            sources = {}
+            for field in img_updates:
+                sources[field] = "CV"
+            for field in gis_updates:
+                sources[field] = "GIS"  # GIS overrides CV if both set the same field
+
+            return merged, sources, None
 
         # ---------- SINGLE mode (backward compatible) ----------
         if has_single_fields and not run_all and not indices:
@@ -637,19 +663,36 @@ def autocode_all(project_name: str):
             if not image_ref or not coords:
                 return fail("imageRef and coords are required", 400)
 
-            merged, err = _call_autocode_pair(image_ref, coords)
+            merged, sources, err = _call_autocode_pair(image_ref, coords)
             if err:
                 return fail(err, 500)
 
             # optional write-back
             idx = payload.get("index")
             if isinstance(idx, int) and 0 <= idx < len(ver.attributes.df):
+                changed_fields = []
+                field_sources = {}
                 for field, code in (merged or {}).items():
+                    # Track which fields actually changed
+                    old_val = ver.attributes.df.at[idx, field] if field in ver.attributes.df.columns else None
+                    if old_val != code:
+                        changed_fields.append(field)
+                        field_sources[field] = sources.get(field, "Unknown")
                     ver.attributes.df.at[idx, field] = code
                 ver.save_all()
-                return ok({"updates": merged, "saved": True})
+                return ok({
+                    "updates": merged,
+                    "saved": True,
+                    "changed_fields": changed_fields,
+                    "field_sources": field_sources
+                })
 
-            return ok({"updates": merged, "saved": False})
+            return ok({
+                "updates": merged,
+                "saved": False,
+                "changed_fields": list(merged.keys()),
+                "field_sources": sources
+            })
 
         # ---------- BULK mode ----------
         # indices: explicit list OR all rows
@@ -662,6 +705,8 @@ def autocode_all(project_name: str):
         save = bool(payload.get("save", True))  # default save in bulk
         errors = []
         ok_count = 0
+        changed_by_row = {}  # Track which fields changed for each row
+        sources_by_row = {}  # Track the source (CV/GIS) for each changed field
 
         # Pre-compute images dir for speed
         images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
@@ -671,21 +716,38 @@ def autocode_all(project_name: str):
                 image_ref = _resolve_image_ref(idx)
                 coords = _resolve_coords(idx)
                 if not image_ref:
-                    errors.append({"index": idx, "reason": "missing imageRef"})
+                    # Add more detailed error message
+                    geo_row = proj.geo_data.df.iloc[idx] if idx < len(proj.geo_data.df) else None
+                    if geo_row is not None:
+                        img_col = "Image Reference"
+                        img_val = geo_row.get(img_col) if img_col in geo_row else None
+                        errors.append({"index": idx, "reason": f"missing or invalid imageRef (geo_data['{img_col}'] = {repr(img_val)})"})
+                    else:
+                        errors.append({"index": idx, "reason": "missing imageRef (row not in geo_data)"})
                     continue
                 if not coords:
                     errors.append({"index": idx, "reason": "missing LineString coords"})
                     continue
 
-                merged, err = _call_autocode_pair(image_ref, coords)
+                merged, sources, err = _call_autocode_pair(image_ref, coords)
                 if err:
                     errors.append({"index": idx, "reason": err})
                     continue
 
-                # write into df row
+                # Track which fields actually changed and their sources
+                changed_fields = []
+                field_sources = {}
                 for field, code in (merged or {}).items():
+                    # Check if value actually changed
+                    old_val = ver.attributes.df.at[idx, field] if field in ver.attributes.df.columns else None
+                    if old_val != code:
+                        changed_fields.append(field)
+                        field_sources[field] = sources.get(field, "Unknown")
+                    # write into df row
                     ver.attributes.df.at[idx, field] = code
 
+                changed_by_row[idx] = changed_fields
+                sources_by_row[idx] = field_sources
                 ok_count += 1
 
             except Exception as e:
@@ -695,12 +757,18 @@ def autocode_all(project_name: str):
         if save and ok_count > 0:
             ver.save_all()
 
+        # Return the updated attributes so frontend can update without refetching
+        updated_attributes = ver.attributes.df.to_dict(orient="records")
+
         return ok({
             "saved": bool(save and ok_count > 0),
             "total": len(indices),
             "ok": ok_count,
             "fail": len(errors),
             "errors": errors,
+            "changed_by_row": changed_by_row,
+            "sources_by_row": sources_by_row,
+            "updated_attributes": updated_attributes,
         })
 
     except ServiceUnavailable as e:

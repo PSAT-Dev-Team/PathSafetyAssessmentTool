@@ -58,6 +58,10 @@ export default function CodingPage() {
   const [autoCodeMsg, setAutoCodeMsg] = useState<string>("");
   const [progress, setProgress] = useState<number>(0);
 
+  // Track which fields were changed by auto-coding for each row
+  const [changedFieldsByRow, setChangedFieldsByRow] = useState<Record<number, string[]>>({});
+  // Track the source (CV/GIS) for each changed field
+  const [fieldSourcesByRow, setFieldSourcesByRow] = useState<Record<number, Record<string, string>>>({});
 
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [attrs, setAttrs] = useState<AttributeRow[]>([]);
@@ -160,13 +164,36 @@ export default function CodingPage() {
         setAutoCodeMsg("Merging updates…");
         setProgress(85);
         const merged = { ...(cv?.updates ?? {}), ...(g?.updates ?? {}) };
+
+        // Track changed fields from both CV and GIS
+        const cvChanged = cv?.changed_fields ?? [];
+        const gisChanged = g?.changed_fields ?? [];
+        const allChanged = [...new Set([...cvChanged, ...gisChanged])];
+
+        // Build field sources mapping
+        const fieldSources: Record<string, string> = {};
+        cvChanged.forEach(field => { fieldSources[field] = "CV"; });
+        gisChanged.forEach(field => { fieldSources[field] = "GIS"; }); // GIS overrides CV
+
+        // Update changed fields tracking for current row
+        setChangedFieldsByRow(prev => ({
+          ...prev,
+          [currentIndex]: allChanged
+        }));
+
+        // Update field sources tracking for current row
+        setFieldSourcesByRow(prev => ({
+          ...prev,
+          [currentIndex]: fieldSources
+        }));
+
         applyUpdatesToCurrentRow(merged);
 
         setProgress(100);
         setAutoCodeMsg("Done");
         toaster.create({
           title: "Auto-code (current) done",
-          description: "CV + GIS updates applied to current row.",
+          description: `CV + GIS updates applied. ${allChanged.length} fields changed.`,
           type: "success",
         });
       } catch (e: any) {
@@ -186,7 +213,7 @@ export default function CodingPage() {
     // 事件名：你可以在别处 window.dispatchEvent(new Event("psat:autocode:one"))
     window.addEventListener("psat:autocode:one", handler);
     return () => window.removeEventListener("psat:autocode:one", handler);
-  }, [name, imgRef, currentFeature, applyUpdatesToCurrentRow]);
+  }, [name, imgRef, currentFeature, applyUpdatesToCurrentRow, currentIndex, autoCoding]);
 
   // ✅ 监听：一键（可让后端顺带保存）。
   // 如果你暂时不想后端保存，把 autocodeAll 改成前端串行调用 image+gis 即可。
@@ -200,26 +227,39 @@ export default function CodingPage() {
         setAutoCodeMsg("CV + GIS for all records…");
         setProgress(10);
 
-        // ✅ 批量模式：让后端对整个项目逐行处理并保存
-        const r = await autocodeAll(name, { all: true, save: true });
+        // ✅ 批量模式：让后端对整个项目逐行处理（不保存，等用户点击Save）
+        const r = await autocodeAll(name, { all: true, save: false });
 
-        // r 是 bulk 结果：{ saved, total, ok, fail, errors }
+        // r 是 bulk 结果：{ saved, total, ok, fail, errors, changed_by_row, sources_by_row }
         setProgress(90);
-        // 批量后一般需要重拉 attributes 才能看到更新
-        try {
-          const a = (await fetchProjectAttributes(name)) as { rows: AttributeRow[] };
-          setAttrs(a?.rows ?? []);
-        } catch {
-          // 可忽略，UI 仍然会提示
+
+        // Update changed fields tracking if available
+        if ("changed_by_row" in r && r.changed_by_row) {
+          setChangedFieldsByRow(r.changed_by_row);
+        }
+
+        // Update field sources tracking if available
+        if ("sources_by_row" in r && r.sources_by_row) {
+          setFieldSourcesByRow(r.sources_by_row);
+        }
+
+        // Use the returned updated attributes (in-memory, not saved yet)
+        if ("updated_attributes" in r && r.updated_attributes) {
+          setAttrs(r.updated_attributes);
         }
 
         setProgress(100);
         setAutoCodeMsg("Completed");
         // 结果提示
         if ("total" in r) {
+          // Log errors to console for debugging
+          if (r.fail > 0 && r.errors && r.errors.length > 0) {
+            console.error("Auto-coding errors:", r.errors);
+          }
+
           toaster.create({
             title: "Auto-code (all) done",
-            description: `Total: ${r.total}, OK: ${r.ok}, Failed: ${r.fail}`,
+            description: `Total: ${r.total}, OK: ${r.ok}, Failed: ${r.fail}${r.fail > 0 ? " (check console for details)" : ""}`,
             type: r.fail > 0 ? "warning" : "success",
           });
         } else {
@@ -488,6 +528,8 @@ export default function CodingPage() {
               panelHeight={PANEL_HEIGHT - CONTROLS_H} // 保持你原来的传值
               onChange={onAttrChange}
               onEdit={editCurrentAttr}
+              changedFields={changedFieldsByRow[currentIndex] || []}
+              fieldSources={fieldSourcesByRow[currentIndex] || {}}
             />
           </Box>
 
