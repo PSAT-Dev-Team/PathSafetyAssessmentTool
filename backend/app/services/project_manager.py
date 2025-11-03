@@ -426,7 +426,7 @@ class project_manager:
         if self.project_name is not None: return True 
         else: return False
         
-    def create_project(self, project_title, geo_data : gpd.geodataframe, dataset_name):
+    def create_project(self, project_title, geo_data : gpd.geodataframe, dataset_name, tags=None):
         proj_root = self.des_path / project_title
 
         prefix = str(project_title) + "_"
@@ -446,7 +446,7 @@ class project_manager:
         project_metadata.dataset        = dataset_name
         project_metadata.progress       = []
         project_metadata.size           = size
-        project_metadata.tags           = []
+        project_metadata.tags           = tags if tags is not None else []
 
         # Craft geo data csv
         geo_tbl = serializer.ProjectGeoData(size)

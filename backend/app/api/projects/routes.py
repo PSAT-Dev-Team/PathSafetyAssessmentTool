@@ -138,10 +138,28 @@ def _ensure_models_ready():
 
 @bp.get("")
 def list_projects():
-    """List project names (equivalent to your original list_names)."""
+    """List projects with metadata including tags."""
     ctx = get_ctx()
-    names = ctx["pm"].list_names()
-    return jsonify({"projects": names})
+    pm = ctx["pm"]
+    names = pm.list_names()
+
+    # Build list with metadata
+    projects = []
+    for name in names:
+        try:
+            proj = pm.project(name)
+            projects.append({
+                "name": name,
+                "tags": proj.metadata.tags or []
+            })
+        except Exception:
+            # If metadata fails to load, return project with empty tags
+            projects.append({
+                "name": name,
+                "tags": []
+            })
+
+    return jsonify({"projects": projects})
 
 @bp.get("/<project_name>")
 def get_project(project_name: str):
@@ -385,11 +403,12 @@ def list_input_folders():
 def create_project_from_folder():
     """
     Create a new project based on an input directory (folder):
-    Body: { "project_name": "My Project", "folder_name": "SomeFolder" }
+    Body: { "project_name": "My Project", "folder_name": "SomeFolder", "tags": ["tag1", "tag2"] }
     """
     data = request.get_json(silent=True) or {}
     project_name = (data.get("project_name") or "").strip()
     folder_name = data.get("folder_name")
+    tags = data.get("tags", [])
 
     if not project_name:
         return fail("project_name is required", 400)
@@ -397,6 +416,10 @@ def create_project_from_folder():
         return fail("Project name cannot contain underscores (_)", 400)
     if not folder_name:
         return fail("folder_name is required", 400)
+
+    # Validate tags is a list
+    if not isinstance(tags, list):
+        return fail("tags must be an array", 400)
 
     ctx = get_ctx()                 # ← Use your existing get_ctx()
     pm = ctx["pm"]
@@ -435,7 +458,7 @@ def create_project_from_folder():
     extracted_geo_data = get_All_Img_Folder(src_dir, extracted_geo_data, images_dir)
 
     # 6) Register project
-    pm.create_project(project_name, extracted_geo_data, folder_name)
+    pm.create_project(project_name, extracted_geo_data, folder_name, tags=tags)
 
     return ok({"ok": True, "name": project_name})
 

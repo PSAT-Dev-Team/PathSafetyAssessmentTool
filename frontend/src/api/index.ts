@@ -8,8 +8,13 @@ export async function ping(): Promise<{ status: string }> {
 }
 
 // Project list
+export interface ProjectListItem {
+  name: string;
+  tags: string[];
+}
+
 interface FileResponse {
-  projects: string[];
+  projects: ProjectListItem[];
 }
 
 export async function fetchProjectList(): Promise<FileResponse> {
@@ -79,11 +84,11 @@ export async function listSourceFolders(opts?: { signal?: AbortSignal }) {
   return (data?.items ?? []) as string[];
 }
 
-export async function createProjectFromFolder(project_name: string, folder_name: string) {
+export async function createProjectFromFolder(project_name: string, folder_name: string, tags: string[] = []) {
   const res = await fetch("/api/projects/folders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_name, folder_name }),
+    body: JSON.stringify({ project_name, folder_name, tags }),
   });
   if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
   // 返回形如 { ok: true, name: "<project>" }

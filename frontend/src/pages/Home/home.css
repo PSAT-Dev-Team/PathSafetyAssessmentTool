@@ -30,9 +30,14 @@
 }
 
 .search-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  display: flex;
+  align-items: flex-end;
   gap: 12px;
+  justify-content: space-between;
+}
+
+.search-item {
+  flex: 1;
 }
 
 .search-item label {
@@ -161,6 +166,12 @@
   gap: 8px;
 }
 
+.actions-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .btn {
   height: 36px;
   padding: 0 14px;
@@ -197,9 +208,39 @@
   background: #fef2f2;
 }
 
+/* Tags styling */
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.tag-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #1a1a1a;
+  white-space: nowrap;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.no-tags {
+  color: var(--chakra-colors-fg-muted);
+  font-size: 14px;
+}
+
 /* 响应式 */
 @media (max-width: 900px) {
   .search-row {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions-buttons {
+    justify-content: flex-start;
+    margin-top: 8px;
   }
 }

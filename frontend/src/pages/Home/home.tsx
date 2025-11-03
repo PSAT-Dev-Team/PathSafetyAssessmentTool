@@ -1,24 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchProjectList, ping, deleteProject as apiDeleteProject } from "../../api";
+import { fetchProjectList, ping, deleteProject as apiDeleteProject, type ProjectListItem } from "../../api";
 import {
   Button,
   Dialog,
   Portal,
   CloseButton,
   Text,
+  Select,
+  createListCollection,
 } from "@chakra-ui/react";import { useNavigate } from "react-router-dom";
 
 import "./home.css";
 
 interface FileListResponse {
-  projects: string[];
+  projects: ProjectListItem[];
 }
 
-// 未来如果后端返回更多字段，可以直接扩展这个类型
-interface ProjectItem {
-  name: string;
-  // createdAt?: string; // ISO
-  // updatedAt?: string; // ISO
+// Generate a consistent color for each unique tag
+function getTagColor(tag: string): string {
+  // Simple hash function to convert string to number
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+  }
+
+  // Convert to HSL color with good saturation and lightness
+  const hue = Math.abs(hash % 360);
+  const saturation = 65 + (Math.abs(hash) % 20); // 65-85%
+  const lightness = 75 + (Math.abs(hash >> 8) % 10); // 75-85%
+
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
 export default function Home() {
@@ -32,6 +43,7 @@ export default function Home() {
 
   // Filter
   const [nameQuery, setNameQuery] = useState("");
+  const [tagFilter, setTagFilter] = useState<string>("");
 
   // Selected Project
   const [selected, setSelected] = useState<string | null>(null);
@@ -56,23 +68,32 @@ export default function Home() {
   }, []);
 
   // UseMemo projects
-  const projects: ProjectItem[] = useMemo(() => {
+  const projects: ProjectListItem[] = useMemo(() => {
     if (!Projectlist?.projects) return [];
     console.log(Projectlist)
     return Projectlist.projects
       .slice()
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name }));
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [Projectlist]);
+
+  // Get all unique tags across all projects
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    projects.forEach(p => {
+      p.tags?.forEach(tag => tagSet.add(tag));
+    });
+    return Array.from(tagSet).sort();
+  }, [projects]);
 
   // for Filters
   const filtered = useMemo(() => {
     const q = nameQuery.trim().toLowerCase();
     let list = projects;
     if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+    if (tagFilter) list = list.filter((p) => p.tags?.includes(tagFilter));
 
     return list;
-  }, [projects, nameQuery /*, updatedFrom, updatedTo, createdFrom, createdTo */]);
+  }, [projects, nameQuery, tagFilter]);
 
   
   const onRowClick = (name: string) => setSelected(name);
@@ -101,7 +122,7 @@ export default function Home() {
       // 本地把它从列表移除
       setProjectList((prev) =>
         prev
-          ? { projects: prev.projects.filter((n) => n !== selected) }
+          ? { projects: prev.projects.filter((p) => p.name !== selected) }
           : prev
       );
       setSelected(null);
@@ -127,6 +148,54 @@ export default function Home() {
               onChange={(e) => setNameQuery(e.target.value)}
             />
           </div>
+          <div className="search-item">
+            <label htmlFor="tagFilter">Filter by tag</label>
+            <Select.Root
+              collection={createListCollection({
+                items: [
+                  { label: "All tags", value: "" },
+                  ...allTags.map(tag => ({ label: tag, value: tag }))
+                ]
+              })}
+              size="sm"
+              value={tagFilter ? [tagFilter] : [""]}
+              onValueChange={({ value }) => setTagFilter(value[0] ?? "")}
+            >
+              <Select.HiddenSelect name="tag-filter" />
+              <Select.Control>
+                <Select.Trigger>
+                  <Select.ValueText placeholder="All tags" />
+                </Select.Trigger>
+                <Select.IndicatorGroup>
+                  <Select.Indicator />
+                </Select.IndicatorGroup>
+              </Select.Control>
+              <Portal>
+                <Select.Positioner>
+                  <Select.Content>
+                    <Select.Item item={{ label: "All tags", value: "" }} key="">
+                      All tags
+                      <Select.ItemIndicator />
+                    </Select.Item>
+                    {allTags.map((tag) => (
+                      <Select.Item item={{ label: tag, value: tag }} key={tag}>
+                        {tag}
+                        <Select.ItemIndicator />
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Positioner>
+              </Portal>
+            </Select.Root>
+          </div>
+          <div className="actions-buttons">
+            <Button onClick={loadProject} colorPalette="blue" disabled={!selected}>
+              Load Project
+            </Button>
+            <Button onClick={askDelete} disabled={!selected}>
+              Delete Project
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -136,12 +205,13 @@ export default function Home() {
             <tr>
               <th style={{ width: 48 }}></th>
               <th>Project Name</th>
+              <th>Tags</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={2} className="empty">
+                <td colSpan={3} className="empty">
                   No projects found
                 </td>
               </tr>
@@ -164,23 +234,29 @@ export default function Home() {
                       />
                     </td>
                     <td title={p.name}>{p.name}</td>
+                    <td>
+                      <div className="tags-container">
+                        {p.tags && p.tags.length > 0 ? (
+                          p.tags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="tag-badge"
+                              style={{ backgroundColor: getTagColor(tag) }}
+                            >
+                              {tag}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="no-tags">—</span>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 );
               })
             )}
           </tbody>
         </table>
-      </div>
-
-      <div className="actions-panel">
-        <div className="buttons">
-          <Button onClick={loadProject} colorPalette="blue" disabled={!selected}>
-            Load Project
-          </Button>
-          <Button onClick={askDelete} disabled={!selected}>
-            Delete Project
-          </Button>
-        </div>
       </div>
 
       {/* 删除确认 Dialog */}

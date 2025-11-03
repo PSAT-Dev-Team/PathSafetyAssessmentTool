@@ -21,6 +21,7 @@ export default function CreateProjectPage() {
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
+  const [tags, setTags] = useState<string>("");
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -53,7 +54,12 @@ export default function CreateProjectPage() {
     try {
       setCreating(true);
       setErr(null);
-      const data = await createProjectFromFolder(name.trim(), folder);
+      // Parse tags from comma-separated string
+      const tagArray = tags
+        .split(",")
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+      const data = await createProjectFromFolder(name.trim(), folder, tagArray);
       const proj = data?.name ?? name.trim();
       nav(`/coding/${encodeURIComponent(proj)}`);
     } catch (e: any) {
@@ -95,6 +101,20 @@ export default function CreateProjectPage() {
                 Project name cannot contain underscores (_)
               </Text>
             )}
+          </Box>
+
+          <Box>
+            <Text fontSize="sm" mb={1}>
+              Tags (optional)
+            </Text>
+            <Input
+              placeholder="Enter tags separated by commas (e.g., Urban, High Priority)"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+            />
+            <Text color="gray.500" fontSize="xs" mt={1}>
+              Tags help you organize and filter projects
+            </Text>
           </Box>
 
           <Box>
