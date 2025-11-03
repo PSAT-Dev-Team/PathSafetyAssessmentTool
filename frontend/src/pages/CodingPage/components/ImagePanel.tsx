@@ -1,4 +1,6 @@
-import { Card, Heading, Box, Image } from "@chakra-ui/react";
+import { Card, Heading, Box, Image, HStack, Text } from "@chakra-ui/react";
+import { useState } from "react";
+import { Slider } from "../../../components/ui/slider";
 
 type Props = {
   projectName?: string;
@@ -7,6 +9,8 @@ type Props = {
 };
 
 export default function ImagePanel({ projectName, imageRef, panelHeight = 500 }: Props) {
+  const [brightness, setBrightness] = useState(100);
+
   return (
     <Card.Root
       h={`${panelHeight}px`}
@@ -16,6 +20,21 @@ export default function ImagePanel({ projectName, imageRef, panelHeight = 500 }:
       <Card.Header>
         <Heading size="sm">Image</Heading>
       </Card.Header>
+
+      <Box px={4} py={2} borderBottomWidth="1px">
+        <HStack gap={3}>
+          <Text fontSize="sm" minW="80px">Brightness:</Text>
+          <Box flex={1}>
+            <Slider
+              min={0}
+              max={200}
+              value={[brightness]}
+              onValueChange={(details) => setBrightness(details.value[0])}
+            />
+          </Box>
+          <Text fontSize="sm" minW="45px">{brightness}%</Text>
+        </HStack>
+      </Box>
 
       <Card.Body minH={0} >
         {imageRef ? (
@@ -33,6 +52,7 @@ export default function ImagePanel({ projectName, imageRef, panelHeight = 500 }:
               maxW="100%"
               maxH="100%"
               objectFit="contain"
+              style={{ filter: `brightness(${brightness}%)` }}
             />
           </Box>
         ) : (

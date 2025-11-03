@@ -215,55 +215,70 @@ export default function CodingPage() {
     return () => window.removeEventListener("psat:autocode:one", handler);
   }, [name, imgRef, currentFeature, applyUpdatesToCurrentRow, currentIndex, autoCoding]);
 
-  // ✅ 监听：一键（可让后端顺带保存）。
-  // 如果你暂时不想后端保存，把 autocodeAll 改成前端串行调用 image+gis 即可。
+  // ========================================================================
+  // AUTO-CODE ALL: Bulk auto-coding for all images in the project
+  // ========================================================================
+  // Triggered by "Auto-code all" button in sidebar via "psat:autocode:all" event
+  //
+  // Key behavior:
+  // - Passes save=false to keep changes temporary (in frontend state only)
+  // - Changes persist in UI as you navigate between images
+  // - Changes are NOT saved to disk until user clicks Save button
+  // - This allows reviewing all auto-coded values before committing
   useEffect(() => {
     if (!name) return;
 
     const handler = async () => {
-      if (autoCoding) return;
+      if (autoCoding) return; // Prevent concurrent auto-coding
       try {
         setAutoCoding(true);
         setAutoCodeMsg("CV + GIS for all records…");
         setProgress(10);
 
-        // ✅ 批量模式：让后端对整个项目逐行处理（不保存，等用户点击Save）
+        // Call backend with save=false to get updates without persisting to disk
         const r = await autocodeAll(name, { all: true, save: false });
+        // r contains: { saved, total, ok, fail, errors, changed_by_row, sources_by_row, updated_attributes }
 
-        // r 是 bulk 结果：{ saved, total, ok, fail, errors, changed_by_row, sources_by_row }
         setProgress(90);
 
-        // Update changed fields tracking if available
+        // Update change tracking for field highlighting in AttributesPanel
+        // changed_by_row: { row_index: [field_names] } - which fields changed per row
         if ("changed_by_row" in r && r.changed_by_row) {
           setChangedFieldsByRow(r.changed_by_row);
         }
 
-        // Update field sources tracking if available
+        // Update field source tracking for CV/GIS badges in AttributesPanel
+        // sources_by_row: { row_index: { field_name: "CV"|"GIS" } }
         if ("sources_by_row" in r && r.sources_by_row) {
           setFieldSourcesByRow(r.sources_by_row);
         }
 
-        // Use the returned updated attributes (in-memory, not saved yet)
+        // Update attributes state with the returned data (temporary, in-memory only)
+        // This replaces the old approach of refetching from server, which would
+        // return unchanged data since we didn't save
         if ("updated_attributes" in r && r.updated_attributes) {
           setAttrs(r.updated_attributes);
         }
 
         setProgress(100);
         setAutoCodeMsg("Completed");
-        // 结果提示
+
+        // Show results to user
         if ("total" in r) {
-          // Log errors to console for debugging
+          // Log detailed error information to browser console for debugging
+          // Errors include: { index: number, reason: string } for each failed row
           if (r.fail > 0 && r.errors && r.errors.length > 0) {
             console.error("Auto-coding errors:", r.errors);
           }
 
+          // Show summary toast notification
           toaster.create({
             title: "Auto-code (all) done",
             description: `Total: ${r.total}, OK: ${r.ok}, Failed: ${r.fail}${r.fail > 0 ? " (check console for details)" : ""}`,
             type: r.fail > 0 ? "warning" : "success",
           });
         } else {
-          // （防守分支，几乎不会走到）
+          // Fallback for unexpected response format (should not happen)
           toaster.create({
             title: "Auto-code (all) done",
             description: r?.saved ? "Updated & saved." : "Updated (unsaved).",
@@ -277,11 +292,13 @@ export default function CodingPage() {
           type: "error",
         });
       } finally {
+        // Brief delay to show 100% completion before hiding progress overlay
         setTimeout(() => { setAutoCoding(false); setAutoCodeMsg(""); setProgress(0); }, 300);
       }
     };
 
-    // 事件名：window.dispatchEvent(new Event("psat:autocode:all"))
+    // Listen for "Auto-code all" button click from Sidebar
+    // Event is dispatched in Sidebar.tsx when user clicks the button
     window.addEventListener("psat:autocode:all", handler);
     return () => window.removeEventListener("psat:autocode:all", handler);
   }, [name, autoCoding]);
@@ -334,7 +351,7 @@ export default function CodingPage() {
     function handleSave() {
       if (!name || !attrs) return;
       saveAttributes(name, attrs)
-        .then(() => toaster.create({ title: "Saved", description: "Attributes persisted.", type: "success" }))
+        .then(() => toaster.create({ title: "Saved", description: "Changes saved successfully.", type: "success" }))
         .catch((e) => toaster.create({ title: "Save failed", description: String(e?.message ?? e), type: "error" }));
     }
 

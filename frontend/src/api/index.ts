@@ -124,39 +124,52 @@ export async function autocodeGIS(project: string, coords: number[][]) {
   return (await res.json()) as { updates: Record<string, number>; changed_fields: string[] };
 }
 
-// ---- types ----
+// ========================================================================
+// AUTO-CODE ALL API TYPES
+// ========================================================================
+// Types for the /autocode/all endpoint that supports both single and bulk modes
+
+// ---------- Request Payloads ----------
+
+// Single mode: Auto-code one image
 export type AutoCodeSinglePayload = {
-  imageRef: string;
-  coords: number[][];
-  index?: number;
-}; // ← 兼容你现有的
+  imageRef: string;        // Image filename
+  coords: number[][];      // LineString coordinates [[lon, lat], ...]
+  index?: number;          // Row index in attributes table (optional)
+};
 
+// Bulk mode (all rows): Auto-code all images in project
 export type AutoCodeBulkAllPayload = {
-  all: true;
-  save?: boolean; // default true on server
+  all: true;               // Flag to process all rows
+  save?: boolean;          // Whether to save to disk (default: false for temp changes)
 };
 
+// Bulk mode (selected rows): Auto-code specific images
 export type AutoCodeBulkIndicesPayload = {
-  indices: number[];
-  save?: boolean;
+  indices: number[];       // Row indices to process
+  save?: boolean;          // Whether to save to disk (default: false for temp changes)
 };
 
+// ---------- Response Types ----------
+
+// Single mode response
 export type AutoCodeSingleResult = {
-  updates: Record<string, number | string>;
-  saved?: boolean;
-  changed_fields?: string[];
-  field_sources?: Record<string, string>; // field name -> "CV" | "GIS"
+  updates: Record<string, number | string>;     // Field updates: {field_name: code}
+  saved?: boolean;                               // Whether changes were saved to disk
+  changed_fields?: string[];                     // List of fields that actually changed
+  field_sources?: Record<string, string>;        // Source per field: {field_name: "CV"|"GIS"}
 };
 
+// Bulk mode response
 export type AutoCodeBulkResult = {
-  saved: boolean;
-  total: number;
-  ok: number;
-  fail: number;
-  errors: { index: number; reason: string }[];
-  changed_by_row?: Record<number, string[]>;
-  sources_by_row?: Record<number, Record<string, string>>; // row index -> field -> source
-  updated_attributes?: AttributeRow[]; // The updated attributes (in-memory, not saved)
+  saved: boolean;                                      // Whether changes were saved to disk
+  total: number;                                       // Total rows attempted
+  ok: number;                                          // Number of rows successfully processed
+  fail: number;                                        // Number of rows that failed
+  errors: { index: number; reason: string }[];         // Detailed error info per failed row
+  changed_by_row?: Record<number, string[]>;          // {row_idx: [field_names]} for UI highlighting
+  sources_by_row?: Record<number, Record<string, string>>;  // {row_idx: {field: "CV"|"GIS"}} for badges
+  updated_attributes?: AttributeRow[];                 // Complete updated attributes table (in-memory)
 };
 
 type AutoCodeAllPayload =
@@ -166,7 +179,9 @@ type AutoCodeAllPayload =
 
 type AutoCodeAllResult = AutoCodeSingleResult | AutoCodeBulkResult;
 
-// ---- helper to read JSON error bodies when available ----
+// ---------- Helper Functions ----------
+
+// Extract error message from response (handles both JSON and text errors)
 async function readError(res: Response) {
   const text = await res.text();
   try {
@@ -177,7 +192,25 @@ async function readError(res: Response) {
   }
 }
 
-// ---- API ----
+// ---------- API Functions ----------
+
+/**
+ * Auto-code attributes using CV and GIS models
+ *
+ * Supports three modes:
+ * 1. Single image: { imageRef, coords, index? }
+ * 2. All images: { all: true, save?: false }
+ * 3. Selected images: { indices: [0,2,5], save?: false }
+ *
+ * Key behavior:
+ * - When save=false (recommended for bulk), changes are kept in memory only
+ * - Returns updated_attributes so UI can display changes without persisting
+ * - User must click Save button to persist changes to disk
+ *
+ * @param project - Project name
+ * @param payload - Request payload (see AutoCodeAllPayload types)
+ * @returns Response with updates and tracking data (see AutoCodeAllResult types)
+ */
 export async function autocodeAll(project: string, payload: AutoCodeAllPayload): Promise<AutoCodeAllResult> {
   const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/all`, {
     method: "POST",
