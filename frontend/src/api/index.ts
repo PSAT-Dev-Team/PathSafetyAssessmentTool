@@ -227,3 +227,27 @@ export async function autocodeAll(project: string, payload: AutoCodeAllPayload):
   }
   return (await res.json()) as AutoCodeAllResult;
 }
+
+// ---------- Calculate Score ----------
+
+export type CalculateScoreResult = {
+  ok: boolean;
+  result_rows: Record<string, any>[];
+};
+
+/**
+ * Calculate cycleRAP scores for the project using Excel macro
+ *
+ * @param project - Project name
+ * @returns Score calculation results
+ */
+export async function calculateScore(project: string): Promise<CalculateScoreResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/score`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(await readError(res));
+  }
+  return (await res.json()) as CalculateScoreResult;
+}

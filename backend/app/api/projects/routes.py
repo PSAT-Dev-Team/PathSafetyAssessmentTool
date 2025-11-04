@@ -16,9 +16,10 @@ import app.services.global_var as global_var
 import pandas as pd
 import os
 import exifread
-from shapely.geometry import Point,LineString 
+from shapely.geometry import Point,LineString
 import geopandas as gpd
 import shutil
+from app.services.cyclerap_scoring import calculate_cyclerap_score_native
 # ---- init guards (thread-safe & error memo) ----
 import threading
 from werkzeug.exceptions import ServiceUnavailable
@@ -251,30 +252,87 @@ def get_attribute_mappings():
 @bp.post("/<project_name>/score")
 def calculate_score(project_name: str):
     """
-    Use Excel macro to calculate scores:
-    1) Take the project's latest attributes DataFrame
-    2) Call cycleRAP_interface.calculate_cycleRAP_score
-    3) Write back results.csv and save
+    Calculate cycleRAP scores using native Python implementation (no Excel dependency).
+
+    This endpoint:
+    1) Loads the project's latest attributes DataFrame from disk
+    2) Optionally accepts modified attributes from the request body
+    3) Calculates BB, BP, SB, VB, and composite CycleRAP scores
+    4) Saves the results back to disk
+    5) Returns the calculated scores to the frontend
+
+    Request body (optional):
+        {
+            "attributes": [
+                {"field1": value1, "field2": value2, ...},  // Row 1
+                {"field1": value1, "field2": value2, ...},  // Row 2
+                ...
+            ]
+        }
+
+    Response:
+        {
+            "ok": true,
+            "result_rows": [
+                {
+                    "BB": 60.0,
+                    "BB Band": 3,
+                    "BP": 0.0,
+                    "BP Band": 0,
+                    "SB": 80.0,
+                    "SB Band": 4,
+                    "VB": 85.0,
+                    "VB Band": 4,
+                    "CycleRAP score": 61.5,
+                    "CycleRAP score Band": 3
+                },
+                ...
+            ]
+        }
+
+    NOTE: The scoring algorithm in cyclerap_scoring.py is currently a MOCK implementation.
+          Replace with actual cycleRAP formulas when available.
     """
+    # Get project context and latest version
     ctx = get_ctx()
     proj: Project = ctx["pm"].project(project_name)
     ver = proj.latest()
 
+    # Load attributes from disk (or use provided attributes from request)
     attrs = ver.attributes.df
-    # If the front end POSTs temporarily modified attributes, merge/override them:
     payload = request.get_json(silent=True) or {}
     if "attributes" in payload:
+        # Frontend sent modified attributes - use those instead
         attrs = serializer.Attributes(values=None)
-        attrs.df = serializer.pd.DataFrame(payload["attributes"])  # Keep column names consistent
+        attrs.df = serializer.pd.DataFrame(payload["attributes"])
 
-    # Calculate scores (depends on Windows + Excel macro environment)
-    results_df = CRI.cycleRAP_interface.calculate_cycleRAP_score(attrs)
+    # Log input for debugging
+    print(f"\n\n\n\n[calculate_score] Processing {len(attrs)} rows for project '{project_name}'")
+    print(f"\n\n\n\n[calculate_score] Attribute columns: {list(attrs.columns)}")
+    print(f"\n\n\n\n[calculate_score] Sample input (first row):\n{attrs.iloc[0].to_dict() if len(attrs) > 0 else 'No data'}")
 
-    # Write back and persist
+    # ==========================================
+    # MAIN CALCULATION: Native Python scoring
+    # ==========================================
+    # This replaces the old Excel COM automation approach:
+    # OLD: results_df = CRI.cycleRAP_interface.calculate_cycleRAP_score(attrs)
+    # NEW: Cross-platform native Python implementation
+    results_df = calculate_cyclerap_score_native(attrs)
+
+    # Log output for debugging
+    print(f"\n\n\n\n[calculate_score] Calculation complete. Generated {len(results_df)} result rows")
+    print(f"\n\n\n\n[calculate_score] Result columns: {list(results_df.columns)}")
+    print(f"\n\n\n\n[calculate_score] Sample output (first row):\n{results_df.iloc[0].to_dict() if len(results_df) > 0 else 'No data'}")
+
+    # ==========================================
+    # PERSIST RESULTS: Save to disk
+    # ==========================================
     ver._results = serializer.Results()
     ver.results.df = results_df
     proj.save_all()
+    print(f"\n\n\n\n[calculate_score] Results saved to disk for project '{project_name}'")
 
+    # Return results to frontend
     return jsonify({"ok": True, "result_rows": results_df.to_dict(orient="records")})
 
 @bp.post("/<project_name>/treatments")

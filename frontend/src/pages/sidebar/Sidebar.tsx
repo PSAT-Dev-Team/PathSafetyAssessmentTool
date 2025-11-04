@@ -2,6 +2,7 @@ import { useLocation, useNavigate, useMatch } from "react-router-dom";
 import { Button, Separator } from "@chakra-ui/react";
 import { useMemo, useCallback } from "react";
 import { toaster } from "../../components/ui/toaster";
+import { calculateScore } from "../../api";
 
 import CodingSidebar from "./components/CodingSidebar";
 import "./sidebar.css";
@@ -42,11 +43,39 @@ export default function Sidebar() {
   const onAnalysis = pathname === "/analysis";
 
   const onCalculate = useCallback(async () => {
-    toaster.create({
-      description: "calculating scores",
-      type: "success",
-    });
-  }, []);
+    if (!projectName) {
+      toaster.create({
+        description: "No project selected",
+        type: "error",
+      });
+      return;
+    }
+
+    try {
+      toaster.create({
+        description: "Calculating scores...",
+        type: "loading",
+      });
+
+      const result = await calculateScore(projectName);
+
+      // Log the attrs data to console so you can inspect it
+      console.log("=== CALCULATE SCORE RESULT ===");
+      console.log("Result:", result);
+      console.log("Result rows:", result.result_rows);
+
+      toaster.create({
+        description: `Score calculated! ${result.result_rows.length} rows returned`,
+        type: "success",
+      });
+    } catch (error) {
+      console.error("Calculate score error:", error);
+      toaster.create({
+        description: error instanceof Error ? error.message : "Failed to calculate score",
+        type: "error",
+      });
+    }
+  }, [projectName]);
 
   const onAutoCodeOne = useCallback(() => {
     window.dispatchEvent(new CustomEvent("psat:autocode:one"));
