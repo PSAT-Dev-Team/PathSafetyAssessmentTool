@@ -38,9 +38,29 @@ class LayerStore:
         self.metric_crs = metric_crs
         self.paths: dict[str, Path] = {}
         self.layers: dict[str, gpd.GeoDataFrame] = {}
+        # Added for Road Operating Speed (mean)
+        self.speed_data: pd.DataFrame | None = None  # Cache for speed CSV data
 
     def add_path(self, name: str, path: str | Path):
         self.paths[name] = Path(path)
+
+    # Added for Road Operating Speed (mean)
+    def set_speed_csv(self, csv_path: str | Path):
+        """Load and cache the speed CSV data for Road Operating Speed (mean)"""
+        csv_path = Path(csv_path)
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Speed CSV not found: {csv_path}")
+
+        # Read CSV - first row contains headers
+        df = pd.read_csv(csv_path)
+
+        # Convert LINKID to string for matching
+        if 'LINKID' in df.columns:
+            df['LINKID'] = df['LINKID'].astype(str)
+            # Index by LINKID for quick lookup
+            self.speed_data = df.set_index('LINKID')
+        else:
+            raise ValueError(f"Speed CSV missing LINKID column. Found columns: {df.columns.tolist()}")
 
     def get(self, name: str):
         """懒加载：第一次用时读取 shapefile（B：通过 cache_resource 缓存）"""
@@ -84,6 +104,17 @@ class LayerStore:
         store.add_path("beforeCount", base / "AMGbeforeCount" / "AMGbeforeCount_export.shp")
         store.add_path("sensorCount", base / "AMGsensorCount" / "AMGsensorCount_export.shp")
         store.add_path("kerb_line", base / "kerb_line" / "kerbline.shp")
+        # Added for Road Operating Speed (mean)
+        store.add_path("road_links", base / "LinkID_Shape_File" / "31Oct24_Link_FUL.shp")
+
+        # Load speed CSV if it exists
+        speed_csv_path = base / "LinkID_Shape_File" / "TSE_AdHocReq_ERP2AverageSpeedData_250425.csv"
+        if speed_csv_path.exists():
+            try:
+                store.set_speed_csv(speed_csv_path)
+            except Exception as e:
+                print(f"Warning: Could not load speed CSV: {e}")
+
         return store
 
 
@@ -253,3 +284,96 @@ class GIS:
         if dists.empty:
             return None
         return float(dists.min())
+
+    # Added for Road Operating Speed (mean)
+    def get_road_operating_speed(self, point, buffer_dist=20, max_dist=30, default_speed=30.0):
+        """
+        Get the road operating speed (mean) for a point by finding the nearest road link.
+
+        Args:
+            point: Shapely Point or (lon, lat) tuple in WGS84 or metric CRS
+            buffer_dist: Buffer distance in meters for initial spatial query (default: 20m)
+            max_dist: Maximum distance in meters to search for road links (default: 30m)
+            default_speed: Default speed value to return if no match found (default: 30 km/h)
+
+        Returns:
+            float: Average hourly speed in km/h, or default_speed if not found
+
+        Implementation follows the specification:
+        1. Extract first coordinate from LineString geometry
+        2. Create 20m buffer for spatial search
+        3. Query candidate road links within buffer
+        4. Filter to only links within 30m
+        5. Find nearest road link
+        6. Look up speed from CSV by Link ID
+        7. Return speed or default value
+        """
+        # Convert point to metric CRS (EPSG:3414)
+        pt = self.store.to_metric_point(point)
+
+        # Check if road links shapefile is available
+        try:
+            road_gdf = self.store.get("road_links")
+        except KeyError:
+            print("Warning: road_links shapefile not registered")
+            return default_speed
+
+        if road_gdf is None or road_gdf.empty:
+            return default_speed
+
+        # Ensure road links are in metric CRS (should already be from LayerStore.get)
+        if road_gdf.crs.to_epsg() != 3414:
+            road_gdf = road_gdf.to_crs("EPSG:3414")
+
+        # Filter to only valid geometries
+        road_gdf = road_gdf[road_gdf.geometry.notna()].copy()
+
+        # Create buffer for spatial query
+        buffer_geom = pt.buffer(buffer_dist)
+
+        # Use spatial index to find candidate road links
+        candidate_indices = list(road_gdf.sindex.intersection(buffer_geom.bounds))
+
+        if not candidate_indices:
+            return default_speed
+
+        # Get candidate road links
+        candidates = road_gdf.iloc[candidate_indices].copy()
+
+        # Calculate distances to point
+        candidates['distance'] = candidates.geometry.distance(pt)
+
+        # Filter to only roads within max_dist
+        nearby_roads = candidates[candidates['distance'] <= max_dist]
+
+        if nearby_roads.empty:
+            return default_speed
+
+        # Find the nearest road link
+        nearest_idx = nearby_roads['distance'].idxmin()
+        nearest_road = nearby_roads.loc[nearest_idx]
+
+        # Extract Link ID (field name: LK_ID_NUM)
+        if 'LK_ID_NUM' not in nearest_road.index:
+            print(f"Warning: LK_ID_NUM field not found in road shapefile. Available fields: {list(nearest_road.index)}")
+            return default_speed
+
+        link_id = str(nearest_road['LK_ID_NUM'])
+
+        # Look up speed in CSV data
+        if self.store.speed_data is None:
+            print("Warning: Speed CSV data not loaded")
+            return default_speed
+
+        if link_id in self.store.speed_data.index:
+            # Get the average hourly speed
+            speed_row = self.store.speed_data.loc[link_id]
+            if 'AVERAGE_HOURLY_SPEED' in speed_row.index:
+                speed = float(speed_row['AVERAGE_HOURLY_SPEED'])
+                return speed
+            else:
+                print(f"Warning: AVERAGE_HOURLY_SPEED column not found. Available columns: {list(speed_row.index)}")
+                return default_speed
+        else:
+            # Link ID not found in CSV - return default
+            return default_speed

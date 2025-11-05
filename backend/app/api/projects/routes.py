@@ -627,6 +627,11 @@ def autocode_gis(project_name: str):
         elif bpks:
             apply_peak(bpks)
 
+        # Added for Road Operating Speed (mean)
+        # Calculate road operating speed based on nearest road link
+        road_speed = _gis.get_road_operating_speed(pt, buffer_dist=20, max_dist=30, default_speed=30.0)
+        updates["Road operating speed (mean)"] = road_speed
+
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
         return ok({"updates": updates, "changed_fields": list(updates.keys())})
