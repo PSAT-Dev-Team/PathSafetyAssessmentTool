@@ -632,6 +632,11 @@ def autocode_gis(project_name: str):
         road_speed = _gis.get_road_operating_speed(pt, buffer_dist=20, max_dist=30, default_speed=30.0)
         updates["Road operating speed (mean)"] = road_speed
 
+        # Added for Road Speed Limit
+        # Calculate road speed limit based on nearest speed limit segment
+        speed_limit = _gis.get_road_speed_limit(pt, buffer_dist=20, max_dist=30, default_limit=10)
+        updates["Road speed limit"] = speed_limit
+
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
         return ok({"updates": updates, "changed_fields": list(updates.keys())})

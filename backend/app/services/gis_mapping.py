@@ -106,6 +106,8 @@ class LayerStore:
         store.add_path("kerb_line", base / "kerb_line" / "kerbline.shp")
         # Added for Road Operating Speed (mean)
         store.add_path("road_links", base / "LinkID_Shape_File" / "31Oct24_Link_FUL.shp")
+        # Added for Road Speed Limit
+        store.add_path("speed_limit", base / "Speed_limit" / "ROADATTRIBUTELINE_SPEEDLIMITS.shp")
 
         # Load speed CSV if it exists
         speed_csv_path = base / "LinkID_Shape_File" / "TSE_AdHocReq_ERP2AverageSpeedData_250425.csv"
@@ -377,3 +379,85 @@ class GIS:
         else:
             # Link ID not found in CSV - return default
             return default_speed
+
+    # Added for Road Speed Limit
+    def get_road_speed_limit(self, point, buffer_dist=20, max_dist=30, default_limit=10):
+        """
+        Get the road speed limit for a point by finding the nearest speed limit road segment.
+
+        Args:
+            point: Shapely Point or (lon, lat) tuple in WGS84 or metric CRS
+            buffer_dist: Buffer distance in meters for initial spatial query (default: 20m)
+            max_dist: Maximum distance in meters to search for speed limit segments (default: 30m)
+            default_limit: Default speed limit value to return if no match found (default: 10 km/h)
+
+        Returns:
+            int or float: Speed limit in km/h, or default_limit if not found
+
+        Implementation follows the specification:
+        1. Extract first coordinate from LineString geometry
+        2. Create 20m buffer for spatial search
+        3. Query candidate speed limit segments within buffer
+        4. Filter to only segments within 30m
+        5. Find nearest speed limit segment
+        6. Extract SPEEDLIMIT value
+        7. Return speed limit or default value
+        """
+        # Convert point to metric CRS (EPSG:3414)
+        pt = self.store.to_metric_point(point)
+
+        # Check if speed limit shapefile is available
+        try:
+            speed_limit_gdf = self.store.get("speed_limit")
+        except KeyError:
+            print("Warning: speed_limit shapefile not registered")
+            return default_limit
+
+        if speed_limit_gdf is None or speed_limit_gdf.empty:
+            return default_limit
+
+        # Ensure speed limit data is in metric CRS (should already be from LayerStore.get)
+        if speed_limit_gdf.crs.to_epsg() != 3414:
+            speed_limit_gdf = speed_limit_gdf.to_crs("EPSG:3414")
+
+        # Filter to only valid geometries
+        speed_limit_gdf = speed_limit_gdf[speed_limit_gdf.geometry.notna()].copy()
+
+        # Create buffer for spatial query
+        buffer_geom = pt.buffer(buffer_dist)
+
+        # Use spatial index to find candidate speed limit segments
+        candidate_indices = list(speed_limit_gdf.sindex.intersection(buffer_geom.bounds))
+
+        if not candidate_indices:
+            return default_limit
+
+        # Get candidate speed limit segments
+        candidates = speed_limit_gdf.iloc[candidate_indices].copy()
+
+        # Calculate distances to point
+        candidates['dist_to_pt'] = candidates.geometry.distance(pt)
+
+        # Filter to only segments within max_dist
+        nearby_segments = candidates[candidates['dist_to_pt'] <= max_dist]
+
+        if nearby_segments.empty:
+            return default_limit
+
+        # Find the nearest segment
+        nearest_idx = nearby_segments['dist_to_pt'].idxmin()
+        nearest_segment = nearby_segments.loc[nearest_idx]
+
+        # Extract SPEEDLIMIT value
+        if 'SPEEDLIMIT' not in nearest_segment.index:
+            print(f"Warning: SPEEDLIMIT field not found in speed limit shapefile. Available fields: {list(nearest_segment.index)}")
+            return default_limit
+
+        speed_limit_value = nearest_segment['SPEEDLIMIT']
+
+        # Handle null/NaN values
+        if pd.isna(speed_limit_value):
+            return default_limit
+
+        # Return the speed limit value
+        return float(speed_limit_value)
