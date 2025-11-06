@@ -461,3 +461,203 @@ class GIS:
 
         # Return the speed limit value
         return float(speed_limit_value)
+
+    def get_heavy_vehicle_flow(self, point, buffer_dist=15, max_dist=15, default_value=1):
+        """
+        Get the heavy vehicle flow category for a point by checking proximity to bus lanes.
+
+        Heavy Vehicle Flow indicates the level of heavy vehicle traffic (buses, trucks) on the road
+        adjacent to the cycling facility. Locations near bus lanes are assumed to have higher heavy
+        vehicle flow due to bus traffic.
+
+        Args:
+            point: Shapely Point or (lon, lat) tuple in WGS84 or metric CRS
+            buffer_dist: Buffer distance in meters for initial spatial query (default: 15m)
+            max_dist: Maximum distance in meters to check for bus lanes (default: 15m)
+            default_value: Default category value (1 = Low) to return if no bus lane found
+
+        Returns:
+            int: Heavy vehicle flow category
+                 1 = 'Low' (default - no bus lane within 15m)
+                 2 = 'Moderate to high' (bus lane within 15m)
+
+        Implementation follows the specification:
+        1. Extract first coordinate from LineString geometry (or use provided point)
+        2. Create 15m buffer for spatial search
+        3. Query candidate bus lanes within buffer using spatial index
+        4. Calculate distance from point to each candidate bus lane
+        5. Find minimum distance to any bus lane
+        6. If minimum distance <= 15m, return 2 (Moderate to high)
+        7. Otherwise, return 1 (Low)
+        """
+        # Convert point to metric CRS (EPSG:3414)
+        pt = self.store.to_metric_point(point)
+
+        # Check if bus_lane shapefile is available
+        try:
+            bus_lane_gdf = self.store.get("bus_lane")
+        except KeyError:
+            print("Warning: bus_lane shapefile not registered")
+            return default_value
+
+        if bus_lane_gdf is None or bus_lane_gdf.empty:
+            return default_value
+
+        # Ensure bus lane data is in metric CRS (should already be from LayerStore.get)
+        if bus_lane_gdf.crs.to_epsg() != 3414:
+            bus_lane_gdf = bus_lane_gdf.to_crs("EPSG:3414")
+
+        # Filter to only valid geometries
+        bus_lane_gdf = bus_lane_gdf[bus_lane_gdf.geometry.notna()].copy()
+
+        # Create buffer for spatial query
+        buffer_geom = pt.buffer(buffer_dist)
+
+        # Use spatial index to find candidate bus lanes
+        candidate_indices = list(bus_lane_gdf.sindex.intersection(buffer_geom.bounds))
+
+        if not candidate_indices:
+            return default_value
+
+        # Get candidate bus lanes
+        candidates = bus_lane_gdf.iloc[candidate_indices].copy()
+
+        # Calculate distances to point
+        candidates['dist_to_pt'] = candidates.geometry.distance(pt)
+
+        # Find the minimum distance to any bus lane
+        min_distance = candidates['dist_to_pt'].min()
+
+        # If minimum distance is within threshold, return "Moderate to high" (2)
+        if min_distance <= max_dist:
+            return 2  # Moderate to high
+        else:
+            return default_value  # Low (1)
+
+    def get_curvature(self, linestring_geometry, sharp_turn_threshold=15.0, densify_step=0.5, epsilon=1e-10, default_value=2):
+        """
+        Calculate curvature of a cycling facility path using the circumcircle method.
+
+        Curvature is a categorical attribute indicating whether a sharp turn is present on the
+        cycling facility path. The calculation uses a circumcircle-based algorithm that analyzes
+        the path geometry by sliding a 3-point window through all vertices and calculating the
+        minimum circumradius.
+
+        Args:
+            linestring_geometry: Shapely LineString geometry in any CRS (will be converted to metric)
+            sharp_turn_threshold: Radius threshold in meters below which indicates a sharp turn (default: 15.0m)
+            densify_step: Distance in meters between interpolated points for smoother detection (default: 0.5m)
+            epsilon: Minimum area value to detect collinear points (default: 1e-10)
+            default_value: Default category value (2 = No Sharp Turn Present) for edge cases
+
+        Returns:
+            int: Curvature category
+                 1 = 'Sharp Turn Present' (minimum radius < threshold)
+                 2 = 'No Sharp Turn Present' (minimum radius >= threshold, default)
+
+        Implementation follows the circumcircle method specification:
+        1. Convert geometry to metric CRS (EPSG:3414)
+        2. Densify the LineString by inserting vertices every densify_step meters
+        3. Extract all coordinate points from densified geometry
+        4. Slide through all consecutive triplets (A, B, C)
+        5. For each triplet:
+           a. Calculate side lengths: a = dist(A,B), b = dist(B,C), c = dist(A,C)
+           b. Calculate semi-perimeter: p = 0.5 * (a + b + c)
+           c. Calculate area using Heron's formula: area² = p * (p-a) * (p-b) * (p-c)
+           d. Calculate circumradius: R = (a * b * c) / (4 * area)
+        6. Track minimum radius across all triplets
+        7. Compare minimum radius against threshold to determine sharp turn
+        """
+        from shapely.geometry import LineString
+
+        # Handle null or invalid geometry
+        if linestring_geometry is None or linestring_geometry.is_empty:
+            return default_value
+
+        # Convert to metric CRS if needed
+        if not isinstance(linestring_geometry, LineString):
+            return default_value
+
+        # Create a GeoDataFrame to handle CRS conversion
+        from geopandas import GeoDataFrame
+        temp_gdf = GeoDataFrame(geometry=[linestring_geometry], crs=CRS_WGS84)
+
+        # Check if already in metric CRS (heuristic: if coordinates are large, assume metric)
+        coords = list(linestring_geometry.coords)
+        if len(coords) > 0:
+            x, y = coords[0]
+            # If coordinates look like lat/lon, convert to metric
+            if -180 <= x <= 180 and -90 <= y <= 90:
+                temp_gdf = temp_gdf.to_crs(CRS_METRIC)
+                linestring_geometry = temp_gdf.geometry.iloc[0]
+
+        # Densify the LineString for better curvature detection
+        # Insert vertices every densify_step meters along the line
+        if linestring_geometry.length > 0:
+            num_points = int(linestring_geometry.length / densify_step)
+            if num_points > 1:
+                # Interpolate points along the line
+                densified_coords = []
+                for i in range(num_points + 1):
+                    distance = min(i * densify_step, linestring_geometry.length)
+                    point = linestring_geometry.interpolate(distance)
+                    densified_coords.append((point.x, point.y))
+                # Add the end point if not already included
+                if densified_coords[-1] != coords[-1]:
+                    densified_coords.append(coords[-1])
+                linestring_geometry = LineString(densified_coords)
+
+        # Extract coordinates from densified geometry
+        coordinates = list(linestring_geometry.coords)
+
+        # Need at least 3 points to calculate curvature
+        if len(coordinates) < 3:
+            return default_value
+
+        # Initialize minimum radius to infinity
+        min_radius = float('inf')
+
+        # Slide through all consecutive triplets
+        for i in range(len(coordinates) - 2):
+            A = coordinates[i]
+            B = coordinates[i + 1]
+            C = coordinates[i + 2]
+
+            # Calculate side lengths using Euclidean distance
+            a = np.sqrt((B[0] - A[0])**2 + (B[1] - A[1])**2)  # dist(A, B)
+            b = np.sqrt((C[0] - B[0])**2 + (C[1] - B[1])**2)  # dist(B, C)
+            c = np.sqrt((C[0] - A[0])**2 + (C[1] - A[1])**2)  # dist(A, C)
+
+            # Skip degenerate cases (zero-length segments)
+            if a < epsilon or b < epsilon or c < epsilon:
+                continue
+
+            # Calculate semi-perimeter
+            p = 0.5 * (a + b + c)
+
+            # Calculate area using Heron's formula
+            area_squared = p * (p - a) * (p - b) * (p - c)
+
+            # Skip if area is too small (collinear points)
+            if area_squared <= epsilon:
+                continue
+
+            # Calculate area
+            area = np.sqrt(area_squared)
+
+            # Calculate circumradius: R = (a * b * c) / (4 * area)
+            R = (a * b * c) / (4.0 * area)
+
+            # Track minimum radius
+            if R < min_radius:
+                min_radius = R
+
+        # Apply threshold to determine sharp turn
+        # If no valid triplets were found, min_radius will still be infinity
+        if min_radius == float('inf'):
+            return default_value
+
+        if min_radius < sharp_turn_threshold:
+            return 1  # Sharp Turn Present
+        else:
+            return 2  # No Sharp Turn Present

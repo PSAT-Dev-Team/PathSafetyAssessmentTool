@@ -580,8 +580,11 @@ def autocode_gis(project_name: str):
 
         # 起点（WGS84）
         start_lon, start_lat = coords[0]
-        from shapely.geometry import Point
+        from shapely.geometry import Point, LineString
         pt = Point(start_lon, start_lat)
+
+        # Create LineString from coordinates for curvature calculation
+        linestring = LineString(coords) if len(coords) >= 2 else None
 
         # backend/shapefiles 作为基准目录
         backend_root = Path(__file__).resolve().parents[3]  # .../backend
@@ -636,6 +639,17 @@ def autocode_gis(project_name: str):
         # Calculate road speed limit based on nearest speed limit segment
         speed_limit = _gis.get_road_speed_limit(pt, buffer_dist=20, max_dist=30, default_limit=10)
         updates["Road speed limit"] = speed_limit
+
+        # Added for Heavy Vehicle Flow
+        # Calculate heavy vehicle flow based on proximity to bus lanes
+        heavy_vehicle_flow = _gis.get_heavy_vehicle_flow(pt, buffer_dist=15, max_dist=15, default_value=1)
+        updates["Heavy vehicle flow"] = heavy_vehicle_flow
+
+        # Added for Curvature
+        # Calculate curvature using circumcircle method on the LineString geometry
+        if linestring is not None:
+            curvature = _gis.get_curvature(linestring, sharp_turn_threshold=15.0, densify_step=0.5, default_value=2)
+            updates["Curvature"] = curvature
 
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
