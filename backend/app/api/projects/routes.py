@@ -651,6 +651,11 @@ def autocode_gis(project_name: str):
             curvature = _gis.get_curvature(linestring, sharp_turn_threshold=15.0, densify_step=0.5, default_value=2)
             updates["Curvature"] = curvature
 
+        # Added for Facility Width per Direction
+        # Calculate facility width using expanding ring search on path centerline shapefiles
+        facility_width = _gis.get_facility_width(pt, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2)
+        updates["Facility Width per Direction"] = facility_width
+
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
         return ok({"updates": updates, "changed_fields": list(updates.keys())})

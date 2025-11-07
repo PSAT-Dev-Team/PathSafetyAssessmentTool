@@ -108,6 +108,10 @@ class LayerStore:
         store.add_path("road_links", base / "LinkID_Shape_File" / "31Oct24_Link_FUL.shp")
         # Added for Road Speed Limit
         store.add_path("speed_limit", base / "Speed_limit" / "ROADATTRIBUTELINE_SPEEDLIMITS.shp")
+        # Added for Facility Width per Direction
+        store.add_path("cycling_path", base / "path" / "CyclingpathCentreline.shp")
+        store.add_path("footpath", base / "path" / "Footpathcentreline.shp")
+        store.add_path("shared_path", base / "path" / "Sharedpathcentreline.shp")
 
         # Load speed CSV if it exists
         speed_csv_path = base / "LinkID_Shape_File" / "TSE_AdHocReq_ERP2AverageSpeedData_250425.csv"
@@ -661,3 +665,224 @@ class GIS:
             return 1  # Sharp Turn Present
         else:
             return 2  # No Sharp Turn Present
+
+    def get_facility_width(self, point, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2):
+        """
+        Get the facility width per direction for a point using expanding ring search.
+
+        Facility Width per Direction is a categorical attribute that represents the width of the
+        cycling/pedestrian facility. The width is extracted from path centerline shapefiles that
+        contain actual width measurements, then categorized into three classes.
+
+        Args:
+            point: Shapely Point or (lon, lat) tuple in WGS84 or metric CRS
+            start_radius: Initial search radius in meters (default: 2.0m)
+            max_radius: Maximum search radius in meters (default: 10.0m)
+            step_size: Radius increment in meters (default: 2.0m)
+            default_value: Default category value (2 = Narrow) if no width found
+
+        Returns:
+            int: Facility width category
+                 1 = 'Very Narrow' (≤ 2 meters)
+                 2 = 'Narrow' (> 2 and ≤ 4 meters) - Default
+                 3 = 'Wide' (> 4 meters)
+
+        Implementation follows the expanding ring search specification:
+        1. Load three path centerline shapefiles (cycling, footpath, shared)
+        2. Convert all to EPSG:3414, clean geometries, standardize WIDTH column
+        3. Use priority order: ["cycling", "shared", "footpath"]
+        4. Expand search radius from start_radius to max_radius in step_size increments
+        5. For each radius, check layers in priority order
+        6. Lock the first valid width found (nearest path width)
+        7. Categorize the width into Very Narrow/Narrow/Wide
+        """
+        # Convert point to metric CRS (EPSG:3414)
+        pt = self.store.to_metric_point(point)
+
+        # Load and prepare path shapefiles
+        layers = {}
+        priority = ["cycling", "shared", "footpath"]
+        layer_names = {
+            "cycling": "cycling_path",
+            "shared": "shared_path",
+            "footpath": "footpath"
+        }
+
+        for layer_key in priority:
+            try:
+                gdf = self.store.get(layer_names[layer_key])
+                if gdf is None or gdf.empty:
+                    layers[layer_key] = None
+                    continue
+
+                # Ensure metric CRS (should already be from LayerStore.get)
+                if gdf.crs.to_epsg() != 3414:
+                    gdf = gdf.to_crs("EPSG:3414")
+
+                # Remove Z-coordinates (convert 3D to 2D geometries)
+                if gdf.geometry.iloc[0].has_z if len(gdf) > 0 else False:
+                    gdf.geometry = gdf.geometry.apply(
+                        lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
+                    )
+
+                # Filter to only valid geometries
+                gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+
+                if gdf.empty:
+                    layers[layer_key] = None
+                    continue
+
+                # Standardize WIDTH column
+                gdf = self._standardize_width_column(gdf)
+
+                # Build spatial index
+                _ = gdf.sindex
+
+                layers[layer_key] = gdf
+
+            except KeyError:
+                # Shapefile not registered
+                layers[layer_key] = None
+            except Exception as e:
+                print(f"Warning: Could not load {layer_key} path shapefile: {e}")
+                layers[layer_key] = None
+
+        # Check if all layers are None
+        if all(gdf is None for gdf in layers.values()):
+            return default_value
+
+        # Expanding ring search
+        found_width = None
+
+        for radius in np.arange(start_radius, max_radius + step_size, step_size):
+            buffer_geom = pt.buffer(radius)
+
+            for layer_key in priority:
+                gdf = layers[layer_key]
+                if gdf is None:
+                    continue
+
+                # Spatial query using index
+                try:
+                    candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
+                except Exception:
+                    # Fallback if spatial index fails
+                    candidate_indices = []
+
+                if not candidate_indices:
+                    continue
+
+                # Lock width if not yet set (first-hit locking)
+                if found_width is None:
+                    candidates = gdf.iloc[candidate_indices].copy()
+
+                    # Filter to valid WIDTH values
+                    if "WIDTH" in candidates.columns:
+                        # Convert to numeric, coercing errors to NaN
+                        candidates["WIDTH_NUMERIC"] = pd.to_numeric(candidates["WIDTH"], errors='coerce')
+                        valid_candidates = candidates[candidates["WIDTH_NUMERIC"].notna()]
+
+                        if not valid_candidates.empty:
+                            # Calculate distances to point
+                            valid_candidates = valid_candidates.copy()
+                            valid_candidates["distance"] = valid_candidates.geometry.distance(pt)
+
+                            # Find nearest feature
+                            nearest_idx = valid_candidates["distance"].idxmin()
+                            found_width = float(valid_candidates.loc[nearest_idx, "WIDTH_NUMERIC"])
+                            # Width is now locked, continue scanning
+                            break
+
+        # Categorize the found width
+        if found_width is None:
+            return default_value  # Narrow (2)
+        elif found_width > 4.0:
+            return 3  # Wide
+        elif found_width > 2.0:
+            return 2  # Narrow
+        else:
+            return 1  # Very Narrow
+
+    @staticmethod
+    def _remove_z_coordinate(geom):
+        """Remove Z-coordinate from geometry (convert 3D to 2D)"""
+        from shapely.geometry import LineString, Point, Polygon, MultiLineString, MultiPoint, MultiPolygon
+
+        if geom is None or geom.is_empty:
+            return geom
+
+        geom_type = geom.geom_type
+
+        if geom_type == 'Point':
+            return Point(geom.x, geom.y)
+        elif geom_type == 'LineString':
+            return LineString([(x, y) for x, y, *_ in geom.coords])
+        elif geom_type == 'Polygon':
+            exterior = [(x, y) for x, y, *_ in geom.exterior.coords]
+            interiors = [[(x, y) for x, y, *_ in interior.coords] for interior in geom.interiors]
+            return Polygon(exterior, interiors)
+        elif geom_type == 'MultiPoint':
+            return MultiPoint([Point(p.x, p.y) for p in geom.geoms])
+        elif geom_type == 'MultiLineString':
+            return MultiLineString([LineString([(x, y) for x, y, *_ in line.coords]) for line in geom.geoms])
+        elif geom_type == 'MultiPolygon':
+            return MultiPolygon([
+                Polygon(
+                    [(x, y) for x, y, *_ in poly.exterior.coords],
+                    [[(x, y) for x, y, *_ in interior.coords] for interior in poly.interiors]
+                )
+                for poly in geom.geoms
+            ])
+        else:
+            # For other geometry types, return as-is
+            return geom
+
+    @staticmethod
+    def _standardize_width_column(gdf):
+        """
+        Standardize WIDTH column in the GeoDataFrame.
+
+        Looks for various width column candidates (case-insensitive):
+        - WIDTH, width, Width
+        - PATH_WIDTH, path_width, Path_Width
+        - L_WIDTH, R_WIDTH, AVG_WIDTH, avg_width
+        - Wdth, WID, Width_m, WIDTH_M
+
+        If found, renames to "WIDTH" and converts to numeric type.
+        If not found, creates "WIDTH" column with NaN values.
+
+        Args:
+            gdf: GeoDataFrame with potential width columns
+
+        Returns:
+            GeoDataFrame with standardized "WIDTH" column
+        """
+        # Width column candidates (case-insensitive)
+        width_candidates = [
+            "WIDTH", "width", "Width",
+            "PATH_WIDTH", "path_width", "Path_Width",
+            "L_WIDTH", "R_WIDTH", "AVG_WIDTH", "avg_width",
+            "Wdth", "WID", "Width_m", "WIDTH_M"
+        ]
+
+        # Find the first matching column
+        found_col = None
+        for candidate in width_candidates:
+            # Case-insensitive search
+            matching_cols = [col for col in gdf.columns if col.upper() == candidate.upper()]
+            if matching_cols:
+                found_col = matching_cols[0]
+                break
+
+        if found_col and found_col != "WIDTH":
+            # Rename to standardized "WIDTH"
+            gdf = gdf.rename(columns={found_col: "WIDTH"})
+        elif not found_col:
+            # Create WIDTH column with NaN values
+            gdf["WIDTH"] = np.nan
+
+        # Convert to numeric type (coercing errors to NaN)
+        if "WIDTH" in gdf.columns:
+            gdf["WIDTH"] = pd.to_numeric(gdf["WIDTH"], errors='coerce')
+
+        return gdf
