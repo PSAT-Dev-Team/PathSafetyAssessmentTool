@@ -715,8 +715,10 @@ def autocode_gis(project_name: str):
 
         # Added for Curvature
         # Calculate curvature using actual path centerline shapefiles
-        # Queries cycling/footpath/shared path shapefiles within 10m radius
-        curvature = _gis.get_curvature(pt, sharp_turn_threshold=10.0, search_radius=10.0, default_value=2)
+        # Uses two-stage process from original PathAssignmentTool:
+        #   Stage 1: Expanding ring (1m→5m) to find nearest path
+        #   Stage 2: Fixed 5m window to calculate curvature from that path
+        curvature = _gis.get_curvature(pt, sharp_turn_threshold=10.0, default_value=2)
         updates["Curvature"] = curvature
 
         # Added for Facility Width per Direction

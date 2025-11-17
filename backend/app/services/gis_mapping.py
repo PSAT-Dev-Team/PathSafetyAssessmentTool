@@ -559,40 +559,70 @@ class GIS:
         else:
             return default_value  # Low (1)
 
-    def get_radius_and_width_at_point(self, point, search_radius=10.0, densify_step=1.0, epsilon=1e-6):
+    def get_radius_and_width_at_point(
+        self,
+        point,
+        start_radius=1.0,
+        max_radius=5.0,
+        step=1.0,
+        collect_radius=5.0,
+        sample_half_window=1.0,
+        epsilon=1e-6
+    ):
         """
-        Calculate the minimum radius (curvature) and width at a specific point using actual path centerline shapefiles.
+        Calculate the minimum curvature radius and facility width at a given point using a
+        TWO-STAGE process that matches the original PathAssignmentTool implementation.
 
-        This method queries cycling path, footpath, and shared path centerline shapefiles to find the actual
-        infrastructure geometry near the point, then calculates the minimum circumradius (representing the
-        sharpest turn) and extracts the width information.
+        This method implements the exact algorithm from the original Streamlit app:
+        - STAGE 1: Expanding ring search (1m→5m) to find WIDTH from the nearest path
+        - STAGE 2: Fixed window search (5m) to calculate CURVATURE from the same layer
 
         Args:
-            point: Shapely Point or (lon, lat) tuple in WGS84 or metric CRS
-            search_radius: Radius in meters to search for nearby path features (default: 10.0m)
-            densify_step: Distance in meters between interpolated points for curvature calculation (default: 1.0m)
-            epsilon: Minimum value for distance/area calculations to avoid numerical issues (default: 1e-6)
+            point: Shapely Point or (lon, lat) tuple in WGS84
+            start_radius: Initial ring radius for width search (default: 1.0m)
+            max_radius: Maximum ring radius for width search (default: 5.0m)
+            step: Ring increment size (default: 1.0m)
+            collect_radius: Fixed window radius for curvature calculation (default: 5.0m)
+            sample_half_window: Densification step - distance between interpolated points (default: 1.0m)
+            epsilon: Minimum threshold for distance/area calculations (default: 1e-6)
 
         Returns:
             tuple: (min_radius, width)
-                - min_radius (float or None): Minimum circumradius in meters, or None if no valid calculation
-                - width (float or None): Path width in meters, or None if not found
+                   - min_radius (float or None): Minimum circumradius in meters (sharpest curve)
+                   - width (float or None): Facility width in meters from the nearest path feature
 
-        Algorithm:
-        1. Query shapefile layers within search_radius around the point
-        2. Merge connectable line segments
-        3. Clip merged geometry to the circular buffer
-        4. Densify the line by inserting vertices every densify_step meters
-        5. Calculate minimum radius using triplet method with circumcircle
-        6. Extract width from shapefile attributes
+        Algorithm (Two-Stage Process):
+
+        STAGE 1 - WIDTH SEARCH (Expanding Ring):
+        1. For each radius in [start_radius, start_radius+step, ..., max_radius]:
+           a. Create circular buffer at current radius
+           b. For each layer in priority order [cycling, shared, footpath]:
+              - Find features intersecting this ring
+              - If width not yet locked AND features found with valid WIDTH:
+                * Lock the width from the nearest feature
+                * Remember which layer provided it
+           c. Increment radius and continue (width stays locked)
+
+        STAGE 2 - CURVATURE CALCULATION (Fixed Window):
+        1. Use ONLY the layer that provided the width
+        2. Query features within collect_radius (5m) of the point
+        3. Merge connectable line segments using shapely's linemerge/unary_union
+        4. Clip merged geometry to the circular buffer
+        5. Densify at sample_half_window (1m) intervals for accurate curvature detection
+        6. Calculate minimum circumradius using sliding triplet window
+        7. Return (min_radius, width)
+
+        Key Characteristics:
+        - Width and curvature come from THE SAME LAYER
+        - Width uses EXPANDING RING (tries closer features first)
+        - Curvature uses FIXED WINDOW (always collect_radius, not expanding)
+        - Width locks at first match (never changes after first valid value)
+        - Curvature calculated AFTER width search completes
         """
         # Convert point to metric CRS (EPSG:3414)
         pt = self.store.to_metric_point(point)
 
-        # Create search buffer
-        buffer_geom = pt.buffer(search_radius)
-
-        # Load and prepare path shapefiles with priority order
+        # Priority order: cycling paths first, then shared, then footpaths
         priority = ["cycling", "shared", "footpath"]
         layer_names = {
             "cycling": "cycling_path",
@@ -600,116 +630,159 @@ class GIS:
             "footpath": "footpath"
         }
 
-        min_radius = None
-        width = None
+        # ========================================================================
+        # STAGE 1: EXPANDING RING SEARCH FOR WIDTH
+        # ========================================================================
+        found_layer = None
+        found_width = None
 
-        for layer_key in priority:
-            try:
-                gdf = self.store.get(layer_names[layer_key])
-                if gdf is None or gdf.empty:
-                    continue
+        # Expand search radius from start_radius to max_radius in steps
+        current_radius = start_radius
+        while current_radius <= max_radius:
+            buffer_ring = pt.buffer(current_radius)
 
-                # Ensure metric CRS
-                if gdf.crs.to_epsg() != 3414:
-                    gdf = gdf.to_crs("EPSG:3414")
-
-                # Remove Z-coordinates if present
-                if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
-                    gdf.geometry = gdf.geometry.apply(
-                        lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
-                    )
-
-                # Filter to valid geometries
-                gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
-                if gdf.empty:
-                    continue
-
-                # Spatial query using index
-                candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
-                if not candidate_indices:
-                    continue
-
-                candidates = gdf.iloc[candidate_indices]
-
-                # Find features that actually intersect the buffer
-                intersecting = candidates[candidates.intersects(buffer_geom)]
-                if intersecting.empty:
-                    continue
-
-                # Merge all intersecting geometries
-                from shapely.ops import linemerge, unary_union
-                merged_geom = unary_union(intersecting.geometry.tolist())
-
-                # Apply linemerge to connect segments if possible
-                if merged_geom.geom_type == 'MultiLineString':
-                    merged_geom = linemerge(merged_geom)
-
-                # Clip to buffer
-                clipped_geom = merged_geom.intersection(buffer_geom)
-
-                # Handle different geometry types after clipping
-                from shapely.geometry import LineString, MultiLineString
-                lines_to_process = []
-
-                if clipped_geom.geom_type == 'LineString':
-                    lines_to_process = [clipped_geom]
-                elif clipped_geom.geom_type == 'MultiLineString':
-                    lines_to_process = list(clipped_geom.geoms)
-                elif clipped_geom.geom_type == 'GeometryCollection':
-                    lines_to_process = [g for g in clipped_geom.geoms if g.geom_type == 'LineString']
-
-                if not lines_to_process:
-                    continue
-
-                # Calculate radius for each line segment
-                for line in lines_to_process:
-                    if line.is_empty or line.length < densify_step:
+            for layer_key in priority:
+                try:
+                    gdf = self.store.get(layer_names[layer_key])
+                    if gdf is None or gdf.empty:
                         continue
 
-                    # Densify the line
-                    densified_coords = []
-                    num_points = int(line.length / densify_step)
-                    for i in range(num_points + 1):
-                        distance = min(i * densify_step, line.length)
-                        point_on_line = line.interpolate(distance)
-                        densified_coords.append((point_on_line.x, point_on_line.y))
+                    # Ensure metric CRS
+                    if gdf.crs.to_epsg() != 3414:
+                        gdf = gdf.to_crs("EPSG:3414")
 
-                    # Add the end point if not already included
-                    if len(densified_coords) > 0:
-                        last_coord = list(line.coords)[-1]
-                        if densified_coords[-1] != last_coord:
-                            densified_coords.append(last_coord)
+                    # Remove Z-coordinates if present
+                    if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+                        gdf.geometry = gdf.geometry.apply(
+                            lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
+                        )
 
-                    # Calculate minimum radius using triplet method
-                    if len(densified_coords) >= 3:
-                        segment_min_radius = self._calculate_min_radius_triplet(densified_coords, epsilon)
-                        if segment_min_radius is not None:
-                            if min_radius is None or segment_min_radius < min_radius:
-                                min_radius = segment_min_radius
+                    # Filter to valid geometries
+                    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+                    if gdf.empty:
+                        continue
 
-                # Extract width if found radius in this layer
-                if min_radius is not None and width is None:
-                    # Standardize WIDTH column
-                    intersecting_std = self._standardize_width_column(intersecting)
-                    if 'WIDTH' in intersecting_std.columns:
-                        # Get width from the nearest feature
-                        distances = intersecting_std.geometry.distance(pt)
-                        nearest_idx = distances.idxmin()
-                        width_value = intersecting_std.loc[nearest_idx, 'WIDTH']
-                        if pd.notna(width_value):
-                            width = float(width_value)
+                    # Spatial query using index
+                    candidate_indices = list(gdf.sindex.intersection(buffer_ring.bounds))
+                    if not candidate_indices:
+                        continue
 
-                # If we found a radius in this priority layer, stop searching
-                if min_radius is not None:
-                    break
+                    candidates = gdf.iloc[candidate_indices]
 
-            except KeyError:
-                continue
+                    # Find features that actually intersect the buffer
+                    intersecting = candidates[candidates.intersects(buffer_ring)]
+                    if intersecting.empty:
+                        continue
+
+                    # Lock width if not yet set
+                    if found_width is None:
+                        # Standardize WIDTH column
+                        intersecting_std = self._standardize_width_column(intersecting)
+                        if 'WIDTH' in intersecting_std.columns:
+                            # Get width from the nearest feature
+                            distances = intersecting_std.geometry.distance(pt)
+                            nearest_idx = distances.idxmin()
+                            width_value = intersecting_std.loc[nearest_idx, 'WIDTH']
+                            if pd.notna(width_value):
+                                found_width = float(width_value)
+                                found_layer = layer_key  # Remember which layer provided it
+
+                except KeyError:
+                    continue
+                except Exception as e:
+                    print(f"Warning: Error processing {layer_key} for width search: {e}")
+                    continue
+
+            # Increment radius for next ring
+            current_radius += step
+
+        # ========================================================================
+        # STAGE 2: CURVATURE CALCULATION (Fixed Window)
+        # ========================================================================
+        # Calculate curvature ONLY from the layer that provided the width
+        min_radius = None
+
+        if found_layer is not None:
+            try:
+                gdf = self.store.get(layer_names[found_layer])
+                if gdf is not None and not gdf.empty:
+                    # Ensure metric CRS
+                    if gdf.crs.to_epsg() != 3414:
+                        gdf = gdf.to_crs("EPSG:3414")
+
+                    # Remove Z-coordinates if present
+                    if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+                        gdf.geometry = gdf.geometry.apply(
+                            lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
+                        )
+
+                    # Filter to valid geometries
+                    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+
+                    if not gdf.empty:
+                        # Create FIXED window buffer for curvature (always collect_radius)
+                        buffer_curv = pt.buffer(collect_radius)
+
+                        # Spatial query using index
+                        candidate_indices = list(gdf.sindex.intersection(buffer_curv.bounds))
+                        if candidate_indices:
+                            candidates = gdf.iloc[candidate_indices]
+
+                            # Find features that actually intersect the buffer
+                            intersecting_curv = candidates[candidates.intersects(buffer_curv)]
+                            if not intersecting_curv.empty:
+                                # Merge all intersecting geometries
+                                from shapely.ops import linemerge, unary_union
+                                merged_geom = unary_union(intersecting_curv.geometry.tolist())
+
+                                # Apply linemerge to connect segments if possible
+                                if merged_geom.geom_type == 'MultiLineString':
+                                    merged_geom = linemerge(merged_geom)
+
+                                # Clip to buffer
+                                clipped_geom = merged_geom.intersection(buffer_curv)
+
+                                # Handle different geometry types after clipping
+                                from shapely.geometry import LineString, MultiLineString
+                                lines_to_process = []
+
+                                if clipped_geom.geom_type == 'LineString':
+                                    lines_to_process = [clipped_geom]
+                                elif clipped_geom.geom_type == 'MultiLineString':
+                                    lines_to_process = list(clipped_geom.geoms)
+                                elif clipped_geom.geom_type == 'GeometryCollection':
+                                    lines_to_process = [g for g in clipped_geom.geoms if g.geom_type == 'LineString']
+
+                                # Calculate radius for each line segment
+                                for line in lines_to_process:
+                                    if line.is_empty or line.length < sample_half_window:
+                                        continue
+
+                                    # Densify the line (sample_half_window is the densification step)
+                                    densified_coords = []
+                                    num_points = int(line.length / sample_half_window)
+                                    for i in range(num_points + 1):
+                                        distance = min(i * sample_half_window, line.length)
+                                        point_on_line = line.interpolate(distance)
+                                        densified_coords.append((point_on_line.x, point_on_line.y))
+
+                                    # Add the end point if not already included
+                                    if len(densified_coords) > 0:
+                                        last_coord = list(line.coords)[-1]
+                                        if densified_coords[-1] != last_coord:
+                                            densified_coords.append(last_coord)
+
+                                    # Calculate minimum radius using triplet method
+                                    if len(densified_coords) >= 3:
+                                        segment_min_radius = self._calculate_min_radius_triplet(densified_coords, epsilon)
+                                        if segment_min_radius is not None:
+                                            if min_radius is None or segment_min_radius < min_radius:
+                                                min_radius = segment_min_radius
+
             except Exception as e:
-                print(f"Warning: Error processing {layer_key} for radius calculation: {e}")
-                continue
+                print(f"Warning: Error calculating curvature from {found_layer}: {e}")
 
-        return (min_radius, width)
+        return (min_radius, found_width)
 
     def _calculate_min_radius_triplet(self, coordinates, epsilon=1e-6):
         """
@@ -768,7 +841,7 @@ class GIS:
 
         return min_radius
 
-    def get_curvature(self, point, sharp_turn_threshold=10.0, search_radius=10.0, default_value=2):
+    def get_curvature(self, point, sharp_turn_threshold=10.0, default_value=2):
         """
         Calculate curvature for a segment using actual path centerline shapefiles.
 
@@ -777,10 +850,13 @@ class GIS:
         shapefiles from Singapore's infrastructure database to find the real path geometry, then
         calculates the minimum circumradius within a local search window.
 
+        This implements the two-stage process from the original PathAssignmentTool:
+        - Stage 1: Expanding ring search (1m→5m) to locate the nearest path
+        - Stage 2: Fixed window analysis (5m) to calculate curvature from that path
+
         Args:
             point: Shapely Point or (lon, lat) tuple representing the segment's starting point
             sharp_turn_threshold: Radius in meters below which indicates a sharp turn (default: 10.0m)
-            search_radius: Radius in meters to search for nearby path features (default: 10.0m)
             default_value: Default category value (2 = No Sharp Turn Present) if no data found
 
         Returns:
@@ -790,18 +866,20 @@ class GIS:
 
         Algorithm:
         1. Extract starting point from segment geometry
-        2. Query path centerline shapefiles within search_radius
-        3. Merge and clip path geometries to the search buffer
-        4. Densify paths (1m intervals) for accurate curvature detection
-        5. Calculate minimum circumradius using triplet method
-        6. Classify: radius < 10m → Sharp Turn (1), otherwise No Sharp Turn (2)
+        2. Use two-stage process to find path and calculate curvature:
+           - Stage 1: Expanding ring (1m→5m) finds nearest path
+           - Stage 2: Fixed 5m window calculates curvature from that path
+        3. Densify paths (1m intervals) for accurate curvature detection
+        4. Calculate minimum circumradius using triplet method
+        5. Classify: radius < 10m → Sharp Turn (1), otherwise No Sharp Turn (2)
         """
-        # Use the new shapefile-based radius calculation
+        # Use the two-stage shapefile-based radius calculation
+        # Defaults match original PathAssignmentTool:
+        #   start_radius=1.0, max_radius=5.0, step=1.0,
+        #   collect_radius=5.0, sample_half_window=1.0
         min_radius, _ = self.get_radius_and_width_at_point(
             point=point,
-            search_radius=search_radius,
-            densify_step=1.0,
-            epsilon=1e-6
+            # Uses default parameters from original implementation
         )
 
         # If no radius could be calculated, return default
