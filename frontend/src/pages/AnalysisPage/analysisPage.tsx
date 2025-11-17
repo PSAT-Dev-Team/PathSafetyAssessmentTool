@@ -6,16 +6,8 @@ import {
   Button,
   Tabs,
 } from "@chakra-ui/react";
-import { fetchProjectList } from "../../api";
+import { fetchProjectList, type FileResponse } from "../../api";
 import "../Home/home.css"; // Reuse home page styles
-
-interface FileListResponse {
-  projects: string[];
-}
-
-interface ProjectItem {
-  name: string;
-}
 
 type TreatmentPhase = "pre" | "post";
 
@@ -24,8 +16,8 @@ export default function AnalysisPage() {
   const [phase, setPhase] = useState<TreatmentPhase>("pre");
 
   // Project list state
-  const [projectList, setProjectList] = useState<FileListResponse | null>(null);
-  const [postTreatmentList, setPostTreatmentList] = useState<FileListResponse | null>(null);
+  const [projectList, setProjectList] = useState<FileResponse | null>(null);
+  const [postTreatmentList, setPostTreatmentList] = useState<FileResponse | null>(null);
 
   // Filter and selection states
   const [nameQuery, setNameQuery] = useState("");
@@ -51,20 +43,19 @@ export default function AnalysisPage() {
   }, [phase]);
 
   // Process projects based on current phase
-  const projects: ProjectItem[] = useMemo(() => {
+  const projects = useMemo(() => {
     const list = phase === "pre" ? projectList : postTreatmentList;
     if (!list?.projects) return [];
     return list.projects
       .slice()
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name }));
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [projectList, postTreatmentList, phase]);
 
   // Apply filters
   const filtered = useMemo(() => {
     const q = nameQuery.trim().toLowerCase();
     let list = projects;
-    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+    if (q) list = list.filter((project) => project.name.toLowerCase().includes(q));
     return list;
   }, [projects, nameQuery]);
 
@@ -174,24 +165,24 @@ export default function AnalysisPage() {
                 </td>
               </tr>
             ) : (
-              filtered.map((p) => {
-                const isSelected = selected === p.name;
+              filtered.map((project) => {
+                const isSelected = selected === project.name;
                 return (
                   <tr
-                    key={p.name}
+                    key={project.name}
                     className={isSelected ? "row selected" : "row"}
-                    onClick={() => onRowClick(p.name)}
+                    onClick={() => onRowClick(project.name)}
                   >
                     <td>
                       <input
                         type="radio"
                         name="projectSelect"
                         checked={isSelected}
-                        onChange={() => onRowClick(p.name)}
-                        aria-label={`Select ${p.name}`}
+                        onChange={() => onRowClick(project.name)}
+                        aria-label={`Select ${project.name}`}
                       />
                     </td>
-                    <td title={p.name}>{p.name}</td>
+                    <td title={project.name}>{project.name}</td>
                     <td>
                       <Box
                         as="span"

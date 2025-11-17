@@ -15,17 +15,9 @@ import {
   SelectTrigger,
   SelectValueText,
 } from "@chakra-ui/react";
-import { fetchProjectList } from "../../api";
+import { fetchProjectList, type FileResponse } from "../../api";
 import AttributesDropdown from "./components/AttributesDropdown";
 import TreatmentMapView from "./components/TreatmentMapView";
-
-interface FileListResponse {
-  projects: string[];
-}
-
-interface ProjectItem {
-  name: string;
-}
 
 // Size filter options
 const sizeOptions = createListCollection({
@@ -63,11 +55,10 @@ const tagsOptions = createListCollection({
 
 export default function TreatmentPage() {
   // Project list state
-  const [projectList, setProjectList] = useState<FileListResponse | null>(null);
+  const [projectList, setProjectList] = useState<FileResponse | null>(null);
   const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
 
   // Filter states
-  const [nameQuery, setNameQuery] = useState("");
   const [dateCreatedFrom, setDateCreatedFrom] = useState("");
   const [dateCreatedTo, setDateCreatedTo] = useState("");
   const [lastUpdatedFrom, setLastUpdatedFrom] = useState("");
@@ -84,12 +75,11 @@ export default function TreatmentPage() {
   }, []);
 
   // Process projects
-  const projects: ProjectItem[] = useMemo(() => {
+  const projects = useMemo(() => {
     if (!projectList?.projects) return [];
     return projectList.projects
       .slice()
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name }));
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [projectList]);
 
   // Create collection for project dropdown

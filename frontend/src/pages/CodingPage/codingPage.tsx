@@ -15,7 +15,7 @@ import {
   CardBody
 } from "@chakra-ui/react";
 
-import type { Feature, FeatureCollection, LineString, Geometry } from "geojson";
+import type { Feature, FeatureCollection, LineString } from "geojson";
 import { toaster } from "../../components/ui/toaster";
 
 
@@ -87,11 +87,11 @@ export default function CodingPage() {
 
   // 取当前行的图片引用（按你数据列名兜底）
   // 根据当前行推导图片引用（优先 editedRow，其次 currentAttr）
-  function isLineStringFeature(
-    f: Feature<Geometry, any> | undefined | null
-  ): f is Feature<LineString, any> {
-    return !!f && f.geometry?.type === "LineString";
-  }
+  // function isLineStringFeature(
+  //   f: Feature<Geometry, any> | undefined | null
+  // ): f is Feature<LineString, any> {
+  //   return !!f && f.geometry?.type === "LineString";
+  // }
 
   // ✅ 补：当前要素（LineString），便于统一读取
   const currentFeature = useMemo<Feature | null>(() => {

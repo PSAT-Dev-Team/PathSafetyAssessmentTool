@@ -5,10 +5,12 @@ import {
   Dialog,
   Portal,
   CloseButton,
-  Text,
   Select,
   createListCollection,
-} from "@chakra-ui/react";import { useNavigate } from "react-router-dom";
+} from "@chakra-ui/react";
+import { useNavigate } from "react-router-dom";
+import { LuPencil } from "react-icons/lu";
+import EditProjectModal from "./components/EditProjectModal";
 
 import "./home.css";
 
@@ -16,7 +18,7 @@ interface FileListResponse {
   projects: ProjectListItem[];
 }
 
-// Generate a consistent color for each unique tag
+// Generate a consistent, bright, varied color for each unique tag
 function getTagColor(tag: string): string {
   // Simple hash function to convert string to number
   let hash = 0;
@@ -24,10 +26,21 @@ function getTagColor(tag: string): string {
     hash = tag.charCodeAt(i) + ((hash << 5) - hash);
   }
 
-  // Convert to HSL color with good saturation and lightness
-  const hue = Math.abs(hash % 360);
-  const saturation = 65 + (Math.abs(hash) % 20); // 65-85%
-  const lightness = 75 + (Math.abs(hash >> 8) % 10); // 75-85%
+  // Use multiple hash variations to increase color variety
+  const hash2 = Math.abs(hash >> 16);
+  const hash3 = Math.abs(hash << 3);
+
+  // Create wider hue distribution with warm and cool colors
+  // Avoid muddy middle ranges (40-60 yellow-green, 160-180 cyan)
+  let hue = Math.abs(hash % 360);
+  if (hue >= 40 && hue <= 60) hue = (hue + 30) % 360;  // Skip muddy yellow-green
+  if (hue >= 160 && hue <= 180) hue = (hue + 30) % 360; // Skip muddy cyan
+
+  // Higher saturation (75-95%) for more vibrant colors
+  const saturation = 75 + (hash2 % 21); // 75-95%
+
+  // Higher lightness (65-80%) for brighter, more visible colors
+  const lightness = 65 + (hash3 % 16); // 65-80%
 
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
@@ -35,8 +48,8 @@ function getTagColor(tag: string): string {
 export default function Home() {
 
   // Status
-  const [status, setStatus] = useState("checking...");
-  const [error, setError] = useState<string | null>(null);
+  const [, setStatus] = useState("checking...");
+  const [, setError] = useState<string | null>(null);
 
   // Project List
   const [Projectlist, setProjectList] = useState<FileListResponse | null>(null);
@@ -51,7 +64,10 @@ export default function Home() {
   // Delete dialog state
   const [openDelete, setOpenDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+
+  // Edit dialog state
+  const [openEdit, setOpenEdit] = useState(false);
+  const [editingProject, setEditingProject] = useState<ProjectListItem | null>(null);
 
   const navigate = useNavigate();
 
@@ -105,10 +121,31 @@ export default function Home() {
     navigate(`/coding/${encodeURIComponent(selected)}`);
   };
 
+  // 编辑成功回调
+  const handleEditSuccess = (newName: string, newTags: string[]) => {
+    if (!editingProject) return;
+
+    const oldName = editingProject.name;
+
+    // 更新本地列表
+    setProjectList((prev) => {
+      if (!prev) return prev;
+      return {
+        projects: prev.projects.map((p) =>
+          p.name === oldName ? { name: newName, tags: newTags } : p
+        ),
+      };
+    });
+
+    // 如果编辑的项目是当前选中的，并且名称改变了，更新选中的项目
+    if (selected === oldName && newName !== oldName) {
+      setSelected(newName);
+    }
+  };
+
 // 打开确认对话框
   const askDelete = () => {
     if (!selected) return;
-    setDeleteErr(null);
     setOpenDelete(true);
   };
 
@@ -117,7 +154,6 @@ export default function Home() {
     if (!selected) return;
     try {
       setDeleting(true);
-      setDeleteErr(null);
       await apiDeleteProject(selected);
       // 本地把它从列表移除
       setProjectList((prev) =>
@@ -128,7 +164,7 @@ export default function Home() {
       setSelected(null);
       setOpenDelete(false);
     } catch (e: any) {
-      setDeleteErr(e?.message ?? "Delete failed");
+      console.error("Delete failed:", e);
     } finally {
       setDeleting(false);
     }
@@ -206,12 +242,13 @@ export default function Home() {
               <th style={{ width: 48 }}></th>
               <th>Project Name</th>
               <th>Tags</th>
+              <th style={{ width: 120 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={3} className="empty">
+                <td colSpan={4} className="empty">
                   No projects found
                 </td>
               </tr>
@@ -251,6 +288,18 @@ export default function Home() {
                         )}
                       </div>
                     </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          setEditingProject(p);
+                          setOpenEdit(true);
+                        }}
+                        className="row-edit-btn"
+                        aria-label="Edit project"
+                      >
+                        <LuPencil className="row-edit-icon" />
+                      </button>
+                    </td>
                   </tr>
                 );
               })
@@ -258,6 +307,17 @@ export default function Home() {
           </tbody>
         </table>
       </div>
+
+      {/* 编辑 Dialog */}
+      {editingProject && (
+        <EditProjectModal
+          open={openEdit}
+          onClose={() => setOpenEdit(false)}
+          projectName={editingProject.name}
+          projectTags={editingProject.tags}
+          onSuccess={handleEditSuccess}
+        />
+      )}
 
       {/* 删除确认 Dialog */}
       <Dialog.Root open={openDelete} onOpenChange={(d) => setOpenDelete(d.open)}>

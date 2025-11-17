@@ -12,7 +12,6 @@ type CodingSidebarProps = {
 };
 
 export default function CodingSidebar({
-  projectName,
   onCalculate,
   onSave,
   onExit,

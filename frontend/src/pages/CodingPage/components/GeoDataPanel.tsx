@@ -40,7 +40,7 @@ function FitBounds({ points }: { points: [number, number][] }) {
   return null;
 }
 
-export default function GeoDataPanel({ feature, index, onJump }: Props) {
+export default function GeoDataPanel({ index, onJump }: Props) {
   // 从路由拿项目名（不改父组件）
   const { projectName } = useParams<{ projectName: string }>();
   const decodedName = useMemo(() => {
@@ -89,7 +89,7 @@ export default function GeoDataPanel({ feature, index, onJump }: Props) {
   const allLatLngs = useMemo(() => points.map(p => p.latlng), [points]);
 
   // 当前高亮点
-  const current = useMemo(() => points.find(p => p.idx === index) ?? null, [points, index]);
+  // const current = useMemo(() => points.find(p => p.idx === index) ?? null, [points, index]);
 
   // 初始中心（无数据时默认新加坡中心点）
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);

@@ -19,6 +19,7 @@ import exifread
 from shapely.geometry import Point,LineString
 import geopandas as gpd
 import shutil
+import datetime
 from app.services.cyclerap_scoring import calculate_cyclerap_score_native
 # ---- init guards (thread-safe & error memo) ----
 import threading
@@ -537,7 +538,76 @@ def delete_project(project_name: str):
     except Exception as e:
         traceback.print_exc()
         return fail(f"Delete failed: {e}", 500)
-    
+
+@bp.patch("/<project_name>")
+def update_project_metadata(project_name: str):
+    """
+    Update project metadata (name and/or tags):
+    PATCH /api/projects/<project_name>
+    Body: { "new_name": "...", "tags": [...] }
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        new_name = payload.get("new_name")
+        new_tags = payload.get("tags")
+
+        # Get the project
+        try:
+            proj = pm.project(project_name)
+        except KeyError:
+            return fail("Project not found", 404)
+
+        # Update tags if provided
+        if new_tags is not None:
+            if not isinstance(new_tags, list):
+                return fail("Tags must be an array", 400)
+            proj.metadata.tags = new_tags
+            proj.metadata.last_updated = datetime.date.today()
+            proj.metadata.serialize(proj.project_path)
+
+        # Update name if provided (requires renaming directory)
+        if new_name and new_name != project_name:
+            if not new_name.strip():
+                return fail("New name cannot be empty", 400)
+
+            # Check if new name already exists
+            if new_name in pm.list_names():
+                return fail(f"Project '{new_name}' already exists", 400)
+
+            # Rename the directory
+            old_path = proj.project_path
+            new_path = old_path.parent / new_name
+
+            try:
+                old_path.rename(new_path)
+
+                # Update metadata
+                proj.project_path = new_path
+                proj.metadata.project_name = new_name
+                proj.metadata.last_updated = datetime.date.today()
+                proj.metadata.serialize(new_path)
+
+                # Reload the project list to reflect the changes
+                pm.projects = [
+                    Project(p) for p in pm.des_path.iterdir() if p.is_dir()
+                ]
+
+            except Exception as e:
+                return fail(f"Failed to rename project: {e}", 500)
+
+        return ok({
+            "ok": True,
+            "name": new_name if new_name else project_name,
+            "tags": proj.metadata.tags or []
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"Update failed: {e}", 500)
+
 @bp.post("/<project_name>/autocode/image")
 def autocode_image(project_name: str):
     try:
@@ -575,16 +645,14 @@ def autocode_gis(project_name: str):
 
         payload = request.get_json(force=True, silent=True) or {}
         coords = payload.get("coords")  # [[lon, lat], ...]
+
         if not coords or not isinstance(coords, list) or not isinstance(coords[0], list):
             return fail("coords (LineString) is required", 400)
 
-        # 起点（WGS84）
+        # Segment starting point (WGS84) - first coordinate of the segment
         start_lon, start_lat = coords[0]
-        from shapely.geometry import Point, LineString
+        from shapely.geometry import Point
         pt = Point(start_lon, start_lat)
-
-        # Create LineString from coordinates for curvature calculation
-        linestring = LineString(coords) if len(coords) >= 2 else None
 
         # backend/shapefiles 作为基准目录
         backend_root = Path(__file__).resolve().parents[3]  # .../backend
@@ -646,10 +714,10 @@ def autocode_gis(project_name: str):
         updates["Heavy vehicle flow"] = heavy_vehicle_flow
 
         # Added for Curvature
-        # Calculate curvature using circumcircle method on the LineString geometry
-        if linestring is not None:
-            curvature = _gis.get_curvature(linestring, sharp_turn_threshold=15.0, densify_step=0.5, default_value=2)
-            updates["Curvature"] = curvature
+        # Calculate curvature using actual path centerline shapefiles
+        # Queries cycling/footpath/shared path shapefiles within 10m radius
+        curvature = _gis.get_curvature(pt, sharp_turn_threshold=10.0, search_radius=10.0, default_value=2)
+        updates["Curvature"] = curvature
 
         # Added for Facility Width per Direction
         # Calculate facility width using expanding ring search on path centerline shapefiles

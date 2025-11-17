@@ -73,6 +73,27 @@ class LayerStore:
             self.layers[name] = gdf
         return self.layers[name]
 
+    def clear_cache(self, name: str = None):
+        """Clear cached layers. If name is None, clear all cached layers."""
+        if name is None:
+            self.layers.clear()
+        elif name in self.layers:
+            del self.layers[name]
+
+    def reload(self, name: str = None):
+        """Force reload of one or all layers by clearing cache and reloading"""
+        self.clear_cache(name)
+        if name is not None:
+            # Force reload by accessing the layer
+            return self.get(name)
+        else:
+            # Reload all registered layers
+            for layer_name in list(self.paths.keys()):
+                try:
+                    self.get(layer_name)
+                except Exception as e:
+                    print(f"Warning: Could not reload layer {layer_name}: {e}")
+
     def to_metric_point(self, point, input_crs=None):
         pt = Point(point) if isinstance(point, tuple) else point
 
@@ -538,87 +559,172 @@ class GIS:
         else:
             return default_value  # Low (1)
 
-    def get_curvature(self, linestring_geometry, sharp_turn_threshold=15.0, densify_step=0.5, epsilon=1e-10, default_value=2):
+    def get_radius_and_width_at_point(self, point, search_radius=10.0, densify_step=1.0, epsilon=1e-6):
         """
-        Calculate curvature of a cycling facility path using the circumcircle method.
+        Calculate the minimum radius (curvature) and width at a specific point using actual path centerline shapefiles.
 
-        Curvature is a categorical attribute indicating whether a sharp turn is present on the
-        cycling facility path. The calculation uses a circumcircle-based algorithm that analyzes
-        the path geometry by sliding a 3-point window through all vertices and calculating the
-        minimum circumradius.
+        This method queries cycling path, footpath, and shared path centerline shapefiles to find the actual
+        infrastructure geometry near the point, then calculates the minimum circumradius (representing the
+        sharpest turn) and extracts the width information.
 
         Args:
-            linestring_geometry: Shapely LineString geometry in any CRS (will be converted to metric)
-            sharp_turn_threshold: Radius threshold in meters below which indicates a sharp turn (default: 15.0m)
-            densify_step: Distance in meters between interpolated points for smoother detection (default: 0.5m)
-            epsilon: Minimum area value to detect collinear points (default: 1e-10)
-            default_value: Default category value (2 = No Sharp Turn Present) for edge cases
+            point: Shapely Point or (lon, lat) tuple in WGS84 or metric CRS
+            search_radius: Radius in meters to search for nearby path features (default: 10.0m)
+            densify_step: Distance in meters between interpolated points for curvature calculation (default: 1.0m)
+            epsilon: Minimum value for distance/area calculations to avoid numerical issues (default: 1e-6)
 
         Returns:
-            int: Curvature category
-                 1 = 'Sharp Turn Present' (minimum radius < threshold)
-                 2 = 'No Sharp Turn Present' (minimum radius >= threshold, default)
+            tuple: (min_radius, width)
+                - min_radius (float or None): Minimum circumradius in meters, or None if no valid calculation
+                - width (float or None): Path width in meters, or None if not found
 
-        Implementation follows the circumcircle method specification:
-        1. Convert geometry to metric CRS (EPSG:3414)
-        2. Densify the LineString by inserting vertices every densify_step meters
-        3. Extract all coordinate points from densified geometry
-        4. Slide through all consecutive triplets (A, B, C)
-        5. For each triplet:
-           a. Calculate side lengths: a = dist(A,B), b = dist(B,C), c = dist(A,C)
-           b. Calculate semi-perimeter: p = 0.5 * (a + b + c)
-           c. Calculate area using Heron's formula: area² = p * (p-a) * (p-b) * (p-c)
-           d. Calculate circumradius: R = (a * b * c) / (4 * area)
-        6. Track minimum radius across all triplets
-        7. Compare minimum radius against threshold to determine sharp turn
+        Algorithm:
+        1. Query shapefile layers within search_radius around the point
+        2. Merge connectable line segments
+        3. Clip merged geometry to the circular buffer
+        4. Densify the line by inserting vertices every densify_step meters
+        5. Calculate minimum radius using triplet method with circumcircle
+        6. Extract width from shapefile attributes
         """
-        from shapely.geometry import LineString
+        # Convert point to metric CRS (EPSG:3414)
+        pt = self.store.to_metric_point(point)
 
-        # Handle null or invalid geometry
-        if linestring_geometry is None or linestring_geometry.is_empty:
-            return default_value
+        # Create search buffer
+        buffer_geom = pt.buffer(search_radius)
 
-        # Convert to metric CRS if needed
-        if not isinstance(linestring_geometry, LineString):
-            return default_value
+        # Load and prepare path shapefiles with priority order
+        priority = ["cycling", "shared", "footpath"]
+        layer_names = {
+            "cycling": "cycling_path",
+            "shared": "shared_path",
+            "footpath": "footpath"
+        }
 
-        # Create a GeoDataFrame to handle CRS conversion
-        from geopandas import GeoDataFrame
-        temp_gdf = GeoDataFrame(geometry=[linestring_geometry], crs=CRS_WGS84)
+        min_radius = None
+        width = None
 
-        # Check if already in metric CRS (heuristic: if coordinates are large, assume metric)
-        coords = list(linestring_geometry.coords)
-        if len(coords) > 0:
-            x, y = coords[0]
-            # If coordinates look like lat/lon, convert to metric
-            if -180 <= x <= 180 and -90 <= y <= 90:
-                temp_gdf = temp_gdf.to_crs(CRS_METRIC)
-                linestring_geometry = temp_gdf.geometry.iloc[0]
+        for layer_key in priority:
+            try:
+                gdf = self.store.get(layer_names[layer_key])
+                if gdf is None or gdf.empty:
+                    continue
 
-        # Densify the LineString for better curvature detection
-        # Insert vertices every densify_step meters along the line
-        if linestring_geometry.length > 0:
-            num_points = int(linestring_geometry.length / densify_step)
-            if num_points > 1:
-                # Interpolate points along the line
-                densified_coords = []
-                for i in range(num_points + 1):
-                    distance = min(i * densify_step, linestring_geometry.length)
-                    point = linestring_geometry.interpolate(distance)
-                    densified_coords.append((point.x, point.y))
-                # Add the end point if not already included
-                if densified_coords[-1] != coords[-1]:
-                    densified_coords.append(coords[-1])
-                linestring_geometry = LineString(densified_coords)
+                # Ensure metric CRS
+                if gdf.crs.to_epsg() != 3414:
+                    gdf = gdf.to_crs("EPSG:3414")
 
-        # Extract coordinates from densified geometry
-        coordinates = list(linestring_geometry.coords)
+                # Remove Z-coordinates if present
+                if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+                    gdf.geometry = gdf.geometry.apply(
+                        lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
+                    )
 
-        # Need at least 3 points to calculate curvature
+                # Filter to valid geometries
+                gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+                if gdf.empty:
+                    continue
+
+                # Spatial query using index
+                candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
+                if not candidate_indices:
+                    continue
+
+                candidates = gdf.iloc[candidate_indices]
+
+                # Find features that actually intersect the buffer
+                intersecting = candidates[candidates.intersects(buffer_geom)]
+                if intersecting.empty:
+                    continue
+
+                # Merge all intersecting geometries
+                from shapely.ops import linemerge, unary_union
+                merged_geom = unary_union(intersecting.geometry.tolist())
+
+                # Apply linemerge to connect segments if possible
+                if merged_geom.geom_type == 'MultiLineString':
+                    merged_geom = linemerge(merged_geom)
+
+                # Clip to buffer
+                clipped_geom = merged_geom.intersection(buffer_geom)
+
+                # Handle different geometry types after clipping
+                from shapely.geometry import LineString, MultiLineString
+                lines_to_process = []
+
+                if clipped_geom.geom_type == 'LineString':
+                    lines_to_process = [clipped_geom]
+                elif clipped_geom.geom_type == 'MultiLineString':
+                    lines_to_process = list(clipped_geom.geoms)
+                elif clipped_geom.geom_type == 'GeometryCollection':
+                    lines_to_process = [g for g in clipped_geom.geoms if g.geom_type == 'LineString']
+
+                if not lines_to_process:
+                    continue
+
+                # Calculate radius for each line segment
+                for line in lines_to_process:
+                    if line.is_empty or line.length < densify_step:
+                        continue
+
+                    # Densify the line
+                    densified_coords = []
+                    num_points = int(line.length / densify_step)
+                    for i in range(num_points + 1):
+                        distance = min(i * densify_step, line.length)
+                        point_on_line = line.interpolate(distance)
+                        densified_coords.append((point_on_line.x, point_on_line.y))
+
+                    # Add the end point if not already included
+                    if len(densified_coords) > 0:
+                        last_coord = list(line.coords)[-1]
+                        if densified_coords[-1] != last_coord:
+                            densified_coords.append(last_coord)
+
+                    # Calculate minimum radius using triplet method
+                    if len(densified_coords) >= 3:
+                        segment_min_radius = self._calculate_min_radius_triplet(densified_coords, epsilon)
+                        if segment_min_radius is not None:
+                            if min_radius is None or segment_min_radius < min_radius:
+                                min_radius = segment_min_radius
+
+                # Extract width if found radius in this layer
+                if min_radius is not None and width is None:
+                    # Standardize WIDTH column
+                    intersecting_std = self._standardize_width_column(intersecting)
+                    if 'WIDTH' in intersecting_std.columns:
+                        # Get width from the nearest feature
+                        distances = intersecting_std.geometry.distance(pt)
+                        nearest_idx = distances.idxmin()
+                        width_value = intersecting_std.loc[nearest_idx, 'WIDTH']
+                        if pd.notna(width_value):
+                            width = float(width_value)
+
+                # If we found a radius in this priority layer, stop searching
+                if min_radius is not None:
+                    break
+
+            except KeyError:
+                continue
+            except Exception as e:
+                print(f"Warning: Error processing {layer_key} for radius calculation: {e}")
+                continue
+
+        return (min_radius, width)
+
+    def _calculate_min_radius_triplet(self, coordinates, epsilon=1e-6):
+        """
+        Calculate minimum circumradius from a list of coordinates using the triplet method.
+
+        Args:
+            coordinates: List of (x, y) coordinate tuples
+            epsilon: Minimum threshold for distance/area calculations
+
+        Returns:
+            float or None: Minimum circumradius in meters, or None if no valid triplets
+        """
         if len(coordinates) < 3:
-            return default_value
+            return None
 
-        # Initialize minimum radius to infinity
         min_radius = float('inf')
 
         # Slide through all consecutive triplets
@@ -656,11 +762,53 @@ class GIS:
             if R < min_radius:
                 min_radius = R
 
-        # Apply threshold to determine sharp turn
-        # If no valid triplets were found, min_radius will still be infinity
+        # Return None if no valid triplets were found
         if min_radius == float('inf'):
+            return None
+
+        return min_radius
+
+    def get_curvature(self, point, sharp_turn_threshold=10.0, search_radius=10.0, default_value=2):
+        """
+        Calculate curvature for a segment using actual path centerline shapefiles.
+
+        Curvature is a categorical attribute indicating whether a sharp turn is present at or near
+        a segment location. This method queries actual cycling/footpath/shared path centerline
+        shapefiles from Singapore's infrastructure database to find the real path geometry, then
+        calculates the minimum circumradius within a local search window.
+
+        Args:
+            point: Shapely Point or (lon, lat) tuple representing the segment's starting point
+            sharp_turn_threshold: Radius in meters below which indicates a sharp turn (default: 10.0m)
+            search_radius: Radius in meters to search for nearby path features (default: 10.0m)
+            default_value: Default category value (2 = No Sharp Turn Present) if no data found
+
+        Returns:
+            int: Curvature category
+                 1 = 'Sharp Turn Present' (minimum radius < 10m)
+                 2 = 'No Sharp Turn Present' (minimum radius >= 10m or no data)
+
+        Algorithm:
+        1. Extract starting point from segment geometry
+        2. Query path centerline shapefiles within search_radius
+        3. Merge and clip path geometries to the search buffer
+        4. Densify paths (1m intervals) for accurate curvature detection
+        5. Calculate minimum circumradius using triplet method
+        6. Classify: radius < 10m → Sharp Turn (1), otherwise No Sharp Turn (2)
+        """
+        # Use the new shapefile-based radius calculation
+        min_radius, _ = self.get_radius_and_width_at_point(
+            point=point,
+            search_radius=search_radius,
+            densify_step=1.0,
+            epsilon=1e-6
+        )
+
+        # If no radius could be calculated, return default
+        if min_radius is None:
             return default_value
 
+        # Classify based on threshold
         if min_radius < sharp_turn_threshold:
             return 1  # Sharp Turn Present
         else:

@@ -1,10 +1,11 @@
 import { useLocation, useNavigate, useMatch } from "react-router-dom";
 import { Button, Separator } from "@chakra-ui/react";
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { toaster } from "../../components/ui/toaster";
 import { calculateScore } from "../../api";
 
 import CodingSidebar from "./components/CodingSidebar";
+import ShapefileModal from "./components/ShapefileModal";
 import "./sidebar.css";
 
 const LINKS = [
@@ -16,9 +17,18 @@ const LINKS = [
 export default function Sidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
 
   const createProject = () => {
     navigate(`/projects/create`);
+  };
+
+  const openShapefileModal = () => {
+    setShapefileModalOpen(true);
+  };
+
+  const closeShapefileModal = () => {
+    setShapefileModalOpen(false);
   };
 
   const navigateSidebar = (to: string) => {
@@ -148,8 +158,14 @@ export default function Sidebar() {
           <Button onClick={createProject} colorPalette="gray" variant="surface" size="sm">
             Create Project
           </Button>
+          <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" mt={2}>
+            Update GIS Layers
+          </Button>
         </div>
       )}
+
+      {/* Shapefile Management Modal */}
+      <ShapefileModal open={shapefileModalOpen} onClose={closeShapefileModal} />
     </aside>
   );
 }

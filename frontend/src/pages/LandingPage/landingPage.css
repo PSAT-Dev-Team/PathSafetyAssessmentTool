@@ -9,7 +9,7 @@
   position: relative;
   min-height: 100svh;
   display: block;
-  font-family: 'Montserrat', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
   background-image: url("./assets/PSAT Landing Page BG.png");
   background-size: cover;
   background-position: center;

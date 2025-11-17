@@ -13,7 +13,7 @@ export interface ProjectListItem {
   tags: string[];
 }
 
-interface FileResponse {
+export interface FileResponse {
   projects: ProjectListItem[];
 }
 
@@ -107,6 +107,23 @@ export async function deleteProject(projectName: string) {
   }
   // 预计返回 { ok: true, name: string }
   return (await res.json()) as { ok?: boolean; name?: string };
+}
+
+// Update Project Metadata (name and/or tags)
+export async function updateProject(
+  projectName: string,
+  updates: { new_name?: string; tags?: string[] }
+) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(msg || "Update failed");
+  }
+  return (await res.json()) as { ok?: boolean; name?: string; tags?: string[] };
 }
 
 export async function autocodeImage(project: string, imageRef: string) {
@@ -250,4 +267,152 @@ export async function calculateScore(project: string): Promise<CalculateScoreRes
     throw new Error(await readError(res));
   }
   return (await res.json()) as CalculateScoreResult;
+}
+
+// ========================================================================
+// SHAPEFILE MANAGEMENT API
+// ========================================================================
+
+export type ShapefileMetadata = {
+  feature_count: number;
+  crs: string;
+  bounds: {
+    minx: number;
+    miny: number;
+    maxx: number;
+    maxy: number;
+  };
+  columns: string[];
+  geometry_type: string[];
+};
+
+export type ShapefileInfo = {
+  name: string;
+  base_name: string;
+  path: string;
+  category: string;
+  size: number;
+  files: string[];
+  metadata: ShapefileMetadata;
+  full_path: string;
+};
+
+export type ShapefileCategoryInfo = {
+  name: string;
+  shapefile_count: number;
+  path: string;
+};
+
+export type UploadResult = {
+  uploaded: Array<{
+    name: string;
+    category: string;
+    path: string;
+  }>;
+  errors: string[];
+  count: number;
+};
+
+export type ReplaceResult = {
+  replaced: Array<{
+    target: string;
+    status: string;
+    backup: string;
+  }>;
+  errors: string[];
+  count: number;
+};
+
+export type ValidationResult = {
+  valid: boolean;
+  error?: string;
+  shapefiles?: Array<{
+    name: string;
+    valid: boolean;
+    missing_files: string[];
+    present_files: string[];
+    metadata: ShapefileMetadata;
+  }>;
+};
+
+/**
+ * List all available shapefiles with metadata
+ */
+export async function listShapefiles(): Promise<ShapefileInfo[]> {
+  const res = await fetch("/api/shapefiles");
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Upload new shapefiles (ZIP or individual files)
+ * @param files - Array of File objects to upload
+ * @param category - Optional category/subdirectory name
+ */
+export async function uploadShapefiles(files: File[], category?: string): Promise<UploadResult> {
+  const formData = new FormData();
+  files.forEach(file => formData.append("files", file));
+  if (category) {
+    formData.append("category", category);
+  }
+
+  const res = await fetch("/api/shapefiles/upload", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Replace existing shapefiles with uploaded ones
+ * @param replacements - Array of {uploaded_path, target_path} pairs
+ */
+export async function replaceShapefiles(
+  replacements: Array<{ uploaded_path: string; target_path: string }>
+): Promise<ReplaceResult> {
+  const res = await fetch("/api/shapefiles/replace", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ replacements }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Delete a shapefile and all companion files
+ * @param shapefilePath - Relative path to shapefile (e.g., "area_type/Central.shp")
+ */
+export async function deleteShapefile(shapefilePath: string): Promise<{ message: string; deleted_files: string[] }> {
+  const res = await fetch(`/api/shapefiles/${encodeURIComponent(shapefilePath)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Validate a shapefile (check for required files, valid CRS, etc.)
+ * @param file - File object to validate (must be .zip)
+ */
+export async function validateShapefile(file: File): Promise<ValidationResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch("/api/shapefiles/validate", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * List all shapefile categories (subdirectories)
+ */
+export async function listShapefileCategories(): Promise<ShapefileCategoryInfo[]> {
+  const res = await fetch("/api/shapefiles/categories");
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
 }

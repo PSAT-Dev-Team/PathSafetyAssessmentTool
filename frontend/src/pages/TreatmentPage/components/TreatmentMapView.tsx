@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Box, Text, Tabs } from "@chakra-ui/react";
-import { MapContainer, TileLayer, CircleMarker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";
@@ -32,9 +32,9 @@ function FitBounds({ points }: { points: [number, number][] }) {
 
 export default function TreatmentMapView() {
   const [activeTab, setActiveTab] = useState<string>("map");
-  const [fc, setFc] = useState<GJ | null>(null);
+  const [fc] = useState<GJ | null>(null);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [err] = useState<string | null>(null);
 
   // Load geodata - you can modify this to load your specific project data
   useEffect(() => {
@@ -119,8 +119,9 @@ export default function TreatmentMapView() {
                       center={latlng}
                       radius={radius}
                       pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
-                      title={label}
-                    />
+                    >
+                      <Tooltip>{label}</Tooltip>
+                    </CircleMarker>
                   );
                 })}
               </MapContainer>

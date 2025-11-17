@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **Curvature** attribute indicates whether a sharp turn is present on the cycling facility path. It uses a binary classification system based on geometric analysis of the path using the circumcircle method.
+The **Curvature** attribute indicates whether a sharp turn is present on the cycling facility path at a segment location. It uses actual path centerline shapefiles from Singapore's infrastructure database to determine the real path geometry, then applies the circumcircle method to detect sharp turns.
 
 ## Attribute Details
 
@@ -15,8 +15,8 @@ The **Curvature** attribute indicates whether a sharp turn is present on the cyc
 
 | Code | Label | Description |
 |------|-------|-------------|
-| 1 | Sharp Turn Present | Minimum circumradius < 15m threshold |
-| 2 | No Sharp Turn Present | Minimum circumradius >= 15m threshold (default) |
+| 1 | Sharp Turn Present | Minimum circumradius < 10m threshold |
+| 2 | No Sharp Turn Present | Minimum circumradius >= 10m threshold (default) |
 
 ### Value Mapping
 
@@ -31,15 +31,34 @@ sharp_turn_mapping = {
 
 ## Data Sources
 
-The curvature is calculated directly from the LineString geometry of the cycling path. No external shapefiles are required.
+The curvature is calculated using **actual path centerline shapefiles** from Singapore's infrastructure database, not the segment geometries created from sampled images.
 
-**Input**: LineString geometry with coordinates in WGS84 (EPSG:4326) or metric CRS (EPSG:3414)
+### Required Shapefiles
 
-## Algorithm: Circumcircle Method
+1. **`CyclingpathCentreline.shp`** - Cycling path centerlines
+2. **`Footpathcentreline.shp`** - Footpath centerlines
+3. **`Sharedpathcentreline.shp`** - Shared path centerlines
+
+**Location**: `backend/shapefiles/path/`
+
+**Priority Order**: Cycling paths > Shared paths > Footpaths (first match wins)
+
+**Coordinate System**: EPSG:3414 (Singapore SVY21)
+
+## Algorithm: Shapefile-Based Circumcircle Method
+
+### High-Level Process
+
+1. **Extract Starting Point**: Use the first coordinate of the segment's LineString geometry
+2. **Query Shapefiles**: Search for path features within 10-meter radius of the starting point
+3. **Merge and Clip**: Merge connectable line segments and clip to the search buffer
+4. **Densify**: Insert vertices every 1 meter along the path for accurate curvature detection
+5. **Calculate Radius**: Apply circumcircle method to find minimum radius
+6. **Classify**: Compare radius against 10-meter threshold
 
 ### Mathematical Foundation
 
-The circumcircle method analyzes path geometry by calculating the circumradius (radius of the circumscribed circle) for every three consecutive points along the path. The minimum circumradius across all triplets represents the sharpest turn along the segment.
+The circumcircle method analyzes path geometry by calculating the circumradius (radius of the circumscribed circle) for every three consecutive points along the path. The minimum circumradius across all triplets represents the sharpest turn.
 
 For three points A, B, C forming a triangle:
 
@@ -64,121 +83,111 @@ The circumradius R represents the curvature at that point:
 
 ### Implementation Steps
 
-1. **CRS Conversion**: Convert LineString geometry to metric CRS (EPSG:3414 - SVY21, Singapore) for accurate distance calculations
+#### 1. Point Extraction
+```python
+# Get starting point from segment geometry
+start_point = Point(segment_coords[0])  # First coordinate is segment start
+```
 
-2. **Densification** (Optional but Recommended):
-   - Insert additional vertices every `densify_step` meters (default: 0.5m) along the LineString
-   - Creates a smoother representation for more accurate curvature detection
-   - Uses Shapely's `interpolate()` method
+#### 2. Shapefile Query
+- Create 10-meter circular buffer around starting point
+- Query each shapefile layer using spatial index for efficiency
+- Priority order: cycling → shared → footpath
+- Stop at first layer that contains matching features
 
-3. **Coordinate Extraction**: Extract all coordinate points from the (optionally densified) LineString
+#### 3. Geometry Processing
+```python
+# Merge all intersecting features
+merged_geom = unary_union(intersecting_features.geometry.tolist())
 
-4. **Triplet Analysis**:
-   - Slide a 3-point window through all consecutive vertices
-   - For each triplet (A, B, C):
-     - Calculate side lengths using Euclidean distance
-     - Skip degenerate cases (collinear points, zero-length segments)
-     - Calculate circumradius using the formula above
-     - Track the minimum radius
+# Connect line segments if possible
+if merged_geom.geom_type == 'MultiLineString':
+    merged_geom = linemerge(merged_geom)
 
-5. **Threshold Comparison**:
-   - Compare minimum radius against threshold (default: 15.0 meters)
-   - If min_radius < threshold: Return 1 (Sharp Turn Present)
-   - If min_radius >= threshold: Return 2 (No Sharp Turn Present)
+# Clip to search buffer
+clipped_geom = merged_geom.intersection(buffer_geom)
+```
+
+#### 4. Path Densification
+- Insert vertices every **1.0 meter** along the line
+- Creates smoother representation for accurate curvature detection
+- Uses Shapely's `interpolate()` method
+
+```python
+densified_coords = []
+num_points = int(line.length / 1.0)  # 1 meter step
+for i in range(num_points + 1):
+    distance = min(i * 1.0, line.length)
+    point = line.interpolate(distance)
+    densified_coords.append((point.x, point.y))
+```
+
+#### 5. Triplet Analysis
+- Slide a 3-vertex window through all consecutive points
+- For each triplet (A, B, C):
+  - Calculate side lengths using Euclidean distance
+  - Skip degenerate cases (collinear points, zero-length segments)
+  - Calculate circumradius using the formula above
+  - Track the minimum radius
+
+```python
+for i in range(len(coordinates) - 2):
+    A, B, C = coordinates[i:i+3]
+
+    # Calculate distances
+    a = distance(A, B)
+    b = distance(B, C)
+    c = distance(A, C)
+
+    # Skip if too small
+    if a < 1e-6 or b < 1e-6 or c < 1e-6:
+        continue
+
+    # Heron's formula for area
+    p = 0.5 * (a + b + c)
+    area = sqrt(p * (p-a) * (p-b) * (p-c))
+
+    # Skip collinear
+    if area <= 1e-6:
+        continue
+
+    # Circumradius
+    R = (a * b * c) / (4 * area)
+
+    if R < min_radius:
+        min_radius = R
+```
+
+#### 6. Classification
+```python
+if min_radius is None:
+    return 2  # Default: No Sharp Turn
+elif min_radius < 10.0:
+    return 1  # Sharp Turn Present
+else:
+    return 2  # No Sharp Turn Present
+```
 
 ### Algorithm Parameters
 
 | Parameter | Default Value | Description |
 |-----------|---------------|-------------|
-| `sharp_turn_threshold` | 15.0 meters | Radius below which indicates a sharp turn |
-| `densify_step` | 0.5 meters | Distance between interpolated points |
-| `epsilon` | 1e-10 | Minimum area value to detect collinear points |
+| `sharp_turn_threshold` | 10.0 meters | Radius below which indicates a sharp turn |
+| `search_radius` | 10.0 meters | Distance to search for nearby path features |
+| `densify_step` | 1.0 meters | Distance between interpolated points |
+| `epsilon` | 1e-6 | Minimum value for distance/area to avoid numerical issues |
 | `default_value` | 2 | Default category (No Sharp Turn Present) |
-
-### Pseudocode
-
-```
-FUNCTION get_curvature(linestring_geometry, sharp_turn_threshold=15.0, densify_step=0.5):
-    IF linestring is null OR empty:
-        RETURN 2  // Default: No Sharp Turn
-
-    // Convert to metric CRS (EPSG:3414)
-    IF coordinates look like lat/lon (within -180 to 180, -90 to 90):
-        linestring = convert_to_metric_crs(linestring)
-
-    // Densify for better detection
-    IF linestring.length > 0:
-        num_points = linestring.length / densify_step
-        densified_coords = []
-        FOR i FROM 0 TO num_points:
-            distance = min(i * densify_step, linestring.length)
-            point = interpolate_point_at_distance(linestring, distance)
-            densified_coords.append(point)
-        linestring = LineString(densified_coords)
-
-    coordinates = extract_coordinates(linestring)
-
-    // Need at least 3 points
-    IF coordinates.length < 3:
-        RETURN 2  // Default: No Sharp Turn
-
-    min_radius = INFINITY
-    epsilon = 1e-10
-
-    // Slide through all consecutive triplets
-    FOR i FROM 0 TO coordinates.length - 3:
-        A = coordinates[i]
-        B = coordinates[i + 1]
-        C = coordinates[i + 2]
-
-        // Calculate side lengths
-        a = distance(A, B)
-        b = distance(B, C)
-        c = distance(A, C)
-
-        // Skip degenerate cases
-        IF a < epsilon OR b < epsilon OR c < epsilon:
-            CONTINUE
-
-        // Calculate semi-perimeter
-        p = 0.5 * (a + b + c)
-
-        // Calculate area using Heron's formula
-        area_squared = p * (p - a) * (p - b) * (p - c)
-
-        // Skip collinear points
-        IF area_squared <= epsilon:
-            CONTINUE
-
-        area = sqrt(area_squared)
-
-        // Calculate circumradius
-        R = (a * b * c) / (4 * area)
-
-        // Track minimum
-        IF R < min_radius:
-            min_radius = R
-
-    // Apply threshold
-    IF min_radius == INFINITY:
-        RETURN 2  // No valid triplets found
-
-    IF min_radius < sharp_turn_threshold:
-        RETURN 1  // Sharp Turn Present
-    ELSE:
-        RETURN 2  // No Sharp Turn Present
-```
 
 ## Error Handling
 
 The implementation handles various edge cases:
 
-1. **Null or empty geometry**: Returns default value (2)
-2. **Invalid geometry type**: Returns default value (2)
+1. **No path features found**: Returns default value (2)
+2. **Invalid geometry**: Skips and tries next layer
 3. **Insufficient points** (< 3): Returns default value (2)
 4. **Degenerate triangles**: Skips collinear points and zero-length segments
 5. **Division by zero**: Protected by epsilon checks
-6. **No valid triplets**: Returns default value (2)
+6. **Empty geometries after clipping**: Returns default value (2)
 
 ## Configuration
 
@@ -222,18 +231,15 @@ dataframe_default_values = {
 
 **File**: `backend/app/services/gis_mapping.py`
 
-**Method**: `GIS.get_curvature(linestring_geometry, ...)`
+**Method 1**: `GIS.get_radius_and_width_at_point(point, search_radius=10.0, densify_step=1.0, epsilon=1e-6)`
 
-```python
-class GIS:
-    def get_curvature(self, linestring_geometry,
-                     sharp_turn_threshold=15.0,
-                     densify_step=0.5,
-                     epsilon=1e-10,
-                     default_value=2):
-        """Calculate curvature using circumcircle method"""
-        # Implementation as described above
-```
+Returns: `(min_radius, width)` tuple
+- `min_radius`: Minimum circumradius in meters, or None if not found
+- `width`: Path width in meters, or None if not found
+
+**Method 2**: `GIS.get_curvature(point, sharp_turn_threshold=10.0, search_radius=10.0, default_value=2)`
+
+Returns: Curvature category (1 or 2)
 
 ### API Endpoint
 
@@ -246,166 +252,70 @@ class GIS:
 def autocode_gis(project_name: str):
     # ... initialization code
 
-    # Create LineString from coordinates
-    from shapely.geometry import LineString
-    linestring = LineString(coords) if len(coords) >= 2 else None
+    # Extract starting point from segment coordinates
+    start_lon, start_lat = coords[0]  # First coordinate
+    pt = Point(start_lon, start_lat)
 
     # ... other GIS rules
 
-    # Calculate curvature
-    if linestring is not None:
-        curvature = _gis.get_curvature(
-            linestring,
-            sharp_turn_threshold=15.0,
-            densify_step=0.5,
-            default_value=2
-        )
-        updates["Curvature"] = curvature
+    # Calculate curvature using actual path centerline shapefiles
+    curvature = _gis.get_curvature(
+        pt,
+        sharp_turn_threshold=10.0,
+        search_radius=10.0,
+        default_value=2
+    )
+    updates["Curvature"] = curvature
 
     return ok({"updates": updates, "changed_fields": list(updates.keys())})
 ```
 
+## Comparison with Previous Implementation
+
+### Previous Approach (Removed)
+- Used sampled segment geometry directly
+- Densified the sampled points
+- Analyzed a window around a specific point index
+- Issues: GPS noise, inaccurate for actual infrastructure
+
+### Current Approach (Shapefile-Based)
+- Uses official infrastructure centerline shapefiles
+- Queries actual path geometry from authoritative source
+- More accurate representation of designed infrastructure
+- Consistent with other GIS-based attributes (Area Type, Facility Width, etc.)
+
 ## Testing
 
-### Test Script
+To test the curvature calculation:
 
-**File**: `backend/test_curvature_standalone.py`
-
-The test script verifies the curvature calculation with various synthetic geometries:
-
-1. **Straight line**: Expects No Sharp Turn (2)
-2. **Gentle curve (R=50m)**: Expects No Sharp Turn (2)
-3. **Sharp turn (R=10m)**: Expects Sharp Turn (1)
-4. **Very sharp turn (R=5m)**: Expects Sharp Turn (1)
-5. **Right angle turn**: Expects Sharp Turn (1)
-6. **At threshold (R=15m)**: Expects No Sharp Turn (2)
-7. **Just below threshold (R=14m)**: Expects Sharp Turn (1)
-8. **Two points only**: Expects No Sharp Turn (2) - default for insufficient data
-
-**Run tests**:
-```bash
-cd backend
-python3 test_curvature_standalone.py
-```
-
-### Expected Behavior
-
-- **Straight paths**: Return 2 (No Sharp Turn Present)
-- **Gentle curves** (radius > 15m): Return 2 (No Sharp Turn Present)
-- **Sharp curves** (radius < 15m): Return 1 (Sharp Turn Present)
-- **Right angles and U-turns**: Return 1 (Sharp Turn Present)
-- **Edge cases** (< 3 points, null geometry): Return 2 (default)
+1. **Verify Shapefiles**: Ensure path centerline shapefiles exist at `backend/shapefiles/path/`
+2. **Check Spatial Index**: Shapefiles should have spatial indexes for performance
+3. **Test Different Scenarios**:
+   - Straight paths (should return 2)
+   - Sharp 90-degree turns (should return 1)
+   - Gentle curves (should return 2)
+   - Areas without path coverage (should return default 2)
 
 ## Performance Considerations
 
-1. **Densification Impact**:
-   - Smaller `densify_step` = more precise detection but slower computation
-   - Default 0.5m provides good balance
-   - For long paths, consider increasing step size
-
-2. **Computational Complexity**:
-   - O(n) where n = number of points after densification
-   - For a 100m path with 0.5m step: ~200 points, ~198 triplet calculations
-
-3. **Memory Usage**:
-   - Minimal - stores only coordinates array and one floating-point minimum
-   - No caching of intermediate results
-
-## Examples
-
-### Example 1: Straight Road
-
-**Input**: LineString with coordinates forming a straight line
-
-```python
-coords = [(103.8198, 1.3521), (103.8199, 1.3522), (103.8200, 1.3523)]
-linestring = LineString(coords)
-result = _gis.get_curvature(linestring)
-```
-
-**Output**: `2` (No Sharp Turn Present)
-
-**Reason**: All points are collinear or near-collinear, circumradius is very large
-
-### Example 2: Sharp Turn
-
-**Input**: LineString with coordinates forming a tight corner
-
-```python
-coords = [(103.8198, 1.3521), (103.8199, 1.3521), (103.8199, 1.3522)]
-linestring = LineString(coords)
-result = _gis.get_curvature(linestring)
-```
-
-**Output**: `1` (Sharp Turn Present)
-
-**Reason**: Tight corner results in small circumradius (< 15m)
-
-### Example 3: Gentle Curve
-
-**Input**: LineString with coordinates forming a gradual bend
-
-```python
-# Large arc with 50m radius
-angles = np.linspace(0, np.pi/4, 20)
-coords = [(50 * np.cos(a) + 103.82, 50 * np.sin(a) + 1.35) for a in angles]
-linestring = LineString(coords)
-result = _gis.get_curvature(linestring)
-```
-
-**Output**: `2` (No Sharp Turn Present)
-
-**Reason**: Large radius curve (50m >> 15m threshold)
-
-## Tuning Guidelines
-
-### Adjusting the Threshold
-
-The `sharp_turn_threshold` parameter (default: 15m) defines what constitutes a "sharp" turn:
-
-- **Increase threshold** (e.g., 20m): Classify more curves as "sharp turns"
-  - Use for stricter safety assessment
-  - Appropriate for high-speed cycling environments
-
-- **Decrease threshold** (e.g., 10m): Classify fewer curves as "sharp turns"
-  - Use for relaxed assessment
-  - Appropriate for low-speed recreational paths
-
-### Adjusting Densification
-
-The `densify_step` parameter (default: 0.5m) controls detection granularity:
-
-- **Smaller step** (e.g., 0.25m): More precise detection of short, sharp curves
-  - Higher computational cost
-  - Better for detecting very localized sharp turns
-
-- **Larger step** (e.g., 1.0m): Faster computation, may miss very short curves
-  - Lower computational cost
-  - Suitable for analyzing overall path character
+1. **Spatial Indexing**: Uses R-tree spatial index (`.sindex`) for efficient queries
+2. **Priority Layering**: Stops searching after first layer with matching features
+3. **Buffer Clipping**: Only processes geometry within 10m radius
+4. **Computational Complexity**: O(n) where n = number of densified points
 
 ## Known Limitations
 
-1. **GPS Noise**: High-frequency GPS noise can create artificial "sharp turns"
-   - Mitigation: Pre-smooth the input LineString geometry
-   - Mitigation: Increase `densify_step` to reduce sensitivity
-
-2. **Very Short Segments**: Segments < 1.5m with fewer than 3 points return default value
-   - Cannot calculate curvature with insufficient data
-
-3. **Numerical Precision**: Floating-point arithmetic can cause edge cases at exactly the threshold
-   - Values very close to 15.0m may vary slightly due to rounding
-
-4. **CRS Dependency**: Accurate only in metric coordinate systems
-   - Automatically converts WGS84 to EPSG:3414
-   - Assumes Singapore context for CRS conversion
+1. **Coverage Dependency**: Requires path centerline shapefiles to be present
+2. **10-Meter Window**: Only detects turns within 10m of segment starting point
+3. **Threshold Sensitivity**: 10m threshold may not suit all contexts
+4. **Shapefile Quality**: Results depend on accuracy of source shapefiles
 
 ## Future Enhancements
 
-1. **Adaptive Densification**: Vary step size based on local curvature
-2. **Multi-Scale Analysis**: Analyze at multiple radius scales
-3. **Curve Smoothing**: Pre-process paths to remove GPS noise
-4. **Confidence Scores**: Return probability instead of binary classification
-5. **Visualization**: Generate debug output showing detected sharp turns
+1. **Adaptive Search Radius**: Increase radius if no features found
+2. **Multi-Scale Analysis**: Analyze at different radius thresholds
+3. **Confidence Scores**: Return probability instead of binary classification
+4. **Visualization**: Generate debug output showing detected path geometry
 
 ## References
 
@@ -415,10 +325,9 @@ The `densify_step` parameter (default: 0.5m) controls detection granularity:
 
 ## Author & Version
 
-- **Implemented**: 2025-11-06
-- **Version**: 1.0
+- **Implemented**: 2025-11-17
+- **Version**: 2.0 (Shapefile-based)
 - **Framework**: PathSafetyAssessmentTool / CycleRAP
 - **Implementation Files**:
-  - `backend/app/services/gis_mapping.py` (GIS.get_curvature)
+  - `backend/app/services/gis_mapping.py` (GIS.get_curvature, GIS.get_radius_and_width_at_point)
   - `backend/app/api/projects/routes.py` (API integration)
-  - `backend/test_curvature_standalone.py` (Testing)
