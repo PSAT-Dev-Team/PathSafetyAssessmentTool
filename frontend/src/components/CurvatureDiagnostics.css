@@ -1,0 +1,315 @@
+/* Curvature Diagnostics Styles */
+
+.curvature-diagnostics {
+  margin-bottom: 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.diagnostic-header {
+  width: 100%;
+  padding: 1rem;
+  background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.2s ease;
+}
+
+.diagnostic-header:hover {
+  background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
+}
+
+.diagnostic-header:focus {
+  outline: 2px solid #ffc107;
+  outline-offset: 2px;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.warning-badge {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #856404;
+}
+
+.radius-value {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.diagnostic-content {
+  padding: 1.5rem;
+  background: #fafafa;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.summary {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: white;
+  border-radius: 4px;
+  border-left: 4px solid #ffc107;
+}
+
+.summary h4 {
+  margin: 0 0 0.75rem 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.summary ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  list-style-type: disc;
+}
+
+.summary li {
+  margin: 0.5rem 0;
+  color: #666;
+  line-height: 1.5;
+}
+
+.summary li strong {
+  color: #333;
+}
+
+.calculation-explanation {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 4px;
+}
+
+.calculation-explanation h4 {
+  margin: 0 0 1rem 0;
+  color: #333;
+  font-size: 1.2rem;
+}
+
+.explanation-intro {
+  margin: 1rem 0 1.5rem 0;
+  padding: 1rem;
+  background: #e3f2fd;
+  border-left: 4px solid #2196f3;
+  color: #1565c0;
+  line-height: 1.6;
+  border-radius: 4px;
+}
+
+.calc-step {
+  display: flex;
+  gap: 1rem;
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+}
+
+.step-number {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  background: #4caf50;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.1rem;
+}
+
+.step-content {
+  flex: 1;
+}
+
+.step-content h5 {
+  margin: 0 0 0.75rem 0;
+  color: #333;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.formula {
+  font-family: 'Courier New', monospace;
+  background: white;
+  padding: 0.75rem;
+  border-radius: 4px;
+  margin: 0.5rem 0;
+  color: #d32f2f;
+  font-size: 0.95rem;
+  border: 1px solid #ffcdd2;
+}
+
+.calculation {
+  font-family: 'Courier New', monospace;
+  color: #666;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  background: #f9f9f9;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.result {
+  font-weight: bold;
+  color: #1976d2;
+  margin: 0.5rem 0;
+  font-size: 1rem;
+}
+
+.values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.value-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+}
+
+.value-item .label {
+  color: #666;
+  font-size: 0.9rem;
+  text-transform: capitalize;
+}
+
+.value-item .value {
+  font-weight: 600;
+  color: #333;
+}
+
+.conclusion {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: 4px;
+}
+
+.conclusion h5 {
+  margin: 0 0 1rem 0;
+  color: #856404;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.comparison {
+  margin: 1rem 0;
+}
+
+.value-comparison {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.calculated {
+  color: #d32f2f;
+  font-weight: 600;
+}
+
+.operator {
+  font-size: 1.5rem;
+  color: #666;
+  font-weight: bold;
+}
+
+.threshold {
+  color: #4caf50;
+  font-weight: 600;
+}
+
+.classification {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-weight: 600;
+  margin: 1rem 0;
+  font-size: 1rem;
+}
+
+.classification.sharp-turn {
+  background: #f44336;
+  color: white;
+}
+
+.explanation {
+  margin: 1rem 0 0 0;
+  line-height: 1.6;
+  color: #666;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .diagnostic-header {
+    padding: 0.75rem;
+  }
+
+  .header-content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .warning-badge {
+    font-size: 0.9rem;
+  }
+
+  .radius-value {
+    font-size: 0.85rem;
+  }
+
+  .diagnostic-content {
+    padding: 1rem;
+  }
+
+  .calc-step {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .values {
+    grid-template-columns: 1fr;
+  }
+
+  .value-comparison {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 1rem;
+  }
+
+  .operator {
+    align-self: center;
+  }
+}

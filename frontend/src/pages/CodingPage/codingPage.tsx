@@ -34,6 +34,8 @@ import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
 import GeoDataPanel from "./components/GeoDataPanel"; // ← 用你之前的组件（保持文件名/路径）
 import { saveAttributes } from "../../api";
+import { CurvatureVisualizationPanel } from "../../components/CurvatureVisualizationPanel";
+import "../../components/CurvatureVisualizationPanel.css";
 
 
 // 兜底类型
@@ -597,9 +599,25 @@ export default function CodingPage() {
                 : null
             }
             index={currentIndex}
-            onJump={(i) => setCurrentPage(i + 1)}  
+            onJump={(i) => setCurrentPage(i + 1)}
           />
         </GridItem>
+
+        {/* 第三行：Curvature Visualization 跨两列 */}
+        {currentFeature?.geometry?.type === "LineString" && (
+          <GridItem colSpan={{ base: 1, md: 2 }}>
+            <Box mt="4">
+              <Text fontSize="lg" fontWeight="bold" mb="3">
+                Curvature Analysis
+              </Text>
+              <CurvatureVisualizationPanel
+                projectName={name}
+                coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
+                segmentIndex={currentIndex}
+              />
+            </Box>
+          </GridItem>
+        )}
       </Grid>
     </Box>
   );

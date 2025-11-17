@@ -109,14 +109,16 @@ export default function GeoDataPanel({ index, onJump }: Props) {
             <MapContainer
               center={initialCenter.current}
               zoom={13}
+              maxZoom={22}
               style={{ width: "100%", height: 500 }}
               scrollWheelZoom
               preferCanvas
             >
-              {/* OSM 瓦片层（可随时换） */}
+              {/* CartoDB Light basemap - same as Curvature Analysis */}
               <TileLayer
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                 attribution='&copy; OpenStreetMap contributors & CARTO'
+                maxZoom={22}
               />
 
               {/* 数据范围自适应 */}

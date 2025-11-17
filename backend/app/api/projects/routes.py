@@ -737,6 +737,105 @@ def autocode_gis(project_name: str):
         return fail(f"autocode_gis error: {e}", 500)
 
 
+@bp.post("/<project_name>/curvature/visualize")
+def get_curvature_visualization(project_name: str):
+    """
+    Generate visualization data for curvature analysis at a specific segment.
+
+    This endpoint returns all the data needed to display an interactive map showing:
+    - The analysis point (segment starting location)
+    - The 5-meter analysis window (circular buffer)
+    - Path centerlines within the window (color-coded by type)
+    - Calculated curvature radius and path width values
+
+    Request body:
+        {
+            "coords": [[lon, lat], ...],  // Segment LineString coordinates
+            "index": 0  // Optional: segment index for reference
+        }
+
+    Response:
+        {
+            "ok": true,
+            "point": {
+                "lon": 103.8198,
+                "lat": 1.3521
+            },
+            "radius": 8.3,  // Minimum curvature radius in meters (null if not found)
+            "width": 2.5,   // Path width in meters (null if not found)
+            "curvature": 1, // Curvature category (1=Sharp Turn, 2=No Sharp Turn)
+            "circle_geojson": {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[lon, lat], ...]]
+                },
+                "properties": {
+                    "radius_m": 5.0,
+                    "style": {"color": "#000000", "weight": 2, "fill": false}
+                }
+            },
+            "paths": [
+                {
+                    "type": "cycling",
+                    "color": [0, 180, 0],
+                    "coordinates": [[lon, lat], ...],
+                    "is_analysis_layer": true
+                },
+                ...
+            ],
+            "layer_used": "cycling",  // Which layer provided the data
+            "analysis_window_m": 5.0
+        }
+
+    Error Response:
+        {
+            "error": "coords (LineString) is required"
+        }
+    """
+    try:
+        _ensure_models_ready()
+
+        payload = request.get_json(force=True, silent=True) or {}
+        coords = payload.get("coords")  # [[lon, lat], ...]
+
+        if not coords or not isinstance(coords, list) or not isinstance(coords[0], list):
+            return fail("coords (LineString) is required", 400)
+
+        # Segment starting point (WGS84) - first coordinate of the segment
+        start_lon, start_lat = coords[0]
+        from shapely.geometry import Point
+        pt = Point(start_lon, start_lat)
+
+        # Backend shapefiles directory
+        backend_root = Path(__file__).resolve().parents[3]  # .../backend
+        shp_dir = (backend_root / "shapefiles").resolve()
+        if not shp_dir.exists():
+            return fail(f"Shapefile base dir not found: {shp_dir}", 500)
+
+        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
+        _gis = gis.GIS(layer_store)
+
+        # Generate visualization data
+        viz_data = _gis.get_curvature_visualization(pt, collect_radius=5.0)
+
+        # Calculate curvature category for display
+        curvature = 2  # Default: No Sharp Turn
+        if viz_data["radius"] is not None and viz_data["radius"] < 10.0:
+            curvature = 1  # Sharp Turn Present
+
+        # Add curvature category to response
+        viz_data["curvature"] = curvature
+        viz_data["ok"] = True
+
+        return ok(viz_data)
+
+    except ServiceUnavailable as e:
+        return fail(str(e), 503)
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"curvature visualization error: {e}", 500)
+
 
 @bp.post("/<project_name>/autocode/all")
 def autocode_all(project_name: str):

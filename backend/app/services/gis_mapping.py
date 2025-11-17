@@ -784,21 +784,36 @@ class GIS:
 
         return (min_radius, found_width)
 
-    def _calculate_min_radius_triplet(self, coordinates, epsilon=1e-6):
+    def _calculate_min_radius_triplet(self, coordinates, epsilon=1e-6, return_details=False):
         """
         Calculate minimum circumradius from a list of coordinates using the triplet method.
 
         Args:
             coordinates: List of (x, y) coordinate tuples
             epsilon: Minimum threshold for distance/area calculations
+            return_details: If True, return detailed calculation info for diagnostics
 
         Returns:
-            float or None: Minimum circumradius in meters, or None if no valid triplets
+            If return_details=False:
+                float or None: Minimum circumradius in meters, or None if no valid triplets
+            If return_details=True:
+                tuple: (min_radius, details_dict) where details_dict contains:
+                    - all_triplets: List of all calculated radii with coordinates
+                    - min_triplet: The triplet that produced minimum radius
+                    - calculation_steps: Detailed step-by-step calculation
         """
         if len(coordinates) < 3:
+            if return_details:
+                return None, {
+                    "error": "Insufficient points",
+                    "num_points": len(coordinates),
+                    "required": 3
+                }
             return None
 
         min_radius = float('inf')
+        min_triplet_idx = None
+        all_triplets = []
 
         # Slide through all consecutive triplets
         for i in range(len(coordinates) - 2):
@@ -813,6 +828,13 @@ class GIS:
 
             # Skip degenerate cases (zero-length segments)
             if a < epsilon or b < epsilon or c < epsilon:
+                if return_details:
+                    all_triplets.append({
+                        "index": i,
+                        "points": [A, B, C],
+                        "skipped": "degenerate",
+                        "reason": "Side length too small"
+                    })
                 continue
 
             # Calculate semi-perimeter
@@ -823,6 +845,13 @@ class GIS:
 
             # Skip if area is too small (collinear points)
             if area_squared <= epsilon:
+                if return_details:
+                    all_triplets.append({
+                        "index": i,
+                        "points": [A, B, C],
+                        "skipped": "collinear",
+                        "reason": "Points are nearly collinear"
+                    })
                 continue
 
             # Calculate area
@@ -831,15 +860,95 @@ class GIS:
             # Calculate circumradius: R = (a * b * c) / (4 * area)
             R = (a * b * c) / (4.0 * area)
 
+            if return_details:
+                all_triplets.append({
+                    "index": i,
+                    "points": [A, B, C],
+                    "sides": {"a": float(a), "b": float(b), "c": float(c)},
+                    "semi_perimeter": float(p),
+                    "area": float(area),
+                    "radius": float(R),
+                    "is_minimum": False  # Will update later
+                })
+
             # Track minimum radius
             if R < min_radius:
                 min_radius = R
+                min_triplet_idx = len(all_triplets) - 1 if return_details else i
 
         # Return None if no valid triplets were found
         if min_radius == float('inf'):
+            if return_details:
+                return None, {
+                    "error": "No valid triplets",
+                    "total_points": len(coordinates),
+                    "all_triplets": all_triplets
+                }
             return None
 
+        if return_details:
+            # Mark the minimum triplet
+            if min_triplet_idx is not None and all_triplets:
+                all_triplets[min_triplet_idx]["is_minimum"] = True
+
+            # Create detailed explanation
+            min_triplet = all_triplets[min_triplet_idx] if min_triplet_idx is not None else None
+
+            details = {
+                "min_radius": float(min_radius),
+                "total_triplets_checked": len(coordinates) - 2,
+                "valid_triplets": len([t for t in all_triplets if "radius" in t]),
+                "skipped_triplets": len([t for t in all_triplets if "skipped" in t]),
+                "all_triplets": all_triplets,
+                "min_triplet": min_triplet,
+                "calculation_steps": self._format_calculation_steps(min_triplet) if min_triplet else None
+            }
+
+            return float(min_radius), details
+
         return min_radius
+
+    def _format_calculation_steps(self, triplet):
+        """Format the calculation steps for a triplet in human-readable form."""
+        if not triplet or "radius" not in triplet:
+            return None
+
+        sides = triplet["sides"]
+        return {
+            "step_1": {
+                "description": "Measure triangle sides",
+                "formula": "a = distance(A, B), b = distance(B, C), c = distance(A, C)",
+                "values": {
+                    "side_a": f"{sides['a']:.2f} meters",
+                    "side_b": f"{sides['b']:.2f} meters",
+                    "side_c": f"{sides['c']:.2f} meters"
+                }
+            },
+            "step_2": {
+                "description": "Calculate semi-perimeter",
+                "formula": "p = (a + b + c) / 2",
+                "calculation": f"({sides['a']:.2f} + {sides['b']:.2f} + {sides['c']:.2f}) / 2",
+                "result": f"{triplet['semi_perimeter']:.2f} meters"
+            },
+            "step_3": {
+                "description": "Calculate triangle area using Heron's formula",
+                "formula": "area = √(p × (p-a) × (p-b) × (p-c))",
+                "calculation": f"√({triplet['semi_perimeter']:.2f} × {triplet['semi_perimeter'] - sides['a']:.2f} × {triplet['semi_perimeter'] - sides['b']:.2f} × {triplet['semi_perimeter'] - sides['c']:.2f})",
+                "result": f"{triplet['area']:.2f} square meters"
+            },
+            "step_4": {
+                "description": "Calculate circumradius",
+                "formula": "R = (a × b × c) / (4 × area)",
+                "calculation": f"({sides['a']:.2f} × {sides['b']:.2f} × {sides['c']:.2f}) / (4 × {triplet['area']:.2f})",
+                "result": f"{triplet['radius']:.2f} meters"
+            },
+            "conclusion": {
+                "description": "Compare with threshold",
+                "threshold": "10.0 meters",
+                "result": f"{triplet['radius']:.2f} meters",
+                "classification": "Sharp Turn (< 10m)" if triplet['radius'] < 10.0 else "No Sharp Turn (≥ 10m)"
+            }
+        }
 
     def get_curvature(self, point, sharp_turn_threshold=10.0, default_value=2):
         """
@@ -891,6 +1000,274 @@ class GIS:
             return 1  # Sharp Turn Present
         else:
             return 2  # No Sharp Turn Present
+
+    def get_curvature_visualization(self, point, collect_radius=5.0):
+        """
+        Generate visualization data for curvature analysis at a given point.
+
+        This method returns all the data needed to visualize the curvature calculation:
+        - The analysis point (red dot)
+        - The 5-meter analysis window (black circle)
+        - Path centerlines within the window (color-coded by type)
+        - Calculated radius and width values
+
+        Args:
+            point: Shapely Point or (lon, lat) tuple in WGS84
+            collect_radius: Radius in meters for the analysis window (default: 5.0m)
+
+        Returns:
+            dict: Visualization data containing:
+                - point: {"lon": float, "lat": float} - Analysis point in WGS84
+                - radius: float or None - Calculated curvature radius in meters
+                - width: float or None - Path width in meters
+                - circle_geojson: GeoJSON Feature - The analysis circle
+                - paths: list[dict] - Path segments with type and coordinates
+                - layer_used: str or None - Which layer provided the data ("cycling", "shared", "footpath")
+        """
+        # Convert point to metric CRS (EPSG:3414)
+        pt = self.store.to_metric_point(point)
+
+        # Calculate radius and width using the two-stage process
+        min_radius, width = self.get_radius_and_width_at_point(
+            point=point,
+            collect_radius=collect_radius
+        )
+
+        # Create the analysis circle (5m buffer in EPSG:3414)
+        circle_geom_3414 = pt.buffer(collect_radius)
+
+        # Transform circle to WGS84 for frontend display
+        from pyproj import Transformer
+        transformer = Transformer.from_crs("EPSG:3414", "EPSG:4326", always_xy=True)
+
+        # Transform circle coordinates
+        circle_coords_wgs84 = []
+        for x, y in circle_geom_3414.exterior.coords:
+            lon, lat = transformer.transform(x, y)
+            circle_coords_wgs84.append([lon, lat])
+
+        circle_geojson = {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [circle_coords_wgs84]
+            },
+            "properties": {
+                "radius_m": collect_radius,
+                "style": {
+                    "color": "#000000",
+                    "weight": 2,
+                    "fill": False
+                }
+            }
+        }
+
+        # Load path layers and collect paths within the circle
+        priority = ["cycling", "shared", "footpath"]
+        layer_names = {
+            "cycling": "cycling_path",
+            "shared": "shared_path",
+            "footpath": "footpath"
+        }
+        color_map = {
+            "cycling": [0, 180, 0],      # Green
+            "shared": [230, 140, 0],     # Orange
+            "footpath": [30, 144, 255]   # Blue
+        }
+
+        paths = []
+
+        # Determine which layer was used for calculation (if any)
+        # We need to run the width search again to find out which layer provided data
+        found_layer = None
+        current_radius = 1.0
+        while current_radius <= 5.0 and found_layer is None:
+            buffer_ring = pt.buffer(current_radius)
+            for layer_key in priority:
+                try:
+                    gdf = self.store.get(layer_names[layer_key])
+                    if gdf is None or gdf.empty:
+                        continue
+
+                    if gdf.crs.to_epsg() != 3414:
+                        gdf = gdf.to_crs("EPSG:3414")
+
+                    candidate_indices = list(gdf.sindex.intersection(buffer_ring.bounds))
+                    if not candidate_indices:
+                        continue
+
+                    candidates = gdf.iloc[candidate_indices]
+                    intersecting = candidates[candidates.intersects(buffer_ring)]
+
+                    if not intersecting.empty:
+                        found_layer = layer_key
+                        break
+                except Exception:
+                    continue
+            current_radius += 1.0
+
+        # Collect paths from all layers within the circle for visualization
+        for layer_key in priority:
+            try:
+                gdf = self.store.get(layer_names[layer_key])
+                if gdf is None or gdf.empty:
+                    continue
+
+                # Ensure metric CRS
+                if gdf.crs.to_epsg() != 3414:
+                    gdf = gdf.to_crs("EPSG:3414")
+
+                # Remove Z-coordinates if present
+                if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+                    gdf.geometry = gdf.geometry.apply(
+                        lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
+                    )
+
+                # Filter to valid geometries
+                gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+                if gdf.empty:
+                    continue
+
+                # Spatial query using index
+                candidate_indices = list(gdf.sindex.intersection(circle_geom_3414.bounds))
+                if not candidate_indices:
+                    continue
+
+                candidates = gdf.iloc[candidate_indices]
+                intersecting = candidates[candidates.intersects(circle_geom_3414)]
+
+                if intersecting.empty:
+                    continue
+
+                # Process each intersecting path
+                for geom in intersecting.geometry:
+                    if geom is None or geom.is_empty:
+                        continue
+
+                    try:
+                        # Clip to circle
+                        clipped = geom.intersection(circle_geom_3414)
+                    except Exception:
+                        clipped = geom.buffer(0).intersection(circle_geom_3414)
+
+                    # Extract LineStrings from clipped geometry
+                    lines = []
+
+                    if clipped.geom_type == 'LineString':
+                        lines = [clipped]
+                    elif clipped.geom_type == 'MultiLineString':
+                        lines = list(clipped.geoms)
+                    elif clipped.geom_type == 'GeometryCollection':
+                        lines = [g for g in clipped.geoms if g.geom_type == 'LineString']
+
+                    # Transform each line to WGS84 and add to paths
+                    for line in lines:
+                        if line.is_empty:
+                            continue
+
+                        coords_wgs84 = []
+                        for x, y in line.coords:
+                            lon, lat = transformer.transform(x, y)
+                            coords_wgs84.append([lon, lat])
+
+                        paths.append({
+                            "type": layer_key,
+                            "color": color_map.get(layer_key, [0, 0, 0]),
+                            "coordinates": coords_wgs84,
+                            "is_analysis_layer": (layer_key == found_layer)
+                        })
+
+            except Exception as e:
+                print(f"Warning: Error collecting paths from {layer_key} for visualization: {e}")
+                continue
+
+        # Get point coordinates in WGS84
+        if isinstance(point, tuple):
+            point_lon, point_lat = point
+        else:
+            # Transform from metric to WGS84
+            point_lon, point_lat = transformer.transform(pt.x, pt.y)
+
+        # Generate detailed diagnostics if curvature was calculated
+        diagnostics = None
+        if found_layer is not None and min_radius is not None:
+            try:
+                # Re-run calculation with details for diagnostics
+                gdf = self.store.get(layer_names[found_layer])
+                if gdf is not None and not gdf.empty:
+                    if gdf.crs.to_epsg() != 3414:
+                        gdf = gdf.to_crs("EPSG:3414")
+
+                    if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+                        gdf.geometry = gdf.geometry.apply(
+                            lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
+                        )
+
+                    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+
+                    if not gdf.empty:
+                        buffer_curv = pt.buffer(collect_radius)
+                        candidate_indices = list(gdf.sindex.intersection(buffer_curv.bounds))
+
+                        if candidate_indices:
+                            candidates = gdf.iloc[candidate_indices]
+                            intersecting_curv = candidates[candidates.intersects(buffer_curv)]
+
+                            if not intersecting_curv.empty:
+                                from shapely.ops import linemerge, unary_union
+                                merged_geom = unary_union(intersecting_curv.geometry.tolist())
+
+                                if merged_geom.geom_type == 'MultiLineString':
+                                    merged_geom = linemerge(merged_geom)
+
+                                clipped_geom = merged_geom.intersection(buffer_curv)
+
+                                # Get densified coordinates
+                                lines_to_process = []
+                                if clipped_geom.geom_type == 'LineString':
+                                    lines_to_process = [clipped_geom]
+                                elif clipped_geom.geom_type == 'MultiLineString':
+                                    lines_to_process = list(clipped_geom.geoms)
+                                elif clipped_geom.geom_type == 'GeometryCollection':
+                                    lines_to_process = [g for g in clipped_geom.geoms if g.geom_type == 'LineString']
+
+                                # Calculate with details for the first line
+                                if lines_to_process:
+                                    line = lines_to_process[0]
+                                    if not line.is_empty and line.length >= 1.0:
+                                        # Densify
+                                        densified_coords = []
+                                        num_points = int(line.length / 1.0)
+                                        for i in range(num_points + 1):
+                                            distance = min(i * 1.0, line.length)
+                                            point_on_line = line.interpolate(distance)
+                                            densified_coords.append((point_on_line.x, point_on_line.y))
+
+                                        if len(densified_coords) > 0:
+                                            last_coord = list(line.coords)[-1]
+                                            if densified_coords[-1] != last_coord:
+                                                densified_coords.append(last_coord)
+
+                                        if len(densified_coords) >= 3:
+                                            _, details = self._calculate_min_radius_triplet(densified_coords, epsilon=1e-6, return_details=True)
+                                            diagnostics = details
+
+            except Exception as e:
+                print(f"Warning: Error generating diagnostics: {e}")
+
+        return {
+            "point": {
+                "lon": point_lon,
+                "lat": point_lat
+            },
+            "radius": min_radius,
+            "width": width,
+            "circle_geojson": circle_geojson,
+            "paths": paths,
+            "layer_used": found_layer,
+            "analysis_window_m": collect_radius,
+            "diagnostics": diagnostics
+        }
 
     def get_facility_width(self, point, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2):
         """

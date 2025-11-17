@@ -6,6 +6,7 @@ import { Toaster } from "./components/ui/toaster.tsx"
 
 import App from './App.tsx'
 import './index.css'
+import 'leaflet/dist/leaflet.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
