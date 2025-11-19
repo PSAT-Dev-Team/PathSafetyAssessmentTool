@@ -1,10 +1,24 @@
 /* Curvature Visualization Panel Styles */
 
 .curvature-visualization-panel {
-  background: white;
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
   border-radius: 8px;
-  padding: 1rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 20px;
+}
+
+.curvature-panel-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e0e0e0;
+  transition: background-color 0.2s;
+}
+
+.curvature-panel-header:hover {
+  background-color: #f8f9fa;
+}
+
+.curvature-panel-content {
+  padding: 20px;
 }
 
 /* Loading State */

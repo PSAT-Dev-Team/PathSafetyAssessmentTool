@@ -1,6 +1,6 @@
 import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from 'react-leaflet';
-import { useEffect } from 'react';
-import L from 'leaflet';
+import { useEffect, useMemo } from 'react';
+import proj4 from 'proj4';
 import 'leaflet/dist/leaflet.css';
 
 interface PathData {
@@ -38,6 +38,11 @@ interface VisualizationData {
   paths: PathData[];
   layer_used: string | null;
   analysis_window_m: number;
+  diagnostics?: {
+    min_triplet?: {
+      points: [[number, number], [number, number], [number, number]]; // [[x, y], [x, y], [x, y]] in EPSG:3414
+    };
+  } | null;
 }
 
 interface CurvatureVisualizationProps {
@@ -56,13 +61,32 @@ function FitBounds({ center }: { center: [number, number] }) {
 }
 
 export function CurvatureVisualization({ data }: CurvatureVisualizationProps) {
-  const { point, circle_geojson, paths } = data;
+  const { point, circle_geojson, paths, diagnostics } = data;
   const center: [number, number] = [point.lat, point.lon];
 
   // Extract circle coordinates (convert from [lon, lat] to [lat, lon])
   const circleCoords: [number, number][] = circle_geojson.geometry.coordinates[0].map(
     ([lon, lat]) => [lat, lon]
   );
+
+  // Convert triplet points from EPSG:3414 to WGS84 (lat, lon) for display
+  const tripletPoints: [number, number][] | null = useMemo(() => {
+    if (!diagnostics?.min_triplet?.points) return null;
+
+    try {
+      // Define EPSG:3414 (Singapore SVY21)
+      proj4.defs('EPSG:3414', '+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 +ellps=WGS84 +units=m +no_defs');
+
+      // Transform each point from EPSG:3414 (x, y) to WGS84 (lon, lat) then swap to (lat, lon)
+      return diagnostics.min_triplet.points.map(([x, y]) => {
+        const [lon, lat] = proj4('EPSG:3414', 'WGS84', [x, y]);
+        return [lat, lon] as [number, number];
+      });
+    } catch (error) {
+      console.error('Error converting triplet points:', error);
+      return null;
+    }
+  }, [diagnostics]);
 
   return (
     <div style={{ width: '100%', height: '500px', borderRadius: '8px', overflow: 'hidden' }}>
@@ -125,6 +149,21 @@ export function CurvatureVisualization({ data }: CurvatureVisualizationProps) {
             weight: 3,
           }}
         />
+
+        {/* Blue triplet points (P1, P2, P3) */}
+        {tripletPoints && tripletPoints.map((point, index) => (
+          <CircleMarker
+            key={`triplet-${index}`}
+            center={point}
+            radius={8}
+            pathOptions={{
+              fillColor: '#1E90FF',
+              fillOpacity: 1,
+              color: '#ffffff',
+              weight: 2,
+            }}
+          />
+        ))}
       </MapContainer>
     </div>
   );

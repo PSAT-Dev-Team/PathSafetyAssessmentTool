@@ -44,11 +44,25 @@ export interface CurvatureVisualizationResponse {
     total_triplets_checked: number;
     valid_triplets: number;
     skipped_triplets: number;
+    min_triplet?: {
+      index: number;
+      points: [[number, number], [number, number], [number, number]]; // [[x, y], [x, y], [x, y]] in EPSG:3414
+      sides: {
+        a: number;
+        b: number;
+        c: number;
+      };
+      semi_perimeter: number;
+      area: number;
+      radius: number;
+      is_minimum: boolean;
+    };
     calculation_steps: {
       step_1: {
         description: string;
         formula: string;
         values: Record<string, string>;
+        result: string;
       };
       step_2: {
         description: string;

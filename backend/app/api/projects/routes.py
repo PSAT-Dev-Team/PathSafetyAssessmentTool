@@ -837,6 +837,96 @@ def get_curvature_visualization(project_name: str):
         return fail(f"curvature visualization error: {e}", 500)
 
 
+@bp.post("/<project_name>/width/visualize")
+def get_width_visualization(project_name: str):
+    """
+    Generate visualization data for facility width analysis at a specific segment.
+
+    This endpoint returns all the data needed to display an interactive map showing:
+    - The analysis point (segment starting location)
+    - Expanding ring search pattern (1m to 10m radii)
+    - Path centerlines within view (color-coded by type)
+    - Which radius found the width value
+    - Calculated width value and category
+
+    Request body:
+        {
+            "coords": [[lon, lat], ...],  // Segment LineString coordinates
+            "index": 0  // Optional: segment index for reference
+        }
+
+    Response:
+        {
+            "ok": true,
+            "point": {"lon": 103.8198, "lat": 1.3521},
+            "width": 2.5,  // Width in meters (null if not found)
+            "width_category": 2,  // 1=Very Narrow, 2=Narrow, 3=Wide
+            "search_info": {
+                "found_at_radius": 2.0,  // meters
+                "layer_used": "cycling",
+                "total_radii_checked": 5
+            },
+            "search_rings": [
+                {
+                    "radius": 2.0,
+                    "center": [lon, lat],
+                    "candidates_by_layer": {"cycling": 1, "shared": 0, "footpath": 0},
+                    "width_locked": true
+                },
+                ...
+            ],
+            "paths": [
+                {
+                    "type": "cycling",
+                    "color": [0, 180, 0],
+                    "coordinates": [[lon, lat], ...],
+                    "is_analysis_layer": true,
+                    "width_value": 2.5
+                },
+                ...
+            ],
+            "width_distribution": {
+                "cycling": {"min": 0.5, "max": 9.0, "count": 1437},
+                "shared": {"min": 0.4, "max": 11.3, "count": 4531},
+                "footpath": {"min": 0.04, "max": 33.3, "count": 179483}
+            }
+        }
+    """
+    try:
+        _ensure_models_ready()
+
+        payload = request.get_json(force=True, silent=True) or {}
+        coords = payload.get("coords")  # [[lon, lat], ...]
+
+        if not coords or not isinstance(coords, list) or not isinstance(coords[0], list):
+            return fail("coords (LineString) is required", 400)
+
+        # Segment starting point (WGS84)
+        start_lon, start_lat = coords[0]
+        pt = Point(start_lon, start_lat)
+
+        # Backend shapefiles directory
+        backend_root = Path(__file__).resolve().parents[3]
+        shp_dir = (backend_root / "shapefiles").resolve()
+        if not shp_dir.exists():
+            return fail(f"Shapefile base dir not found: {shp_dir}", 500)
+
+        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
+        _gis = gis.GIS(layer_store)
+
+        # Generate visualization data
+        viz_data = _gis.get_width_visualization(pt, start_radius=1.0, max_radius=10.0, step=1.0)
+
+        viz_data["ok"] = True
+        return ok(viz_data)
+
+    except ServiceUnavailable as e:
+        return fail(str(e), 503)
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"width visualization error: {e}", 500)
+
+
 @bp.post("/<project_name>/autocode/all")
 def autocode_all(project_name: str):
     """

@@ -36,6 +36,8 @@ import GeoDataPanel from "./components/GeoDataPanel"; // ← 用你之前的组�
 import { saveAttributes } from "../../api";
 import { CurvatureVisualizationPanel } from "../../components/CurvatureVisualizationPanel";
 import "../../components/CurvatureVisualizationPanel.css";
+import { WidthVisualizationPanel } from "../../components/WidthVisualizationPanel";
+import "../../components/WidthVisualizationPanel.css";
 
 
 // 兜底类型
@@ -603,19 +605,25 @@ export default function CodingPage() {
           />
         </GridItem>
 
-        {/* 第三行：Curvature Visualization 跨两列 */}
+        {/* 第三行：Facility Width Analysis (Collapsible) - 跨两列 */}
         {currentFeature?.geometry?.type === "LineString" && (
           <GridItem colSpan={{ base: 1, md: 2 }}>
-            <Box mt="4">
-              <Text fontSize="lg" fontWeight="bold" mb="3">
-                Curvature Analysis
-              </Text>
-              <CurvatureVisualizationPanel
-                projectName={name}
-                coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
-                segmentIndex={currentIndex}
-              />
-            </Box>
+            <WidthVisualizationPanel
+              projectName={name}
+              coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
+              segmentIndex={currentIndex}
+            />
+          </GridItem>
+        )}
+
+        {/* 第四行：Curvature Visualization (Collapsible) - 跨两列 */}
+        {currentFeature?.geometry?.type === "LineString" && (
+          <GridItem colSpan={{ base: 1, md: 2 }}>
+            <CurvatureVisualizationPanel
+              projectName={name}
+              coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
+              segmentIndex={currentIndex}
+            />
           </GridItem>
         )}
       </Grid>
