@@ -22,7 +22,7 @@ export function WidthVisualization({ data }: WidthVisualizationProps) {
   const center: [number, number] = [data.point.lat, data.point.lon];
 
   return (
-    <div className="width-map" style={{ width: '100%', height: '400px', borderRadius: '8px', overflow: 'hidden' }}>
+    <div className="width-map" style={{ width: '100%', height: '520px', borderRadius: '8px', overflow: 'hidden' }}>
       <MapContainer
         center={center}
         zoom={20}

@@ -78,7 +78,7 @@ export default function TreatmentMapView() {
 
         {/* Map Tab Content */}
         <Tabs.Content value="map">
-          <Box h="500px">
+          <Box h="650px">
             {loading && (
               <Box p="6">
                 <Text color="gray.500">Loading map…</Text>
@@ -131,7 +131,7 @@ export default function TreatmentMapView() {
 
         {/* Table Tab Content */}
         <Tabs.Content value="table">
-          <Box p="6" h="500px" overflowY="auto">
+          <Box p="6" h="650px" overflowY="auto">
             <table
               style={{
                 width: "100%",

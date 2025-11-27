@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
 import {
   Box,
@@ -61,6 +61,30 @@ export default function CodingPage() {
   const [autoCoding, setAutoCoding] = useState(false);
   const [autoCodeMsg, setAutoCodeMsg] = useState<string>("");
   const [progress, setProgress] = useState<number>(0);
+
+  // Track cleanup timeout to ensure it always executes
+  const cleanupTimeoutRef = useRef<number | null>(null);
+
+  // Helper function to clear auto-coding state
+  const clearAutoCodingState = useCallback(() => {
+    setAutoCoding(false);
+    setAutoCodeMsg("");
+    setProgress(0);
+    if (cleanupTimeoutRef.current !== null) {
+      clearTimeout(cleanupTimeoutRef.current);
+      cleanupTimeoutRef.current = null;
+    }
+  }, []);
+
+  // Cleanup timeout on unmount or when currentPage changes
+  useEffect(() => {
+    return () => {
+      if (cleanupTimeoutRef.current !== null) {
+        clearTimeout(cleanupTimeoutRef.current);
+        cleanupTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Track which fields were changed by auto-coding for each row
   const [changedFieldsByRow, setChangedFieldsByRow] = useState<Record<number, string[]>>({});
@@ -207,8 +231,14 @@ export default function CodingPage() {
           type: "error",
         });
       } finally {
+        // Clear any existing timeout and schedule new cleanup
+        if (cleanupTimeoutRef.current !== null) {
+          clearTimeout(cleanupTimeoutRef.current);
+        }
         // 稍微停 300ms 让 100% 有个完成感
-        setTimeout(() => { setAutoCoding(false); setAutoCodeMsg(""); setProgress(0); }, 300);
+        cleanupTimeoutRef.current = window.setTimeout(() => {
+          clearAutoCodingState();
+        }, 300);
       }
     };
 
@@ -296,8 +326,14 @@ export default function CodingPage() {
           type: "error",
         });
       } finally {
+        // Clear any existing timeout and schedule new cleanup
+        if (cleanupTimeoutRef.current !== null) {
+          clearTimeout(cleanupTimeoutRef.current);
+        }
         // Brief delay to show 100% completion before hiding progress overlay
-        setTimeout(() => { setAutoCoding(false); setAutoCodeMsg(""); setProgress(0); }, 300);
+        cleanupTimeoutRef.current = window.setTimeout(() => {
+          clearAutoCodingState();
+        }, 300);
       }
     };
 

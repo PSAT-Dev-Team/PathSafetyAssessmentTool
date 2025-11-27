@@ -1,10 +1,11 @@
-import { Card, CardHeader, CardBody, Heading, Text, Box } from "@chakra-ui/react";
+import { Card, CardHeader, CardBody, Heading, Text, Box, Flex, HStack } from "@chakra-ui/react";
 import { Tooltip } from "../../../components/ui/tooltip";
+import { Switch } from "../../../components/ui/switch";
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { MapContainer, TileLayer, CircleMarker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -52,6 +53,23 @@ export default function GeoDataPanel({ index, onJump }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // GIS Layer toggles (matching curvature analysis colors)
+  const [showFootpath, setShowFootpath] = useState(false);  // Blue
+  const [showCycling, setShowCycling] = useState(false);     // Green
+  const [showShared, setShowShared] = useState(false);       // Orange
+
+  // GIS Layer data
+  type GISLayerFeature = {
+    coordinates: [number, number][];
+    properties: { width?: number };
+  };
+  type GISLayers = {
+    footpath: GISLayerFeature[];
+    cycling: GISLayerFeature[];
+    shared: GISLayerFeature[];
+  };
+  const [gisLayers, setGisLayers] = useState<GISLayers | null>(null);
+
   // 拉取整条 geodata（不改其它文件）
   useEffect(() => {
     if (!decodedName) return;
@@ -89,15 +107,109 @@ export default function GeoDataPanel({ index, onJump }: Props) {
   const allLatLngs = useMemo(() => points.map(p => p.latlng), [points]);
 
   // 当前高亮点
-  // const current = useMemo(() => points.find(p => p.idx === index) ?? null, [points, index]);
+  const current = useMemo(() => points.find(p => p.idx === index) ?? null, [points, index]);
 
   // 初始中心（无数据时默认新加坡中心点）
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
 
+  // Fetch GIS layers when any toggle is turned on and we have a current point
+  useEffect(() => {
+    if (!decodedName || !current) return;
+
+    const anyLayerEnabled = showFootpath || showCycling || showShared;
+    if (!anyLayerEnabled) {
+      setGisLayers(null);
+      return;
+    }
+
+    let aborted = false;
+    (async () => {
+      try {
+        // current.latlng is [lat, lon] format from to4326()
+        const [lat, lon] = current.latlng;
+
+        // Fetch GIS layers near the current coding point
+        console.log('Fetching GIS layers for point:', [lon, lat]);
+        const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/gis/layers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            point: [lon, lat],  // API expects [lon, lat]
+            radius: 200,  // 200m radius around coding area (increased for better visibility)
+            layers: ['cycling', 'shared', 'footpath']
+          })
+        });
+
+        if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+        const data = await res.json();
+
+        if (!aborted && data.ok) {
+          console.log('GIS layers loaded:', data.layers);
+          console.log('Footpath features:', data.layers.footpath?.length);
+          console.log('Cycling features:', data.layers.cycling?.length);
+          console.log('Shared features:', data.layers.shared?.length);
+          setGisLayers(data.layers);
+        }
+      } catch (e: any) {
+        console.error('Failed to load GIS layers:', e);
+      }
+    })();
+
+    return () => { aborted = true; };
+  }, [decodedName, current, showFootpath, showCycling, showShared]);
+
+  // Layer colors matching curvature analysis
+  const layerColors = {
+    footpath: "#1E90FF",    // Blue - rgb(30, 144, 255)
+    cycling: "#00B400",     // Green - rgb(0, 180, 0)
+    shared: "#E68C00"       // Orange - rgb(230, 140, 0)
+  };
+
   return (
     <Card.Root>
       <CardHeader>
-        <Heading size="sm">Map Preview</Heading>
+        <Flex justify="space-between" align="center">
+          <Heading size="sm">Map Preview</Heading>
+
+          {/* GIS Layer Toggles */}
+          <HStack gap="4">
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showFootpath ? "blue.600" : "gray.500"}>
+                Footpath
+              </Text>
+              <Switch
+                colorPalette="blue"
+                size="sm"
+                checked={showFootpath}
+                onCheckedChange={(e) => setShowFootpath(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showCycling ? "green.600" : "gray.500"}>
+                Cycling Path
+              </Text>
+              <Switch
+                colorPalette="green"
+                size="sm"
+                checked={showCycling}
+                onCheckedChange={(e) => setShowCycling(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showShared ? "orange.600" : "gray.500"}>
+                Shared Path
+              </Text>
+              <Switch
+                colorPalette="orange"
+                size="sm"
+                checked={showShared}
+                onCheckedChange={(e) => setShowShared(e.checked)}
+              />
+            </Flex>
+          </HStack>
+        </Flex>
       </CardHeader>
 
       <CardBody>
@@ -110,7 +222,7 @@ export default function GeoDataPanel({ index, onJump }: Props) {
               center={initialCenter.current}
               zoom={13}
               maxZoom={22}
-              style={{ width: "100%", height: 500 }}
+              style={{ width: "100%", height: 650 }}
               scrollWheelZoom
               preferCanvas
             >
@@ -123,6 +235,52 @@ export default function GeoDataPanel({ index, onJump }: Props) {
 
               {/* 数据范围自适应 */}
               {allLatLngs.length > 0 && <FitBounds points={allLatLngs} />}
+
+              {/* GIS Layers - Render below the segment points */}
+              {gisLayers && showFootpath && gisLayers.footpath && (
+                console.log('Rendering footpath layers:', gisLayers.footpath.length),
+                gisLayers.footpath.map((feature, i) => (
+                  <Polyline
+                    key={`footpath-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
+                    pathOptions={{
+                      color: layerColors.footpath,
+                      weight: 3,
+                      opacity: 0.8
+                    }}
+                  />
+                ))
+              )}
+
+              {gisLayers && showCycling && gisLayers.cycling && (
+                console.log('Rendering cycling layers:', gisLayers.cycling.length),
+                gisLayers.cycling.map((feature, i) => (
+                  <Polyline
+                    key={`cycling-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
+                    pathOptions={{
+                      color: layerColors.cycling,
+                      weight: 3,
+                      opacity: 0.8
+                    }}
+                  />
+                ))
+              )}
+
+              {gisLayers && showShared && gisLayers.shared && (
+                console.log('Rendering shared layers:', gisLayers.shared.length),
+                gisLayers.shared.map((feature, i) => (
+                  <Polyline
+                    key={`shared-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
+                    pathOptions={{
+                      color: layerColors.shared,
+                      weight: 3,
+                      opacity: 0.8
+                    }}
+                  />
+                ))
+              )}
 
               {/* 所有起点 */}
               {points.map(({ idx, latlng, f }) => {

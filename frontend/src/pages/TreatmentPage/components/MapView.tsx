@@ -26,7 +26,7 @@ export default function MapView() {
       overflow="hidden"
       bg="white"
       _dark={{ bg: "gray.800" }}
-      h="500px"
+      h="650px"
     >
       <MapContainer
         center={SINGAPORE_CENTER}

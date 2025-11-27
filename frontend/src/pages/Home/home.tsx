@@ -7,6 +7,7 @@ import {
   CloseButton,
   Select,
   createListCollection,
+  Box,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { LuPencil } from "react-icons/lu";
@@ -18,8 +19,19 @@ interface FileListResponse {
   projects: ProjectListItem[];
 }
 
+// Get border color for Pre/Post tags
+function getTagBorderColor(tag: string): string {
+  if (tag === "Pre") return "#fb923c"; // orange.emphasized
+  if (tag === "Post") return "#22c55e"; // green.emphasized
+  return "rgba(0, 0, 0, 0.1)";
+}
+
 // Generate a consistent, bright, varied color for each unique tag
 function getTagColor(tag: string): string {
+  // Fixed colors for Pre/Post - matching the analysis pages (orange.subtle and green.subtle)
+  if (tag === "Pre") return "#fed7aa"; // orange.subtle
+  if (tag === "Post") return "#bbf7d0"; // green.subtle
+
   // Simple hash function to convert string to number
   let hash = 0;
   for (let i = 0; i < tag.length; i++) {
@@ -255,6 +267,11 @@ export default function Home() {
             ) : (
               filtered.map((p) => {
                 const isSelected = selected === p.name;
+                // Find Pre/Post tag if it exists
+                const phaseTag = p.tags?.find(tag => tag === "Pre" || tag === "Post");
+                // Get all other tags (excluding Pre/Post)
+                const otherTags = p.tags?.filter(tag => tag !== "Pre" && tag !== "Post") || [];
+
                 return (
                   <tr
                     key={p.name}
@@ -270,15 +287,41 @@ export default function Home() {
                         aria-label={`Select ${p.name}`}
                       />
                     </td>
-                    <td title={p.name}>{p.name}</td>
+                    <td title={p.name}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                        <span>{p.name}</span>
+                        {phaseTag && (
+                          <Box
+                            as="span"
+                            bg={phaseTag === "Pre" ? "orange.subtle" : "green.subtle"}
+                            color={phaseTag === "Pre" ? "orange.fg" : "green.fg"}
+                            borderColor={phaseTag === "Pre" ? "orange.emphasized" : "green.emphasized"}
+                            borderWidth="1px"
+                            fontSize="xs"
+                            fontWeight="semibold"
+                            px="2"
+                            py="1"
+                            borderRadius="md"
+                            ml="auto"
+                          >
+                            {phaseTag}
+                          </Box>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <div className="tags-container">
-                        {p.tags && p.tags.length > 0 ? (
-                          p.tags.map((tag) => (
+                        {otherTags.length > 0 ? (
+                          otherTags.map((tag) => (
                             <span
                               key={tag}
                               className="tag-badge"
-                              style={{ backgroundColor: getTagColor(tag) }}
+                              style={{
+                                backgroundColor: getTagColor(tag),
+                                borderColor: getTagBorderColor(tag),
+                                borderWidth: "1px",
+                                borderStyle: "solid",
+                              }}
                             >
                               {tag}
                             </span>

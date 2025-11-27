@@ -3,6 +3,12 @@ import { Button, Separator } from "@chakra-ui/react";
 import { useMemo, useCallback, useState } from "react";
 import { toaster } from "../../components/ui/toaster";
 import { calculateScore } from "../../api";
+import {
+  MenuContent,
+  MenuItem,
+  MenuRoot,
+  MenuTrigger,
+} from "@chakra-ui/react";
 
 import CodingSidebar from "./components/CodingSidebar";
 import ShapefileModal from "./components/ShapefileModal";
@@ -10,8 +16,13 @@ import "./sidebar.css";
 
 const LINKS = [
   { to: "/home", label: "Home" },
-  { to: "/analysis", label: "Analysis" },
   { to: "/treatment", label: "Treatment" },
+];
+
+const ANALYSIS_LINKS = [
+  { to: "/analysis/attribute", label: "Attribute Analysis" },
+  { to: "/analysis/pre-treatment", label: "Pre-Treatment Analysis" },
+  { to: "/analysis/post-treatment", label: "Post-Treatment Analysis" },
 ];
 
 export default function Sidebar() {
@@ -50,7 +61,7 @@ export default function Sidebar() {
   const inCoding = pathname.startsWith("/coding");
   const onHome = pathname === "/home";
   const onTreatment = pathname === "/treatment";
-  const onAnalysis = pathname === "/analysis";
+  const onAnalysis = pathname.startsWith("/analysis");
 
   const onCalculate = useCallback(async () => {
     if (!projectName) {
@@ -131,6 +142,32 @@ export default function Sidebar() {
               </Button>
             );
           })}
+
+          {/* Analysis Dropdown Menu */}
+          <MenuRoot>
+            <MenuTrigger asChild>
+              <Button
+                colorPalette="gray"
+                variant={onAnalysis ? "solid" : "outline"}
+                size="sm"
+              >
+                Analysis ▼
+              </Button>
+            </MenuTrigger>
+            <MenuContent>
+              {ANALYSIS_LINKS.map(({ to, label }) => (
+                <MenuItem
+                  key={to}
+                  value={to}
+                  onClick={() => navigateSidebar(to)}
+                  bg={pathname === to ? "gray.subtle" : "transparent"}
+                  _hover={{ bg: "gray.subtle" }}
+                >
+                  {label}
+                </MenuItem>
+              ))}
+            </MenuContent>
+          </MenuRoot>
         </div>
       </div>
 

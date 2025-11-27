@@ -1,0 +1,355 @@
+import { useState, useEffect, useMemo } from "react";
+import {
+  Box,
+  Flex,
+  Text,
+  Button,
+  Input,
+  createListCollection,
+  Combobox,
+  Portal,
+} from "@chakra-ui/react";
+import { fetchProjectList, type FileResponse } from "../../api";
+import AttributesDropdown from "./components/AttributesDropdown";
+import AttributeAnalysisMapView from "./components/AttributeAnalysisMapView";
+import "./attributeAnalysisPage.css";
+
+export default function AttributeAnalysisPage() {
+  // Project list state
+  const [projectList, setProjectList] = useState<FileResponse | null>(null);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
+  const [loadedProjects, setLoadedProjects] = useState<string[]>([]);
+
+  // Filter states
+  const [dateCreatedFrom, setDateCreatedFrom] = useState("");
+  const [dateCreatedTo, setDateCreatedTo] = useState("");
+  const [lastUpdatedFrom, setLastUpdatedFrom] = useState("");
+  const [lastUpdatedTo, setLastUpdatedTo] = useState("");
+  const [tagsFilter, setTagsFilter] = useState<string[]>([]);
+
+  // Selected attribute for visualization
+  const [selectedAttribute, setSelectedAttribute] = useState<string | null>(null);
+
+  // Combobox input states for filtering
+  const [projectInputValue, setProjectInputValue] = useState("");
+  const [tagsInputValue, setTagsInputValue] = useState("");
+
+  // Fetch projects on mount
+  useEffect(() => {
+    fetchProjectList()
+      .then((data) => setProjectList(data))
+      .catch((e) => console.error("Failed to fetch projects:", e));
+  }, []);
+
+  // Process projects
+  const projects = useMemo(() => {
+    if (!projectList?.projects) return [];
+    return projectList.projects
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [projectList]);
+
+  // Filter projects based on input
+  const filteredProjects = useMemo(() => {
+    if (!projectInputValue) return projects;
+    return projects.filter((p) =>
+      p.name.toLowerCase().includes(projectInputValue.toLowerCase())
+    );
+  }, [projects, projectInputValue]);
+
+  // Get all unique tags from all projects
+  const allTags = useMemo(() => {
+    if (!projectList?.projects) return [];
+    const tagSet = new Set<string>();
+    projectList.projects.forEach((p) => {
+      if (p.tags && Array.isArray(p.tags)) {
+        p.tags.forEach((tag) => tagSet.add(tag));
+      }
+    });
+    return Array.from(tagSet).sort();
+  }, [projectList]);
+
+  // Filter tags based on input
+  const filteredTags = useMemo(() => {
+    if (!tagsInputValue) return allTags;
+    return allTags.filter((tag) =>
+      tag.toLowerCase().includes(tagsInputValue.toLowerCase())
+    );
+  }, [allTags, tagsInputValue]);
+
+  // Create collections for dropdowns (using filtered data)
+  const projectCollection = useMemo(() =>
+    createListCollection({
+      items: filteredProjects.map((p) => ({
+        label: p.name,
+        value: p.name,
+      })),
+    }), [filteredProjects]
+  );
+
+  const tagsCollection = useMemo(() =>
+    createListCollection({
+      items: filteredTags.map((tag) => ({
+        label: tag,
+        value: tag,
+      })),
+    }), [filteredTags]
+  );
+
+  // Handle Load Selected Projects button click
+  const handleLoadProjects = () => {
+    if (selectedProjects.length === 0) {
+      alert("Please select at least one project");
+      return;
+    }
+    // Trigger loading by updating the loadedProjects state
+    setLoadedProjects([...selectedProjects]);
+  };
+
+  return (
+    <Box w="100%" h="100vh" overflowY="auto" p="6">
+      {/* Header */}
+      <Box mb="6">
+        <Text fontSize="2xl" fontWeight="bold" mb="2">
+          Attribute Analysis
+        </Text>
+        <Text fontSize="sm" color="fg.muted">
+          Select one or more projects to analyze attributes across multiple projects
+        </Text>
+      </Box>
+
+      {/* Filter Panel */}
+      <Box
+        borderWidth="1px"
+        borderRadius="lg"
+        p="6"
+        bg="bg.panel"
+        mb="6"
+      >
+        <Text fontSize="lg" fontWeight="semibold" mb="4">
+          Filter Projects
+        </Text>
+
+        <Flex direction="column" gap="4">
+          {/* Row 1: Project Name Dropdown (Multi-select) */}
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" mb="2">
+              Project Name
+            </Text>
+            <Combobox.Root
+              collection={projectCollection}
+              multiple
+              value={selectedProjects}
+              onValueChange={(e) => setSelectedProjects(e.value)}
+              inputValue={projectInputValue}
+              onInputValueChange={(e) => setProjectInputValue(e.inputValue)}
+            >
+              <Combobox.Control>
+                <Combobox.Input placeholder="Type to search projects..." />
+                <Combobox.IndicatorGroup>
+                  <Combobox.ClearTrigger />
+                  <Combobox.Trigger />
+                </Combobox.IndicatorGroup>
+              </Combobox.Control>
+              <Portal>
+                <Combobox.Positioner>
+                  <Combobox.Content maxH="300px" overflowY="auto">
+                    <Combobox.Empty>No projects found</Combobox.Empty>
+                    {projectCollection.items.map((item) => (
+                      <Combobox.Item item={item} key={item.value}>
+                        <Flex align="center" gap="2" width="100%">
+                          <input
+                            type="checkbox"
+                            checked={selectedProjects.includes(item.value)}
+                            readOnly
+                            style={{ pointerEvents: "none" }}
+                          />
+                          <Text>{item.label}</Text>
+                        </Flex>
+                        <Combobox.ItemIndicator />
+                      </Combobox.Item>
+                    ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
+              </Portal>
+            </Combobox.Root>
+            {selectedProjects.length > 0 && (
+              <Flex mt="2" gap="2" flexWrap="wrap">
+                {selectedProjects.map((proj) => (
+                  <Flex
+                    key={proj}
+                    align="center"
+                    gap="1"
+                    px="2"
+                    py="1"
+                    bg="blue.subtle"
+                    borderRadius="md"
+                    fontSize="sm"
+                  >
+                    <Text>{proj}</Text>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() =>
+                        setSelectedProjects(selectedProjects.filter((p) => p !== proj))
+                      }
+                      px="1"
+                    >
+                      ×
+                    </Button>
+                  </Flex>
+                ))}
+              </Flex>
+            )}
+          </Box>
+
+          {/* Row 2: Date filters */}
+          <Flex gap="4" direction={{ base: "column", md: "row" }}>
+            <Box flex="1">
+              <Text fontSize="sm" fontWeight="semibold" mb="2">
+                Date Created
+              </Text>
+              <Flex gap="2" align="center">
+                <Input
+                  type="date"
+                  value={dateCreatedFrom}
+                  onChange={(e) => setDateCreatedFrom(e.target.value)}
+                  size="md"
+                />
+                <Text fontSize="sm" color="fg.muted">to</Text>
+                <Input
+                  type="date"
+                  value={dateCreatedTo}
+                  onChange={(e) => setDateCreatedTo(e.target.value)}
+                  size="md"
+                />
+              </Flex>
+            </Box>
+
+            <Box flex="1">
+              <Text fontSize="sm" fontWeight="semibold" mb="2">
+                Last Updated
+              </Text>
+              <Flex gap="2" align="center">
+                <Input
+                  type="date"
+                  value={lastUpdatedFrom}
+                  onChange={(e) => setLastUpdatedFrom(e.target.value)}
+                  size="md"
+                />
+                <Text fontSize="sm" color="fg.muted">to</Text>
+                <Input
+                  type="date"
+                  value={lastUpdatedTo}
+                  onChange={(e) => setLastUpdatedTo(e.target.value)}
+                  size="md"
+                />
+              </Flex>
+            </Box>
+          </Flex>
+
+          {/* Row 3: Tags filter */}
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" mb="2">
+              Tags
+            </Text>
+            <Combobox.Root
+              collection={tagsCollection}
+              multiple
+              value={tagsFilter}
+              onValueChange={(e) => setTagsFilter(e.value)}
+              inputValue={tagsInputValue}
+              onInputValueChange={(e) => setTagsInputValue(e.inputValue)}
+            >
+              <Combobox.Control>
+                <Combobox.Input placeholder="Type to search tags..." />
+                <Combobox.IndicatorGroup>
+                  <Combobox.ClearTrigger />
+                  <Combobox.Trigger />
+                </Combobox.IndicatorGroup>
+              </Combobox.Control>
+              <Portal>
+                <Combobox.Positioner>
+                  <Combobox.Content maxH="300px" overflowY="auto">
+                    <Combobox.Empty>No tags found</Combobox.Empty>
+                    {tagsCollection.items.map((item) => (
+                      <Combobox.Item item={item} key={item.value}>
+                        <Flex align="center" gap="2" width="100%">
+                          <input
+                            type="checkbox"
+                            checked={tagsFilter.includes(item.value)}
+                            readOnly
+                            style={{ pointerEvents: "none" }}
+                          />
+                          <Text>{item.label}</Text>
+                        </Flex>
+                        <Combobox.ItemIndicator />
+                      </Combobox.Item>
+                    ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
+              </Portal>
+            </Combobox.Root>
+            {tagsFilter.length > 0 && (
+              <Flex mt="2" gap="2" flexWrap="wrap">
+                {tagsFilter.map((tag) => (
+                  <Flex
+                    key={tag}
+                    align="center"
+                    gap="1"
+                    px="2"
+                    py="1"
+                    bg="purple.subtle"
+                    borderRadius="md"
+                    fontSize="sm"
+                  >
+                    <Text>{tag}</Text>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() =>
+                        setTagsFilter(tagsFilter.filter((t) => t !== tag))
+                      }
+                      px="1"
+                    >
+                      ×
+                    </Button>
+                  </Flex>
+                ))}
+              </Flex>
+            )}
+          </Box>
+
+          {/* Load Selected Projects Button */}
+          <Flex justify="center" mt="4">
+            <Button
+              colorPalette="blue"
+              size="lg"
+              px="12"
+              onClick={handleLoadProjects}
+              disabled={selectedProjects.length === 0}
+            >
+              Load Selected Projects ({selectedProjects.length})
+            </Button>
+          </Flex>
+        </Flex>
+      </Box>
+
+      {/* Attributes Dropdown Section */}
+      <Box mb="6">
+        <AttributesDropdown
+          selectedAttribute={selectedAttribute}
+          onAttributeChange={setSelectedAttribute}
+        />
+      </Box>
+
+      {/* Map/Table Section */}
+      <Box mb="6">
+        <AttributeAnalysisMapView
+          selectedProjects={loadedProjects}
+          selectedAttribute={selectedAttribute}
+        />
+      </Box>
+    </Box>
+  );
+}

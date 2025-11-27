@@ -89,7 +89,7 @@ export function CurvatureVisualization({ data }: CurvatureVisualizationProps) {
   }, [diagnostics]);
 
   return (
-    <div style={{ width: '100%', height: '500px', borderRadius: '8px', overflow: 'hidden' }}>
+    <div style={{ width: '100%', height: '650px', borderRadius: '8px', overflow: 'hidden' }}>
       <MapContainer
         center={center}
         zoom={22}

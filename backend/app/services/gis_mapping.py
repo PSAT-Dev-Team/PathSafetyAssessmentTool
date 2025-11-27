@@ -585,8 +585,8 @@ class GIS:
             start_radius: Initial ring radius for width search (default: 1.0m)
             max_radius: Maximum ring radius for width search (default: 5.0m)
             step: Ring increment size (default: 1.0m)
-            collect_radius: Fixed window radius for curvature calculation (default: 5.0m)
-            sample_half_window: Densification step - distance between interpolated points (default: 1.0m)
+            collect_radius: Fixed window radius for curvature calculation (default: 5.0m, extended to 5.5m internally)
+            sample_half_window: Legacy parameter (not used - densification now uses 0.25m fixed step and preserves original vertices)
             epsilon: Minimum threshold for distance/area calculations (default: 1e-6)
 
         Returns:
@@ -608,11 +608,11 @@ class GIS:
 
         STAGE 2 - CURVATURE CALCULATION (Fixed Window):
         1. Use ONLY the layer that provided the width
-        2. Query features within collect_radius (5m) of the point
+        2. Query features within collect_radius (5.5m extended) of the point
         3. Merge connectable line segments using shapely's linemerge/unary_union
         4. Clip merged geometry to the circular buffer
-        5. Densify at sample_half_window (1m) intervals for accurate curvature detection
-        6. Calculate minimum circumradius using sliding triplet window
+        5. IMPROVED DENSIFICATION: Preserve original vertices + add points at 0.25m intervals
+        6. Calculate minimum circumradius using sliding triplet window on ALL points
         7. Return (min_radius, width)
 
         Key Characteristics:
@@ -723,8 +723,9 @@ class GIS:
                     gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
 
                     if not gdf.empty:
-                        # Create FIXED window buffer for curvature (always collect_radius)
-                        buffer_curv = pt.buffer(collect_radius)
+                        # Create FIXED window buffer for curvature (extended slightly for better edge detection)
+                        # Use 5.5m instead of 5.0m to ensure sharp bends at the edge are fully captured
+                        buffer_curv = pt.buffer(collect_radius + 0.5)
 
                         # Spatial query using index
                         candidate_indices = list(gdf.sindex.intersection(buffer_curv.bounds))
@@ -742,45 +743,114 @@ class GIS:
                                 if merged_geom.geom_type == 'MultiLineString':
                                     merged_geom = linemerge(merged_geom)
 
-                                # Clip to buffer
-                                clipped_geom = merged_geom.intersection(buffer_curv)
-
-                                # Handle different geometry types after clipping
+                                # IMPORTANT: Process UNCLIPPED geometry to preserve sharp vertices
+                                # Clipping can alter vertex angles at the boundary
+                                # We'll filter individual vertices by distance instead
                                 from shapely.geometry import LineString, MultiLineString
                                 lines_to_process = []
 
-                                if clipped_geom.geom_type == 'LineString':
-                                    lines_to_process = [clipped_geom]
-                                elif clipped_geom.geom_type == 'MultiLineString':
-                                    lines_to_process = list(clipped_geom.geoms)
-                                elif clipped_geom.geom_type == 'GeometryCollection':
-                                    lines_to_process = [g for g in clipped_geom.geoms if g.geom_type == 'LineString']
+                                if merged_geom.geom_type == 'LineString':
+                                    lines_to_process = [merged_geom]
+                                elif merged_geom.geom_type == 'MultiLineString':
+                                    lines_to_process = list(merged_geom.geoms)
+                                elif merged_geom.geom_type == 'GeometryCollection':
+                                    lines_to_process = [g for g in merged_geom.geoms if g.geom_type == 'LineString']
 
                                 # Calculate radius for each line segment
                                 for line in lines_to_process:
-                                    if line.is_empty or line.length < sample_half_window:
+                                    if line.is_empty:
                                         continue
 
-                                    # Densify the line (sample_half_window is the densification step)
-                                    densified_coords = []
-                                    num_points = int(line.length / sample_half_window)
-                                    for i in range(num_points + 1):
-                                        distance = min(i * sample_half_window, line.length)
-                                        point_on_line = line.interpolate(distance)
-                                        densified_coords.append((point_on_line.x, point_on_line.y))
+                                    # IMPROVED DENSIFICATION: Preserve original vertices + add interpolated points
+                                    # This ensures we capture sharp bends encoded as vertices in the shapefile
+                                    original_coords = list(line.coords)
 
-                                    # Add the end point if not already included
-                                    if len(densified_coords) > 0:
-                                        last_coord = list(line.coords)[-1]
-                                        if densified_coords[-1] != last_coord:
-                                            densified_coords.append(last_coord)
+                                    if len(original_coords) < 2:
+                                        continue
 
-                                    # Calculate minimum radius using triplet method
-                                    if len(densified_coords) >= 3:
-                                        segment_min_radius = self._calculate_min_radius_triplet(densified_coords, epsilon)
-                                        if segment_min_radius is not None:
-                                            if min_radius is None or segment_min_radius < min_radius:
-                                                min_radius = segment_min_radius
+                                    # Use finer densification step (0.25m instead of 1.0m)
+                                    fine_step = 0.25
+
+                                    # Build combined coordinate list: original vertices + interpolated points
+                                    combined_coords = []
+
+                                    for i in range(len(original_coords) - 1):
+                                        # Always add the original vertex (this preserves sharp angles)
+                                        combined_coords.append(original_coords[i])
+
+                                        # Calculate segment between this vertex and next
+                                        segment = LineString([original_coords[i], original_coords[i+1]])
+                                        segment_length = segment.length
+
+                                        # Add densified points between vertices
+                                        if segment_length > fine_step:
+                                            num_intermediate = int(segment_length / fine_step)
+                                            for j in range(1, num_intermediate + 1):
+                                                dist = j * fine_step
+                                                if dist < segment_length:
+                                                    pt_interp = segment.interpolate(dist)
+                                                    combined_coords.append((pt_interp.x, pt_interp.y))
+
+                                    # Add the final original vertex
+                                    combined_coords.append(original_coords[-1])
+
+                                    # Remove duplicate consecutive points (within epsilon tolerance)
+                                    deduped_coords = [combined_coords[0]]
+                                    for coord in combined_coords[1:]:
+                                        prev = deduped_coords[-1]
+                                        dist_sq = (coord[0] - prev[0])**2 + (coord[1] - prev[1])**2
+                                        if dist_sq > epsilon * epsilon:
+                                            deduped_coords.append(coord)
+
+                                    # Mark which coordinates are within the analysis window
+                                    # We need to keep triplets where AT LEAST ONE point is within range
+                                    max_dist = collect_radius + 0.5  # 5.5m
+
+                                    # Tag each coordinate with its distance to analysis point
+                                    coords_with_dist = []
+                                    for coord in deduped_coords:
+                                        dist_to_pt = ((coord[0] - pt.x)**2 + (coord[1] - pt.y)**2)**0.5
+                                        coords_with_dist.append((coord, dist_to_pt))
+
+                                    # Analyze triplets - include if ANY of the 3 points is within range
+                                    # This ensures we capture sharp bends near the boundary
+                                    min_triplet_radius = float('inf')
+                                    for i in range(len(coords_with_dist) - 2):
+                                        coord_a, dist_a = coords_with_dist[i]
+                                        coord_b, dist_b = coords_with_dist[i + 1]
+                                        coord_c, dist_c = coords_with_dist[i + 2]
+
+                                        # Include triplet if at least one point is within range
+                                        if min(dist_a, dist_b, dist_c) <= max_dist:
+                                            # Calculate circumradius for this triplet
+                                            A = Point(coord_a)
+                                            B = Point(coord_b)
+                                            C = Point(coord_c)
+
+                                            a = A.distance(B)
+                                            b = B.distance(C)
+                                            c = A.distance(C)
+
+                                            # Skip degenerate triangles
+                                            if a < epsilon or b < epsilon or c < epsilon:
+                                                continue
+
+                                            # Calculate using Heron's formula
+                                            p = 0.5 * (a + b + c)
+                                            area_sq = p * (p - a) * (p - b) * (p - c)
+
+                                            if area_sq <= epsilon:
+                                                continue  # Nearly collinear
+
+                                            R = (a * b * c) / (4.0 * area_sq**0.5)
+                                            if R < min_triplet_radius:
+                                                min_triplet_radius = R
+
+                                    # Update overall minimum
+                                    if min_triplet_radius != float('inf'):
+                                        segment_min_radius = min_triplet_radius
+                                        if min_radius is None or segment_min_radius < min_radius:
+                                            min_radius = segment_min_radius
 
             except Exception as e:
                 print(f"Warning: Error calculating curvature from {found_layer}: {e}")

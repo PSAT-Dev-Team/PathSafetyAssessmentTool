@@ -20,6 +20,7 @@ from shapely.geometry import Point,LineString
 import geopandas as gpd
 import shutil
 import datetime
+import math
 from app.services.cyclerap_scoring import calculate_cyclerap_score_native
 # ---- init guards (thread-safe & error memo) ----
 import threading
@@ -925,6 +926,210 @@ def get_width_visualization(project_name: str):
     except Exception as e:
         traceback.print_exc()
         return fail(f"width visualization error: {e}", 500)
+
+
+@bp.post("/<project_name>/gis/layers")
+def get_gis_layers(project_name: str):
+    """
+    Fetch GIS layer paths near a point for map visualization on the coding page.
+
+    This endpoint provides cycling paths, footpaths, and shared paths within
+    a specified radius of a point to show GIS layer context on the coding map.
+
+    Request body:
+        {
+            "point": [lon, lat],  // Center point (WGS84)
+            "radius": 100,        // Search radius in meters (default: 100m)
+            "layers": ["cycling", "shared", "footpath"]  // Optional: which layers to fetch
+        }
+
+    Response:
+        {
+            "ok": true,
+            "point": {"lon": 103.8198, "lat": 1.3521},
+            "radius": 100,
+            "layers": {
+                "cycling": [
+                    {
+                        "coordinates": [[lon, lat], ...],  // LineString in WGS84
+                        "properties": {"width": 2.5}  // if available
+                    },
+                    ...
+                ],
+                "shared": [...],
+                "footpath": [...]
+            }
+        }
+    """
+    try:
+        _ensure_models_ready()
+
+        payload = request.get_json(force=True, silent=True) or {}
+        point_coords = payload.get("point", [])
+        radius = payload.get("radius", 100)  # Default 100m radius
+        requested_layers = payload.get("layers", ["cycling", "shared", "footpath"])
+
+        print(f"\n[GIS] ===== NEW REQUEST =====")
+        print(f"[GIS] Project: {project_name}")
+        print(f"[GIS] Point: {point_coords}")
+        print(f"[GIS] Radius: {radius}m")
+
+        if not point_coords or len(point_coords) != 2:
+            return fail("point [lon, lat] is required", 400)
+
+        lon, lat = point_coords
+        pt = Point(lon, lat)
+
+        # Backend shapefiles directory
+        backend_root = Path(__file__).resolve().parents[3]
+        shp_dir = (backend_root / "shapefiles").resolve()
+        if not shp_dir.exists():
+            return fail(f"Shapefile base dir not found: {shp_dir}", 500)
+
+        print(f"[GIS] Shapefile directory: {shp_dir}")
+        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
+        print(f"[GIS] Layer store paths: {list(layer_store.paths.keys())}")
+        _gis = gis.GIS(layer_store)
+        pt_metric = _gis.store.to_metric_point(pt)
+        print(f"[GIS] Point in metric (EPSG:3414): {pt_metric}")
+
+        # Create buffer for spatial query
+        buffer_geom = pt_metric.buffer(radius)
+
+        # Layer name mapping
+        layer_names = {
+            "cycling": "cycling_path",
+            "shared": "shared_path",
+            "footpath": "footpath"
+        }
+
+        result_layers = {}
+
+        for layer_key in requested_layers:
+            if layer_key not in layer_names:
+                continue
+
+            layer_name = layer_names[layer_key]
+
+            try:
+                print(f"[GIS] Fetching layer: {layer_key} -> {layer_name}")
+                gdf = layer_store.get(layer_name)
+
+                if gdf is None:
+                    print(f"[GIS] Layer {layer_key} is None!")
+                    result_layers[layer_key] = []
+                    continue
+
+                if gdf.empty:
+                    print(f"[GIS] Layer {layer_key} is empty!")
+                    result_layers[layer_key] = []
+                    continue
+
+                print(f"[GIS] Layer {layer_key} has {len(gdf)} features, CRS: {gdf.crs}")
+
+                # Ensure metric CRS (EPSG:3414)
+                if gdf.crs.to_epsg() != 3414:
+                    gdf = gdf.to_crs("EPSG:3414")
+
+                # Remove Z-coordinates if present
+                if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+                    gdf.geometry = gdf.geometry.apply(
+                        lambda geom: gis.GIS._remove_z_coordinate(geom) if geom is not None else None
+                    )
+
+                # Filter to valid geometries
+                gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+
+                if gdf.empty:
+                    result_layers[layer_key] = []
+                    continue
+
+                # Spatial query using index
+                print(f"[GIS] Buffer bounds: {buffer_geom.bounds}")
+                candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
+                print(f"[GIS] Found {len(candidate_indices)} candidates for {layer_key}")
+
+                if not candidate_indices:
+                    result_layers[layer_key] = []
+                    continue
+
+                candidates = gdf.iloc[candidate_indices]
+
+                # Filter to features that actually intersect the buffer
+                intersecting = candidates[candidates.intersects(buffer_geom)]
+                print(f"[GIS] After intersect filter: {len(intersecting)} features for {layer_key}")
+
+                if intersecting.empty:
+                    result_layers[layer_key] = []
+                    continue
+
+                # Convert to WGS84 for frontend
+                intersecting_wgs84 = intersecting.to_crs("EPSG:4326")
+
+                features = []
+                for _, feature in intersecting_wgs84.iterrows():
+                    geom = feature.geometry
+
+                    if geom is None or geom.is_empty:
+                        continue
+
+                    # Extract coordinates based on geometry type
+                    coords = []
+                    if geom.geom_type == "LineString":
+                        coords = [[float(x), float(y)] for x, y in geom.coords]
+                    elif geom.geom_type == "MultiLineString":
+                        # For MultiLineString, create separate features for each part
+                        for line in geom.geoms:
+                            line_coords = [[float(x), float(y)] for x, y in line.coords]
+
+                            # Extract properties
+                            props = {}
+                            if "WIDTH" in feature.index:
+                                width_val = feature["WIDTH"]
+                                if width_val is not None and not (isinstance(width_val, float) and math.isnan(width_val)):
+                                    props["width"] = float(width_val)
+
+                            features.append({
+                                "coordinates": line_coords,
+                                "properties": props
+                            })
+                        continue  # Skip the append at the end since we handled MultiLineString
+                    else:
+                        continue  # Skip unsupported geometry types
+
+                    # Extract properties for LineString
+                    props = {}
+                    if "WIDTH" in feature.index:
+                        width_val = feature["WIDTH"]
+                        if width_val is not None and not (isinstance(width_val, float) and math.isnan(width_val)):
+                            props["width"] = float(width_val)
+
+                    features.append({
+                        "coordinates": coords,
+                        "properties": props
+                    })
+
+                result_layers[layer_key] = features
+
+            except Exception as e:
+                print(f"Warning: Error loading {layer_key}: {e}")
+                result_layers[layer_key] = []
+
+        # Build response
+        response = {
+            "ok": True,
+            "point": {"lon": lon, "lat": lat},
+            "radius": radius,
+            "layers": result_layers
+        }
+
+        return ok(response)
+
+    except ServiceUnavailable as e:
+        return fail(str(e), 503)
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"GIS layers error: {e}", 500)
 
 
 @bp.post("/<project_name>/autocode/all")

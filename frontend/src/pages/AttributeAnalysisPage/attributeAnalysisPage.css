@@ -1,0 +1,10 @@
+/* Force dropdown content to float properly */
+[data-scope="select"][data-part="content"] {
+  position: fixed !important;
+  z-index: 1500 !important;
+}
+
+[data-scope="select"][data-part="positioner"] {
+  position: fixed !important;
+  z-index: 1500 !important;
+}
