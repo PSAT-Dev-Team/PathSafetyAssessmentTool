@@ -253,6 +253,7 @@ export default function Home() {
             <tr>
               <th style={{ width: 48 }}></th>
               <th>Project Name</th>
+              <th style={{ width: 120 }}>Status</th>
               <th>Tags</th>
               <th style={{ width: 120 }}>Actions</th>
             </tr>
@@ -260,7 +261,7 @@ export default function Home() {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={4} className="empty">
+                <td colSpan={5} className="empty">
                   No projects found
                 </td>
               </tr>
@@ -287,27 +288,24 @@ export default function Home() {
                         aria-label={`Select ${p.name}`}
                       />
                     </td>
-                    <td title={p.name}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                        <span>{p.name}</span>
-                        {phaseTag && (
-                          <Box
-                            as="span"
-                            bg={phaseTag === "Pre" ? "orange.subtle" : "green.subtle"}
-                            color={phaseTag === "Pre" ? "orange.fg" : "green.fg"}
-                            borderColor={phaseTag === "Pre" ? "orange.emphasized" : "green.emphasized"}
-                            borderWidth="1px"
-                            fontSize="xs"
-                            fontWeight="semibold"
-                            px="2"
-                            py="1"
-                            borderRadius="md"
-                            ml="auto"
-                          >
-                            {phaseTag}
-                          </Box>
-                        )}
-                      </div>
+                    <td title={p.name}>{p.name}</td>
+                    <td>
+                      {phaseTag && (
+                        <Box
+                          as="span"
+                          bg={phaseTag === "Pre" ? "orange.subtle" : "green.subtle"}
+                          color={phaseTag === "Pre" ? "orange.fg" : "green.fg"}
+                          borderColor={phaseTag === "Pre" ? "orange.emphasized" : "green.emphasized"}
+                          borderWidth="1px"
+                          fontSize="xs"
+                          fontWeight="semibold"
+                          px="2"
+                          py="1"
+                          borderRadius="md"
+                        >
+                          {phaseTag}
+                        </Box>
+                      )}
                     </td>
                     <td>
                       <div className="tags-container">

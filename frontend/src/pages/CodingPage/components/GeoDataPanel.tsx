@@ -2,7 +2,7 @@ import { Card, CardHeader, CardBody, Heading, Text, Box, Flex, HStack } from "@c
 import { Tooltip } from "../../../components/ui/tooltip";
 import { Switch } from "../../../components/ui/switch";
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
 
 import { MapContainer, TileLayer, CircleMarker, Polyline, useMap } from "react-leaflet";
@@ -18,6 +18,11 @@ type Props = {
 };
 
 type GJ = FeatureCollection<LineString, any>;
+
+type ScoreRow = {
+  "CycleRAP score": number;
+  [key: string]: any;
+};
 
 // --- EPSG:3414 (SVY21 / Singapore TM) 定义 -> EPSG:4326 ---
 proj4.defs(
@@ -52,6 +57,9 @@ export default function GeoDataPanel({ index, onJump }: Props) {
   const [fc, setFc] = useState<GJ | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // CycleRAP scores for color coding
+  const [scores, setScores] = useState<ScoreRow[]>([]);
 
   // GIS Layer toggles (matching curvature analysis colors)
   const [showFootpath, setShowFootpath] = useState(false);  // Blue
@@ -90,6 +98,42 @@ export default function GeoDataPanel({ index, onJump }: Props) {
     })();
     return () => { aborted = true; };
   }, [decodedName]);
+
+  // Helper function to fetch scores
+  const fetchScores = useCallback(async () => {
+    if (!decodedName) return;
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/results`);
+      if (!res.ok) {
+        console.warn("Could not fetch CycleRAP scores");
+        return;
+      }
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.result_rows)) {
+        setScores(data.result_rows);
+        console.log("Scores loaded:", data.result_rows.length, "segments");
+      }
+    } catch (e: any) {
+      console.warn("Failed to load CycleRAP scores:", e?.message);
+    }
+  }, [decodedName]);
+
+  // Fetch CycleRAP scores for color coding on component mount
+  useEffect(() => {
+    if (!decodedName) return;
+    fetchScores();
+  }, [decodedName, fetchScores]);
+
+  // Listen for score update events (triggered after Calculate Score button is clicked)
+  useEffect(() => {
+    const handleScoresUpdated = () => {
+      console.log("Scores updated event received, refetching scores...");
+      fetchScores();
+    };
+
+    window.addEventListener("psat:scores:updated", handleScoresUpdated);
+    return () => window.removeEventListener("psat:scores:updated", handleScoresUpdated);
+  }, [fetchScores]);
 
   // 取每条 LineString 的首点（转 4326），并保留原 feature
   const points = useMemo(() => {
@@ -163,6 +207,18 @@ export default function GeoDataPanel({ index, onJump }: Props) {
     footpath: "#1E90FF",    // Blue - rgb(30, 144, 255)
     cycling: "#00B400",     // Green - rgb(0, 180, 0)
     shared: "#E68C00"       // Orange - rgb(230, 140, 0)
+  };
+
+  // Get segment color based on CycleRAP score
+  const getSegmentColor = (segmentIndex: number): string => {
+    if (!scores || segmentIndex >= scores.length) {
+      return "#2563EB"; // Default blue if no scores
+    }
+    const score = scores[segmentIndex]["CycleRAP score"];
+    if (score < 5) return "#87C424";    // Low (green)
+    if (score < 10) return "#FFCC1A";   // Medium (yellow)
+    if (score < 20) return "#FF5B1A";   // High (orange)
+    return "#CD1AFF";                    // Extreme (purple)
   };
 
   return (
@@ -285,9 +341,10 @@ export default function GeoDataPanel({ index, onJump }: Props) {
               {/* 所有起点 */}
               {points.map(({ idx, latlng, f }) => {
                 const isActive = idx === index;
-                const color = isActive ? "#FF6B6B" : "#2563EB";
+                const baseColor = getSegmentColor(idx);
+                const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
                 const radius = isActive ? 8 : 5;
-                const label = `#${idx} ${f.properties?.["Image Reference"] ?? ""}`;
+                const label = `#${idx} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scores[idx]?.["CycleRAP score"]?.toFixed(2) ?? "N/A"}`;
 
                 return (
                   <Tooltip key={idx} content={label}>

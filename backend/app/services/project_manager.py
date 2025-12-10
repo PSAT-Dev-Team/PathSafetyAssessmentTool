@@ -201,6 +201,25 @@ class Project:
         if version is not None:
             ver_obj = version
             ver_obj.path = ver_path
+            # Mark all data as dirty so it gets saved to the new version directory
+            # This ensures attributes, snapshot_metadata, etc. are copied forward
+            # Access properties (not _internal) to trigger lazy loading if needed
+            try:
+                ver_obj.attributes.df_dirty = True
+            except Exception:
+                pass  # If attributes can't be loaded, skip
+            try:
+                ver_obj.snapshot_metadata.df_dirty = True
+            except Exception:
+                pass
+            try:
+                ver_obj.treatment.df_dirty = True
+            except Exception:
+                pass
+            try:
+                ver_obj.results.df_dirty = True
+            except Exception:
+                pass
         else:
             ver_obj = ProjectVersion(ver_path)
 

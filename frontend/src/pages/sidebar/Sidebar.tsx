@@ -16,12 +16,11 @@ import "./sidebar.css";
 
 const LINKS = [
   { to: "/home", label: "Home" },
-  { to: "/treatment", label: "Treatment" },
+  { to: "/treatment", label: "Treatment Projection" },
 ];
 
 const ANALYSIS_LINKS = [
   { to: "/analysis/attribute", label: "Attribute Analysis" },
-  { to: "/analysis/pre-treatment", label: "Pre-Treatment Analysis" },
   { to: "/analysis/post-treatment", label: "Post-Treatment Analysis" },
 ];
 
@@ -73,7 +72,8 @@ export default function Sidebar() {
     }
 
     try {
-      toaster.create({
+      // Show loading toast and store ID so we can dismiss it later
+      const loadingToastId = toaster.create({
         description: "Calculating scores...",
         type: "loading",
       });
@@ -85,12 +85,26 @@ export default function Sidebar() {
       console.log("Result:", result);
       console.log("Result rows:", result.result_rows);
 
+      // Dismiss loading toast
+      if (loadingToastId) {
+        toaster.dismiss(loadingToastId);
+      }
+
+      // Show success toast
       toaster.create({
         description: `Score calculated! ${result.result_rows.length} rows returned`,
         type: "success",
       });
+
+      // Trigger GeoDataPanel to refetch scores
+      window.dispatchEvent(new CustomEvent("psat:scores:updated"));
     } catch (error) {
       console.error("Calculate score error:", error);
+
+      // Dismiss loading toast if it exists
+      // Note: In error case, we can't reliably dismiss the loading toast,
+      // so we'll just let it stay while the error is shown
+
       toaster.create({
         description: error instanceof Error ? error.message : "Failed to calculate score",
         type: "error",
@@ -175,7 +189,7 @@ export default function Sidebar() {
       <Separator />
 
       <div className="psat-side-middle">
-        {inCoding && projectName ? (
+        {inCoding && projectName && (
           <CodingSidebar
             projectName={projectName}
             onCalculate={onCalculate}
@@ -184,8 +198,6 @@ export default function Sidebar() {
             onAutoCodeOne={onAutoCodeOne}   // ★ 新增
             onAutoCodeAll={onAutoCodeAll}   // ★ 新增
           />
-        ) : (
-          <div className="placeholder">Placeholder</div>
         )}
       </div>
 

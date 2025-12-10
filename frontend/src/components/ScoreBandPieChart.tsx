@@ -1,0 +1,209 @@
+import { useMemo } from "react";
+import { Box, Text, Flex } from "@chakra-ui/react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
+
+interface ScoreBandPieChartProps {
+  crashType: string;
+  bandCounts: Record<number, number>;
+}
+
+const BAND_INFO: Record<number, { label: string; color: string }> = {
+  1: { label: "Low", color: "#87C424" },
+  2: { label: "Medium", color: "#FFCC1A" },
+  3: { label: "High", color: "#FF5B1A" },
+  4: { label: "Extreme", color: "#CD1AFF" },
+};
+
+interface ChartDataPoint {
+  band: number;
+  label: string;
+  count: number;
+  percentage: number;
+  color: string;
+}
+
+export default function ScoreBandPieChart({
+  crashType,
+  bandCounts,
+}: ScoreBandPieChartProps) {
+  // Transform band counts to chart data
+  const chartData: ChartDataPoint[] = useMemo(() => {
+    const total = Object.values(bandCounts).reduce((sum, count) => sum + count, 0);
+
+    return Object.entries(bandCounts)
+      .filter(([_, count]) => count > 0) // Only show non-zero bands
+      .map(([band, count]) => {
+        const bandNum = parseInt(band);
+        return {
+          band: bandNum,
+          label: BAND_INFO[bandNum].label,
+          count,
+          percentage: total > 0 ? (count / total) * 100 : 0,
+          color: BAND_INFO[bandNum].color,
+        };
+      })
+      .sort((a, b) => a.band - b.band); // Sort by band number
+  }, [bandCounts]);
+
+  const total = useMemo(
+    () => chartData.reduce((sum, d) => sum + d.count, 0),
+    [chartData]
+  );
+
+  // Custom label showing percentages inside pie slices
+  const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+    const RADIAN = Math.PI / 180;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    // Don't show label for very small slices
+    if (percent < 0.05) return null;
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="black"
+        textAnchor={x > cx ? "start" : "end"}
+        dominantBaseline="central"
+        fontSize="14"
+        fontWeight="bold"
+      >
+        {`${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
+  // Empty state
+  if (chartData.length === 0) {
+    return (
+      <Box
+        p="4"
+        textAlign="center"
+        borderWidth="1px"
+        borderRadius="md"
+        bg="gray.50"
+        _dark={{ bg: "gray.700" }}
+      >
+        <Text color="gray.500" fontSize="sm" _dark={{ color: "gray.400" }}>
+          No data for {crashType}
+        </Text>
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      {/* Title */}
+      <Text
+        fontSize="md"
+        fontWeight="bold"
+        textAlign="left"
+        pl="125px"
+        mb="2"
+        color="gray.900"
+        _dark={{ color: "white" }}
+      >
+        {crashType}
+      </Text>
+      <Text
+        fontSize="sm"
+        color="gray.600"
+        _dark={{ color: "gray.400" }}
+        textAlign="left"
+        pl="130px"
+        mb="4"
+      >
+        Total: {total} segments
+      </Text>
+
+      {/* Pie Chart Container with Legend on the Side */}
+      <Box display="flex" gap="4" alignItems="center">
+        {/* Chart */}
+        <Box h="400px" w="400px" display="flex" justifyContent="center" alignItems="center" flexShrink={0}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart data={chartData} margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+              <Pie
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={renderLabel}
+                outerRadius={120}
+                innerRadius={0}
+                dataKey="count"
+                animationDuration={800}
+              >
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
+
+              {/* Tooltip */}
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const data = payload[0].payload as ChartDataPoint;
+                    return (
+                      <Box
+                        bg="white"
+                        _dark={{ bg: "gray.900" }}
+                        p="3"
+                        borderRadius="md"
+                        boxShadow="lg"
+                        borderWidth="2px"
+                        borderColor={data.color}
+                      >
+                        <Text
+                          fontWeight="bold"
+                          color={data.color}
+                          mb="1"
+                        >
+                          {data.label}
+                        </Text>
+                        <Text fontSize="sm" color="gray.700" _dark={{ color: "gray.200" }}>
+                          Count: {data.count}
+                        </Text>
+                        <Text
+                          fontSize="sm"
+                          fontWeight="bold"
+                          color={data.color}
+                        >
+                          {data.percentage.toFixed(1)}%
+                        </Text>
+                      </Box>
+                    );
+                  }
+                  return null;
+                }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </Box>
+
+        {/* Legend on the Right */}
+        <Box display="flex" flexDirection="column" gap="2" minW="120px">
+          {chartData.map((item, index) => (
+            <Flex
+              key={`legend-${index}`}
+              align="center"
+              gap="2"
+              fontSize="xs"
+              color="gray.700"
+              _dark={{ color: "gray.300" }}
+            >
+              <Box w="12px" h="12px" borderRadius="full" bg={item.color} flexShrink={0} />
+              <Text fontSize="xs">{item.label} {item.percentage.toFixed(0)}%</Text>
+            </Flex>
+          ))}
+        </Box>
+      </Box>
+    </Box>
+  );
+}

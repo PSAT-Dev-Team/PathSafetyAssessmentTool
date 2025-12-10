@@ -38,6 +38,9 @@ import { CurvatureVisualizationPanel } from "../../components/CurvatureVisualiza
 import "../../components/CurvatureVisualizationPanel.css";
 import { WidthVisualizationPanel } from "../../components/WidthVisualizationPanel";
 import "../../components/WidthVisualizationPanel.css";
+import { ScoreBandDistributionPanel } from "../../components/ScoreBandDistributionPanel";
+import "../../components/ScoreBandDistributionPanel.css";
+import SegmentScoresCard from "../../components/SegmentScoresCard";
 
 
 // 兜底类型
@@ -96,6 +99,20 @@ export default function CodingPage() {
   const [geoFeatures, setGeoFeatures] = useState<Feature[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Segment scores
+  const [scores, setScores] = useState<Array<{
+    BB: number;
+    "BB Band": number;
+    BP: number;
+    "BP Band": number;
+    SB: number;
+    "SB Band": number;
+    VB: number;
+    "VB Band": number;
+    "CycleRAP score": number;
+    "CycleRAP score Band": number;
+  }>>([]);
 
   const [attrMappings, setAttrMappings] = useState<AttrMappings>({});
   const len = attrs.length;
@@ -372,6 +389,41 @@ export default function CodingPage() {
     return () => { cancelled = true; };
   }, [name]);
 
+  // Fetch scores for segment display
+  const fetchScores = useCallback(async () => {
+    if (!name) return;
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(name)}/results`);
+      if (!res.ok) {
+        console.warn("Could not fetch CycleRAP scores");
+        return;
+      }
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.result_rows)) {
+        setScores(data.result_rows);
+        console.log("Scores loaded:", data.result_rows.length, "segments");
+      }
+    } catch (e: any) {
+      console.warn("Failed to load CycleRAP scores:", e?.message);
+    }
+  }, [name]);
+
+  // Fetch scores on component mount and when name changes
+  useEffect(() => {
+    fetchScores();
+  }, [fetchScores]);
+
+  // Listen for score update events (triggered after Calculate Score button is clicked)
+  useEffect(() => {
+    const handleScoresUpdated = () => {
+      console.log("Scores updated event received, refetching scores...");
+      fetchScores();
+    };
+
+    window.addEventListener("psat:scores:updated", handleScoresUpdated);
+    return () => window.removeEventListener("psat:scores:updated", handleScoresUpdated);
+  }, [fetchScores]);
+
   // 映射
   useEffect(() => {
     let cancelled = false;
@@ -639,6 +691,27 @@ export default function CodingPage() {
             index={currentIndex}
             onJump={(i) => setCurrentPage(i + 1)}
           />
+        </GridItem>
+
+        {/* Segment Crash Type Scores - 跨两列 */}
+        <GridItem colSpan={{ base: 1, md: 2 }}>
+          <Box
+            bg="white"
+            borderRadius="md"
+            p="6"
+            borderWidth="1px"
+            borderColor="gray.200"
+            _dark={{ bg: "gray.800", borderColor: "gray.600" }}
+          >
+            <SegmentScoresCard
+              scores={scores[currentIndex] || null}
+            />
+          </Box>
+        </GridItem>
+
+        {/* CycleRAP Score Band Distributions - 跨两列 */}
+        <GridItem colSpan={{ base: 1, md: 2 }}>
+          <ScoreBandDistributionPanel projectName={name} />
         </GridItem>
 
         {/* 第三行：Facility Width Analysis (Collapsible) - 跨两列 */}

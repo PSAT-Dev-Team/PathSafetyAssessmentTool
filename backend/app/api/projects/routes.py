@@ -337,6 +337,36 @@ def calculate_score(project_name: str):
     # Return results to frontend
     return jsonify({"ok": True, "result_rows": results_df.to_dict(orient="records")})
 
+@bp.get("/<project_name>/results")
+def get_results(project_name: str):
+    """
+    Retrieve the latest CycleRAP scores for a project.
+    Returns the calculated results from the latest version.
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        # Get results if they exist
+        if ver.results and ver.results.df is not None and len(ver.results.df) > 0:
+            return jsonify({
+                "ok": True,
+                "result_rows": ver.results.df.to_dict(orient="records")
+            })
+        else:
+            # No results yet
+            return jsonify({
+                "ok": True,
+                "result_rows": []
+            })
+    except Exception as e:
+        print(f"Error retrieving results: {e}")
+        return jsonify({
+            "ok": False,
+            "error": str(e)
+        }), 500
+
 @bp.post("/<project_name>/treatments")
 def evaluate_treatments(project_name: str):
     """

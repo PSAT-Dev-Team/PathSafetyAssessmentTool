@@ -51,7 +51,7 @@ export default function CodingSidebar({
 
         <GridItem colSpan={2}>
           <Button onClick={onCalculate} w="100%" size="sm" variant="outline" colorPalette="gray">
-            Calculate Score & Treatment
+            Calculate Score
           </Button>
         </GridItem>
 
