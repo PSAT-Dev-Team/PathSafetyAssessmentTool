@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Box, Flex, Grid, GridItem, Text, VStack } from "@chakra-ui/react";
+import { Box, Flex, Grid, GridItem, Text } from "@chakra-ui/react";
 
 interface SegmentScoresCardProps {
   scores: {
@@ -14,23 +14,27 @@ interface SegmentScoresCardProps {
 const CRASH_TYPES = [
   {
     key: "BB",
-    label: "Bicycle × Bicycle",
+    label: "Bicycle-Bicycle",
     icon: "🚴🚴",
+    shortLabel: "BB",
   },
   {
     key: "BP",
-    label: "Bicycle × Pedestrian",
+    label: "Bicycle-Pedestrian",
     icon: "🚴🚶",
-  },
-  {
-    key: "VB",
-    label: "Vehicle × Bicycle",
-    icon: "🚗🚴",
+    shortLabel: "BP",
   },
   {
     key: "SB",
-    label: "Single Bicycle",
+    label: "Single-Bicycle",
     icon: "🚴",
+    shortLabel: "SB",
+  },
+  {
+    key: "VB",
+    label: "Vehicle-Bicycle",
+    icon: "🚗🚴",
+    shortLabel: "VB",
   },
 ];
 
@@ -41,11 +45,32 @@ const getBandColor = (score: number): string => {
   return "#CD1AFF"; // Extreme - Purple
 };
 
+const getLightBgColor = (score: number): string => {
+  if (score < 3) return "#88E788"; // Low - Green
+  if (score < 6) return "#FDDA0D"; // Medium - Yellow
+  if (score < 10) return "#F54927"; // High - Red
+  return "#BF40BF"; // Extreme - Purple
+};
+
+const getDarkBgColor = (score: number): string => {
+  if (score < 3) return "#88E788"; // Low - Green
+  if (score < 6) return "#FDDA0D"; // Medium - Yellow
+  if (score < 10) return "#F54927"; // High - Red
+  return "#BF40BF"; // Extreme - Purple
+};
+
 const getBandLabel = (score: number): string => {
   if (score < 3) return "Low";
   if (score < 6) return "Medium";
   if (score < 10) return "High";
   return "Extreme";
+};
+
+const getRiskEmoji = (score: number): string => {
+  if (score < 3) return "💯";
+  if (score < 6) return "🤔";
+  if (score < 10) return "😰";
+  return "⚠️";
 };
 
 export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
@@ -63,8 +88,6 @@ export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
   }, [scores]);
 
   const totalScore = scores?.["CycleRAP score"] ?? 0;
-  const totalColor = getBandColor(totalScore);
-  const totalBand = getBandLabel(totalScore);
 
   if (!scores) {
     return (
@@ -77,135 +100,121 @@ export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
   }
 
   return (
-    <VStack gap="6" align="stretch">
-      {/* Crash Type Scores Grid */}
-      <Box>
-        <Text fontSize="sm" fontWeight="bold" mb="4" color="gray.900" _dark={{ color: "white" }}>
-          Crash Type Scores
-        </Text>
-        <Grid
-          templateColumns={{ base: "1fr 1fr", md: "1fr 1fr" }}
-          gap="4"
-        >
-          {crashTypeScores.map((type) => (
-            <GridItem key={type.key}>
-              <Flex
-                direction="column"
-                bg="white"
-                borderRadius="md"
-                p="4"
-                borderWidth="1px"
-                borderColor="gray.200"
-                boxShadow="0 1px 3px rgba(0, 0, 0, 0.1)"
-                _dark={{
-                  bg: "gray.800",
-                  borderColor: "gray.600",
-                  boxShadow: "0 1px 3px rgba(0, 0, 0, 0.3)",
-                }}
+    <Box>
+      <Text fontSize="sm" fontWeight="bold" mb="4" color="gray.900" _dark={{ color: "white" }}>
+        Crash Type Scores
+      </Text>
+
+      {/* 5-column grid with crash type scores + total */}
+      <Grid
+        templateColumns="repeat(5, 1fr)"
+        gap="4"
+        mb="6"
+      >
+        {crashTypeScores.map((type) => (
+          <GridItem key={type.key}>
+            <Flex
+              direction="column"
+              align="center"
+              justify="center"
+              bg={getLightBgColor(type.score)}
+              _dark={{ bg: getDarkBgColor(type.score) }}
+              borderRadius="lg"
+              p="4"
+              textAlign="center"
+              h="140px"
+              color="black"
+            >
+              {/* Icon */}
+              <Text fontSize="xl" mb="2">
+                {type.icon}
+              </Text>
+
+              {/* Label */}
+              <Text fontSize="xs" fontWeight="bold" mb="3">
+                {type.label}
+              </Text>
+
+              {/* Score Value */}
+              <Text
+                fontSize="2xl"
+                fontWeight="bold"
+                mt="auto"
               >
-                {/* Icon and Label */}
-                <Flex align="center" gap="2" mb="3">
-                  <Text fontSize="lg">{type.icon}</Text>
-                  <Text fontSize="xs" fontWeight="600" color="gray.700" _dark={{ color: "gray.300" }}>
-                    {type.label}
-                  </Text>
-                </Flex>
+                {type.score.toFixed(2)}
+              </Text>
+            </Flex>
+          </GridItem>
+        ))}
 
-                {/* Score Value */}
-                <Box
-                  bg={type.color}
-                  px="3"
-                  py="2"
-                  borderRadius="md"
-                  mb="2"
-                >
-                  <Text fontSize="xl" fontWeight="bold" color="white">
-                    {type.score.toFixed(2)}
-                  </Text>
-                </Box>
-
-                {/* Band Label */}
-                <Text fontSize="xs" fontWeight="600" color="gray.600" _dark={{ color: "gray.400" }}>
-                  {type.band}
-                </Text>
-              </Flex>
-            </GridItem>
-          ))}
-        </Grid>
-      </Box>
-
-      {/* CycleRAP Total Score */}
-      <Box>
-        <Text fontSize="sm" fontWeight="bold" mb="3" color="gray.900" _dark={{ color: "white" }}>
-          CycleRAP Score
-        </Text>
-        <Flex
-          direction="column"
-          align="center"
-          justify="center"
-          bg="white"
-          borderRadius="md"
-          p="6"
-          borderWidth="1px"
-          borderColor="gray.200"
-          boxShadow="0 1px 3px rgba(0, 0, 0, 0.1)"
-          _dark={{
-            bg: "gray.800",
-            borderColor: "gray.600",
-            boxShadow: "0 1px 3px rgba(0, 0, 0, 0.3)",
-          }}
-        >
-          <Box
-            bg={totalColor}
-            px="6"
-            py="3"
-            borderRadius="md"
-            mb="3"
-            w="100%"
+        {/* Total Score */}
+        <GridItem>
+          <Flex
+            direction="column"
+            align="center"
+            justify="center"
+            bg={getLightBgColor(totalScore)}
+            _dark={{ bg: getDarkBgColor(totalScore) }}
+            borderRadius="lg"
+            p="4"
             textAlign="center"
+            h="140px"
+            color="black"
           >
-            <Text fontSize="3xl" fontWeight="bold" color="white">
+            {/* Risk emoji */}
+            <Text fontSize="xl" mb="2">
+              {getRiskEmoji(totalScore)}
+            </Text>
+
+            {/* Total label */}
+            <Text fontSize="xs" fontWeight="bold" mb="3">
+              CycleRAP Score
+            </Text>
+
+            {/* Total score value */}
+            <Text
+              fontSize="2xl"
+              fontWeight="bold"
+              mt="auto"
+            >
               {totalScore.toFixed(2)}
             </Text>
-          </Box>
-          <Text fontSize="sm" fontWeight="600" color="gray.600" _dark={{ color: "gray.400" }}>
-            {totalBand}
-          </Text>
-        </Flex>
-      </Box>
+          </Flex>
+        </GridItem>
+      </Grid>
 
       {/* Risk Levels Legend */}
       <Box>
         <Text fontSize="xs" fontWeight="bold" mb="2" color="gray.900" _dark={{ color: "white" }}>
           Risk Levels
         </Text>
-        <Grid templateColumns="1fr 1fr" gap="2">
+        <Grid templateColumns="repeat(4, 1fr)" gap="2">
           <Flex align="center" gap="2">
-            <Box w="20px" h="20px" borderRadius="md" bg="#87C424" />
+            <Box w="16px" h="16px" borderRadius="md" bg="#88E788" />
             <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
               Low
             </Text>
           </Flex>
           <Flex align="center" gap="2">
-            <Box w="20px" h="20px" borderRadius="md" bg="#FFCC1A" />
+            <Box w="16px" h="16px" borderRadius="md" bg="#FDDA0D" />
             <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
               Medium
             </Text>
           </Flex>
           <Flex align="center" gap="2">
-            <Box w="20px" h="20px" borderRadius="md" bg="#FF5B1A" />
+            <Box w="16px" h="16px" borderRadius="md" bg="#F54927" />
             <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
               High
             </Text>
           </Flex>
           <Flex align="center" gap="2">
-            <Box w="20px" h="20px" borderRadius="md" bg="#CD1AFF" />
+            <Box w="16px" h="16px" borderRadius="md" bg="#BF40BF" />
             <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
               Extreme
             </Text>
           </Flex>
         </Grid>
       </Box>
-    </VStack>
+    </Box>
   );
 }

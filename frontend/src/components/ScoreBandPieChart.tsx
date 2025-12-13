@@ -14,10 +14,11 @@ interface ScoreBandPieChartProps {
 }
 
 const BAND_INFO: Record<number, { label: string; color: string }> = {
-  1: { label: "Low", color: "#87C424" },
-  2: { label: "Medium", color: "#FFCC1A" },
-  3: { label: "High", color: "#FF5B1A" },
-  4: { label: "Extreme", color: "#CD1AFF" },
+  1: { label: "Low", color: "#88E788" },
+  2: { label: "Medium", color: "#FDDA0D" },
+  3: { label: "High", color: "#F54927" },
+  4: { label: "Extreme", color: "#BF40BF" },
+  5: { label: "Extreme", color: "#BF40BF" },
 };
 
 interface ChartDataPoint {
@@ -36,7 +37,19 @@ export default function ScoreBandPieChart({
   const chartData: ChartDataPoint[] = useMemo(() => {
     const total = Object.values(bandCounts).reduce((sum, count) => sum + count, 0);
 
-    return Object.entries(bandCounts)
+    // Merge bands 4 and 5 into a single "Extreme" category
+    const mergedBandCounts: Record<number, number> = {};
+    Object.entries(bandCounts).forEach(([band, count]) => {
+      const bandNum = parseInt(band);
+      if (bandNum === 5) {
+        // Merge band 5 into band 4
+        mergedBandCounts[4] = (mergedBandCounts[4] || 0) + count;
+      } else {
+        mergedBandCounts[bandNum] = count;
+      }
+    });
+
+    return Object.entries(mergedBandCounts)
       .filter(([_, count]) => count > 0) // Only show non-zero bands
       .map(([band, count]) => {
         const bandNum = parseInt(band);

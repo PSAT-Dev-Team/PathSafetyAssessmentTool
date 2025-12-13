@@ -215,10 +215,10 @@ export default function GeoDataPanel({ index, onJump }: Props) {
       return "#2563EB"; // Default blue if no scores
     }
     const score = scores[segmentIndex]["CycleRAP score"];
-    if (score < 5) return "#87C424";    // Low (green)
-    if (score < 10) return "#FFCC1A";   // Medium (yellow)
-    if (score < 20) return "#FF5B1A";   // High (orange)
-    return "#CD1AFF";                    // Extreme (purple)
+    if (score < 3) return "#88E788";    // Low (green)
+    if (score < 6) return "#FDDA0D";    // Medium (yellow)
+    if (score < 10) return "#F54927";   // High (red)
+    return "#BF40BF";                    // Extreme (purple)
   };
 
   return (

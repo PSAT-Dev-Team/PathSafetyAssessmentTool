@@ -54,13 +54,13 @@ export function ScoreBandDistributionPanel({
   // Process band distributions from API response
   const processBandDistributions = useCallback(
     (resultRows: ScoreResultRow[]): CrashTypeDistributions => {
-      // Initialize all bands to 0
+      // Initialize all bands to 0 (including band 5 for extreme scores)
       const distributions: CrashTypeDistributions = {
-        VB: { 1: 0, 2: 0, 3: 0, 4: 0 },
-        BB: { 1: 0, 2: 0, 3: 0, 4: 0 },
-        SB: { 1: 0, 2: 0, 3: 0, 4: 0 },
-        BP: { 1: 0, 2: 0, 3: 0, 4: 0 },
-        Overall: { 1: 0, 2: 0, 3: 0, 4: 0 },
+        VB: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+        BB: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+        SB: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+        BP: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+        Overall: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
       };
 
       // Count occurrences of each band
@@ -71,12 +71,12 @@ export function ScoreBandDistributionPanel({
         const bpBand = row["BP Band"];
         const overallBand = row["CycleRAP score Band"];
 
-        // Only count valid bands (1-4), skip 0
-        if (vbBand >= 1 && vbBand <= 4) distributions.VB[vbBand]++;
-        if (bbBand >= 1 && bbBand <= 4) distributions.BB[bbBand]++;
-        if (sbBand >= 1 && sbBand <= 4) distributions.SB[sbBand]++;
-        if (bpBand >= 1 && bpBand <= 4) distributions.BP[bpBand]++;
-        if (overallBand >= 1 && overallBand <= 4) distributions.Overall[overallBand]++;
+        // Count valid bands (1-5), skip 0 and other invalid values
+        if (vbBand >= 1 && vbBand <= 5) distributions.VB[vbBand]++;
+        if (bbBand >= 1 && bbBand <= 5) distributions.BB[bbBand]++;
+        if (sbBand >= 1 && sbBand <= 5) distributions.SB[sbBand]++;
+        if (bpBand >= 1 && bpBand <= 5) distributions.BP[bpBand]++;
+        if (overallBand >= 1 && overallBand <= 5) distributions.Overall[overallBand]++;
       });
 
       return distributions;

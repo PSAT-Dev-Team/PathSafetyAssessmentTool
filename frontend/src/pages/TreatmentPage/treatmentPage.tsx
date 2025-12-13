@@ -1,71 +1,71 @@
 import { useState, useEffect, useMemo } from "react";
 import {
-  Box,
-  Flex,
-  Text,
   Button,
-  Input,
+  Portal,
+  Select,
   createListCollection,
-  For,
+  Box,
 } from "@chakra-ui/react";
-import {
-  SelectContent,
-  SelectItem,
-  SelectRoot,
-  SelectTrigger,
-  SelectValueText,
-} from "@chakra-ui/react";
+import { useNavigate } from "react-router-dom";
+import { LuPencil } from "react-icons/lu";
 import { fetchProjectList, type FileResponse } from "../../api";
-import AttributesDropdown from "./components/AttributesDropdown";
-import TreatmentMapView from "./components/TreatmentMapView";
+import EditProjectModal from "../Home/components/EditProjectModal";
+import "../Home/home.css";
 
-// Size filter options
-const sizeOptions = createListCollection({
-  items: [
-    { label: "Any Size", value: "any" },
-    { label: "Small (< 10 MB)", value: "small" },
-    { label: "Medium (10-100 MB)", value: "medium" },
-    { label: "Large (100-500 MB)", value: "large" },
-    { label: "Extra Large (> 500 MB)", value: "xlarge" },
-  ],
-});
+// Get border color for Pre/Post tags
+function getTagBorderColor(tag: string): string {
+  if (tag === "Pre") return "#fb923c"; // orange.emphasized
+  if (tag === "Post") return "#22c55e"; // green.emphasized
+  return "rgba(0, 0, 0, 0.1)";
+}
 
-// Dataset filter options
-const datasetOptions = createListCollection({
-  items: [
-    { label: "All Datasets", value: "all" },
-    { label: "Safety Assessment", value: "safety" },
-    { label: "Traffic Analysis", value: "traffic" },
-    { label: "Infrastructure", value: "infrastructure" },
-    { label: "Environmental", value: "environmental" },
-  ],
-});
+// Generate a consistent, bright, varied color for each unique tag
+function getTagColor(tag: string): string {
+  // Fixed colors for Pre/Post - matching the analysis pages (orange.subtle and green.subtle)
+  if (tag === "Pre") return "#fed7aa"; // orange.subtle
+  if (tag === "Post") return "#bbf7d0"; // green.subtle
 
-// Tags filter options
-const tagsOptions = createListCollection({
-  items: [
-    { label: "All Tags", value: "all" },
-    { label: "Cycling", value: "cycling" },
-    { label: "Pedestrian", value: "pedestrian" },
-    { label: "Urban", value: "urban" },
-    { label: "Rural", value: "rural" },
-    { label: "High Priority", value: "priority" },
-  ],
-});
+  // Simple hash function to convert string to number
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+  }
+
+  // Use multiple hash variations to increase color variety
+  const hash2 = Math.abs(hash >> 16);
+  const hash3 = Math.abs(hash << 3);
+
+  // Create wider hue distribution with warm and cool colors
+  // Avoid muddy middle ranges (40-60 yellow-green, 160-180 cyan)
+  let hue = Math.abs(hash % 360);
+  if (hue >= 40 && hue <= 60) hue = (hue + 30) % 360;  // Skip muddy yellow-green
+  if (hue >= 160 && hue <= 180) hue = (hue + 30) % 360; // Skip muddy cyan
+
+  // Higher saturation (75-95%) for more vibrant colors
+  const saturation = 75 + (hash2 % 21); // 75-95%
+
+  // Higher lightness (65-80%) for brighter, more visible colors
+  const lightness = 65 + (hash3 % 16); // 65-80%
+
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+}
 
 export default function TreatmentPage() {
   // Project list state
   const [projectList, setProjectList] = useState<FileResponse | null>(null);
-  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
 
   // Filter states
-  const [dateCreatedFrom, setDateCreatedFrom] = useState("");
-  const [dateCreatedTo, setDateCreatedTo] = useState("");
-  const [lastUpdatedFrom, setLastUpdatedFrom] = useState("");
-  const [lastUpdatedTo, setLastUpdatedTo] = useState("");
-  const [sizeFilter, setSizeFilter] = useState("any");
-  const [datasetFilter, setDatasetFilter] = useState("all");
-  const [tagsFilter, setTagsFilter] = useState("all");
+  const [nameQuery, setNameQuery] = useState("");
+  const [tagFilter, setTagFilter] = useState<string>("");
+
+  // Selected Project
+  const [selected, setSelected] = useState<string | null>(null);
+
+  // Edit dialog state
+  const [openEdit, setOpenEdit] = useState(false);
+  const [editingProject, setEditingProject] = useState<any | null>(null);
+
+  const navigate = useNavigate();
 
   // Fetch projects on mount
   useEffect(() => {
@@ -82,259 +82,223 @@ export default function TreatmentPage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [projectList]);
 
-  // Create collection for project dropdown
-  const projectCollection = useMemo(() => {
-    return createListCollection({
-      items: projects.map((p) => ({
-        label: p.name,
-        value: p.name,
-      })),
+  // Get all unique tags
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    projects.forEach(p => {
+      p.tags?.forEach(tag => tagSet.add(tag));
     });
+    return Array.from(tagSet).sort();
   }, [projects]);
 
-  // Handle View Project button click
-  const handleViewProject = () => {
-    if (selectedProjects.length === 0) {
-      alert("Please select at least one project");
-      return;
+  // Apply filters
+  const filtered = useMemo(() => {
+    const q = nameQuery.trim().toLowerCase();
+    let list = projects;
+    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+    if (tagFilter) list = list.filter((p) => p.tags?.includes(tagFilter));
+    return list;
+  }, [projects, nameQuery, tagFilter]);
+
+  const onRowClick = (name: string) => setSelected(name);
+
+  const loadProject = async () => {
+    if (!selected) return;
+    navigate(`/coding/${encodeURIComponent(selected)}`);
+  };
+
+  const handleEditSuccess = (newName: string, newTags: string[]) => {
+    if (!editingProject) return;
+    const oldName = editingProject.name;
+    setProjectList((prev) => {
+      if (!prev) return prev;
+      return {
+        projects: prev.projects.map((p) =>
+          p.name === oldName ? { name: newName, tags: newTags } : p
+        ),
+      };
+    });
+    if (selected === oldName && newName !== oldName) {
+      setSelected(newName);
     }
-    console.log("Selected projects:", selectedProjects);
-    // TODO: Load treatment data for selected projects
   };
 
   return (
-    <Box w="100%" h="100vh" overflowY="auto" p="6">
-      {/* Header */}
-      <Box mb="6">
-        <Text fontSize="2xl" fontWeight="bold" mb="2">
-          Treatment Dashboard
-        </Text>
-        <Text fontSize="sm" color="fg.muted">
-          Select one or more projects to start treatment analysis
-        </Text>
-      </Box>
-
-      {/* Filter Panel */}
-      <Box
-        borderWidth="1px"
-        borderRadius="lg"
-        p="6"
-        bg="bg.panel"
-        mb="6"
-      >
-        <Text fontSize="lg" fontWeight="semibold" mb="4">
-          Filter Projects
-        </Text>
-
-        <Flex direction="column" gap="4">
-          {/* Row 1: Project Name Dropdown (Multi-select) */}
-          <Box>
-            <Text fontSize="sm" fontWeight="semibold" mb="2">
-              Project Name
-            </Text>
-            <SelectRoot
-              collection={projectCollection}
-              size="md"
-              multiple
-              value={selectedProjects}
-              onValueChange={(e) => setSelectedProjects(e.value)}
+    <div className="home-root">
+      {/* Search Panel */}
+      <div className="search-panel">
+        <div className="search-row">
+          <div className="search-item">
+            <label htmlFor="nameQuery">Search by project name</label>
+            <input
+              id="nameQuery"
+              type="text"
+              placeholder="Type project name…"
+              value={nameQuery}
+              onChange={(e) => setNameQuery(e.target.value)}
+            />
+          </div>
+          <div className="search-item">
+            <label htmlFor="tagFilter">Filter by tag</label>
+            <Select.Root
+              collection={createListCollection({
+                items: [
+                  { label: "All tags", value: "" },
+                  ...allTags.map(tag => ({ label: tag, value: tag }))
+                ]
+              })}
+              size="sm"
+              value={tagFilter ? [tagFilter] : [""]}
+              onValueChange={({ value }) => setTagFilter(value[0] ?? "")}
             >
-              <SelectTrigger>
-                <SelectValueText placeholder="Select one or more projects...">
-                  {selectedProjects.length === 0
-                    ? "Select one or more projects..."
-                    : `${selectedProjects.length} project${selectedProjects.length > 1 ? "s" : ""} selected`}
-                </SelectValueText>
-              </SelectTrigger>
-              <SelectContent maxH="300px" overflowY="auto">
-                <For each={projectCollection.items}>
-                  {(item) => (
-                    <SelectItem key={item.value} item={item}>
-                      <Flex align="center" gap="2">
-                        <input
-                          type="checkbox"
-                          checked={selectedProjects.includes(item.value)}
-                          readOnly
-                          style={{ pointerEvents: "none" }}
-                        />
-                        <Text>{item.label}</Text>
-                      </Flex>
-                    </SelectItem>
-                  )}
-                </For>
-              </SelectContent>
-            </SelectRoot>
-            {selectedProjects.length > 0 && (
-              <Flex mt="2" gap="2" flexWrap="wrap">
-                {selectedProjects.map((proj) => (
-                  <Flex
-                    key={proj}
-                    align="center"
-                    gap="1"
-                    px="2"
-                    py="1"
-                    bg="blue.subtle"
-                    borderRadius="md"
-                    fontSize="sm"
-                  >
-                    <Text>{proj}</Text>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() =>
-                        setSelectedProjects(selectedProjects.filter((p) => p !== proj))
-                      }
-                      px="1"
-                    >
-                      ×
-                    </Button>
-                  </Flex>
-                ))}
-              </Flex>
-            )}
-          </Box>
-
-          {/* Row 2: Date filters */}
-          <Flex gap="4" direction={{ base: "column", md: "row" }}>
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Date Created
-              </Text>
-              <Flex gap="2" align="center">
-                <Input
-                  type="date"
-                  value={dateCreatedFrom}
-                  onChange={(e) => setDateCreatedFrom(e.target.value)}
-                  size="md"
-                />
-                <Text fontSize="sm" color="fg.muted">to</Text>
-                <Input
-                  type="date"
-                  value={dateCreatedTo}
-                  onChange={(e) => setDateCreatedTo(e.target.value)}
-                  size="md"
-                />
-              </Flex>
-            </Box>
-
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Last Updated
-              </Text>
-              <Flex gap="2" align="center">
-                <Input
-                  type="date"
-                  value={lastUpdatedFrom}
-                  onChange={(e) => setLastUpdatedFrom(e.target.value)}
-                  size="md"
-                />
-                <Text fontSize="sm" color="fg.muted">to</Text>
-                <Input
-                  type="date"
-                  value={lastUpdatedTo}
-                  onChange={(e) => setLastUpdatedTo(e.target.value)}
-                  size="md"
-                />
-              </Flex>
-            </Box>
-          </Flex>
-
-          {/* Row 3: Other filters */}
-          <Flex gap="4" direction={{ base: "column", md: "row" }}>
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Size
-              </Text>
-              <SelectRoot
-                collection={sizeOptions}
-                size="md"
-                value={[sizeFilter]}
-                onValueChange={(e) => setSizeFilter(e.value[0])}
-              >
-                <SelectTrigger>
-                  <SelectValueText placeholder="Select size" />
-                </SelectTrigger>
-                <SelectContent>
-                  {sizeOptions.items.map((item) => (
-                    <SelectItem key={item.value} item={item}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
-            </Box>
-
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Dataset
-              </Text>
-              <SelectRoot
-                collection={datasetOptions}
-                size="md"
-                value={[datasetFilter]}
-                onValueChange={(e) => setDatasetFilter(e.value[0])}
-              >
-                <SelectTrigger>
-                  <SelectValueText placeholder="Select dataset" />
-                </SelectTrigger>
-                <SelectContent>
-                  {datasetOptions.items.map((item) => (
-                    <SelectItem key={item.value} item={item}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
-            </Box>
-
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Tags
-              </Text>
-              <SelectRoot
-                collection={tagsOptions}
-                size="md"
-                value={[tagsFilter]}
-                onValueChange={(e) => setTagsFilter(e.value[0])}
-              >
-                <SelectTrigger>
-                  <SelectValueText placeholder="Select tags" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tagsOptions.items.map((item) => (
-                    <SelectItem key={item.value} item={item}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
-            </Box>
-          </Flex>
-
-          {/* Load Selected Projects Button */}
-          <Flex justify="center" mt="4">
-            <Button
-              colorPalette="blue"
-              size="lg"
-              px="12"
-              onClick={handleViewProject}
-              disabled={selectedProjects.length === 0}
-            >
-              Load Selected Projects ({selectedProjects.length})
+              <Select.HiddenSelect name="tag-filter" />
+              <Select.Control>
+                <Select.Trigger>
+                  <Select.ValueText placeholder="All tags" />
+                </Select.Trigger>
+                <Select.IndicatorGroup>
+                  <Select.Indicator />
+                </Select.IndicatorGroup>
+              </Select.Control>
+              <Portal>
+                <Select.Positioner>
+                  <Select.Content>
+                    <Select.Item item={{ label: "All tags", value: "" }} key="">
+                      All tags
+                      <Select.ItemIndicator />
+                    </Select.Item>
+                    {allTags.map((tag) => (
+                      <Select.Item item={{ label: tag, value: tag }} key={tag}>
+                        {tag}
+                        <Select.ItemIndicator />
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Positioner>
+              </Portal>
+            </Select.Root>
+          </div>
+          <div className="actions-buttons">
+            <Button onClick={loadProject} colorPalette="blue" disabled={!selected}>
+              Load Project
             </Button>
-          </Flex>
-        </Flex>
-      </Box>
+          </div>
+        </div>
+      </div>
 
-      {/* Attributes Dropdown Section */}
-      <Box mb="6">
-        <AttributesDropdown />
-      </Box>
+      {/* Project Table */}
+      <div className="table-wrap">
+        <table className="project-table">
+          <thead>
+            <tr>
+              <th style={{ width: 48 }}></th>
+              <th>Project Name</th>
+              <th style={{ width: 120 }}>Status</th>
+              <th>Tags</th>
+              <th style={{ width: 120 }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="empty">
+                  No projects found
+                </td>
+              </tr>
+            ) : (
+              filtered.map((p) => {
+                const isSelected = selected === p.name;
+                // Find Pre/Post tag if it exists
+                const phaseTag = p.tags?.find(tag => tag === "Pre" || tag === "Post");
+                // Get all other tags (excluding Pre/Post)
+                const otherTags = p.tags?.filter(tag => tag !== "Pre" && tag !== "Post") || [];
 
-      {/* Map/Table Section */}
-      <Box mb="6">
-        <TreatmentMapView />
-      </Box>
-    </Box>
+                return (
+                  <tr
+                    key={p.name}
+                    className={isSelected ? "row selected" : "row"}
+                    onClick={() => onRowClick(p.name)}
+                  >
+                    <td>
+                      <input
+                        type="radio"
+                        name="projectSelect"
+                        checked={isSelected}
+                        onChange={() => onRowClick(p.name)}
+                        aria-label={`Select ${p.name}`}
+                      />
+                    </td>
+                    <td title={p.name}>{p.name}</td>
+                    <td>
+                      {phaseTag && (
+                        <Box
+                          as="span"
+                          bg={phaseTag === "Pre" ? "orange.subtle" : "green.subtle"}
+                          color={phaseTag === "Pre" ? "orange.fg" : "green.fg"}
+                          borderColor={phaseTag === "Pre" ? "orange.emphasized" : "green.emphasized"}
+                          borderWidth="1px"
+                          fontSize="xs"
+                          fontWeight="semibold"
+                          px="2"
+                          py="1"
+                          borderRadius="md"
+                        >
+                          {phaseTag}
+                        </Box>
+                      )}
+                    </td>
+                    <td>
+                      <div className="tags-container">
+                        {otherTags.length > 0 ? (
+                          otherTags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="tag-badge"
+                              style={{
+                                backgroundColor: getTagColor(tag),
+                                borderColor: getTagBorderColor(tag),
+                                borderWidth: "1px",
+                                borderStyle: "solid",
+                              }}
+                            >
+                              {tag}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="no-tags">—</span>
+                        )}
+                      </div>
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          setEditingProject(p);
+                          setOpenEdit(true);
+                        }}
+                        className="row-edit-btn"
+                        aria-label="Edit project"
+                      >
+                        <LuPencil className="row-edit-icon" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Edit Dialog */}
+      {editingProject && (
+        <EditProjectModal
+          open={openEdit}
+          onClose={() => setOpenEdit(false)}
+          projectName={editingProject.name}
+          projectTags={editingProject.tags}
+          onSuccess={handleEditSuccess}
+        />
+      )}
+    </div>
   );
 }
