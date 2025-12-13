@@ -4,6 +4,7 @@ import Home from "./pages/Home/home";
 import CodingPage from "./pages/CodingPage/codingPage"
 import CreateProjectPage from "./pages/CreateProjectPage/createProjectPage"
 import TreatmentPage from "./pages/TreatmentPage/treatmentPage"
+import TreatmentDetailPage from "./pages/TreatmentPage/treatmentDetailPage"
 import AttributeAnalysisPage from "./pages/AttributeAnalysisPage/attributeAnalysisPage"
 import PostTreatmentAnalysisPage from "./pages/PostTreatmentAnalysisPage/postTreatmentAnalysisPage"
 
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/home" element={<Home />} />
         <Route path="/coding/:projectName" element={<CodingPage />} />
         <Route path="/treatment" element={<TreatmentPage />} />
+        <Route path="/treatment/:projectName" element={<TreatmentDetailPage />} />
         <Route path="/analysis/attribute" element={<AttributeAnalysisPage />} />
         <Route path="/analysis/post-treatment" element={<PostTreatmentAnalysisPage />} />
         <Route path="/projects/create" element={<CreateProjectPage />} />

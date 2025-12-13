@@ -104,7 +104,7 @@ export default function TreatmentPage() {
 
   const loadProject = async () => {
     if (!selected) return;
-    navigate(`/coding/${encodeURIComponent(selected)}`);
+    navigate(`/treatment/${encodeURIComponent(selected)}`);
   };
 
   const handleEditSuccess = (newName: string, newTags: string[]) => {

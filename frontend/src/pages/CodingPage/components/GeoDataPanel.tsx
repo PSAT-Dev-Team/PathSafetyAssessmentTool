@@ -15,6 +15,7 @@ type Props = {
   feature: Feature<LineString, any> | null; // 当前段（父组件传入）
   index: number;                             // 当前页（父组件传入，0-based）
   onJump?: (idx: number) => void;  // ← 新增
+  containerHeight?: number;                  // 容器总高度（包括header）
 };
 
 type GJ = FeatureCollection<LineString, any>;
@@ -46,7 +47,7 @@ function FitBounds({ points }: { points: [number, number][] }) {
   return null;
 }
 
-export default function GeoDataPanel({ index, onJump }: Props) {
+export default function GeoDataPanel({ index, onJump, containerHeight = 650 }: Props) {
   // 从路由拿项目名（不改父组件）
   const { projectName } = useParams<{ projectName: string }>();
   const decodedName = useMemo(() => {
@@ -222,8 +223,8 @@ export default function GeoDataPanel({ index, onJump }: Props) {
   };
 
   return (
-    <Card.Root>
-      <CardHeader>
+    <Card.Root display="flex" flexDirection="column" h={`${containerHeight}px`}>
+      <CardHeader py="2" px="4">
         <Flex justify="space-between" align="center">
           <Heading size="sm">Map Preview</Heading>
 
@@ -268,17 +269,17 @@ export default function GeoDataPanel({ index, onJump }: Props) {
         </Flex>
       </CardHeader>
 
-      <CardBody>
+      <CardBody flex="1" minH={0} p={0}>
         {loading && <Text color="gray.500">Loading map…</Text>}
         {err && <Text color="red.600">Failed: {err}</Text>}
 
         {!loading && !err && (
-          <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
+          <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden" h="100%">
             <MapContainer
               center={initialCenter.current}
               zoom={13}
               maxZoom={22}
-              style={{ width: "100%", height: 650 }}
+              style={{ width: "100%", height: "100%" }}
               scrollWheelZoom
               preferCanvas
             >
