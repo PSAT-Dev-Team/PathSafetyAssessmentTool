@@ -47,6 +47,135 @@ from app.services import gis_mapping as gis
 import app.services.global_var as global_var
 
 
+# ===== Treatment Definitions (must match frontend exactly) =====
+TREATMENTS = [
+    {
+        "id": 1,
+        "name": "Upgrade to on-road bicycle lane with light segregation",
+        "effects": {"Facility Type": 4, "Light Segregation": 1, "Facility access": 1}
+    },
+    {
+        "id": 2,
+        "name": "Safety barrier (Adjacent road 0-1m)",
+        "effects": {"Adjacent Road Lane 0-1m": 2, "Facility access": 1}
+    },
+    {
+        "id": 3,
+        "name": "Safety barrier (Adjacent road 1-3m)",
+        "effects": {"Adjacent Road Lane 1-3m": 2, "Facility access": 1}
+    },
+    {
+        "id": 4,
+        "name": "Upgrade to cycling-priority street",
+        "effects": {"Facility access": 1}
+    },
+    {
+        "id": 5,
+        "name": "Upgrade to multi-use path",
+        "effects": {"Facility Type": 2, "Facility Width per Direction": 3, "Facility access": 1}
+    },
+    {
+        "id": 6,
+        "name": "Upgrade to off-road bicycle path",
+        "effects": {"Facility Type": 3, "Facility access": 1}
+    },
+    {
+        "id": 7,
+        "name": "Convert to one-way facility",
+        "effects": {"Flow Direction": 1, "Facility access": 1}
+    },
+    {
+        "id": 8,
+        "name": "Improve surface conditions",
+        "effects": {"Loose or slippery surface": 2, "Major Surface Deformation or Drain Opening": 2}
+    },
+    {
+        "id": 9,
+        "name": "Install light segregation",
+        "effects": {"Light Segregation": 1}
+    },
+    {
+        "id": 10,
+        "name": "Install street lighting",
+        "effects": {"Street Lighting": 1}
+    },
+    {
+        "id": 11,
+        "name": "Remove fixed obstacles",
+        "effects": {"Fixed Obstacle on Facility": 2}
+    },
+    {
+        "id": 12,
+        "name": "Remove non-fixed obstacles",
+        "effects": {"Non-Fixed Obstacle on Facility": 2}
+    },
+    {
+        "id": 13,
+        "name": "Remove width restriction",
+        "effects": {"Width Restriction": 2}
+    },
+    {
+        "id": 14,
+        "name": "Improve facility access",
+        "effects": {"Facility access": 1}
+    },
+    {
+        "id": 15,
+        "name": "Redesign sharp curves",
+        "effects": {"Curvature": 2}
+    },
+    {
+        "id": 16,
+        "name": "Widen the facility",
+        "effects": {"Facility Width per Direction": 3}
+    },
+    {
+        "id": 17,
+        "name": "Install protective barrier",
+        "effects": {"Adjacent Severe Hazard 0-1m": 2}
+    },
+    {
+        "id": 18,
+        "name": "Improve delineation",
+        "effects": {"Delineation": 1}
+    },
+    {
+        "id": 19,
+        "name": "Review intersection approach",
+        "effects": {"Intersection Approach": 2}
+    },
+    {
+        "id": 20,
+        "name": "Improve crossing facility",
+        "effects": {"Crossing Facility": 1}
+    },
+    {
+        "id": 21,
+        "name": "Evaluate grade separation",
+        "effects": {"Intersection or Road Crossing": 2}
+    },
+    {
+        "id": 22,
+        "name": "Reconfigure/remove parking",
+        "effects": {"Adjacent Vehicle Parking 0-1m": 2}
+    },
+    {
+        "id": 23,
+        "name": "Review tram/train rails",
+        "effects": {"Tram or Train Rails": 2}
+    },
+    {
+        "id": 24,
+        "name": "Install traffic calming",
+        "effects": {}
+    },
+    {
+        "id": 25,
+        "name": "Bicycle speed control",
+        "effects": {"Bicycle/LV speed – average": 1}
+    },
+]
+
 # util
 def ok(data, code=200):
     return jsonify(data), code
@@ -385,6 +514,312 @@ def evaluate_treatments(project_name: str):
     proj.save_all()
 
     return jsonify({"ok": True, "rows": treatment_tbl.df.to_dict(orient="records")})
+
+
+@bp.post("/<project_name>/treatments/apply")
+def apply_treatments(project_name: str):
+    """
+    Apply selected treatments to a specific segment.
+
+    Request body:
+        {
+            "segment_index": 5,
+            "treatment_ids": [1, 9, 14],
+            "image_ref": "FERNVALE_001.jpg"  // Optional, for tracking
+        }
+
+    Response:
+        {
+            "ok": true,
+            "segment_index": 5,
+            "treatments_applied": "1,9,14",
+            "modified_attributes": { "Facility Type": 4, ... },
+            "before_scores": { "BB": 2.5, "BP": 1.2, "SB": 3.1, "VB": 5.8, "CycleRAP score": 12.6 },
+            "after_scores": { "BB": 1.8, "BP": 0.9, "SB": 2.2, "VB": 3.5, "CycleRAP score": 8.4 }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        data = request.get_json(silent=True) or {}
+        segment_index = data.get("segment_index")
+        treatment_ids = data.get("treatment_ids", [])
+        image_ref = data.get("image_ref", "")
+
+        if segment_index is None:
+            return fail("Missing segment_index", 400)
+
+        if not isinstance(treatment_ids, list):
+            return fail("treatment_ids must be a list", 400)
+
+        # Load original attributes
+        attrs_df = ver.attributes.df
+        if segment_index >= len(attrs_df):
+            return fail(f"Segment index {segment_index} out of range", 400)
+
+        original_row = dict(attrs_df.iloc[segment_index])
+
+        # Apply treatment effects
+        modified_row = original_row.copy()
+        for treatment_id in treatment_ids:
+            if not (1 <= treatment_id <= 25):
+                return fail(f"Invalid treatment ID: {treatment_id}", 400)
+            treatment = TREATMENTS[treatment_id - 1]  # Convert 1-based to 0-based
+            for attr_name, new_value in treatment['effects'].items():
+                modified_row[attr_name] = new_value
+
+        # Calculate before scores (from original attributes)
+        original_df = pd.DataFrame([original_row])
+        before_scores_df = calculate_cyclerap_score_native(original_df)
+        before_scores = {
+            "BB": float(before_scores_df["BB"].iloc[0]),
+            "BP": float(before_scores_df["BP"].iloc[0]),
+            "SB": float(before_scores_df["SB"].iloc[0]),
+            "VB": float(before_scores_df["VB"].iloc[0]),
+            "CycleRAP score": float(before_scores_df["CycleRAP score"].iloc[0])
+        }
+
+        # Calculate after scores (from modified attributes)
+        modified_df = pd.DataFrame([modified_row])
+        after_scores_df = calculate_cyclerap_score_native(modified_df)
+        after_scores = {
+            "BB": float(after_scores_df["BB"].iloc[0]),
+            "BP": float(after_scores_df["BP"].iloc[0]),
+            "SB": float(after_scores_df["SB"].iloc[0]),
+            "VB": float(after_scores_df["VB"].iloc[0]),
+            "CycleRAP score": float(after_scores_df["CycleRAP score"].iloc[0])
+        }
+
+        # Update or create treatment.csv
+        treatment_df = ver.treatment.df
+
+        # Ensure the treatment.csv has enough rows
+        if len(treatment_df) <= segment_index:
+            # Need to expand the dataframe
+            new_rows = [treatment_df.iloc[0].copy() if len(treatment_df) > 0 else {}] * (segment_index - len(treatment_df) + 1)
+            treatment_df = pd.concat([treatment_df, pd.DataFrame(new_rows)], ignore_index=True)
+
+        # Update the row with modified attributes
+        for col in modified_row.keys():
+            if col in treatment_df.columns:
+                treatment_df.at[segment_index, col] = modified_row[col]
+
+        # Update "Treatments Applied" column
+        if "Treatments Applied" not in treatment_df.columns:
+            treatment_df.insert(0, "Treatments Applied", "")
+
+        if treatment_ids:
+            treatment_df.at[segment_index, "Treatments Applied"] = ",".join(str(tid) for tid in treatment_ids)
+        else:
+            treatment_df.at[segment_index, "Treatments Applied"] = ""
+
+        # Save updated treatment.csv
+        ver._treatment = serializer.Treatment()
+        ver.treatment.df = treatment_df
+        ver.treatment.df_dirty = True
+        proj.save_all()
+
+        return jsonify({
+            "ok": True,
+            "segment_index": segment_index,
+            "treatments_applied": ",".join(str(tid) for tid in treatment_ids),
+            "modified_attributes": modified_row,
+            "before_scores": before_scores,
+            "after_scores": after_scores
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error applying treatments: {str(e)}", 500)
+
+
+@bp.get("/<project_name>/treatments/segment/<int:segment_index>")
+def get_segment_treatments(project_name: str, segment_index: int):
+    """
+    Get treatment state for a specific segment.
+
+    Response:
+        {
+            "ok": true,
+            "segment_index": 5,
+            "has_treatments": true,
+            "treatments_applied": [1, 9, 14],
+            "modified_attributes": { "Facility Type": 4, ... },
+            "after_scores": { "BB": 1.8, "BP": 0.9, "SB": 2.2, "VB": 3.5, "CycleRAP score": 8.4 }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        treatment_df = ver.treatment.df
+
+        # Check if segment exists in treatment.csv
+        if segment_index >= len(treatment_df):
+            return jsonify({
+                "ok": True,
+                "segment_index": segment_index,
+                "has_treatments": False,
+                "treatments_applied": []
+            })
+
+        row = treatment_df.iloc[segment_index]
+
+        # Check if "Treatments Applied" column exists and has data
+        treatments_str = ""
+        if "Treatments Applied" in treatment_df.columns:
+            treatments_str = row.get("Treatments Applied", "")
+
+        # If no treatments applied, return early
+        if not treatments_str or pd.isna(treatments_str) or treatments_str.strip() == "":
+            return jsonify({
+                "ok": True,
+                "segment_index": segment_index,
+                "has_treatments": False,
+                "treatments_applied": []
+            })
+
+        # Parse treatment IDs
+        try:
+            treatment_ids = [int(x.strip()) for x in treatments_str.split(",") if x.strip()]
+        except ValueError:
+            return jsonify({
+                "ok": True,
+                "segment_index": segment_index,
+                "has_treatments": False,
+                "treatments_applied": []
+            })
+
+        # Extract modified attributes from row
+        modified_attributes = {}
+        attrs_df = ver.attributes.df
+
+        for col in attrs_df.columns:
+            if col in treatment_df.columns and col != "Treatments Applied":
+                val = row.get(col)
+                # Convert pandas types to Python native types for JSON serialization
+                if pd.notna(val):
+                    # Handle numpy/pandas numeric types
+                    try:
+                        if hasattr(val, 'item'):  # numpy/pandas scalar
+                            val = val.item()
+                        # Ensure we get a Python native type
+                        if isinstance(val, (int, float, bool)):
+                            modified_attributes[col] = val
+                        else:
+                            modified_attributes[col] = float(val)
+                    except (ValueError, TypeError):
+                        modified_attributes[col] = None
+                else:
+                    modified_attributes[col] = None
+
+        # Calculate after scores from modified attributes
+        modified_df = pd.DataFrame([modified_attributes])
+        after_scores_df = calculate_cyclerap_score_native(modified_df)
+
+        # Extract scores safely with explicit type conversion
+        after_scores = {
+            "BB": float(after_scores_df["BB"].iloc[0].item() if hasattr(after_scores_df["BB"].iloc[0], 'item') else after_scores_df["BB"].iloc[0]),
+            "BP": float(after_scores_df["BP"].iloc[0].item() if hasattr(after_scores_df["BP"].iloc[0], 'item') else after_scores_df["BP"].iloc[0]),
+            "SB": float(after_scores_df["SB"].iloc[0].item() if hasattr(after_scores_df["SB"].iloc[0], 'item') else after_scores_df["SB"].iloc[0]),
+            "VB": float(after_scores_df["VB"].iloc[0].item() if hasattr(after_scores_df["VB"].iloc[0], 'item') else after_scores_df["VB"].iloc[0]),
+            "CycleRAP score": float(after_scores_df["CycleRAP score"].iloc[0].item() if hasattr(after_scores_df["CycleRAP score"].iloc[0], 'item') else after_scores_df["CycleRAP score"].iloc[0])
+        }
+
+        return jsonify({
+            "ok": True,
+            "segment_index": segment_index,
+            "has_treatments": True,
+            "treatments_applied": [int(x) if hasattr(x, 'item') else int(x) for x in treatment_ids],
+            "modified_attributes": modified_attributes,
+            "after_scores": after_scores
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error retrieving treatment state: {str(e)}", 500)
+
+
+@bp.post("/<project_name>/treatments/apply/export-attributes")
+def export_modified_attributes(project_name: str):
+    """
+    Create and save a CSV file with modified attributes after treatment is applied.
+    This creates a duplicate of attributes.csv with updated values from the treatment.
+
+    Request body:
+        {
+            "segment_index": 5,
+            "treatment_ids": [1, 9, 14]
+        }
+
+    Response:
+        {
+            "ok": true,
+            "filename": "attributes_post_treatment.csv",
+            "path": "/data/FERNVALE ROAD/versions/20251214/attributes_post_treatment.csv",
+            "message": "Modified attributes CSV created successfully"
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        data = request.get_json(silent=True) or {}
+        segment_index = data.get("segment_index")
+        treatment_ids = data.get("treatment_ids", [])
+
+        if segment_index is None:
+            return fail("Missing segment_index", 400)
+
+        # Load original attributes
+        attrs_df = ver.attributes.df.copy()
+
+        if segment_index >= len(attrs_df):
+            return fail(f"Segment index {segment_index} out of range", 400)
+
+        # Get the original row
+        original_row = dict(attrs_df.iloc[segment_index])
+
+        # Apply treatment effects to create modified row
+        modified_row = original_row.copy()
+        for treatment_id in treatment_ids:
+            if not (1 <= treatment_id <= 25):
+                return fail(f"Invalid treatment ID: {treatment_id}", 400)
+            treatment = TREATMENTS[treatment_id - 1]  # Convert 1-based to 0-based
+            for attr_name, new_value in treatment['effects'].items():
+                modified_row[attr_name] = new_value
+
+        # Update the specific row in the DataFrame
+        for col, val in modified_row.items():
+            if col in attrs_df.columns:
+                attrs_df.at[segment_index, col] = val
+
+        # Create filename with timestamp
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filename = f"attributes_post_treatment_{timestamp}.csv"
+        output_path = ver.path / output_filename
+
+        # Save the modified attributes CSV
+        attrs_df.to_csv(output_path, index=False)
+
+        return jsonify({
+            "ok": True,
+            "filename": output_filename,
+            "path": str(output_path),
+            "message": "Modified attributes CSV created successfully"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error exporting modified attributes: {str(e)}", 500)
+
 
 @bp.put("/<string:name>/attributes")
 def update_attributes(name: str):

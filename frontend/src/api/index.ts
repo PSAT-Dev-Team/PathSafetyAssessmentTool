@@ -416,3 +416,131 @@ export async function listShapefileCategories(): Promise<ShapefileCategoryInfo[]
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
+
+// ========================================================================
+// TREATMENT APPLICATION API
+// ========================================================================
+
+/**
+ * Payload for applying treatments to a segment
+ */
+export type ApplyTreatmentsPayload = {
+  segment_index: number;
+  treatment_ids: number[];
+  image_ref?: string;
+};
+
+/**
+ * Result of applying treatments
+ */
+export type ApplyTreatmentsResult = {
+  ok: boolean;
+  segment_index: number;
+  treatments_applied: string;
+  modified_attributes: Record<string, number>;
+  before_scores: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "CycleRAP score": number;
+  };
+  after_scores: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "CycleRAP score": number;
+  };
+};
+
+/**
+ * Treatment state for a segment
+ */
+export type SegmentTreatmentState = {
+  ok: boolean;
+  segment_index: number;
+  has_treatments: boolean;
+  treatments_applied: number[];
+  modified_attributes?: Record<string, number>;
+  after_scores?: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "CycleRAP score": number;
+  };
+};
+
+/**
+ * Apply treatments to a specific segment
+ * @param project - Project name
+ * @param payload - Treatment application payload
+ * @returns Treatment application result with before/after scores
+ */
+export async function applyTreatments(
+  project: string,
+  payload: ApplyTreatmentsPayload
+): Promise<ApplyTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/apply`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Get treatment state for a specific segment
+ * @param project - Project name
+ * @param segmentIndex - Segment index
+ * @returns Treatment state including applied treatments and after scores
+ */
+export async function getSegmentTreatments(
+  project: string,
+  segmentIndex: number
+): Promise<SegmentTreatmentState> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/segment/${segmentIndex}`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Export modified attributes CSV after treatment is applied
+ * @param project - Project name
+ * @param payload - Segment index and treatment IDs
+ * @returns Export result with filename and path
+ */
+export type ExportAttributesPayload = {
+  segment_index: number;
+  treatment_ids: number[];
+};
+
+export type ExportAttributesResult = {
+  ok: boolean;
+  filename: string;
+  path: string;
+  message: string;
+};
+
+export async function exportModifiedAttributes(
+  project: string,
+  payload: ExportAttributesPayload
+): Promise<ExportAttributesResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/apply/export-attributes`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}

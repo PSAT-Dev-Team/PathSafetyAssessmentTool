@@ -19,6 +19,9 @@ import {
   fetchProjectDetail,
   fetchProjectAttributes,
   fetchProjectGeoJSON,
+  applyTreatments,
+  getSegmentTreatments,
+  exportModifiedAttributes,
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
@@ -302,6 +305,30 @@ const getScoreColor = (score: number): string => {
   return "#ef4444";                       // red
 };
 
+// Calculate estimated preview scores based on selected treatments
+const calculatePreviewScores = (beforeScores: ScoreType, selectedTreatmentIds: Set<number>): ScoreType => {
+  if (selectedTreatmentIds.size === 0) {
+    return beforeScores;
+  }
+
+  // Calculate impact based on number of attributes modified by selected treatments
+  const affectedAttributeCount = Array.from(selectedTreatmentIds).reduce((count, treatmentId) => {
+    const treatment = TREATMENTS.find(t => t.id === treatmentId);
+    return count + (treatment ? Object.keys(treatment.effects).length : 0);
+  }, 0);
+
+  // Heuristic: reduce score by 5% per treatment attribute modified (max 50% reduction)
+  const reductionFactor = Math.max(0.5, 1 - (affectedAttributeCount * 0.05));
+
+  return {
+    BB: beforeScores.BB * reductionFactor,
+    BP: beforeScores.BP * reductionFactor,
+    SB: beforeScores.SB * reductionFactor,
+    VB: beforeScores.VB * reductionFactor,
+    total: beforeScores.total * reductionFactor,
+  };
+};
+
 export default function TreatmentDetailPage() {
   const { projectName } = useParams<{ projectName: string }>();
 
@@ -321,6 +348,14 @@ export default function TreatmentDetailPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTreatments, setSelectedTreatments] = useState<Set<number>>(new Set());
+
+  // Treatment application state
+  const [treatmentState, setTreatmentState] = useState<Record<number, {
+    applied: boolean;
+    treatment_ids: number[];
+    after_scores: ScoreType | null;
+  }>>({});
+  const [applyLoading, setApplyLoading] = useState(false);
 
   const len = attrs.length;
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -383,6 +418,130 @@ export default function TreatmentDetailPage() {
       cancelled = true;
     };
   }, [name]);
+
+  // Load treatment state when segment changes
+  useEffect(() => {
+    if (!name || currentIndex < 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const state = await getSegmentTreatments(name, currentIndex);
+        if (cancelled) return;
+
+        if (state.has_treatments) {
+          setTreatmentState((prev) => ({
+            ...prev,
+            [currentIndex]: {
+              applied: true,
+              treatment_ids: state.treatments_applied,
+              after_scores: state.after_scores
+                ? {
+                    BB: state.after_scores.BB,
+                    BP: state.after_scores.BP,
+                    SB: state.after_scores.SB,
+                    VB: state.after_scores.VB,
+                    total: state.after_scores["CycleRAP score"],
+                  }
+                : null,
+            },
+          }));
+          // Pre-select treatments that were applied
+          setSelectedTreatments(new Set(state.treatments_applied));
+        } else {
+          // Clear selection for segments without treatments
+          setSelectedTreatments(new Set());
+        }
+      } catch (e) {
+        console.error("Failed to load treatment state:", e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [name, currentIndex]);
+
+  // Handle applying treatments
+  const handleApplyTreatments = useCallback(async () => {
+    if (!name || selectedTreatments.size === 0) return;
+
+    setApplyLoading(true);
+
+    try {
+      const result = await applyTreatments(name, {
+        segment_index: currentIndex,
+        treatment_ids: Array.from(selectedTreatments),
+        image_ref: imgRef,
+      });
+
+      // Update local state
+      setTreatmentState((prev) => ({
+        ...prev,
+        [currentIndex]: {
+          applied: true,
+          treatment_ids: result.treatments_applied.split(",").map((x) => Number(x.trim())).filter((x) => !isNaN(x)),
+          after_scores: {
+            BB: result.after_scores.BB,
+            BP: result.after_scores.BP,
+            SB: result.after_scores.SB,
+            VB: result.after_scores.VB,
+            total: result.after_scores["CycleRAP score"],
+          },
+        },
+      }));
+
+      // Export modified attributes CSV after treatment is applied
+      try {
+        const exportResult = await exportModifiedAttributes(name, {
+          segment_index: currentIndex,
+          treatment_ids: Array.from(selectedTreatments),
+        });
+        console.log("Modified attributes CSV created:", exportResult);
+      } catch (exportError: any) {
+        console.warn("Failed to export modified attributes CSV:", exportError.message);
+        // Don't fail the entire treatment application if export fails
+      }
+
+      console.log("Treatments applied successfully:", result);
+    } catch (e: any) {
+      console.error("Failed to apply treatments:", e);
+      alert(`Error: ${e.message}`);
+    } finally {
+      setApplyLoading(false);
+    }
+  }, [name, currentIndex, selectedTreatments, imgRef]);
+
+  // Handle resetting treatments
+  const handleResetTreatments = useCallback(async () => {
+    if (!name) return;
+
+    setApplyLoading(true);
+
+    try {
+      // Apply with empty treatment list to reset
+      await applyTreatments(name, {
+        segment_index: currentIndex,
+        treatment_ids: [],
+        image_ref: imgRef,
+      });
+
+      // Clear local state
+      setTreatmentState((prev) => {
+        const next = { ...prev };
+        delete next[currentIndex];
+        return next;
+      });
+
+      setSelectedTreatments(new Set());
+    } catch (e: any) {
+      console.error("Failed to reset treatments:", e);
+      alert(`Error: ${e.message}`);
+    } finally {
+      setApplyLoading(false);
+    }
+  }, [name, currentIndex, imgRef]);
 
   // Pagination
   const gotoPage = useCallback(
@@ -599,51 +758,93 @@ export default function TreatmentDetailPage() {
                     const applicable = getApplicableTreatments(currentAttr);
                     return applicable.length > 0 ? (
                       <Flex direction="column" gap="3">
-                        {applicable.map((t) => (
-                          <Flex
-                            key={t.id}
-                            gap="2"
-                            align="flex-start"
-                            p="2"
-                            borderRadius="md"
-                            bg={selectedTreatments.has(t.id) ? "blue.50" : "transparent"}
-                            borderWidth="1px"
-                            borderColor={selectedTreatments.has(t.id) ? "blue.200" : "transparent"}
-                            cursor="pointer"
-                            transition="all 0.2s"
-                            _hover={{ bg: selectedTreatments.has(t.id) ? "blue.100" : "gray.100" }}
-                            _dark={{
-                              bg: selectedTreatments.has(t.id) ? "blue.900" : "transparent",
-                              borderColor: selectedTreatments.has(t.id) ? "blue.700" : "transparent",
-                              _hover: { bg: selectedTreatments.has(t.id) ? "blue.800" : "gray.600" },
-                            }}
-                            onClick={() => {
-                              const newSelected = new Set(selectedTreatments);
-                              if (newSelected.has(t.id)) {
-                                newSelected.delete(t.id);
-                              } else {
-                                newSelected.add(t.id);
+                        {applicable.map((t) => {
+                          const isApplied = treatmentState[currentIndex]?.applied &&
+                                            treatmentState[currentIndex]?.treatment_ids.includes(t.id);
+                          const isDisabled = treatmentState[currentIndex]?.applied;
+
+                          return (
+                            <Flex
+                              key={t.id}
+                              gap="2"
+                              align="flex-start"
+                              p="2"
+                              borderRadius="md"
+                              bg={
+                                isApplied
+                                  ? "green.50"
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.50"
+                                    : "transparent"
                               }
-                              setSelectedTreatments(newSelected);
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedTreatments.has(t.id)}
-                              onChange={() => {}} // Handled by parent Flex onClick
-                              style={{ marginTop: '2px', cursor: 'pointer' }}
-                              aria-label={`Select treatment: ${t.name}`}
-                            />
-                            <Box flex="1">
-                              <Text fontSize="xs" fontWeight="medium" color="gray.900" _dark={{ color: "white" }}>
-                                {t.name}
-                              </Text>
-                              <Text fontSize="2xs" color="gray.500" _dark={{ color: "gray.400" }}>
-                                {t.description}
-                              </Text>
-                            </Box>
-                          </Flex>
-                        ))}
+                              borderWidth="1px"
+                              borderColor={
+                                isApplied
+                                  ? "green.200"
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.200"
+                                    : "transparent"
+                              }
+                              cursor={isDisabled ? "not-allowed" : "pointer"}
+                              opacity={isDisabled ? 0.6 : 1}
+                              transition="all 0.2s"
+                              _hover={{
+                                bg: isDisabled
+                                  ? undefined
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.100"
+                                    : "gray.100"
+                              }}
+                              _dark={{
+                                bg: isApplied
+                                  ? "green.900"
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.900"
+                                    : "transparent",
+                                borderColor: isApplied
+                                  ? "green.700"
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.700"
+                                    : "transparent",
+                                _hover: {
+                                  bg: isDisabled
+                                    ? undefined
+                                    : selectedTreatments.has(t.id)
+                                      ? "blue.800"
+                                      : "gray.600"
+                                },
+                              }}
+                              onClick={() => {
+                                if (isDisabled) return;
+                                const newSelected = new Set(selectedTreatments);
+                                if (newSelected.has(t.id)) {
+                                  newSelected.delete(t.id);
+                                } else {
+                                  newSelected.add(t.id);
+                                }
+                                setSelectedTreatments(newSelected);
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isApplied || selectedTreatments.has(t.id)}
+                                disabled={isDisabled}
+                                onChange={() => {}} // Handled by parent Flex onClick
+                                style={{ marginTop: '2px', cursor: isDisabled ? 'not-allowed' : 'pointer' }}
+                                aria-label={`Select treatment: ${t.name}`}
+                              />
+                              <Box flex="1">
+                                <Text fontSize="xs" fontWeight="medium" color="gray.900" _dark={{ color: "white" }}>
+                                  {t.name}
+                                  {isApplied && " ✓"}
+                                </Text>
+                                <Text fontSize="2xs" color="gray.500" _dark={{ color: "gray.400" }}>
+                                  {t.description}
+                                </Text>
+                              </Box>
+                            </Flex>
+                          );
+                        })}
                       </Flex>
                     ) : (
                       <Text fontSize="xs" color="gray.400" _dark={{ color: "gray.500" }}>
@@ -651,6 +852,76 @@ export default function TreatmentDetailPage() {
                       </Text>
                     );
                   })()}
+                  {/* Treatment Action Buttons */}
+                  <Flex direction="column" gap="2" mt="4" pt="4" borderTopWidth="1px" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
+                    {/* Select All / Clear All Button */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      colorScheme={selectedTreatments.size > 0 ? "red" : "blue"}
+                      disabled={
+                        (() => {
+                          const currentAttr = attrs[currentIndex] as any;
+                          if (!currentAttr) return true;
+                          const applicable = getApplicableTreatments(currentAttr);
+                          return applicable.length === 0 || treatmentState[currentIndex]?.applied;
+                        })()
+                      }
+                      onClick={() => {
+                        const currentAttr = attrs[currentIndex] as any;
+                        if (!currentAttr) return;
+
+                        if (selectedTreatments.size > 0) {
+                          // Clear all selected treatments
+                          setSelectedTreatments(new Set());
+                        } else {
+                          // Select all applicable treatments
+                          const applicable = getApplicableTreatments(currentAttr);
+                          setSelectedTreatments(new Set(applicable.map(t => t.id)));
+                        }
+                      }}
+                    >
+                      {selectedTreatments.size > 0 ? (
+                        <>Clear All ({selectedTreatments.size})</>
+                      ) : (
+                        <>
+                          Select All ({(() => {
+                            const currentAttr = attrs[currentIndex] as any;
+                            if (!currentAttr) return 0;
+                            const applicable = getApplicableTreatments(currentAttr);
+                            return applicable.length;
+                          })()})
+                        </>
+                      )}
+                    </Button>
+
+                    {/* Apply Treatment Button */}
+                    <Button
+                      size="sm"
+                      variant="solid"
+                      colorScheme={treatmentState[currentIndex]?.applied ? "green" : "blue"}
+                      disabled={selectedTreatments.size === 0 || applyLoading}
+                      loading={applyLoading}
+                      onClick={handleApplyTreatments}
+                    >
+                      {treatmentState[currentIndex]?.applied
+                        ? "Treatment Applied ✓"
+                        : `Apply Treatment (${selectedTreatments.size})`}
+                    </Button>
+
+                    {/* Reset Button (optional) */}
+                    {treatmentState[currentIndex]?.applied && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        colorScheme="red"
+                        loading={applyLoading}
+                        onClick={handleResetTreatments}
+                      >
+                        Reset
+                      </Button>
+                    )}
+                  </Flex>
                 </Box>
               </Box>
             </GridItem>
@@ -717,101 +988,113 @@ export default function TreatmentDetailPage() {
                 bg="gray.50"
                 _dark={{ bg: "gray.700", borderColor: "gray.600" }}
               >
-                <Text
-                  fontSize="sm"
-                  fontWeight="bold"
-                  mb="3"
-                  color="gray.600"
-                  _dark={{ color: "gray.300" }}
-                >
-                  After Treatment
+                <Flex direction="column" gap="1" mb="3">
+                  <Text
+                    fontSize="sm"
+                    fontWeight="bold"
+                    color="gray.600"
+                    _dark={{ color: "gray.300" }}
+                  >
+                    After Treatment
+                  </Text>
                   {selectedTreatments.size > 0 && (
-                    <Text fontSize="2xs" color="blue.600" _dark={{ color: "blue.300" }} mt="1">
+                    <Text fontSize="2xs" color="blue.600" _dark={{ color: "blue.300" }}>
                       ({selectedTreatments.size} treatment{selectedTreatments.size !== 1 ? 's' : ''} selected)
                     </Text>
                   )}
-                </Text>
+                </Flex>
                 <Flex direction="column" gap="2">
                   {(() => {
-                    if (selectedTreatments.size === 0) {
-                      // No treatments selected, show original scores
-                      const scoreRow = scores[currentIndex] ?? null;
-                      const scoreData = extractScores(scoreRow);
-                      return ["BB", "BP", "SB", "VB", "total"].map((k) => {
-                        const value = scoreData[k as keyof ScoreType];
-                        const color = getScoreColor(value);
-                        return (
-                          <Flex key={k} justify="space-between" align="center">
-                            <Text fontSize="xs" fontWeight="medium" color="gray.900" _dark={{ color: "white" }}>
-                              {k === "total" ? "Total" : k}:
-                            </Text>
-                            <Box
-                              px="2"
-                              py="1"
-                              borderRadius="md"
-                              bg="white"
-                              borderWidth="1px"
-                              borderColor="gray.200"
-                              _dark={{ bg: "gray.600", borderColor: "gray.500" }}
-                            >
-                              <Text fontSize="sm" fontWeight="bold" style={{ color }}>
-                                {value.toFixed(2)}
-                              </Text>
-                            </Box>
-                          </Flex>
-                        );
-                      });
+                    const beforeScores = extractScores(scores[currentIndex] ?? null);
+
+                    // If treatments are applied, use real scores; otherwise use preview
+                    let afterScores: ScoreType;
+                    let isPreview = false;
+
+                    if (treatmentState[currentIndex]?.after_scores) {
+                      // Real calculated scores from backend
+                      afterScores = treatmentState[currentIndex]!.after_scores;
+                    } else if (selectedTreatments.size > 0) {
+                      // Preview scores based on selected treatments
+                      afterScores = calculatePreviewScores(beforeScores, selectedTreatments);
+                      isPreview = true;
                     } else {
-                      // Treatments selected - show estimated scores based on treatment effects
-                      const scoreRow = scores[currentIndex] ?? null;
-                      const scoreData = extractScores(scoreRow);
-
-                      // Calculate impact based on number of attributes modified
-                      // Apply a simple heuristic: reduce score by 5% per treatment attribute modified
-                      // In a real implementation, this would call the backend score calculator
-                      const affectedAttributeCount = Array.from(selectedTreatments).reduce((count, treatmentId) => {
-                        const treatment = TREATMENTS.find(t => t.id === treatmentId);
-                        return count + (treatment ? Object.keys(treatment.effects).length : 0);
-                      }, 0);
-
-                      const reductionFactor = Math.max(0.5, 1 - (affectedAttributeCount * 0.05));
-
-                      return ["BB", "BP", "SB", "VB", "total"].map((k) => {
-                        const originalValue = scoreData[k as keyof ScoreType];
-                        const estimatedValue = originalValue * reductionFactor;
-                        const color = getScoreColor(estimatedValue);
-                        return (
-                          <Flex key={k} justify="space-between" align="center">
-                            <Text fontSize="xs" fontWeight="medium" color="gray.900" _dark={{ color: "white" }}>
-                              {k === "total" ? "Total" : k}:
-                            </Text>
-                            <Box
-                              px="2"
-                              py="1"
-                              borderRadius="md"
-                              bg="blue.50"
-                              borderWidth="1px"
-                              borderColor="blue.200"
-                              _dark={{ bg: "blue.900", borderColor: "blue.700" }}
-                            >
-                              <Flex direction="column" align="flex-end" gap="0">
-                                <Text fontSize="sm" fontWeight="bold" style={{ color }}>
-                                  {estimatedValue.toFixed(2)}
-                                </Text>
-                                <Text fontSize="2xs" color="gray.500" _dark={{ color: "gray.400" }}>
-                                  ↓ {(originalValue - estimatedValue).toFixed(2)}
-                                </Text>
-                              </Flex>
-                            </Box>
-                          </Flex>
-                        );
-                      });
+                      // No treatments selected, show original scores
+                      afterScores = beforeScores;
                     }
+
+                    return ["BB", "BP", "SB", "VB", "total"].map((k) => {
+                      const beforeValue = beforeScores[k as keyof ScoreType];
+                      const afterValue = afterScores[k as keyof ScoreType];
+                      const improved = afterValue < beforeValue;
+                      const color = getScoreColor(afterValue);
+
+                      return (
+                        <Flex key={k} justify="space-between" align="center">
+                          <Text fontSize="xs" fontWeight="medium" color="gray.900" _dark={{ color: "white" }}>
+                            {k === "total" ? "Total" : k}:
+                          </Text>
+                          <Box
+                            px="2"
+                            py="1"
+                            borderRadius="md"
+                            bg={
+                              treatmentState[currentIndex]?.applied
+                                ? (improved ? "green.50" : "white")
+                                : isPreview
+                                  ? "blue.50"
+                                  : "white"
+                            }
+                            borderWidth="1px"
+                            borderColor={
+                              treatmentState[currentIndex]?.applied
+                                ? (improved ? "green.200" : "gray.200")
+                                : isPreview
+                                  ? "blue.200"
+                                  : "gray.200"
+                            }
+                            _dark={{
+                              bg: treatmentState[currentIndex]?.applied
+                                ? (improved ? "green.900" : "gray.600")
+                                : isPreview
+                                  ? "blue.900"
+                                  : "gray.600",
+                              borderColor: treatmentState[currentIndex]?.applied
+                                ? (improved ? "green.700" : "gray.500")
+                                : isPreview
+                                  ? "blue.700"
+                                  : "gray.500"
+                            }}
+                          >
+                            <Flex direction="row" align="center" gap="1" justify="flex-end">
+                              {improved && (
+                                <Text
+                                  fontSize="2xs"
+                                  color={treatmentState[currentIndex]?.applied ? "green.600" : "blue.600"}
+                                  _dark={{ color: treatmentState[currentIndex]?.applied ? "green.300" : "blue.300" }}
+                                  whiteSpace="nowrap"
+                                >
+                                  ↓ {(beforeValue - afterValue).toFixed(2)}
+                                </Text>
+                              )}
+                              <Text fontSize="sm" fontWeight="bold" style={{ color }}>
+                                {afterValue.toFixed(2)}
+                              </Text>
+                            </Flex>
+                          </Box>
+                        </Flex>
+                      );
+                    });
                   })()}
                 </Flex>
-                {selectedTreatments.size > 0 && (
-                  <Text fontSize="2xs" color="gray.500" _dark={{ color: "gray.400" }} mt="2">
-                    * Scores are estimated based on treatment effects
+                {treatmentState[currentIndex]?.applied && (
+                  <Text fontSize="2xs" color="green.600" _dark={{ color: "green.300" }} mt="2">
+                    ✓ Calculated with CycleRAP v2.11
+                  </Text>
+                )}
+                {selectedTreatments.size > 0 && !treatmentState[currentIndex]?.applied && (
+                  <Text fontSize="2xs" color="blue.600" _dark={{ color: "blue.300" }} mt="2">
+                    ℹ Preview based on {selectedTreatments.size} selected treatment{selectedTreatments.size !== 1 ? 's' : ''}
                   </Text>
                 )}
               </Box>
