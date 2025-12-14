@@ -43,7 +43,7 @@ const MAP_HEIGHT = 500;
 type Treatment = {
   id: number;
   name: string;
-  description: string;
+  description?: string;
   // Attributes to check if treatment is applicable
   triggers: Record<string, number[]>[];
   // Attribute changes to apply when treatment is selected
@@ -54,176 +54,207 @@ const TREATMENTS: Treatment[] = [
   {
     id: 1,
     name: "Upgrade to on-road bicycle lane with light segregation",
-    description: "Improve facility type and add light segregation",
-    triggers: [{ "Facility Type": [5, 6], "Light Segregation": [2] }],
+    triggers: [
+      { "Facility Type": [5], "Light Segregation": [2] },
+      { "Facility Type": [6], "Light Segregation": [2] },
+      { "Facility Type": [1, 2], "Number of lanes – adjacent road": [1], "Peak pedestrian flow along or across facility": [3] },
+      { "Facility Type": [1, 2], "Number of lanes – adjacent road": [1] },
+    ],
     effects: { "Facility Type": 4, "Light Segregation": 1, "Facility access": 1 },
   },
   {
     id: 2,
-    name: "Install safety barrier (Adjacent road 0-1m)",
-    description: "Reduce risk from adjacent road hazards",
-    triggers: [{ "Facility Type": [4, 5, 6], "Adjacent Road Lane 0-1m": [1] }],
+    name: "Safety barrier (Adjacent road 0-1m)",
+    triggers: [
+      { "Facility Type": [4, 5, 6], "Adjacent Road Lane 0-1m": [1], "Intersection or Road Crossing": [2] },
+      { "Facility Type": [4, 5, 6], "Adjacent Road Lane 0-1m": [1], "Curvature": [1], "Intersection or Road Crossing": [2] },
+      { "Facility Type": [3, 4, 5, 6], "Adjacent Road Lane 0-1m": [1], "Intersection or Road Crossing": [2] },
+    ],
     effects: { "Adjacent Road Lane 0-1m": 2, "Facility access": 1 },
   },
   {
     id: 3,
-    name: "Install safety barrier (Adjacent road 1-3m)",
-    description: "Protect from hazards 1-3m away",
-    triggers: [{ "Facility Type": [4, 5, 6], "Adjacent Road Lane 1-3m": [1] }],
-    effects: { "Adjacent Road Lane 1-3m": 2 },
+    name: "Safety barrier (Adjacent road 1-3m)",
+    triggers: [
+      { "Facility Type": [4, 5, 6], "Adjacent Road Lane 1-3m": [1], "Intersection or Road Crossing": [2] },
+      { "Facility Type": [3, 4, 5, 6], "Adjacent Road Lane 1-3m": [1], "Intersection or Road Crossing": [2] },
+    ],
+    effects: { "Adjacent Road Lane 1-3m": 2, "Facility access": 1 },
   },
   {
     id: 4,
     name: "Upgrade to cycling-priority street",
-    description: "Reduce vehicle speed and improve access",
-    triggers: [{ "Facility Type": [6], "Light Segregation": [2] }],
+    triggers: [
+      { "Facility Type": [1, 2, 5, 6], "Property Access": [1] },
+    ],
     effects: { "Facility access": 1 },
   },
   {
     id: 5,
     name: "Upgrade to multi-use path",
-    description: "Convert to dedicated multi-use facility",
-    triggers: [{ "Facility Type": [6], "Facility access": [2] }],
+    triggers: [
+      { "Facility Type": [1, 2, 5, 6], "Property Access": [1] },
+    ],
     effects: { "Facility Type": 2, "Facility Width per Direction": 3, "Facility access": 1 },
   },
   {
     id: 6,
     name: "Upgrade to off-road bicycle path",
-    description: "Create dedicated off-road facility",
-    triggers: [{ "Facility Type": [5, 6], "Facility access": [2] }],
+    triggers: [
+      { "Facility Type": [1, 2, 5, 6], "Property Access": [1] },
+    ],
     effects: { "Facility Type": 3, "Facility access": 1 },
   },
   {
     id: 7,
     name: "Convert to one-way facility",
-    description: "Change to one-directional traffic flow",
-    triggers: [{ "Flow Direction": [2] }],
-    effects: { "Flow Direction": 1 },
+    triggers: [
+      { "Facility Type": [4, 5, 6], "Flow Direction": [2] },
+    ],
+    effects: { "Flow Direction": 1, "Facility access": 1 },
   },
   {
     id: 8,
     name: "Improve surface conditions",
-    description: "Fix loose/slippery surfaces and deformations",
-    triggers: [{ "Loose or slippery surface": [1] }],
+    triggers: [
+      { "Loose or slippery surface": [1] },
+    ],
     effects: { "Loose or slippery surface": 2, "Major Surface Deformation or Drain Opening": 2 },
   },
   {
     id: 9,
     name: "Install light segregation",
-    description: "Add physical separation from traffic",
-    triggers: [{ "Light Segregation": [2] }],
+    triggers: [
+      { "Light Segregation": [2] },
+    ],
     effects: { "Light Segregation": 1 },
   },
   {
     id: 10,
     name: "Install street lighting",
-    description: "Improve visibility and safety at night",
-    triggers: [{ "Street Lighting": [2] }],
+    triggers: [
+      { "Street Lighting": [2] },
+    ],
     effects: { "Street Lighting": 1 },
   },
   {
     id: 11,
     name: "Remove fixed obstacles",
-    description: "Clear permanent barriers and hazards",
-    triggers: [{ "Fixed Obstacle on Facility": [1] }],
+    triggers: [
+      { "Fixed Obstacle on Facility": [1] },
+    ],
     effects: { "Fixed Obstacle on Facility": 2 },
   },
   {
     id: 12,
     name: "Remove non-fixed obstacles",
-    description: "Clear temporary barriers and hazards",
-    triggers: [{ "Non-Fixed Obstacle on Facility": [1] }],
+    triggers: [
+      { "Non-Fixed Obstacle on Facility": [1] },
+    ],
     effects: { "Non-Fixed Obstacle on Facility": 2 },
   },
   {
     id: 13,
     name: "Remove width restriction",
-    description: "Expand facility width",
-    triggers: [{ "Width Restriction": [1] }],
+    triggers: [
+      { "Width Restriction": [1] },
+    ],
     effects: { "Width Restriction": 2 },
   },
   {
     id: 14,
     name: "Improve facility access",
-    description: "Address inadequate facility access",
-    triggers: [{ "Facility access": [2] }],
+    triggers: [
+      { "Facility access": [2] },
+    ],
     effects: { "Facility access": 1 },
   },
   {
     id: 15,
     name: "Redesign sharp curves",
-    description: "Address dangerous curvature",
-    triggers: [{ "Curvature": [1] }],
+    triggers: [
+      { "Curvature": [1] },
+    ],
     effects: { "Curvature": 2 },
   },
   {
     id: 16,
     name: "Widen the facility",
-    description: "Expand facility width to improve safety",
-    triggers: [{ "Facility Width per Direction": [1, 2] }],
+    triggers: [
+      { "Facility Width per Direction": [1, 2] },
+    ],
     effects: { "Facility Width per Direction": 3 },
   },
   {
     id: 17,
     name: "Install protective barrier",
-    description: "Shield from adjacent hazards",
-    triggers: [{ "Adjacent Severe Hazard 0-1m": [1] }],
+    triggers: [
+      { "Adjacent Severe Hazard 0-1m": [1] },
+    ],
     effects: { "Adjacent Severe Hazard 0-1m": 2 },
   },
   {
     id: 18,
     name: "Improve delineation",
-    description: "Add or improve lane delineation",
-    triggers: [{ "Delineation": [2] }],
+    triggers: [
+      { "Delineation": [2] },
+    ],
     effects: { "Delineation": 1 },
   },
   {
     id: 19,
     name: "Review intersection approach",
-    description: "Improve intersection design",
-    triggers: [{ "Intersection Approach": [1] }],
+    triggers: [
+      { "Intersection Approach": [1] },
+    ],
     effects: { "Intersection Approach": 2 },
   },
   {
     id: 20,
     name: "Improve crossing facility",
-    description: "Enhance crossing design and safety",
-    triggers: [{ "Crossing Facility": [2] }],
+    triggers: [
+      { "Crossing Facility": [2] },
+    ],
     effects: { "Crossing Facility": 1 },
   },
   {
     id: 21,
     name: "Evaluate grade separation",
-    description: "Consider grade-separated crossing",
-    triggers: [{ "Intersection or Road Crossing": [1] }],
+    triggers: [
+      { "Intersection or Road Crossing": [1] },
+    ],
     effects: { "Intersection or Road Crossing": 2 },
   },
   {
     id: 22,
     name: "Reconfigure/remove parking",
-    description: "Remove or relocate adjacent parking",
-    triggers: [{ "Adjacent Vehicle Parking 0-1m": [1] }],
+    triggers: [
+      { "Adjacent Vehicle Parking 0-1m": [1] },
+    ],
     effects: { "Adjacent Vehicle Parking 0-1m": 2 },
   },
   {
     id: 23,
     name: "Review tram/train rails",
-    description: "Address tram or train rail hazards",
-    triggers: [{ "Tram or Train Rails": [1] }],
+    triggers: [
+      { "Tram or Train Rails": [1] },
+    ],
     effects: { "Tram or Train Rails": 2 },
   },
   {
     id: 24,
     name: "Install traffic calming",
-    description: "Reduce vehicle speeds through physical measures",
-    triggers: [{ "Facility Type": [4], "Light Segregation": [2], "Adjacent Road Lane 0-1m": [1] }],
+    triggers: [
+      { "Facility Type": [4], "Intersection or Road Crossing": [2], "Adjacent Road Lane 0-1m": [1] },
+    ],
     effects: {},
   },
   {
     id: 25,
     name: "Bicycle speed control",
-    description: "Manage bicycle speeds in high-speed areas",
-    triggers: [{ "Bicycle/LV speed – average": [2] }],
+    triggers: [
+      { "Bicycle/LV speed – average": [2] },
+    ],
     effects: { "Bicycle/LV speed – average": 1 },
   },
 ];
