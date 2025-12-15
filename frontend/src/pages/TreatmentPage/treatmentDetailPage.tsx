@@ -21,7 +21,6 @@ import {
   fetchProjectGeoJSON,
   applyTreatments,
   getSegmentTreatments,
-  exportModifiedAttributes,
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
@@ -491,18 +490,6 @@ export default function TreatmentDetailPage() {
           },
         },
       }));
-
-      // Export modified attributes CSV after treatment is applied
-      try {
-        const exportResult = await exportModifiedAttributes(name, {
-          segment_index: currentIndex,
-          treatment_ids: Array.from(selectedTreatments),
-        });
-        console.log("Modified attributes CSV created:", exportResult);
-      } catch (exportError: any) {
-        console.warn("Failed to export modified attributes CSV:", exportError.message);
-        // Don't fail the entire treatment application if export fails
-      }
 
       console.log("Treatments applied successfully:", result);
     } catch (e: any) {

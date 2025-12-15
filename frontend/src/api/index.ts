@@ -517,28 +517,82 @@ export async function getSegmentTreatments(
  * @param payload - Segment index and treatment IDs
  * @returns Export result with filename and path
  */
-export type ExportAttributesPayload = {
-  segment_index: number;
-  treatment_ids: number[];
-};
-
-export type ExportAttributesResult = {
+/**
+ * Apply all applicable recommended treatments to all segments in a project
+ * @param project - Project name
+ * @returns Result with details on how many segments were treated
+ */
+export type ApplyAllTreatmentsResult = {
   ok: boolean;
-  filename: string;
-  path: string;
-  message: string;
+  total_segments: number;
+  segments_treated: number;
+  segments_skipped: number;
+  details: Array<{
+    segment_index: number;
+    treatment_ids: number[];
+    before_scores: Record<string, number>;
+    after_scores: Record<string, number>;
+  }>;
 };
 
-export async function exportModifiedAttributes(
-  project: string,
-  payload: ExportAttributesPayload
-): Promise<ExportAttributesResult> {
+export async function applyAllTreatments(
+  project: string
+): Promise<ApplyAllTreatmentsResult> {
   const res = await fetch(
-    `/api/projects/${encodeURIComponent(project)}/treatments/apply/export-attributes`,
+    `/api/projects/${encodeURIComponent(project)}/treatments/apply-all`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Reset all applied treatments for all segments in a project
+ * @param project - Project name
+ * @returns Result with details on how many segments were reset
+ */
+export type ResetAllTreatmentsResult = {
+  ok: boolean;
+  total_segments: number;
+  segments_reset: number;
+  message: string;
+};
+
+export async function resetAllTreatments(
+  project: string
+): Promise<ResetAllTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/reset-all`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Save all pending treatment changes to treatment.csv
+ * @param project - Project name
+ * @returns Result of save operation
+ */
+export type SaveTreatmentsResult = {
+  ok: boolean;
+  message: string;
+};
+
+export async function saveTreatments(
+  project: string
+): Promise<SaveTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/save`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
     }
   );
   if (!res.ok) throw new Error(await readError(res));

@@ -2,7 +2,7 @@ import { useLocation, useNavigate, useMatch } from "react-router-dom";
 import { Button, Separator } from "@chakra-ui/react";
 import { useMemo, useCallback, useState } from "react";
 import { toaster } from "../../components/ui/toaster";
-import { calculateScore } from "../../api";
+import { calculateScore, applyAllTreatments, resetAllTreatments, saveTreatments } from "../../api";
 import {
   MenuContent,
   MenuItem,
@@ -11,6 +11,7 @@ import {
 } from "@chakra-ui/react";
 
 import CodingSidebar from "./components/CodingSidebar";
+import TreatmentSidebar from "./components/TreatmentSidebar";
 import ShapefileModal from "./components/ShapefileModal";
 import "./sidebar.css";
 
@@ -47,7 +48,8 @@ export default function Sidebar() {
 
   // Get the project name
   const codingMatch = useMatch("/coding/:projectName");
-  const rawProjectName = codingMatch?.params.projectName ?? null;
+  const treatmentMatch = useMatch("/treatment/:projectName");
+  const rawProjectName = codingMatch?.params.projectName ?? treatmentMatch?.params.projectName ?? null;
   const projectName = useMemo(() => {
     if (!rawProjectName) return null;
     try {
@@ -60,7 +62,71 @@ export default function Sidebar() {
   const inCoding = pathname.startsWith("/coding");
   const onHome = pathname === "/home";
   const onTreatment = pathname === "/treatment";
+  const onTreatmentDetail = pathname.startsWith("/treatment/") && projectName;
   const onAnalysis = pathname.startsWith("/analysis");
+
+  // Bulk treatment operations
+  const handleTreatAllSegments = useCallback(async () => {
+    if (!projectName) {
+      toaster.create({
+        description: "No project selected",
+        type: "error",
+      });
+      return;
+    }
+
+    try {
+      const result = await applyAllTreatments(projectName);
+
+      if (result.ok) {
+        toaster.create({
+          title: "Treatments Applied",
+          description: `Successfully applied treatments to ${result.segments_treated} segments. ${result.segments_skipped} segments had no applicable treatments.`,
+          type: "success",
+        });
+      }
+    } catch (error) {
+      console.error("Failed to apply all treatments:", error);
+      toaster.create({
+        description: error instanceof Error ? error.message : "Failed to apply treatments",
+        type: "error",
+      });
+    }
+  }, [projectName]);
+
+  const handleResetAllSegments = useCallback(async () => {
+    if (!projectName) {
+      toaster.create({
+        description: "No project selected",
+        type: "error",
+      });
+      return;
+    }
+
+    const confirmed = confirm(
+      "Are you sure you want to reset all applied treatments for all segments? This action cannot be undone."
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const result = await resetAllTreatments(projectName);
+
+      if (result.ok) {
+        toaster.create({
+          title: "Treatments Reset",
+          description: `${result.message} Reset ${result.segments_reset} segments.`,
+          type: "success",
+        });
+      }
+    } catch (error) {
+      console.error("Failed to reset all treatments:", error);
+      toaster.create({
+        description: error instanceof Error ? error.message : "Failed to reset treatments",
+        type: "error",
+      });
+    }
+  }, [projectName]);
 
   const onCalculate = useCallback(async () => {
     if (!projectName) {
@@ -135,6 +201,39 @@ export default function Sidebar() {
     navigate(`/home`);
   }, [navigate]);
 
+  // Treatment save and exit handlers
+  const onTreatmentSave = useCallback(async () => {
+    if (!projectName) {
+      toaster.create({
+        description: "No project selected",
+        type: "error",
+      });
+      return;
+    }
+
+    try {
+      const result = await saveTreatments(projectName);
+
+      if (result.ok) {
+        toaster.create({
+          title: "Treatments Saved",
+          description: result.message,
+          type: "success",
+        });
+      }
+    } catch (error) {
+      console.error("Failed to save treatments:", error);
+      toaster.create({
+        description: error instanceof Error ? error.message : "Failed to save treatments",
+        type: "error",
+      });
+    }
+  }, [projectName]);
+
+  const onTreatmentExit = useCallback(() => {
+    navigate(`/home`);
+  }, [navigate]);
+
   return (
     <aside className="psat-sidebar" aria-label="PSAT sidebar">
       {/* Top: PSAT + buttons */}
@@ -201,13 +300,26 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Bottom: Create Project — 只在 /home 或 /treatment 或 /analysis 时出现 */}
+      {/* Bottom: Create Project & Treatment Actions */}
+      {/* Treatment Detail Page - Show treatment sidebar */}
+      {onTreatmentDetail && projectName && (
+        <div className="psat-side-bottom">
+          <TreatmentSidebar
+            onTreatAll={handleTreatAllSegments}
+            onResetAll={handleResetAllSegments}
+            onSave={onTreatmentSave}
+            onExit={onTreatmentExit}
+          />
+        </div>
+      )}
+
+      {/* Home, Treatment List, and Analysis Pages - Show project management buttons */}
       {(onHome || onTreatment || onAnalysis) && (
         <div className="psat-side-bottom">
-          <Button onClick={createProject} colorPalette="gray" variant="surface" size="sm">
+          <Button onClick={createProject} colorPalette="gray" variant="surface" size="sm" width="100%">
             Create Project
           </Button>
-          <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" mt={2}>
+          <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" mt={2} width="100%">
             Update GIS Layers
           </Button>
         </div>

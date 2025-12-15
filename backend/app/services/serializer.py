@@ -251,6 +251,7 @@ class SnapshotMetadata(BaseTable):
 
 class Treatment(BaseTable):
     class Fields:
+        TREATMENTS_APPLIED_STR  = "Treatments Applied"
         IMAGE_REFERENCE_STR     = "Image Reference"
         TREATMENT_RANK_STR      = "Treatment Rank"
         TREATMENT_ID_STR        = "Treatment ID"
