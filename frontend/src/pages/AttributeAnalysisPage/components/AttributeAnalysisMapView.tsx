@@ -353,9 +353,10 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         2: "Medium",
         3: "High",
         4: "Extreme",
+        5: "Extreme",
       };
       if (typeof attrValue === "number") {
-        return safetyScoreBands[attrValue] || String(attrValue);
+        return safetyScoreBands[attrValue] || "Not Selected";
       }
     }
 

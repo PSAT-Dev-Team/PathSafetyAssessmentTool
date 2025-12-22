@@ -8,7 +8,6 @@ import {
   Combobox,
   Portal,
 } from "@chakra-ui/react";
-import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 import "./AttributesDropdown.css";
 
 // Helper function to render grouped attributes with headers
@@ -82,42 +81,14 @@ function renderGroupedAttributes(items: any[]) {
               </Text>
             )}
             {/* Group items */}
-            {groupItems.map((item: any) => {
-              // Add color indicator for Safety Score items
-              const isSafetyScore = groupName === "Safety Score";
-              const getColorForRisk = (label: string): string => {
-                switch (label.toLowerCase()) {
-                  case "low":
-                    return RISK_BAND_COLORS.LOW;
-                  case "medium":
-                    return RISK_BAND_COLORS.MEDIUM;
-                  case "high":
-                    return RISK_BAND_COLORS.HIGH;
-                  case "extreme":
-                    return RISK_BAND_COLORS.EXTREME;
-                  default:
-                    return "transparent";
-                }
-              };
-
-              return (
-                <Combobox.Item item={item} key={item.value}>
-                  <Flex align="center" gap="2" width="100%">
-                    {isSafetyScore && item.label !== "Not Selected" && (
-                      <Box
-                        width="12px"
-                        height="12px"
-                        borderRadius="2px"
-                        bg={getColorForRisk(item.label)}
-                        flexShrink={0}
-                      />
-                    )}
-                    <Text flex="1">{item.label}</Text>
-                  </Flex>
-                  <Combobox.ItemIndicator />
-                </Combobox.Item>
-              );
-            })}
+            {groupItems.map((item: any) => (
+              <Combobox.Item item={item} key={item.value}>
+                <Flex align="center" gap="2" width="100%">
+                  <Text flex="1">{item.label}</Text>
+                </Flex>
+                <Combobox.ItemIndicator />
+              </Combobox.Item>
+            ))}
           </Box>
         );
       })}
