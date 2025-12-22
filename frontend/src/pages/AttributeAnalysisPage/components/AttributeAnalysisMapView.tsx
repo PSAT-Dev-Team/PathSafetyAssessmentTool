@@ -750,19 +750,9 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                         "#9CA3AF": "gray",
                       };
                       const colorPalette = colorMap[color] || "gray";
-                      const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(categoryFilterAttribute || "");
 
                       return (
                         <Flex key={category} align="center" gap="2">
-                          {isSafetyScore && (
-                            <Box
-                              width="12px"
-                              height="12px"
-                              borderRadius="2px"
-                              bg={color}
-                              flexShrink={0}
-                            />
-                          )}
                           <Text
                             fontSize="sm"
                             fontWeight="medium"
