@@ -1,7 +1,7 @@
 import { MapContainer, TileLayer, Polyline, CircleMarker, Circle, useMap, Popup } from 'react-leaflet';
 import { useEffect } from 'react';
 import 'leaflet/dist/leaflet.css';
-import type { WidthVisualizationResponse } from '../api/widthVisualization';
+import type { WidthVisualizationResponse } from '../../../api/widthVisualization';
 
 interface WidthVisualizationProps {
   data: WidthVisualizationResponse;

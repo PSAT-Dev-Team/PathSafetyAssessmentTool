@@ -4,6 +4,7 @@ import { Switch } from "../../../components/ui/switch";
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
+import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 import { MapContainer, TileLayer, CircleMarker, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -16,6 +17,7 @@ type Props = {
   index: number;                             // 当前页（父组件传入，0-based）
   onJump?: (idx: number) => void;  // ← 新增
   containerHeight?: number;                  // 容器总高度（包括header）
+  scores?: ScoreRow[];                       // Optional scores passed from parent for real-time updates
 };
 
 type GJ = FeatureCollection<LineString, any>;
@@ -47,7 +49,7 @@ function FitBounds({ points }: { points: [number, number][] }) {
   return null;
 }
 
-export default function GeoDataPanel({ index, onJump, containerHeight = 650 }: Props) {
+export default function GeoDataPanel({ index, onJump, containerHeight = 650, scores: externalScores }: Props) {
   // 从路由拿项目名（不改父组件）
   const { projectName } = useParams<{ projectName: string }>();
   const decodedName = useMemo(() => {
@@ -59,7 +61,7 @@ export default function GeoDataPanel({ index, onJump, containerHeight = 650 }: P
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // CycleRAP scores for color coding
+  // CycleRAP scores for color coding - use external scores if provided, otherwise fetch from API
   const [scores, setScores] = useState<ScoreRow[]>([]);
 
   // GIS Layer toggles (matching curvature analysis colors)
@@ -119,11 +121,21 @@ export default function GeoDataPanel({ index, onJump, containerHeight = 650 }: P
     }
   }, [decodedName]);
 
-  // Fetch CycleRAP scores for color coding on component mount
+  // Use external scores if provided (real-time updates), otherwise fetch from API
+  useEffect(() => {
+    if (externalScores && externalScores.length > 0) {
+      setScores(externalScores);
+    }
+  }, [externalScores]);
+
+  // Fetch CycleRAP scores for color coding on component mount (fallback if no external scores)
   useEffect(() => {
     if (!decodedName) return;
-    fetchScores();
-  }, [decodedName, fetchScores]);
+    // Only fetch if we don't have external scores
+    if (!externalScores || externalScores.length === 0) {
+      fetchScores();
+    }
+  }, [decodedName, fetchScores, externalScores]);
 
   // Listen for score update events (triggered after Calculate Score button is clicked)
   useEffect(() => {
@@ -210,16 +222,34 @@ export default function GeoDataPanel({ index, onJump, containerHeight = 650 }: P
     shared: "#E68C00"       // Orange - rgb(230, 140, 0)
   };
 
-  // Get segment color based on CycleRAP score
+  // Get segment color based on the crash type with the highest score
   const getSegmentColor = (segmentIndex: number): string => {
     if (!scores || segmentIndex >= scores.length) {
       return "#2563EB"; // Default blue if no scores
     }
-    const score = scores[segmentIndex]["CycleRAP score"];
-    if (score < 3) return "#88E788";    // Low (green)
-    if (score < 6) return "#FDDA0D";    // Medium (yellow)
-    if (score < 10) return "#F54927";   // High (red)
-    return "#BF40BF";                    // Extreme (purple)
+
+    const segmentScores = scores[segmentIndex];
+    const crashTypes = ["BB", "BP", "SB", "VB"];
+
+    let highestScore = 0;
+    let highestScoreColor = RISK_BAND_COLORS.LOW;
+
+    // Find the crash type with the highest score
+    crashTypes.forEach((crashType) => {
+      const score = segmentScores[crashType] || 0;
+
+      if (score > highestScore) {
+        highestScore = score;
+
+        // Determine color based on the score
+        if (score < 3) highestScoreColor = RISK_BAND_COLORS.LOW;
+        else if (score < 6) highestScoreColor = RISK_BAND_COLORS.MEDIUM;
+        else if (score < 10) highestScoreColor = RISK_BAND_COLORS.HIGH;
+        else highestScoreColor = RISK_BAND_COLORS.EXTREME;
+      }
+    });
+
+    return highestScoreColor;
   };
 
   return (

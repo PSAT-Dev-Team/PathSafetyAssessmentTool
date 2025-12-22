@@ -7,6 +7,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
+import { RISK_BAND_COLORS } from "./colorConstants";
 
 interface ScoreBandPieChartProps {
   crashType: string;
@@ -14,11 +15,11 @@ interface ScoreBandPieChartProps {
 }
 
 const BAND_INFO: Record<number, { label: string; color: string }> = {
-  1: { label: "Low", color: "#88E788" },
-  2: { label: "Medium", color: "#FDDA0D" },
-  3: { label: "High", color: "#F54927" },
-  4: { label: "Extreme", color: "#BF40BF" },
-  5: { label: "Extreme", color: "#BF40BF" },
+  1: { label: "Low", color: RISK_BAND_COLORS.LOW },
+  2: { label: "Medium", color: RISK_BAND_COLORS.MEDIUM },
+  3: { label: "High", color: RISK_BAND_COLORS.HIGH },
+  4: { label: "Extreme", color: RISK_BAND_COLORS.EXTREME },
+  5: { label: "Extreme", color: RISK_BAND_COLORS.EXTREME },
 };
 
 interface ChartDataPoint {
@@ -149,7 +150,7 @@ export default function ScoreBandPieChart({
                 labelLine={false}
                 label={renderLabel}
                 outerRadius={120}
-                innerRadius={0}
+                innerRadius={50}
                 dataKey="count"
                 animationDuration={800}
               >

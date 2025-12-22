@@ -26,6 +26,8 @@ import {
 import type { AttributeRow } from "../../api";
 import ImagePanel from "../CodingPage/components/ImagePanel";
 import GeoDataPanel from "../CodingPage/components/GeoDataPanel";
+import OverallTreatmentAnalysis from "../../components/visualization/scoreband/OverallTreatmentAnalysis";
+import { RISK_BAND_COLORS } from "../../components/visualization/scoreband/colorConstants";
 
 type ProjectDetail = { name: string; versions: string[]; latest: string };
 type AttributesResponse = { rows: AttributeRow[] };
@@ -297,11 +299,10 @@ const extractScores = (scoreRow: any): ScoreType => {
 };
 
 const getScoreColor = (score: number): string => {
-  if (score <= 3) return "#22c55e";      // green
-  if (score <= 6) return "#84cc16";      // lime
-  if (score <= 10) return "#eab308";     // yellow
-  if (score <= 20) return "#f97316";     // orange
-  return "#ef4444";                       // red
+  if (score <= 3) return RISK_BAND_COLORS.LOW;      // Low
+  if (score <= 6) return RISK_BAND_COLORS.MEDIUM;   // Medium
+  if (score <= 10) return RISK_BAND_COLORS.HIGH;    // High
+  return RISK_BAND_COLORS.EXTREME;                  // Extreme
 };
 
 // Calculate estimated preview scores based on selected treatments
@@ -326,6 +327,39 @@ const calculatePreviewScores = (beforeScores: ScoreType, selectedTreatmentIds: S
     VB: beforeScores.VB * reductionFactor,
     total: beforeScores.total * reductionFactor,
   };
+};
+
+// Convert score to band (1-5)
+const calculateBandFromScore = (score: number): number => {
+  if (score <= 3) return 1;
+  if (score <= 6) return 2;
+  if (score <= 10) return 3;
+  if (score <= 20) return 4;
+  return 5;
+};
+
+// Calculate band distributions for pie charts
+const calculateBandDistributions = (scoreRows: any[]) => {
+  const distributions = {
+    VB: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    BB: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    SB: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    BP: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+  };
+
+  scoreRows.forEach((row) => {
+    const vbBand = row["VB Band"];
+    const bbBand = row["BB Band"];
+    const sbBand = row["SB Band"];
+    const bpBand = row["BP Band"];
+
+    if (vbBand >= 1 && vbBand <= 5) distributions.VB[vbBand as keyof typeof distributions.VB]++;
+    if (bbBand >= 1 && bbBand <= 5) distributions.BB[bbBand as keyof typeof distributions.BB]++;
+    if (sbBand >= 1 && sbBand <= 5) distributions.SB[sbBand as keyof typeof distributions.SB]++;
+    if (bpBand >= 1 && bpBand <= 5) distributions.BP[bpBand as keyof typeof distributions.BP]++;
+  });
+
+  return distributions;
 };
 
 export default function TreatmentDetailPage() {
@@ -364,6 +398,34 @@ export default function TreatmentDetailPage() {
     () => Math.max(0, Math.min(len - 1, currentPage - 1)),
     [currentPage, len]
   );
+
+  // Calculate before treatment band distributions (all segments)
+  const beforeBandCounts = useMemo(() => {
+    return calculateBandDistributions(scores);
+  }, [scores]);
+
+  // Calculate after treatment band distributions (only treated segments)
+  const afterBandCounts = useMemo(() => {
+    const treatedSegments = scores.map((scoreRow, index) => {
+      const state = treatmentState[index];
+      if (!state?.applied || !state.after_scores) {
+        return scoreRow; // Not treated, return original
+      }
+      // Create new row with after-treatment scores
+      return {
+        ...scoreRow,
+        "BB": state.after_scores.BB,
+        "BB Band": calculateBandFromScore(state.after_scores.BB),
+        "BP": state.after_scores.BP,
+        "BP Band": calculateBandFromScore(state.after_scores.BP),
+        "SB": state.after_scores.SB,
+        "SB Band": calculateBandFromScore(state.after_scores.SB),
+        "VB": state.after_scores.VB,
+        "VB Band": calculateBandFromScore(state.after_scores.VB),
+      };
+    });
+    return calculateBandDistributions(treatedSegments);
+  }, [scores, treatmentState]);
 
   const currentFeature = useMemo<Feature | null>(() => {
     return geoFeatures[currentIndex] ?? null;
@@ -1089,6 +1151,12 @@ export default function TreatmentDetailPage() {
           </Grid>
         </Card.Body>
       </Card.Root>
+
+      {/* Overall Treatment Analysis with Before/After Pie Charts */}
+      <OverallTreatmentAnalysis
+        beforeBandCounts={beforeBandCounts}
+        afterBandCounts={afterBandCounts}
+      />
     </Box>
   );
 }

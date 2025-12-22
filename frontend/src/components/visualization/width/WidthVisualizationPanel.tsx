@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { WidthSearchDiagnostics } from './WidthSearchDiagnostics';
-import { fetchWidthVisualization, type WidthVisualizationResponse } from '../api/widthVisualization';
+import { fetchWidthVisualization, type WidthVisualizationResponse } from '../../../api/widthVisualization';
 
 interface WidthVisualizationPanelProps {
   projectName: string;

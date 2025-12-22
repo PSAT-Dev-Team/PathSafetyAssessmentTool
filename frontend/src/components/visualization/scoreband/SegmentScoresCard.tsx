@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Box, Flex, Grid, GridItem, Text } from "@chakra-ui/react";
+import { RISK_BAND_COLORS } from "./colorConstants";
 
 interface SegmentScoresCardProps {
   scores: {
@@ -15,48 +16,48 @@ const CRASH_TYPES = [
   {
     key: "BB",
     label: "Bicycle-Bicycle",
-    icon: "🚴🚴",
+    icon: "BB",
     shortLabel: "BB",
   },
   {
     key: "BP",
     label: "Bicycle-Pedestrian",
-    icon: "🚴🚶",
+    icon: "BP",
     shortLabel: "BP",
   },
   {
     key: "SB",
     label: "Single-Bicycle",
-    icon: "🚴",
+    icon: "SB",
     shortLabel: "SB",
   },
   {
     key: "VB",
     label: "Vehicle-Bicycle",
-    icon: "🚗🚴",
+    icon: "VB",
     shortLabel: "VB",
   },
 ];
 
 const getBandColor = (score: number): string => {
-  if (score < 3) return "#87C424"; // Low - Green
-  if (score < 6) return "#FFCC1A"; // Medium - Yellow
-  if (score < 10) return "#FF5B1A"; // High - Orange
-  return "#CD1AFF"; // Extreme - Purple
+  if (score < 3) return RISK_BAND_COLORS.LOW;
+  if (score < 6) return RISK_BAND_COLORS.MEDIUM;
+  if (score < 10) return RISK_BAND_COLORS.HIGH;
+  return RISK_BAND_COLORS.EXTREME;
 };
 
 const getLightBgColor = (score: number): string => {
-  if (score < 3) return "#88E788"; // Low - Green
-  if (score < 6) return "#FDDA0D"; // Medium - Yellow
-  if (score < 10) return "#F54927"; // High - Red
-  return "#BF40BF"; // Extreme - Purple
+  if (score < 3) return RISK_BAND_COLORS.LOW;
+  if (score < 6) return RISK_BAND_COLORS.MEDIUM;
+  if (score < 10) return RISK_BAND_COLORS.HIGH;
+  return RISK_BAND_COLORS.EXTREME;
 };
 
 const getDarkBgColor = (score: number): string => {
-  if (score < 3) return "#88E788"; // Low - Green
-  if (score < 6) return "#FDDA0D"; // Medium - Yellow
-  if (score < 10) return "#F54927"; // High - Red
-  return "#BF40BF"; // Extreme - Purple
+  if (score < 3) return RISK_BAND_COLORS.LOW;
+  if (score < 6) return RISK_BAND_COLORS.MEDIUM;
+  if (score < 10) return RISK_BAND_COLORS.HIGH;
+  return RISK_BAND_COLORS.EXTREME;
 };
 
 const getBandLabel = (score: number): string => {
@@ -64,13 +65,6 @@ const getBandLabel = (score: number): string => {
   if (score < 6) return "Medium";
   if (score < 10) return "High";
   return "Extreme";
-};
-
-const getRiskEmoji = (score: number): string => {
-  if (score < 3) return "💯";
-  if (score < 6) return "🤔";
-  if (score < 10) return "😰";
-  return "⚠️";
 };
 
 export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
@@ -88,6 +82,25 @@ export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
   }, [scores]);
 
   const totalScore = scores?.["CycleRAP score"] ?? 0;
+
+  // Determine CycleRAP Score color based on the crash type with the highest score
+  const getCycleRAPScoreColor = useMemo(() => {
+    if (!scores) return RISK_BAND_COLORS.LOW;
+
+    let highestScore = 0;
+    let highestScoreColor = RISK_BAND_COLORS.LOW;
+
+    CRASH_TYPES.forEach((type) => {
+      const score = scores[type.key as keyof typeof scores] || 0;
+
+      if (score > highestScore) {
+        highestScore = score;
+        highestScoreColor = getBandColor(score);
+      }
+    });
+
+    return highestScoreColor;
+  }, [scores]);
 
   if (!scores) {
     return (
@@ -125,11 +138,6 @@ export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
               h="140px"
               color="black"
             >
-              {/* Icon */}
-              <Text fontSize="xl" mb="2">
-                {type.icon}
-              </Text>
-
               {/* Label */}
               <Text fontSize="xs" fontWeight="bold" mb="3">
                 {type.label}
@@ -153,19 +161,13 @@ export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
             direction="column"
             align="center"
             justify="center"
-            bg={getLightBgColor(totalScore)}
-            _dark={{ bg: getDarkBgColor(totalScore) }}
+            bg={getCycleRAPScoreColor}
             borderRadius="lg"
             p="4"
             textAlign="center"
             h="140px"
             color="black"
           >
-            {/* Risk emoji */}
-            <Text fontSize="xl" mb="2">
-              {getRiskEmoji(totalScore)}
-            </Text>
-
             {/* Total label */}
             <Text fontSize="xs" fontWeight="bold" mb="3">
               CycleRAP Score
@@ -190,25 +192,25 @@ export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
         </Text>
         <Grid templateColumns="repeat(4, 1fr)" gap="2">
           <Flex align="center" gap="2">
-            <Box w="16px" h="16px" borderRadius="md" bg="#88E788" />
+            <Box w="16px" h="16px" borderRadius="md" bg={RISK_BAND_COLORS.LOW} />
             <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
               Low
             </Text>
           </Flex>
           <Flex align="center" gap="2">
-            <Box w="16px" h="16px" borderRadius="md" bg="#FDDA0D" />
+            <Box w="16px" h="16px" borderRadius="md" bg={RISK_BAND_COLORS.MEDIUM} />
             <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
               Medium
             </Text>
           </Flex>
           <Flex align="center" gap="2">
-            <Box w="16px" h="16px" borderRadius="md" bg="#F54927" />
+            <Box w="16px" h="16px" borderRadius="md" bg={RISK_BAND_COLORS.HIGH} />
             <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
               High
             </Text>
           </Flex>
           <Flex align="center" gap="2">
-            <Box w="16px" h="16px" borderRadius="md" bg="#BF40BF" />
+            <Box w="16px" h="16px" borderRadius="md" bg={RISK_BAND_COLORS.EXTREME} />
             <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
               Extreme
             </Text>

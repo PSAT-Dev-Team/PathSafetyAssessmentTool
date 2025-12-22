@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Box, Text, Tabs, Button, Flex, HStack } from "@chakra-ui/react";
+import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal } from "@chakra-ui/react";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import { Switch } from "../../../components/ui/switch";
 import L from "leaflet";
@@ -7,7 +7,6 @@ import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
 import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, type AttributeRow } from "../../../api";
-import AttributeDistributionChart from "./AttributeDistributionChart";
 
 // --- EPSG:3414 (SVY21 / Singapore TM) definition -> EPSG:4326 ---
 proj4.defs(
@@ -43,55 +42,10 @@ function FitBounds({ points, shouldFit }: { points: [number, number][]; shouldFi
 
 interface AttributeAnalysisMapViewProps {
   selectedProjects: string[];
-  selectedAttribute: string | null;
+  selectedAttributes: (string | null)[];
+  onChartDataUpdate?: (data: { categoryDistributionData: { category: string; count: number; color: string }[]; primaryFocusAttribute: string | null }) => void;
 }
 
-// CycleRAP Attributes with their specific possible values
-interface AttributeConfig {
-  name: string;
-  options: string[];
-}
-
-const cyclerapAttributes: AttributeConfig[] = [
-  { name: "Facility Type", options: ["Not Selected", "Sidewalk", "Multi-Use Path", "Off-Road Bicycle Path", "On-road Bicycle Lane", "Road Shoulder", "Mixed Traffic Road Lane"] },
-  { name: "Facility access", options: ["Not Selected", "Adequate", "Inadequate"] },
-  { name: "Loose or slippery surface", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Tram or Train Rails", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Major Surface Deformation or Drain Opening", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Fixed Obstacle on Facility", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Non-Fixed Obstacle on Facility", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Delineation", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Light Segregation", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Facility Width per Direction", options: ["Not Selected", "Very Narrow", "Narrow", "Wide"] },
-  { name: "Flow Direction", options: ["Not Selected", "One Way", "Two Way"] },
-  { name: "Width Restriction", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Adjacent Road Lane 0-1m", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Adjacent Vehicle Parking 0-1m", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Adjacent Severe Hazard 0-1m", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Adjacent object or level change 0-1m", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Adjacent Sidewalk 0-1m", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Adjacent Road Lane 1-3m", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Adjacent Vehicle Parking 1-3m", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Adjacent Severe Hazard 1-3m", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Adjacent object or level change 1-3m", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Grade", options: ["Not Selected", "< 5 Degrees", "=/> 5 Degrees"] },
-  { name: "Curvature", options: ["Not Selected", "Sharp Turn Present", "No Sharp Turn Present"] },
-  { name: "Street Lighting", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Pedestrian Crossing", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Intersecting Bicycle Facility", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Intersection Approach", options: ["Not Selected", "Shared", "Separate/NA"] },
-  { name: "Intersection or Road Crossing", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Crossing Facility", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Number of lanes – adjacent road", options: ["Not Selected", "1 per Direction/NA", "> 1 per Direction"] },
-  { name: "Number of lanes – intersecting road", options: ["Not Selected", "1 per Direction/NA", "> 1 per Direction"] },
-  { name: "Property Access", options: ["Not Selected", "Present", "Not Present"] },
-  { name: "Peak pedestrian flow along or across facility", options: ["Not Selected", "None", "Low", "Moderate to high"] },
-  { name: "Peak bicycle/LV traffic flow", options: ["Not Selected", "Low", "Moderate to high"] },
-  { name: "Observed proportion of cargo bikes and mopeds", options: ["Not Selected", "Low", "Moderate to high"] },
-  { name: "Bicycle/LV speed – average", options: ["Not Selected", "< 20km/h", "=/> 20km/h"] },
-  { name: "Bicycle/LV speed differential", options: ["Not Selected", "< 10km/h", "=/> 10km/h"] },
-  { name: "Heavy vehicle flow", options: ["Not Selected", "Low", "Moderate to high"] }
-];
 
 type ProjectData = {
   projectName: string;
@@ -100,7 +54,7 @@ type ProjectData = {
   color: string;
 };
 
-export default function AttributeAnalysisMapView({ selectedProjects, selectedAttribute }: AttributeAnalysisMapViewProps) {
+export default function AttributeAnalysisMapView({ selectedProjects, selectedAttributes, onChartDataUpdate }: AttributeAnalysisMapViewProps) {
   const [activeTab, setActiveTab] = useState<string>("map");
   const [projectsData, setProjectsData] = useState<ProjectData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -108,11 +62,40 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   const [panToBounds, setPanToBounds] = useState<L.LatLngBounds | null>(null);
   const [attrMappings, setAttrMappings] = useState<Record<string, Record<string, string>>>({});
 
-  // Category toggle states - managed internally
-  const [categoryToggles, setCategoryToggles] = useState<Record<string, boolean>>({});
+  // Category toggle states - now tracks toggles per filter attribute
+  // Structure: { "attributeName": { "categoryValue": true/false } }
+  const [categoryToggles, setCategoryToggles] = useState<Record<string, Record<string, boolean>>>({});
 
   // Track if we should auto-fit bounds (only on initial project load, not on category changes)
   const [shouldAutoFit, setShouldAutoFit] = useState(false);
+
+  // Track which attribute to show categories for (defaults to first)
+  const [categoryFilterAttributeIndex, setCategoryFilterAttributeIndex] = useState(0);
+
+  // Track which attribute is the primary focus for coloring
+  const [primaryFocusAttribute, setPrimaryFocusAttribute] = useState<string | null>(null);
+
+  // Get the first selected attribute for visualization/coloring
+  const selectedAttribute = selectedAttributes.find(attr => attr !== null);
+
+  // Update primaryFocusAttribute when selected attributes change
+  useEffect(() => {
+    const activeAttrs = selectedAttributes.filter(attr => attr !== null);
+    if (activeAttrs.length > 0) {
+      // If current primary focus is not in active attributes or not "Project", reset to first active attribute
+      if (!primaryFocusAttribute || (primaryFocusAttribute !== "Project" && !activeAttrs.includes(primaryFocusAttribute))) {
+        setPrimaryFocusAttribute(activeAttrs[0]);
+      }
+    } else if (primaryFocusAttribute !== "Project") {
+      // Only clear if not set to "Project"
+      setPrimaryFocusAttribute(null);
+    }
+  }, [selectedAttributes]);
+
+  // Get all active filters (non-null attributes)
+  const activeFilters = useMemo(() => {
+    return selectedAttributes.filter(attr => attr !== null);
+  }, [selectedAttributes]);
 
   // Load attribute mappings on mount
   useEffect(() => {
@@ -121,33 +104,9 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       .catch(e => console.error("Failed to load attribute mappings:", e));
   }, []);
 
-  // Get available categories for the selected attribute
-  const availableCategories = useMemo(() => {
-    if (!selectedAttribute) return [];
-    const attr = cyclerapAttributes.find(a => a.name === selectedAttribute);
-    return attr ? attr.options.filter(opt => opt !== "Not Selected") : [];
-  }, [selectedAttribute]);
+  // Get the attribute to show categories for
+  const categoryFilterAttribute = activeFilters[categoryFilterAttributeIndex];
 
-  // Initialize category toggles when attribute changes - enable all by default
-  useEffect(() => {
-    if (!selectedAttribute || availableCategories.length === 0) {
-      setCategoryToggles({});
-      return;
-    }
-
-    const initialToggles: Record<string, boolean> = {};
-    availableCategories.forEach(category => {
-      initialToggles[category] = true; // Enable all by default
-    });
-    setCategoryToggles(initialToggles);
-  }, [selectedAttribute, availableCategories]);
-
-  // Get list of enabled categories
-  const enabledCategories = useMemo(() => {
-    return Object.entries(categoryToggles)
-      .filter(([_, enabled]) => enabled)
-      .map(([category, _]) => category);
-  }, [categoryToggles]);
 
   // Generate distinct colors for each project
   const projectColors = useMemo(() => {
@@ -285,19 +244,65 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           const attributes = projectData.attributes[i];
 
           if (attributes) {
-            // Determine color based on selected attribute or project
+            // Check if segment matches all active filters
+            // Segments must have non-empty values for ALL selected filter attributes
+            if (activeFilters.length > 0) {
+              let matchesAllFilters = true;
+
+              for (const filterAttr of activeFilters) {
+                let attrValueText = "";
+
+                // Special handling for "Project" filter
+                if (filterAttr === "Project") {
+                  attrValueText = projectData.projectName;
+                } else {
+                  const attrValue = attributes[filterAttr];
+                  attrValueText = getAttrText(filterAttr, attrValue);
+                }
+
+                // Skip if this filter attribute has no value
+                if (!attrValueText || attrValueText === "Not Selected") {
+                  matchesAllFilters = false;
+                  break;
+                }
+
+                // Check if this filter attribute's category toggle is enabled
+                const filterToggles = categoryToggles[filterAttr];
+                if (filterToggles && Object.keys(filterToggles).length > 0) {
+                  // For "Project", default to enabled if not explicitly set
+                  if (filterAttr === "Project") {
+                    if (filterToggles[attrValueText] === false) {
+                      matchesAllFilters = false;
+                      break;
+                    }
+                  } else {
+                    // For other attributes, default to disabled if not explicitly set
+                    if (!filterToggles[attrValueText]) {
+                      matchesAllFilters = false;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (!matchesAllFilters) {
+                return; // Skip segment - doesn't match all filters or category toggles
+              }
+            }
+
+            // Determine color based on primary focus attribute or project
             let pointColor = projectData.color; // Default to project color
             let attrValueText = "";
 
-            if (selectedAttribute) {
-              const attrValue = attributes[selectedAttribute];
-              attrValueText = getAttrText(selectedAttribute, attrValue);
+            if (primaryFocusAttribute === "Project") {
+              // Use project color
+              pointColor = projectData.color;
+              attrValueText = projectData.projectName;
+            } else if (primaryFocusAttribute) {
+              // Use attribute color
+              const attrValue = attributes[primaryFocusAttribute];
+              attrValueText = getAttrText(primaryFocusAttribute, attrValue);
               pointColor = attributeCategoryColors[attrValueText] || "#6B7280"; // Gray as fallback
-
-              // Filter by enabled categories - skip if category is not enabled
-              if (enabledCategories.length > 0 && !enabledCategories.includes(attrValueText)) {
-                return; // Skip this point
-              }
             }
 
             pts.push({
@@ -315,9 +320,90 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
 
     return pts;
-  }, [projectsData, selectedAttribute, attrMappings, attributeCategoryColors, enabledCategories]);
+  }, [projectsData, primaryFocusAttribute, activeFilters, attrMappings, attributeCategoryColors, categoryToggles]);
 
   const allLatLngs = useMemo(() => allPoints.map(p => p.latlng), [allPoints]);
+
+  // Helper function to convert numeric attribute value to text using mappings
+  const getAttrText = (attrName: string, attrValue: any): string => {
+    if (attrMappings[attrName] && typeof attrValue === "number") {
+      return attrMappings[attrName][String(attrValue)] || String(attrValue);
+    }
+    return String(attrValue);
+  };
+
+  // Get only the categories that exist in the FILTERED data for the selected category filter attribute
+  const availableCategories = useMemo(() => {
+    if (!categoryFilterAttribute) return [];
+
+    // Get unique categories from segments that match all other active filters
+    const categoriesInFilteredData = new Set<string>();
+
+    // Get the other filters (all except the current category filter attribute)
+    const otherFilters = activeFilters.filter(f => f !== categoryFilterAttribute);
+
+    projectsData.forEach((projectData) => {
+      // If categoryFilterAttribute is "Project", collect unique project names
+      if (categoryFilterAttribute === "Project") {
+        categoriesInFilteredData.add(projectData.projectName);
+        return;
+      }
+
+      projectData.geoFeatures.forEach((_, i) => {
+        const attributes = projectData.attributes[i];
+        if (attributes) {
+          // Check if this segment matches all OTHER filters (not the category filter itself)
+          let matchesOtherFilters = true;
+          for (const filterAttr of otherFilters) {
+            let attrValueText = "";
+            if (filterAttr === "Project") {
+              attrValueText = projectData.projectName;
+            } else {
+              const attrValue = attributes[filterAttr];
+              attrValueText = getAttrText(filterAttr, attrValue);
+            }
+            if (!attrValueText || attrValueText === "Not Selected") {
+              matchesOtherFilters = false;
+              break;
+            }
+          }
+
+          // If matches all other filters, add its category for the category filter attribute
+          if (matchesOtherFilters) {
+            const attrValue = attributes[categoryFilterAttribute];
+            const attrValueText = getAttrText(categoryFilterAttribute, attrValue);
+            if (attrValueText && attrValueText !== "Not Selected") {
+              categoriesInFilteredData.add(attrValueText);
+            }
+          }
+        }
+      });
+    });
+    return Array.from(categoriesInFilteredData).sort();
+  }, [categoryFilterAttribute, activeFilters, projectsData, attrMappings]);
+
+  // Initialize category toggles when category filter attribute changes
+  useEffect(() => {
+    if (!categoryFilterAttribute) {
+      return;
+    }
+
+    // Initialize toggles for the current category filter attribute if not already set
+    setCategoryToggles(prev => {
+      if (prev[categoryFilterAttribute]) {
+        // Already initialized, keep existing state
+        return prev;
+      }
+
+      // Create new toggles for this attribute with all categories enabled by default
+      const newToggles = { ...prev };
+      newToggles[categoryFilterAttribute] = {};
+      availableCategories.forEach(category => {
+        newToggles[categoryFilterAttribute][category] = true;
+      });
+      return newToggles;
+    });
+  }, [categoryFilterAttribute, availableCategories]);
 
   // Default center (Singapore)
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
@@ -355,29 +441,109 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     }
   };
 
+  // CSV helper: escape CSV values with proper quoting
+  const escapeCSV = (value: string): string => {
+    if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+    return value;
+  };
+
+  // Generate CSV content from allPoints
+  const generateCSV = (): string => {
+    const headers = ["Project", "Segment #", "Image Reference", "Latitude", "Longitude"];
+    // Add all active filter attributes to the headers
+    headers.push(...activeFilters);
+
+    const rows = allPoints.map(point => {
+      const row = [
+        point.projectName,
+        point.idx.toString(),
+        point.f.properties?.["Image Reference"] ?? "-",
+        point.latlng[0].toFixed(6),
+        point.latlng[1].toFixed(6)
+      ];
+      // Add values for all active filter attributes
+      activeFilters.forEach(attr => {
+        const attrValue = point.attributes[attr];
+        const attrValueText = getAttrText(attr, attrValue);
+        row.push(attrValueText || "-");
+      });
+      return row;
+    });
+
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(escapeCSV).join(","))
+      .join("\n");
+
+    return csvContent;
+  };
+
+  // Download CSV file
+  const handleDownloadCSV = (): void => {
+    const csvContent = generateCSV();
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `project_analysis-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Calculate category distribution data for the chart
   const categoryDistributionData = useMemo(() => {
-    if (!selectedAttribute) return [];
+    if (!primaryFocusAttribute) return [];
 
     // Count occurrences of each category
     const categoryCounts: Record<string, number> = {};
 
-    allPoints.forEach((point) => {
-      const category = point.attributeValue;
-      if (category) {
-        categoryCounts[category] = (categoryCounts[category] || 0) + 1;
-      }
-    });
+    if (primaryFocusAttribute === "Project") {
+      // For Project focus, count segments per project
+      allPoints.forEach((point) => {
+        const project = point.projectName;
+        if (project) {
+          categoryCounts[project] = (categoryCounts[project] || 0) + 1;
+        }
+      });
 
-    // Convert to array format for the chart
-    return Object.entries(categoryCounts)
-      .map(([category, count]) => ({
-        category,
-        count,
-        color: attributeCategoryColors[category] || "#6B7280",
-      }))
-      .sort((a, b) => b.count - a.count); // Sort by count descending
-  }, [allPoints, selectedAttribute, attributeCategoryColors]);
+      // Convert to array format for the chart with project colors
+      return Object.entries(categoryCounts)
+        .map(([project, count]) => ({
+          category: project,
+          count,
+          color: projectColors[project] || "#6B7280",
+        }))
+        .sort((a, b) => b.count - a.count); // Sort by count descending
+    } else {
+      // For attribute focus, count segments per category value
+      allPoints.forEach((point) => {
+        const category = point.attributeValue;
+        if (category) {
+          categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+        }
+      });
+
+      // Convert to array format for the chart
+      return Object.entries(categoryCounts)
+        .map(([category, count]) => ({
+          category,
+          count,
+          color: attributeCategoryColors[category] || "#6B7280",
+        }))
+        .sort((a, b) => b.count - a.count); // Sort by count descending
+    }
+  }, [allPoints, primaryFocusAttribute, attributeCategoryColors, projectColors]);
+
+  // Notify parent when chart data updates
+  useEffect(() => {
+    if (onChartDataUpdate) {
+      onChartDataUpdate({
+        categoryDistributionData,
+        primaryFocusAttribute,
+      });
+    }
+  }, [categoryDistributionData, primaryFocusAttribute, onChartDataUpdate]);
 
   return (
     <Box
@@ -389,10 +555,21 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     >
       {/* Tabs */}
       <Tabs.Root value={activeTab} onValueChange={(e) => setActiveTab(e.value)}>
-        <Tabs.List>
-          <Tabs.Trigger value="map">Map View</Tabs.Trigger>
-          <Tabs.Trigger value="table">Table View</Tabs.Trigger>
-        </Tabs.List>
+        <Flex justify="space-between" align="center" borderBottom="1px solid" borderColor="gray.200" bg="white" _dark={{ bg: "gray.800" }} py="3" px="4">
+          <Tabs.List>
+            <Tabs.Trigger value="map">Map View</Tabs.Trigger>
+            <Tabs.Trigger value="table">Table View</Tabs.Trigger>
+          </Tabs.List>
+          {allPoints.length > 0 && (
+            <Button
+              colorPalette="blue"
+              size="sm"
+              onClick={handleDownloadCSV}
+            >
+              Download Table
+            </Button>
+          )}
+        </Flex>
 
         {/* Map Tab Content */}
         <Tabs.Content value="map">
@@ -416,11 +593,91 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 ))}
               </Flex>
 
-              {/* Category Toggles - Only show when an attribute is selected */}
-              {selectedAttribute && availableCategories.length > 0 && (
+              {/* Primary Focus Selector - Show when attributes or projects are selected */}
+              {(activeFilters.length > 0 || selectedProjects.length > 0) && (
                 <Box mb="3" pb="3" borderBottom="1px solid" borderColor="gray.200">
-                  <Text fontSize="xs" fontWeight="semibold" mb="2" color="gray.600" _dark={{ color: "gray.300" }}>
-                    Filter Categories:
+                  <Text fontSize="sm" fontWeight="semibold" mb="2">
+                    Primary Focus:
+                  </Text>
+                  <Flex gap="2" align="center">
+                    <Box flex="1" maxW="300px">
+                      <Combobox.Root
+                        collection={createListCollection({
+                          items: [
+                            { label: "Project", value: "Project" },
+                            ...activeFilters.map((attr) => ({
+                              label: attr,
+                              value: attr,
+                            })),
+                          ],
+                        })}
+                        value={primaryFocusAttribute ? [primaryFocusAttribute] : []}
+                        onValueChange={(e) => setPrimaryFocusAttribute(e.value[0] || null)}
+                      >
+                        <Combobox.Control>
+                          <Combobox.Input
+                            placeholder="Select primary attribute for color coding"
+                            readOnly
+                          />
+                          <Combobox.IndicatorGroup>
+                            <Combobox.Trigger />
+                          </Combobox.IndicatorGroup>
+                        </Combobox.Control>
+                        <Portal>
+                          <Combobox.Positioner>
+                            <Combobox.Content>
+                              <Combobox.Item
+                                item={{ label: "Project", value: "Project" }}
+                              >
+                                Project
+                              </Combobox.Item>
+                              {activeFilters.map((attr) => (
+                                <Combobox.Item
+                                  key={attr}
+                                  item={{ label: attr, value: attr }}
+                                >
+                                  {attr}
+                                </Combobox.Item>
+                              ))}
+                            </Combobox.Content>
+                          </Combobox.Positioner>
+                        </Portal>
+                      </Combobox.Root>
+                    </Box>
+                    {primaryFocusAttribute && (
+                      <Text fontSize="xs" color="gray.500">
+                        Map is color-coded by: <Text as="span" fontWeight="semibold">{primaryFocusAttribute}</Text>
+                      </Text>
+                    )}
+                  </Flex>
+                </Box>
+              )}
+
+              {/* Category Toggles - Only show when an attribute (not Project) is selected */}
+              {primaryFocusAttribute && primaryFocusAttribute !== "Project" && availableCategories.length > 0 && (
+                <Box mb="3" pb="3" borderBottom="1px solid" borderColor="gray.200">
+                  <Flex justify="space-between" align="center" mb="3">
+                    <Text fontSize="xs" fontWeight="semibold" color="gray.600" _dark={{ color: "gray.300" }}>
+                      Filter Categories:
+                    </Text>
+                    {activeFilters.length > 1 && (
+                      <Flex gap="2">
+                        {activeFilters.map((_, idx) => (
+                          <Button
+                            key={idx}
+                            size="sm"
+                            variant={categoryFilterAttributeIndex === idx ? "solid" : "outline"}
+                            colorPalette={categoryFilterAttributeIndex === idx ? "blue" : "gray"}
+                            onClick={() => setCategoryFilterAttributeIndex(idx)}
+                          >
+                            {idx + 1}
+                          </Button>
+                        ))}
+                      </Flex>
+                    )}
+                  </Flex>
+                  <Text fontSize="xs" color="gray.500" mb="2">
+                    {activeFilters.length > 1 ? `Showing categories for: ${categoryFilterAttribute}` : categoryFilterAttribute}
                   </Text>
                   <HStack gap="4" flexWrap="wrap">
                     {availableCategories.map((category) => {
@@ -442,18 +699,66 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                           <Text
                             fontSize="sm"
                             fontWeight="medium"
-                            color={categoryToggles[category] ? `${colorPalette}.600` : "gray.500"}
+                            color={categoryToggles[categoryFilterAttribute]?.[category] ? `${colorPalette}.600` : "gray.500"}
                           >
                             {category}
                           </Text>
                           <Switch
                             colorPalette={colorPalette}
                             size="sm"
-                            checked={categoryToggles[category] || false}
+                            checked={categoryToggles[categoryFilterAttribute]?.[category] || false}
                             onCheckedChange={(e) => {
                               setCategoryToggles(prev => ({
                                 ...prev,
-                                [category]: e.checked
+                                [categoryFilterAttribute]: {
+                                  ...prev[categoryFilterAttribute],
+                                  [category]: e.checked
+                                }
+                              }));
+                            }}
+                          />
+                        </Flex>
+                      );
+                    })}
+                  </HStack>
+                </Box>
+              )}
+
+              {/* Project Filter Toggles - Show when "Project" is in active filters OR is the Primary Focus */}
+              {(activeFilters.includes("Project") || primaryFocusAttribute === "Project") && selectedProjects.length > 0 && (
+                <Box mb="3" pb="3" borderBottom="1px solid" borderColor="gray.200">
+                  <Text fontSize="xs" fontWeight="semibold" color="gray.600" _dark={{ color: "gray.300" }} mb="3">
+                    Filter Projects:
+                  </Text>
+                  <HStack gap="4" flexWrap="wrap">
+                    {selectedProjects.map((project) => {
+                      const colorPalette = "blue";
+                      return (
+                        <Flex key={project} align="center" gap="2">
+                          <Box
+                            w="12px"
+                            h="12px"
+                            borderRadius="full"
+                            bg={projectColors[project]}
+                          />
+                          <Text
+                            fontSize="sm"
+                            fontWeight="medium"
+                            color={categoryToggles["Project"]?.[project] ? "blue.600" : "gray.500"}
+                          >
+                            {project}
+                          </Text>
+                          <Switch
+                            colorPalette={colorPalette}
+                            size="sm"
+                            checked={categoryToggles["Project"]?.[project] !== false}
+                            onCheckedChange={(e) => {
+                              setCategoryToggles(prev => ({
+                                ...prev,
+                                "Project": {
+                                  ...prev["Project"],
+                                  [project]: e.checked
+                                }
                               }));
                             }}
                           />
@@ -466,10 +771,31 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
               {/* Legend */}
               <Box>
-                {selectedAttribute ? (
+                {primaryFocusAttribute === "Project" ? (
                   <>
                     <Text fontSize="xs" fontWeight="semibold" mb="1" color="gray.600" _dark={{ color: "gray.300" }}>
-                      {selectedAttribute} Categories:
+                      Project Colors:
+                    </Text>
+                    <Flex gap="3" flexWrap="wrap">
+                      {selectedProjects.map((proj) => (
+                        <Flex key={proj} align="center" gap="1.5">
+                          <Box
+                            w="12px"
+                            h="12px"
+                            borderRadius="full"
+                            bg={projectColors[proj]}
+                          />
+                          <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
+                            {proj}
+                          </Text>
+                        </Flex>
+                      ))}
+                    </Flex>
+                  </>
+                ) : primaryFocusAttribute ? (
+                  <>
+                    <Text fontSize="xs" fontWeight="semibold" mb="1" color="gray.600" _dark={{ color: "gray.300" }}>
+                      {primaryFocusAttribute} Categories:
                     </Text>
                     <Flex gap="3" flexWrap="wrap">
                       {/* Get unique attribute values from allPoints */}
@@ -556,8 +882,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   if (f.properties?.["Image Reference"]) {
                     label += ` ${f.properties["Image Reference"]}`;
                   }
-                  if (selectedAttribute && attributeValue) {
-                    label += ` | ${selectedAttribute}: ${attributeValue}`;
+                  if (primaryFocusAttribute && attributeValue) {
+                    label += ` | ${primaryFocusAttribute}: ${attributeValue}`;
                   }
 
                   return (
@@ -590,13 +916,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 }}
               >
                 <thead>
-                  <tr style={{ backgroundColor: "#f7fafc" }}>
+                  <tr style={{ backgroundColor: "var(--chakra-colors-bg-subtle)" }}>
                     <th
                       style={{
                         padding: "12px",
                         textAlign: "left",
-                        borderBottom: "2px solid #e2e8f0",
+                        borderBottom: "2px solid var(--chakra-colors-border-subtle)",
                         fontWeight: "600",
+                        color: "var(--chakra-colors-fg)",
                       }}
                     >
                       Project
@@ -605,8 +932,9 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                       style={{
                         padding: "12px",
                         textAlign: "left",
-                        borderBottom: "2px solid #e2e8f0",
+                        borderBottom: "2px solid var(--chakra-colors-border-subtle)",
                         fontWeight: "600",
+                        color: "var(--chakra-colors-fg)",
                       }}
                     >
                       Segment #
@@ -615,8 +943,9 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                       style={{
                         padding: "12px",
                         textAlign: "left",
-                        borderBottom: "2px solid #e2e8f0",
+                        borderBottom: "2px solid var(--chakra-colors-border-subtle)",
                         fontWeight: "600",
+                        color: "var(--chakra-colors-fg)",
                       }}
                     >
                       Image Reference
@@ -625,16 +954,31 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                       style={{
                         padding: "12px",
                         textAlign: "left",
-                        borderBottom: "2px solid #e2e8f0",
+                        borderBottom: "2px solid var(--chakra-colors-border-subtle)",
                         fontWeight: "600",
+                        color: "var(--chakra-colors-fg)",
                       }}
                     >
                       Coordinates
                     </th>
+                    {activeFilters.map((attr) => (
+                      <th
+                        key={attr}
+                        style={{
+                          padding: "12px",
+                          textAlign: "left",
+                          borderBottom: "2px solid var(--chakra-colors-border-subtle)",
+                          fontWeight: "600",
+                          color: "var(--chakra-colors-fg)",
+                        }}
+                      >
+                        {attr}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {allPoints.map(({ idx, latlng, f, projectName, color }, globalIdx) => (
+                  {allPoints.map(({ idx, latlng, f, projectName, color, attributes }, globalIdx) => (
                     <tr key={`${projectName}-${idx}-${globalIdx}`}>
                       <td style={{ padding: "12px", borderBottom: "1px solid #e2e8f0" }}>
                         <Flex align="center" gap="2">
@@ -658,6 +1002,20 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                           [{latlng[0].toFixed(6)}, {latlng[1].toFixed(6)}]
                         </Text>
                       </td>
+                      {activeFilters.map((attr) => {
+                        let attrValueText = "";
+                        if (attr === "Project") {
+                          attrValueText = projectName;
+                        } else {
+                          const attrValue = attributes[attr];
+                          attrValueText = getAttrText(attr, attrValue);
+                        }
+                        return (
+                          <td key={attr} style={{ padding: "12px", borderBottom: "1px solid #e2e8f0" }}>
+                            <Text fontSize="sm">{attrValueText || "-"}</Text>
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -666,16 +1024,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           </Box>
         </Tabs.Content>
       </Tabs.Root>
-
-      {/* Chart Below Map (Always Visible when attribute is selected) */}
-      {selectedAttribute && (
-        <Box p="4" bg="bg.panel">
-          <AttributeDistributionChart
-            categoryData={categoryDistributionData}
-            selectedAttribute={selectedAttribute}
-          />
-        </Box>
-      )}
     </Box>
   );
 }

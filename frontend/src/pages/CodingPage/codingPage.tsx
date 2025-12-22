@@ -24,6 +24,8 @@ import {
   fetchProjectAttributes,
   fetchProjectGeoJSON,
   fetchAttributeMappings,
+  calculateScore,
+  calculateScoreForRow,
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
@@ -34,13 +36,13 @@ import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
 import GeoDataPanel from "./components/GeoDataPanel"; // ← 用你之前的组件（保持文件名/路径）
 import { saveAttributes } from "../../api";
-import { CurvatureVisualizationPanel } from "../../components/CurvatureVisualizationPanel";
-import "../../components/CurvatureVisualizationPanel.css";
-import { WidthVisualizationPanel } from "../../components/WidthVisualizationPanel";
-import "../../components/WidthVisualizationPanel.css";
-import { ScoreBandDistributionPanel } from "../../components/ScoreBandDistributionPanel";
-import "../../components/ScoreBandDistributionPanel.css";
-import SegmentScoresCard from "../../components/SegmentScoresCard";
+import { CurvatureVisualizationPanel } from "../../components/visualization/curvature/CurvatureVisualizationPanel";
+import "../../components/visualization/curvature/CurvatureVisualizationPanel.css";
+import { WidthVisualizationPanel } from "../../components/visualization/width/WidthVisualizationPanel";
+import "../../components/visualization/width/WidthVisualizationPanel.css";
+// import { ScoreBandDistributionPanel } from "../../components/visualization/scoreband/ScoreBandDistributionPanel"; // Temporarily removed
+// import "../../components/visualization/scoreband/ScoreBandDistributionPanel.css"; // Temporarily removed
+import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
 
 
 // 兜底类型
@@ -68,6 +70,9 @@ export default function CodingPage() {
   // Track cleanup timeout to ensure it always executes
   const cleanupTimeoutRef = useRef<number | null>(null);
 
+  // Track debounce timeout for score calculation
+  const scoreDebounceRef = useRef<Record<number, number>>({});
+
   // Helper function to clear auto-coding state
   const clearAutoCodingState = useCallback(() => {
     setAutoCoding(false);
@@ -79,13 +84,20 @@ export default function CodingPage() {
     }
   }, []);
 
-  // Cleanup timeout on unmount or when currentPage changes
+  // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
       if (cleanupTimeoutRef.current !== null) {
         clearTimeout(cleanupTimeoutRef.current);
         cleanupTimeoutRef.current = null;
       }
+      // Clear all debounce timeouts
+      Object.values(scoreDebounceRef.current).forEach(timeout => {
+        if (timeout !== undefined) {
+          clearTimeout(timeout);
+        }
+      });
+      scoreDebounceRef.current = {};
     };
   }, []);
 
@@ -389,40 +401,72 @@ export default function CodingPage() {
     return () => { cancelled = true; };
   }, [name]);
 
-  // Fetch scores for segment display
-  const fetchScores = useCallback(async () => {
-    if (!name) return;
-    try {
-      const res = await fetch(`/api/projects/${encodeURIComponent(name)}/results`);
-      if (!res.ok) {
-        console.warn("Could not fetch CycleRAP scores");
-        return;
-      }
-      const data = await res.json();
-      if (data.ok && Array.isArray(data.result_rows)) {
-        setScores(data.result_rows);
-        console.log("Scores loaded:", data.result_rows.length, "segments");
-      }
-    } catch (e: any) {
-      console.warn("Failed to load CycleRAP scores:", e?.message);
-    }
-  }, [name]);
-
-  // Fetch scores on component mount and when name changes
+  // Auto-calculate scores on project load if they don't exist
   useEffect(() => {
-    fetchScores();
-  }, [fetchScores]);
+    if (!name || attrs.length === 0) return;
 
-  // Listen for score update events (triggered after Calculate Score button is clicked)
-  useEffect(() => {
-    const handleScoresUpdated = () => {
-      console.log("Scores updated event received, refetching scores...");
-      fetchScores();
-    };
+    let isMounted = true;
 
-    window.addEventListener("psat:scores:updated", handleScoresUpdated);
-    return () => window.removeEventListener("psat:scores:updated", handleScoresUpdated);
-  }, [fetchScores]);
+    (async () => {
+      try {
+        // First, try to fetch existing scores
+        const res = await fetch(`/api/projects/${encodeURIComponent(name)}/results`);
+        if (!res.ok) {
+          throw new Error("Failed to fetch results");
+        }
+
+        const data = await res.json();
+
+        // If no scores exist or result_rows is empty, auto-calculate them
+        if (!data.ok || !Array.isArray(data.result_rows) || data.result_rows.length === 0) {
+          let loadingToastId: string | undefined;
+
+          if (isMounted) {
+            console.log("No scores found, auto-calculating scores for all segments...");
+            loadingToastId = toaster.create({
+              description: "Auto-calculating scores for all segments...",
+              type: "loading",
+            });
+          }
+
+          // Calculate scores for all segments
+          const result = await calculateScore(name);
+
+          if (isMounted && result.ok && Array.isArray(result.result_rows)) {
+            // Dismiss loading toast
+            if (loadingToastId) {
+              toaster.dismiss(loadingToastId);
+            }
+
+            setScores(result.result_rows as any);
+            console.log("Scores auto-calculated:", result.result_rows.length, "segments");
+            toaster.create({
+              title: "Scores calculated",
+              description: `Auto-calculated scores for ${result.result_rows.length} segments`,
+              type: "success",
+            });
+
+            // Notify other components (like GeoDataPanel) that scores have been updated
+            window.dispatchEvent(new CustomEvent("psat:scores:updated"));
+          } else if (isMounted && loadingToastId) {
+            // Dismiss loading toast if calculation failed
+            toaster.dismiss(loadingToastId);
+          }
+        } else if (isMounted) {
+          // Scores exist, just load them
+          setScores(data.result_rows as any);
+          console.log("Scores loaded:", data.result_rows.length, "segments");
+        }
+      } catch (e: any) {
+        if (isMounted) {
+          console.warn("Failed to auto-calculate scores:", e?.message);
+          // Silently fail - scores will be empty but user can still browse attributes
+        }
+      }
+    })();
+
+    return () => { isMounted = false; };
+  }, [name, attrs.length]);
 
   // 映射
   useEffect(() => {
@@ -465,13 +509,67 @@ export default function CodingPage() {
   );
 
   const editCurrentAttr = (field: string, value: string | number | boolean | null) => {
-    if (!attrs) return;
+    if (!attrs || !attrs[currentIndex]) return;
+
+    // Create the updated row with the new value - make sure to include ALL attributes
+    const updatedRow = { ...attrs[currentIndex], [field]: value };
+
+    // Update the attributes in state immediately for responsiveness
     setAttrs(prev => {
       if (!prev) return prev;
       const next = [...prev];
-      next[currentIndex] = { ...next[currentIndex], [field]: value };
+      next[currentIndex] = updatedRow;
       return next;
     });
+
+    // Debounce score calculation to avoid excessive API calls while typing
+    const currentIdx = currentIndex;
+
+    // Clear any existing timeout for this row
+    if (scoreDebounceRef.current[currentIdx] !== undefined) {
+      clearTimeout(scoreDebounceRef.current[currentIdx]);
+    }
+
+    // Set a new debounced timeout
+    scoreDebounceRef.current[currentIdx] = window.setTimeout(async () => {
+      if (!name) return;
+
+      try {
+        // Log what we're sending to the API for debugging
+        console.log("Calling calculateScoreForRow with updated row:", updatedRow);
+
+        const newScore = await calculateScoreForRow(name, updatedRow);
+
+        console.log("Received scores from API:", newScore);
+
+        // Update scores for the current segment only
+        setScores(prev => {
+          // Ensure the array is large enough to hold the current index
+          const next = [...prev];
+
+          // Fill any gaps with empty objects if needed
+          while (next.length <= currentIdx) {
+            next.push({} as any);
+          }
+
+          // Update the score at the current index
+          if (next[currentIdx]) {
+            next[currentIdx] = { ...next[currentIdx], ...newScore };
+          } else {
+            next[currentIdx] = newScore as any;
+          }
+          return next;
+        });
+
+        console.log("Score state updated for segment", currentIdx, "field", field, "new scores:", newScore);
+
+        // Notify map component to update segment colors
+        window.dispatchEvent(new CustomEvent("psat:scores:updated"));
+      } catch (e: any) {
+        console.warn("Failed to recalculate score:", e?.message);
+        // Silently fail - allow editing even if score calculation fails
+      }
+    }, 500); // 500ms debounce delay
   };
 
   // 翻页
@@ -690,29 +788,16 @@ export default function CodingPage() {
             }
             index={currentIndex}
             onJump={(i) => setCurrentPage(i + 1)}
+            scores={scores}
           />
         </GridItem>
 
-        {/* Segment Crash Type Scores - 跨两列 */}
-        <GridItem colSpan={{ base: 1, md: 2 }}>
-          <Box
-            bg="white"
-            borderRadius="md"
-            p="6"
-            borderWidth="1px"
-            borderColor="gray.200"
-            _dark={{ bg: "gray.800", borderColor: "gray.600" }}
-          >
-            <SegmentScoresCard
-              scores={scores[currentIndex] || null}
-            />
-          </Box>
-        </GridItem>
-
         {/* CycleRAP Score Band Distributions - 跨两列 */}
+        {/* Temporarily removed
         <GridItem colSpan={{ base: 1, md: 2 }}>
           <ScoreBandDistributionPanel projectName={name} />
         </GridItem>
+        */}
 
         {/* 第三行：Facility Width Analysis (Collapsible) - 跨两列 */}
         {currentFeature?.geometry?.type === "LineString" && (
@@ -735,6 +820,22 @@ export default function CodingPage() {
             />
           </GridItem>
         )}
+
+        {/* Segment Crash Type Scores - 跨两列 */}
+        <GridItem colSpan={{ base: 1, md: 2 }}>
+          <Box
+            bg="white"
+            borderRadius="md"
+            p="6"
+            borderWidth="1px"
+            borderColor="gray.200"
+            _dark={{ bg: "gray.800", borderColor: "gray.600" }}
+          >
+            <SegmentScoresCard
+              scores={scores[currentIndex] || null}
+            />
+          </Box>
+        </GridItem>
       </Grid>
     </Box>
   );

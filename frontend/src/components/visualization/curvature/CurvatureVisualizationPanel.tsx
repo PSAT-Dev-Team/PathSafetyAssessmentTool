@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CurvatureVisualization } from './CurvatureVisualization';
 import { CurvatureDiagnostics } from './CurvatureDiagnostics';
-import { fetchCurvatureVisualization, type CurvatureVisualizationResponse } from '../api/curvatureVisualization';
+import { fetchCurvatureVisualization, type CurvatureVisualizationResponse } from '../../../api/curvatureVisualization';
 
 interface CurvatureVisualizationPanelProps {
   projectName: string;

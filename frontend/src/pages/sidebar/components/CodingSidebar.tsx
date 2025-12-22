@@ -2,7 +2,6 @@ import { Button, Flex, Spacer, Grid, GridItem } from "@chakra-ui/react";
 
 type CodingSidebarProps = {
   projectName: string;
-  onCalculate: () => Promise<void> | void;
   onSave: () => Promise<void> | void;
   onExit: () => void;
 
@@ -12,7 +11,6 @@ type CodingSidebarProps = {
 };
 
 export default function CodingSidebar({
-  onCalculate,
   onSave,
   onExit,
   onAutoCodeOne,
@@ -48,12 +46,6 @@ export default function CodingSidebar({
         rowGap={3}
         mt="auto"
       >
-
-        <GridItem colSpan={2}>
-          <Button onClick={onCalculate} w="100%" size="sm" variant="outline" colorPalette="gray">
-            Calculate Score
-          </Button>
-        </GridItem>
 
         <GridItem>
           <Button onClick={onSave} w="100%" size="sm" variant="solid" colorPalette="gray">

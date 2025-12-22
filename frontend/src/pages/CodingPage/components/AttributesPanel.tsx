@@ -26,11 +26,11 @@ type Props = {
 /** ====== Group ordering (tab order) ====== */
 const GROUP_ORDER = [
   "Facility configuration",
-  "Flow & Speed",
   "Facility clear width",
   "Facility surface conditions",
   "Intersection",
   "Others",
+  "Flow & Speed",
 ] as const;
 
 /** ====== Display fields under each group (keep your original order) ====== */

@@ -104,34 +104,14 @@ export default function AttributeDistributionChart({
         <ResponsiveContainer width="100%" height="100%">
           {chartType === "pie" ? (
             <PieChart>
-              <defs>
-                {chartData.map((entry, index) => (
-                  <radialGradient key={`gradient-${index}`} id={`gradient-${index}`}>
-                    <stop offset="0%" stopColor={entry.color} stopOpacity={1} />
-                    <stop offset="100%" stopColor={entry.color} stopOpacity={0.5} />
-                  </radialGradient>
-                ))}
-                <filter id="pie-shadow" x="-50%" y="-50%" width="200%" height="200%">
-                  <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
-                  <feOffset dx="0" dy="4" result="offsetblur"/>
-                  <feComponentTransfer>
-                    <feFuncA type="linear" slope="0.3"/>
-                  </feComponentTransfer>
-                  <feMerge>
-                    <feMergeNode/>
-                    <feMergeNode in="SourceGraphic"/>
-                  </feMerge>
-                </filter>
-              </defs>
               <Pie
-                filter="url(#pie-shadow)"
                 data={chartData}
                 cx="50%"
                 cy="40%"
                 labelLine={false}
                 label={renderCustomLabel}
                 outerRadius={145}
-                innerRadius={0}
+                innerRadius={60}
                 fill="#8884d8"
                 dataKey="count"
                 animationDuration={1000}
@@ -141,7 +121,7 @@ export default function AttributeDistributionChart({
                 {chartData.map((_entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={`url(#gradient-${index})`}
+                    fill={_entry.color}
                     stroke="none"
                   />
                 ))}
@@ -221,26 +201,6 @@ export default function AttributeDistributionChart({
               layout="vertical"
               margin={{ top: 20, right: 60, left: 20, bottom: 20 }}
             >
-              <defs>
-                {chartData.map((entry, index) => (
-                  <linearGradient key={`bar-gradient-${index}`} id={`bar-gradient-${index}`} x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor={entry.color} stopOpacity={0.5} />
-                    <stop offset="50%" stopColor={entry.color} stopOpacity={0.85} />
-                    <stop offset="100%" stopColor={entry.color} stopOpacity={1} />
-                  </linearGradient>
-                ))}
-                <filter id="bar-shadow" x="-50%" y="-50%" width="200%" height="200%">
-                  <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
-                  <feOffset dx="4" dy="3" result="offsetblur"/>
-                  <feComponentTransfer>
-                    <feFuncA type="linear" slope="0.3"/>
-                  </feComponentTransfer>
-                  <feMerge>
-                    <feMergeNode/>
-                    <feMergeNode in="SourceGraphic"/>
-                  </feMerge>
-                </filter>
-              </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
                 type="number"
@@ -293,13 +253,12 @@ export default function AttributeDistributionChart({
                 radius={[0, 8, 8, 0]}
                 animationDuration={1000}
                 animationBegin={0}
-                filter="url(#bar-shadow)"
                 maxBarSize={50}
               >
                 {chartData.map((_entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={`url(#bar-gradient-${index})`}
+                    fill={_entry.color}
                     stroke="none"
                   />
                 ))}

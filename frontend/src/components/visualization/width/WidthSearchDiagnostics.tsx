@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { WidthVisualizationResponse } from '../api/widthVisualization';
+import type { WidthVisualizationResponse } from '../../../api/widthVisualization';
 
 interface WidthSearchDiagnosticsProps {
   searchInfo: WidthVisualizationResponse['search_info'];

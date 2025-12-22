@@ -11,6 +11,8 @@ export async function ping(): Promise<{ status: string }> {
 export interface ProjectListItem {
   name: string;
   tags: string[];
+  date_created?: string;
+  last_updated?: string;
 }
 
 export interface FileResponse {
@@ -253,7 +255,7 @@ export type CalculateScoreResult = {
 };
 
 /**
- * Calculate cycleRAP scores for the project using Excel macro
+ * Calculate cycleRAP scores for the entire project
  *
  * @param project - Project name
  * @returns Score calculation results
@@ -267,6 +269,26 @@ export async function calculateScore(project: string): Promise<CalculateScoreRes
     throw new Error(await readError(res));
   }
   return (await res.json()) as CalculateScoreResult;
+}
+
+/**
+ * Calculate cycleRAP scores for a single row
+ *
+ * @param project - Project name
+ * @param attributes - Single attribute row
+ * @returns Score for the single row
+ */
+export async function calculateScoreForRow(project: string, attributes: AttributeRow): Promise<Record<string, any>> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/score`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ attributes: [attributes] }),
+  });
+  if (!res.ok) {
+    throw new Error(await readError(res));
+  }
+  const result = (await res.json()) as CalculateScoreResult;
+  return result.result_rows[0] || {};
 }
 
 // ========================================================================

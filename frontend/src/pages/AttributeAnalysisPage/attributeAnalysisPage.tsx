@@ -12,6 +12,7 @@ import {
 import { fetchProjectList, type FileResponse } from "../../api";
 import AttributesDropdown from "./components/AttributesDropdown";
 import AttributeAnalysisMapView from "./components/AttributeAnalysisMapView";
+import AttributeDistributionChart from "./components/AttributeDistributionChart";
 import "./attributeAnalysisPage.css";
 
 export default function AttributeAnalysisPage() {
@@ -27,12 +28,21 @@ export default function AttributeAnalysisPage() {
   const [lastUpdatedTo, setLastUpdatedTo] = useState("");
   const [tagsFilter, setTagsFilter] = useState<string[]>([]);
 
-  // Selected attribute for visualization
-  const [selectedAttribute, setSelectedAttribute] = useState<string | null>(null);
+  // Selected attributes for visualization (up to 5)
+  const [selectedAttributes, setSelectedAttributes] = useState<(string | null)[]>([null]);
 
   // Combobox input states for filtering
   const [projectInputValue, setProjectInputValue] = useState("");
   const [tagsInputValue, setTagsInputValue] = useState("");
+
+  // Chart data state
+  const [chartData, setChartData] = useState<{
+    categoryDistributionData: { category: string; count: number; color: string }[];
+    primaryFocusAttribute: string | null;
+  }>({
+    categoryDistributionData: [],
+    primaryFocusAttribute: null,
+  });
 
   // Fetch projects on mount
   useEffect(() => {
@@ -49,13 +59,71 @@ export default function AttributeAnalysisPage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [projectList]);
 
-  // Filter projects based on input
+  // Filter projects based on input, tags, and date created
   const filteredProjects = useMemo(() => {
-    if (!projectInputValue) return projects;
-    return projects.filter((p) =>
-      p.name.toLowerCase().includes(projectInputValue.toLowerCase())
-    );
-  }, [projects, projectInputValue]);
+    let result = projects;
+
+    // Filter by project name input
+    if (projectInputValue) {
+      result = result.filter((p) =>
+        p.name.toLowerCase().includes(projectInputValue.toLowerCase())
+      );
+    }
+
+    // Filter by selected tags (if any tags are selected, show only projects that have at least one of those tags)
+    if (tagsFilter.length > 0) {
+      result = result.filter((p) => {
+        if (!p.tags || !Array.isArray(p.tags)) return false;
+        return tagsFilter.some((tag) => p.tags!.includes(tag));
+      });
+    }
+
+    // Filter by date created range
+    if (dateCreatedFrom || dateCreatedTo) {
+      result = result.filter((p) => {
+        if (!p.date_created) return false;
+        const projectDate = new Date(p.date_created);
+
+        if (dateCreatedFrom) {
+          const fromDate = new Date(dateCreatedFrom);
+          if (projectDate < fromDate) return false;
+        }
+
+        if (dateCreatedTo) {
+          const toDate = new Date(dateCreatedTo);
+          // Set to end of day for inclusive range
+          toDate.setHours(23, 59, 59, 999);
+          if (projectDate > toDate) return false;
+        }
+
+        return true;
+      });
+    }
+
+    // Filter by last updated range
+    if (lastUpdatedFrom || lastUpdatedTo) {
+      result = result.filter((p) => {
+        if (!p.last_updated) return false;
+        const projectDate = new Date(p.last_updated);
+
+        if (lastUpdatedFrom) {
+          const fromDate = new Date(lastUpdatedFrom);
+          if (projectDate < fromDate) return false;
+        }
+
+        if (lastUpdatedTo) {
+          const toDate = new Date(lastUpdatedTo);
+          // Set to end of day for inclusive range
+          toDate.setHours(23, 59, 59, 999);
+          if (projectDate > toDate) return false;
+        }
+
+        return true;
+      });
+    }
+
+    return result;
+  }, [projects, projectInputValue, tagsFilter, dateCreatedFrom, dateCreatedTo, lastUpdatedFrom, lastUpdatedTo]);
 
   // Get all unique tags from all projects
   const allTags = useMemo(() => {
@@ -111,7 +179,7 @@ export default function AttributeAnalysisPage() {
       {/* Header */}
       <Box mb="6">
         <Text fontSize="2xl" fontWeight="bold" mb="2">
-          Attribute Analysis
+          Path Analysis
         </Text>
         <Text fontSize="sm" color="fg.muted">
           Select one or more projects to analyze attributes across multiple projects
@@ -338,8 +406,8 @@ export default function AttributeAnalysisPage() {
       {/* Attributes Dropdown Section */}
       <Box mb="6">
         <AttributesDropdown
-          selectedAttribute={selectedAttribute}
-          onAttributeChange={setSelectedAttribute}
+          selectedAttributes={selectedAttributes}
+          onAttributeChange={setSelectedAttributes}
         />
       </Box>
 
@@ -347,9 +415,26 @@ export default function AttributeAnalysisPage() {
       <Box mb="6">
         <AttributeAnalysisMapView
           selectedProjects={loadedProjects}
-          selectedAttribute={selectedAttribute}
+          selectedAttributes={selectedAttributes}
+          onChartDataUpdate={setChartData}
         />
       </Box>
+
+      {/* Charts Section - Displayed Below Map/Table */}
+      {chartData.primaryFocusAttribute && chartData.categoryDistributionData.length > 0 && (
+        <Box
+          borderWidth="1px"
+          borderRadius="lg"
+          p="6"
+          bg="white"
+          _dark={{ bg: "gray.800" }}
+        >
+          <AttributeDistributionChart
+            categoryData={chartData.categoryDistributionData}
+            selectedAttribute={chartData.primaryFocusAttribute}
+          />
+        </Box>
+      )}
     </Box>
   );
 }

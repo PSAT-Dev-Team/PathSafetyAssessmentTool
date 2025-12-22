@@ -2,7 +2,7 @@ import { useLocation, useNavigate, useMatch } from "react-router-dom";
 import { Button, Separator } from "@chakra-ui/react";
 import { useMemo, useCallback, useState } from "react";
 import { toaster } from "../../components/ui/toaster";
-import { calculateScore, applyAllTreatments, resetAllTreatments, saveTreatments } from "../../api";
+import { applyAllTreatments, resetAllTreatments, saveTreatments } from "../../api";
 import {
   MenuContent,
   MenuItem,
@@ -17,11 +17,11 @@ import "./sidebar.css";
 
 const LINKS = [
   { to: "/home", label: "Home" },
-  { to: "/treatment", label: "Treatment Projection" },
+  // { to: "/treatment", label: "Treatment Projection" }, // Temporarily removed
 ];
 
 const ANALYSIS_LINKS = [
-  { to: "/analysis/attribute", label: "Attribute Analysis" },
+  { to: "/analysis/attribute", label: "Path Analysis" },
   { to: "/analysis/post-treatment", label: "Post-Treatment Analysis" },
 ];
 
@@ -128,55 +128,6 @@ export default function Sidebar() {
     }
   }, [projectName]);
 
-  const onCalculate = useCallback(async () => {
-    if (!projectName) {
-      toaster.create({
-        description: "No project selected",
-        type: "error",
-      });
-      return;
-    }
-
-    try {
-      // Show loading toast and store ID so we can dismiss it later
-      const loadingToastId = toaster.create({
-        description: "Calculating scores...",
-        type: "loading",
-      });
-
-      const result = await calculateScore(projectName);
-
-      // Log the attrs data to console so you can inspect it
-      console.log("=== CALCULATE SCORE RESULT ===");
-      console.log("Result:", result);
-      console.log("Result rows:", result.result_rows);
-
-      // Dismiss loading toast
-      if (loadingToastId) {
-        toaster.dismiss(loadingToastId);
-      }
-
-      // Show success toast
-      toaster.create({
-        description: `Score calculated! ${result.result_rows.length} rows returned`,
-        type: "success",
-      });
-
-      // Trigger GeoDataPanel to refetch scores
-      window.dispatchEvent(new CustomEvent("psat:scores:updated"));
-    } catch (error) {
-      console.error("Calculate score error:", error);
-
-      // Dismiss loading toast if it exists
-      // Note: In error case, we can't reliably dismiss the loading toast,
-      // so we'll just let it stay while the error is shown
-
-      toaster.create({
-        description: error instanceof Error ? error.message : "Failed to calculate score",
-        type: "error",
-      });
-    }
-  }, [projectName]);
 
   const onAutoCodeOne = useCallback(() => {
     window.dispatchEvent(new CustomEvent("psat:autocode:one"));
@@ -291,7 +242,6 @@ export default function Sidebar() {
         {inCoding && projectName && (
           <CodingSidebar
             projectName={projectName}
-            onCalculate={onCalculate}
             onSave={onSave}
             onExit={onExit}
             onAutoCodeOne={onAutoCodeOne}   // ★ 新增
