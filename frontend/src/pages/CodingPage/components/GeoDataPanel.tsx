@@ -144,15 +144,23 @@ export default function GeoDataPanel({ index, onJump, containerHeight = 650, sco
   }, [decodedName, fetchScores, externalScores]);
 
   // Listen for score update events (triggered after Calculate Score button is clicked)
+  // If we have external scores (from parent), don't fetch from API - let parent updates drive the scores
+  // Only fetch from API if we're using the fallback mechanism (no external scores)
   useEffect(() => {
     const handleScoresUpdated = () => {
-      console.log("Scores updated event received, refetching scores...");
-      fetchScores();
+      console.log("Scores updated event received");
+      // Only refetch from API if we don't have external scores
+      if (!externalScores || externalScores.length === 0) {
+        console.log("No external scores available, refetching from API...");
+        fetchScores();
+      } else {
+        console.log("External scores available, not refetching from API");
+      }
     };
 
     window.addEventListener("psat:scores:updated", handleScoresUpdated);
     return () => window.removeEventListener("psat:scores:updated", handleScoresUpdated);
-  }, [fetchScores]);
+  }, [fetchScores, externalScores]);
 
   // 取每条 LineString 的首点（转 4326），并保留原 feature
   const points = useMemo(() => {
@@ -385,10 +393,13 @@ export default function GeoDataPanel({ index, onJump, containerHeight = 650, sco
                 const baseColor = getSegmentColor(idx);
                 const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
                 const radius = isActive ? 8 : 5;
-                const label = `#${idx} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scores[idx]?.["CycleRAP score"]?.toFixed(2) ?? "N/A"}`;
+                const scoreValue = scores[idx]?.["CycleRAP score"];
+                const label = `#${idx} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
+                // Include score in key to force re-render when score changes
+                const keyWithScore = `${idx}-${scoreValue?.toFixed(2) ?? "loading"}`;
 
                 return (
-                  <Tooltip key={idx} content={label}>
+                  <Tooltip key={keyWithScore} content={label}>
                     <CircleMarker
                       center={latlng}
                       radius={radius}
