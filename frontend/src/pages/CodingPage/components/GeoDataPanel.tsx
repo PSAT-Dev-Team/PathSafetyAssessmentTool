@@ -124,9 +124,15 @@ export default function GeoDataPanel({ index, onJump, containerHeight = 650, sco
   // Use external scores if provided (real-time updates), otherwise fetch from API
   useEffect(() => {
     if (externalScores && externalScores.length > 0) {
+      console.log("GeoDataPanel: Updating scores from external source, count:", externalScores.length, "scores:", externalScores);
       setScores(externalScores);
     }
   }, [externalScores]);
+
+  // Debug: log when internal scores state changes
+  useEffect(() => {
+    console.log("GeoDataPanel: Internal scores state updated, count:", scores.length);
+  }, [scores]);
 
   // Fetch CycleRAP scores for color coding on component mount (fallback if no external scores)
   useEffect(() => {
@@ -229,6 +235,10 @@ export default function GeoDataPanel({ index, onJump, containerHeight = 650, sco
     }
 
     const segmentScores = scores[segmentIndex];
+    if (!segmentScores) {
+      return "#2563EB"; // Default blue if no score data for this segment
+    }
+
     const crashTypes = ["BB", "BP", "SB", "VB"];
 
     let highestScore = 0;

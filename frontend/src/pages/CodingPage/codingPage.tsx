@@ -558,10 +558,11 @@ export default function CodingPage() {
           } else {
             next[currentIdx] = newScore as any;
           }
+
+          console.log("CodingPage: Score state updated for segment", currentIdx, "field", field, "scores array now has", next.length, "items, updated score:", next[currentIdx]);
+
           return next;
         });
-
-        console.log("Score state updated for segment", currentIdx, "field", field, "new scores:", newScore);
 
         // Notify map component to update segment colors
         window.dispatchEvent(new CustomEvent("psat:scores:updated"));
