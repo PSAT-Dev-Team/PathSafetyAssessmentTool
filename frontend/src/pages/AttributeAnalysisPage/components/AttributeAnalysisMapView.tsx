@@ -420,12 +420,16 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(categoryFilterAttribute || "");
 
     if (isSafetyScore) {
-      // For safety score, sort in the order: Low, Medium, High, Extreme, Not Selected
-      const riskOrder = ["Low", "Medium", "High", "Extreme", "Not Selected"];
+      // For safety score, sort in the order: Low, Medium, High, Extreme
+      const riskOrder = ["Low", "Medium", "High", "Extreme"];
       categories.sort((a, b) => {
         const aIndex = riskOrder.indexOf(a);
         const bIndex = riskOrder.indexOf(b);
-        return (aIndex === -1 ? riskOrder.length : aIndex) - (bIndex === -1 ? riskOrder.length : bIndex);
+        // If both are in riskOrder, use their indices; otherwise put them at the end
+        if (aIndex === -1 && bIndex === -1) return 0;
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
       });
     } else {
       categories.sort();
