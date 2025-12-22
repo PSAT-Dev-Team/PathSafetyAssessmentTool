@@ -413,7 +413,24 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         }
       });
     });
-    return Array.from(categoriesInFilteredData).sort();
+
+    // Sort categories with special handling for safety score bands
+    const categories = Array.from(categoriesInFilteredData);
+    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(categoryFilterAttribute || "");
+
+    if (isSafetyScore) {
+      // For safety score, sort in the order: Low, Medium, High, Extreme, Not Selected
+      const riskOrder = ["Low", "Medium", "High", "Extreme", "Not Selected"];
+      categories.sort((a, b) => {
+        const aIndex = riskOrder.indexOf(a);
+        const bIndex = riskOrder.indexOf(b);
+        return (aIndex === -1 ? riskOrder.length : aIndex) - (bIndex === -1 ? riskOrder.length : bIndex);
+      });
+    } else {
+      categories.sort();
+    }
+
+    return categories;
   }, [categoryFilterAttribute, activeFilters, projectsData, attrMappings]);
 
   // Initialize category toggles when category filter attribute changes
@@ -725,11 +742,26 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                         "#6B7280": "gray",
                         "#10B981": "teal",
                         "#F59E0B": "orange",
+                        "#87C424": "green",
+                        "#FFCC1A": "yellow",
+                        "#FF5B1A": "orange",
+                        "#CD1AFF": "purple",
+                        "#9CA3AF": "gray",
                       };
                       const colorPalette = colorMap[color] || "gray";
+                      const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(categoryFilterAttribute || "");
 
                       return (
                         <Flex key={category} align="center" gap="2">
+                          {isSafetyScore && (
+                            <Box
+                              width="12px"
+                              height="12px"
+                              borderRadius="2px"
+                              bg={color}
+                              flexShrink={0}
+                            />
+                          )}
                           <Text
                             fontSize="sm"
                             fontWeight="medium"
