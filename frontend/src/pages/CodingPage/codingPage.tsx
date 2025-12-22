@@ -246,6 +246,33 @@ export default function CodingPage() {
 
         applyUpdatesToCurrentRow(merged);
 
+        // Recalculate scores after attributes are updated
+        setProgress(95);
+        if (name && currentIndex !== undefined && attrs[currentIndex]) {
+          try {
+            const updatedRow = { ...attrs[currentIndex], ...merged };
+            const newScore = await calculateScoreForRow(name, updatedRow);
+
+            // Update scores for the current segment
+            setScores(prev => {
+              const next = [...prev];
+              while (next.length <= currentIndex) {
+                next.push({} as any);
+              }
+              if (next[currentIndex]) {
+                next[currentIndex] = { ...next[currentIndex], ...newScore };
+              } else {
+                next[currentIndex] = newScore as any;
+              }
+              return next;
+            });
+
+            console.log("Auto-code: Score updated for segment", currentIndex, "new scores:", newScore);
+          } catch (e: any) {
+            console.warn("Failed to recalculate score after autocode:", e?.message);
+          }
+        }
+
         setProgress(100);
         setAutoCodeMsg("Done");
         toaster.create({
@@ -319,8 +346,36 @@ export default function CodingPage() {
         // Update attributes state with the returned data (temporary, in-memory only)
         // This replaces the old approach of refetching from server, which would
         // return unchanged data since we didn't save
-        if ("updated_attributes" in r && r.updated_attributes) {
-          setAttrs(r.updated_attributes);
+        const isBulkResult = "updated_attributes" in r && r.updated_attributes;
+        if (isBulkResult) {
+          setAttrs(r.updated_attributes!);
+        }
+
+        // Recalculate scores for all segments after attributes are updated
+        setProgress(95);
+        if (name && isBulkResult && Array.isArray(r.updated_attributes)) {
+          try {
+            console.log("Auto-code all: Recalculating scores for", r.updated_attributes.length, "segments");
+
+            // Calculate scores for all updated attributes
+            const res = await fetch(`/api/projects/${encodeURIComponent(name)}/score`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ attributes: r.updated_attributes }),
+            });
+
+            if (res.ok) {
+              const result = await res.json();
+              if (result.ok && Array.isArray(result.result_rows)) {
+                setScores(result.result_rows);
+                console.log("Auto-code all: Scores updated for all segments");
+              }
+            } else {
+              console.warn("Failed to recalculate scores after autocode all");
+            }
+          } catch (e: any) {
+            console.warn("Failed to recalculate scores after autocode all:", e?.message);
+          }
         }
 
         setProgress(100);
