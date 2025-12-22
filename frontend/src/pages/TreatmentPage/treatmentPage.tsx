@@ -9,8 +9,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import { LuPencil } from "react-icons/lu";
 import { fetchProjectList, type FileResponse } from "../../api";
-import EditProjectModal from "../Home/components/EditProjectModal";
-import "../Home/home.css";
+import EditProjectModal from "../Projects/components/EditProjectModal";
+import "../Projects/projects.css";
 
 // Get border color for Pre/Post tags
 function getTagBorderColor(tag: string): string {

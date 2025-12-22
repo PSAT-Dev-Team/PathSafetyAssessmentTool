@@ -156,7 +156,7 @@ export function WidthVisualizationPanel({
             )}
             {data.search_info.found_at_radius !== null && (
               <div className="info-row">
-                <span className="label">Found at Radius:</span>
+                <span className="label">Radius:</span>
                 <span className="value">{data.search_info.found_at_radius.toFixed(1)}m</span>
               </div>
             )}

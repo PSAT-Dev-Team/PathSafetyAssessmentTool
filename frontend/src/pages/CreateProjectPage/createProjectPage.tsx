@@ -16,7 +16,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { listSourceFolders, createProjectFromFolder } from "../../api";
 import { Switch } from "../../components/ui/switch";
-import "../Home/components/editProjectModal.css";
+import "../Projects/components/EditProjectModal.css";
 
 // Get border color for Pre/Post tags
 function getTagBorderColor(tag: string): string {

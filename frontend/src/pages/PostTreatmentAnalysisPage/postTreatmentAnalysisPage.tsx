@@ -6,7 +6,7 @@ import {
   Button,
 } from "@chakra-ui/react";
 import { fetchProjectList, type FileResponse } from "../../api";
-import "../Home/home.css"; // Reuse home page styles
+import "../Projects/projects.css"; // Reuse projects page styles
 
 function getTagBorderColor(tag: string): string {
   if (tag === "Pre") return "#fb923c"; // orange.emphasized

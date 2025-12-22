@@ -6,7 +6,7 @@ import {
   Button,
 } from "@chakra-ui/react";
 import { fetchProjectList, type FileResponse } from "../../api";
-import "../Home/home.css"; // Reuse home page styles
+import "../Projects/projects.css"; // Reuse projects page styles
 
 export default function PreTreatmentAnalysisPage() {
   // Project list state

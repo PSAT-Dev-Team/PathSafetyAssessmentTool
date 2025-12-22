@@ -398,11 +398,33 @@ def get_project(project_name: str):
 
 @bp.get("/<project_name>/versions/latest/attributes")
 def get_latest_attributes(project_name: str):
-    """Return the latest attributes.csv (converted to JSON for front-end table rendering)."""
+    """Return the latest attributes.csv (converted to JSON for front-end table rendering).
+
+    Also includes calculated band values (VB Band, BB Band, SB Band, BP Band) if they exist
+    in the results, so filtering can use these calculated values.
+    """
     ctx = get_ctx()
     proj: Project = ctx["pm"].project(project_name)
-    df = proj.latest().attributes.df
-    return jsonify({"rows": df.to_dict(orient="records")})
+    ver = proj.latest()
+
+    attrs_df = ver.attributes.df
+
+    # If results exist, merge the band values into attributes for filtering capability
+    if ver.results and ver.results.df is not None and len(ver.results.df) > 0:
+        results_df = ver.results.df
+        band_columns = ["VB Band", "BB Band", "SB Band", "BP Band"]
+
+        # Only include band columns that exist in results
+        available_bands = [col for col in band_columns if col in results_df.columns]
+
+        if available_bands and len(attrs_df) == len(results_df):
+            # Create a copy of attributes to avoid modifying the original
+            attrs_df = attrs_df.copy()
+            # Merge band values into attributes
+            for col in available_bands:
+                attrs_df[col] = results_df[col].values
+
+    return jsonify({"rows": attrs_df.to_dict(orient="records")})
 
 @bp.get("/<project_name>/geodata")
 def get_geodata(project_name: str):

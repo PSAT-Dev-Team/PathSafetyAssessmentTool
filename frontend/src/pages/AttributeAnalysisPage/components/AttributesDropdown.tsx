@@ -8,167 +8,365 @@ import {
   Combobox,
   Portal,
 } from "@chakra-ui/react";
+import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 import "./AttributesDropdown.css";
+
+// Helper function to render grouped attributes with headers
+function renderGroupedAttributes(items: any[]) {
+  const groupedItems: Record<string, any[]> = {
+    "Not Selected": [],
+    "Project": [],
+    "Safety Score": [],
+    "Facility configuration": [],
+    "Flow & Speed": [],
+    "Facility clear width": [],
+    "Facility surface conditions": [],
+    "Intersection": [],
+  };
+
+  // Group items
+  items.forEach((item) => {
+    if (item.value === "Not Selected" || item.value === "Project") {
+      groupedItems[item.value].push(item);
+    } else if (item.group) {
+      if (!groupedItems[item.group]) {
+        groupedItems[item.group] = [];
+      }
+      groupedItems[item.group].push(item);
+    }
+  });
+
+  const groupOrder = [
+    "Not Selected",
+    "Project",
+    "Safety Score",
+    "Facility configuration",
+    "Flow & Speed",
+    "Facility clear width",
+    "Facility surface conditions",
+    "Intersection",
+  ];
+
+  return (
+    <>
+      {groupOrder.map((groupName, groupIndex) => {
+        const groupItems = groupedItems[groupName] || [];
+        if (groupItems.length === 0) return null;
+
+        return (
+          <Box key={groupName}>
+            {/* Divider before group header (except for first group) */}
+            {groupIndex > 0 && (
+              <Box
+                borderTop="1px solid"
+                borderColor="gray.200"
+                _dark={{ borderColor: "gray.700" }}
+                my="1"
+              />
+            )}
+
+            {/* Group header - only show for non-special items */}
+            {groupName !== "Not Selected" && groupName !== "Project" && (
+              <Text
+                px="3"
+                py="2"
+                fontSize="xs"
+                fontWeight="bold"
+                color="gray.700"
+                textTransform="uppercase"
+                letterSpacing="1px"
+                bg="gray.100"
+                _dark={{ color: "gray.200", bg: "gray.700" }}
+              >
+                {groupName}
+              </Text>
+            )}
+            {/* Group items */}
+            {groupItems.map((item: any) => {
+              // Add color indicator for Safety Score items
+              const isSafetyScore = groupName === "Safety Score";
+              const getColorForRisk = (label: string): string => {
+                switch (label.toLowerCase()) {
+                  case "low":
+                    return RISK_BAND_COLORS.LOW;
+                  case "medium":
+                    return RISK_BAND_COLORS.MEDIUM;
+                  case "high":
+                    return RISK_BAND_COLORS.HIGH;
+                  case "extreme":
+                    return RISK_BAND_COLORS.EXTREME;
+                  default:
+                    return "transparent";
+                }
+              };
+
+              return (
+                <Combobox.Item item={item} key={item.value}>
+                  <Flex align="center" gap="2" width="100%">
+                    {isSafetyScore && item.label !== "Not Selected" && (
+                      <Box
+                        width="12px"
+                        height="12px"
+                        borderRadius="2px"
+                        bg={getColorForRisk(item.label)}
+                        flexShrink={0}
+                      />
+                    )}
+                    <Text flex="1">{item.label}</Text>
+                  </Flex>
+                  <Combobox.ItemIndicator />
+                </Combobox.Item>
+              );
+            })}
+          </Box>
+        );
+      })}
+    </>
+  );
+}
 
 // CycleRAP Attributes with their specific possible values
 interface AttributeConfig {
   name: string;
   options: string[];
+  group: string; // Add group field
 }
 
+// Safety Score Crash Types
+interface SafetyScoreConfig {
+  name: string;
+  displayName?: string;
+  options: string[];
+  group: string;
+}
+
+const safetyScoreAttributes: SafetyScoreConfig[] = [
+  {
+    name: "VB Band",
+    displayName: "Vehicle-Bicycle (VB)",
+    group: "Safety Score",
+    options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
+  },
+  {
+    name: "BB Band",
+    displayName: "Bicycle-Bicycle (BB)",
+    group: "Safety Score",
+    options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
+  },
+  {
+    name: "SB Band",
+    displayName: "Single-Bicycle (SB)",
+    group: "Safety Score",
+    options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
+  },
+  {
+    name: "BP Band",
+    displayName: "Bicycle-Pedestrian (BP)",
+    group: "Safety Score",
+    options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
+  },
+];
+
 const cyclerapAttributes: AttributeConfig[] = [
+  // Facility configuration group
   {
     name: "Facility Type",
+    group: "Facility configuration",
     options: ["Not Selected", "Sidewalk", "Multi-Use Path", "Off-Road Bicycle Path", "On-road Bicycle Lane", "Road Shoulder", "Mixed Traffic Road Lane"]
   },
   {
     name: "Facility access",
+    group: "Facility configuration",
     options: ["Not Selected", "Adequate", "Inadequate"]
   },
   {
-    name: "Loose or slippery surface",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Tram or Train Rails",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Major Surface Deformation or Drain Opening",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Fixed Obstacle on Facility",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Non-Fixed Obstacle on Facility",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Delineation",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Light Segregation",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Facility Width per Direction",
-    options: ["Not Selected", "Very Narrow", "Narrow", "Wide"]
-  },
-  {
-    name: "Flow Direction",
-    options: ["Not Selected", "One Way", "Two Way"]
-  },
-  {
-    name: "Width Restriction",
+    name: "Adjacent Sidewalk 0-1m",
+    group: "Facility configuration",
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
     name: "Adjacent Road Lane 0-1m",
+    group: "Facility configuration",
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
     name: "Adjacent Vehicle Parking 0-1m",
+    group: "Facility configuration",
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
     name: "Adjacent Severe Hazard 0-1m",
+    group: "Facility configuration",
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
     name: "Adjacent object or level change 0-1m",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Adjacent Sidewalk 0-1m",
+    group: "Facility configuration",
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
     name: "Adjacent Road Lane 1-3m",
+    group: "Facility configuration",
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
     name: "Adjacent Vehicle Parking 1-3m",
+    group: "Facility configuration",
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
     name: "Adjacent Severe Hazard 1-3m",
+    group: "Facility configuration",
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
     name: "Adjacent object or level change 1-3m",
+    group: "Facility configuration",
     options: ["Not Selected", "Present", "Not Present"]
   },
+
+  // Flow & Speed group
   {
-    name: "Grade",
-    options: ["Not Selected", "< 5 Degrees", "=/> 5 Degrees"]
-  },
-  {
-    name: "Curvature",
-    options: ["Not Selected", "Sharp Turn Present", "No Sharp Turn Present"]
-  },
-  {
-    name: "Street Lighting",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Pedestrian Crossing",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Intersecting Bicycle Facility",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Intersection Approach",
-    options: ["Not Selected", "Shared", "Separate/NA"]
-  },
-  {
-    name: "Intersection or Road Crossing",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Crossing Facility",
-    options: ["Not Selected", "Present", "Not Present"]
-  },
-  {
-    name: "Number of lanes – adjacent road",
-    options: ["Not Selected", "1 per Direction/NA", "> 1 per Direction"]
-  },
-  {
-    name: "Number of lanes – intersecting road",
-    options: ["Not Selected", "1 per Direction/NA", "> 1 per Direction"]
-  },
-  {
-    name: "Property Access",
-    options: ["Not Selected", "Present", "Not Present"]
+    name: "Flow Direction",
+    group: "Flow & Speed",
+    options: ["Not Selected", "One Way", "Two Way"]
   },
   {
     name: "Peak pedestrian flow along or across facility",
+    group: "Flow & Speed",
     options: ["Not Selected", "None", "Low", "Moderate to high"]
   },
   {
     name: "Peak bicycle/LV traffic flow",
+    group: "Flow & Speed",
     options: ["Not Selected", "Low", "Moderate to high"]
   },
   {
     name: "Observed proportion of cargo bikes and mopeds",
+    group: "Flow & Speed",
+    options: ["Not Selected", "Low", "Moderate to high"]
+  },
+  {
+    name: "Heavy vehicle flow",
+    group: "Flow & Speed",
     options: ["Not Selected", "Low", "Moderate to high"]
   },
   {
     name: "Bicycle/LV speed – average",
+    group: "Flow & Speed",
     options: ["Not Selected", "< 20km/h", "=/> 20km/h"]
   },
   {
     name: "Bicycle/LV speed differential",
+    group: "Flow & Speed",
     options: ["Not Selected", "< 10km/h", "=/> 10km/h"]
   },
+
+  // Facility clear width group
   {
-    name: "Heavy vehicle flow",
-    options: ["Not Selected", "Low", "Moderate to high"]
-  }
+    name: "Facility Width per Direction",
+    group: "Facility clear width",
+    options: ["Not Selected", "Very Narrow", "Narrow", "Wide"]
+  },
+  {
+    name: "Fixed Obstacle on Facility",
+    group: "Facility clear width",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Non-Fixed Obstacle on Facility",
+    group: "Facility clear width",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Width Restriction",
+    group: "Facility clear width",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Light Segregation",
+    group: "Facility clear width",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+
+  // Facility surface conditions group
+  {
+    name: "Delineation",
+    group: "Facility surface conditions",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Loose or slippery surface",
+    group: "Facility surface conditions",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Tram or Train Rails",
+    group: "Facility surface conditions",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Major Surface Deformation or Drain Opening",
+    group: "Facility surface conditions",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Grade",
+    group: "Facility surface conditions",
+    options: ["Not Selected", "< 5 Degrees", "=/> 5 Degrees"]
+  },
+  {
+    name: "Curvature",
+    group: "Facility surface conditions",
+    options: ["Not Selected", "Sharp Turn Present", "No Sharp Turn Present"]
+  },
+  {
+    name: "Street Lighting",
+    group: "Facility surface conditions",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+
+  // Intersection group
+  {
+    name: "Intersection Approach",
+    group: "Intersection",
+    options: ["Not Selected", "Shared", "Separate/NA"]
+  },
+  {
+    name: "Intersection or Road Crossing",
+    group: "Intersection",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Crossing Facility",
+    group: "Intersection",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Pedestrian Crossing",
+    group: "Intersection",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Intersecting Bicycle Facility",
+    group: "Intersection",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Property Access",
+    group: "Intersection",
+    options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Number of lanes – adjacent road",
+    group: "Intersection",
+    options: ["Not Selected", "1 per Direction/NA", "> 1 per Direction"]
+  },
+  {
+    name: "Number of lanes – intersecting road",
+    group: "Intersection",
+    options: ["Not Selected", "1 per Direction/NA", "> 1 per Direction"]
+  },
 ];
 
 interface AttributesDropdownProps {
@@ -235,9 +433,15 @@ export default function AttributesDropdown({
   const allAttributes = useMemo(() => [
     { label: "Not Selected", value: "Not Selected" },
     { label: "Project", value: "Project" },
+    ...safetyScoreAttributes.map((attr) => ({
+      label: attr.displayName || attr.name,
+      value: attr.name,
+      group: attr.group,
+    })),
     ...cyclerapAttributes.map((attr) => ({
       label: attr.name,
       value: attr.name,
+      group: attr.group,
     })),
   ], []);
 
@@ -339,12 +543,7 @@ export default function AttributesDropdown({
                         <Combobox.Positioner>
                           <Combobox.Content maxH="400px" overflowY="auto">
                             <Combobox.Empty>No attributes found</Combobox.Empty>
-                            {attributeCollection.items.map((item: any) => (
-                              <Combobox.Item item={item} key={item.value}>
-                                {item.label}
-                                <Combobox.ItemIndicator />
-                              </Combobox.Item>
-                            ))}
+                            {renderGroupedAttributes(attributeCollection.items)}
                           </Combobox.Content>
                         </Combobox.Positioner>
                       </Portal>

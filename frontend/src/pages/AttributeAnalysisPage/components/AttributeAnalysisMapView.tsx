@@ -188,7 +188,12 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       "Very Narrow": "#DC2626", // Red
       "One Way": "#2563EB", // Blue
       "Two Way": "#9333EA", // Purple
-      "Low": "#16A34A", // Green
+      // Safety Score Band colors (CycleRAP Risk Bands)
+      "Not Selected": "#9CA3AF", // Gray
+      "Low": "#87C424", // Green (CycleRAP Low)
+      "Medium": "#FFCC1A", // Yellow (CycleRAP Medium)
+      "High": "#FF5B1A", // Orange (CycleRAP High)
+      "Extreme": "#CD1AFF", // Purple (CycleRAP Extreme)
       "Moderate to high": "#DC2626", // Red
       "None": "#6B7280", // Gray
       "Shared": "#DC2626", // Red
@@ -229,6 +234,20 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
     // Helper function to convert numeric attribute value to text using mappings
     const getAttrText = (attrName: string, attrValue: any): string => {
+      // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
+      if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(attrName)) {
+        const safetyScoreBands: Record<number, string> = {
+          0: "Not Selected",
+          1: "Low",
+          2: "Medium",
+          3: "High",
+          4: "Extreme",
+        };
+        if (typeof attrValue === "number") {
+          return safetyScoreBands[attrValue] || String(attrValue);
+        }
+      }
+
       // If we have a mapping for this attribute and the value is a number
       if (attrMappings[attrName] && typeof attrValue === "number") {
         return attrMappings[attrName][String(attrValue)] || String(attrValue);
@@ -326,6 +345,21 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Helper function to convert numeric attribute value to text using mappings
   const getAttrText = (attrName: string, attrValue: any): string => {
+    // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
+    if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(attrName)) {
+      const safetyScoreBands: Record<number, string> = {
+        0: "Not Selected",
+        1: "Low",
+        2: "Medium",
+        3: "High",
+        4: "Extreme",
+      };
+      if (typeof attrValue === "number") {
+        return safetyScoreBands[attrValue] || String(attrValue);
+      }
+    }
+
+    // If we have a mapping for this attribute and the value is a number
     if (attrMappings[attrName] && typeof attrValue === "number") {
       return attrMappings[attrName][String(attrValue)] || String(attrValue);
     }
