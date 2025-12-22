@@ -860,10 +860,27 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                     </Text>
                     <Flex gap="3" flexWrap="wrap">
                       {/* Get unique attribute values from allPoints */}
-                      {Array.from(new Set(allPoints.map(p => p.attributeValue)))
-                        .filter(val => val) // Remove empty values
-                        .sort()
-                        .map((category) => (
+                      {(() => {
+                        let categories = Array.from(new Set(allPoints.map(p => p.attributeValue)))
+                          .filter(val => val); // Remove empty values
+
+                        // Special sorting for safety score attributes
+                        const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute || "");
+                        if (isSafetyScore) {
+                          const riskOrder = ["Low", "Medium", "High", "Extreme"];
+                          categories.sort((a, b) => {
+                            const aIndex = riskOrder.indexOf(a);
+                            const bIndex = riskOrder.indexOf(b);
+                            if (aIndex === -1 && bIndex === -1) return 0;
+                            if (aIndex === -1) return 1;
+                            if (bIndex === -1) return -1;
+                            return aIndex - bIndex;
+                          });
+                        } else {
+                          categories.sort();
+                        }
+
+                        return categories.map((category) => (
                           <Flex key={category} align="center" gap="1.5">
                             <Box
                               w="12px"
@@ -875,7 +892,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                               {category}
                             </Text>
                           </Flex>
-                        ))}
+                        ));
+                      })()}
                     </Flex>
                   </>
                 ) : (
