@@ -13,7 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { LuPencil } from "react-icons/lu";
 import EditProjectModal from "./components/EditProjectModal";
 
-import "./home.css";
+import "./projects.css";
 
 interface FileListResponse {
   projects: ProjectListItem[];
@@ -183,7 +183,7 @@ export default function Home() {
   };
 
   return (
-    <div className="home-root">
+    <div className="projects-root">
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">

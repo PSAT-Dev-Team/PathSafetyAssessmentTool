@@ -250,7 +250,7 @@ export default function GeoDataPanel({ index, onJump, containerHeight = 650, sco
     const crashTypes = ["BB", "BP", "SB", "VB"];
 
     let highestScore = 0;
-    let highestScoreColor = RISK_BAND_COLORS.LOW;
+    let highestScoreColor: string = RISK_BAND_COLORS.LOW;
 
     // Find the crash type with the highest score
     crashTypes.forEach((crashType) => {
@@ -260,9 +260,9 @@ export default function GeoDataPanel({ index, onJump, containerHeight = 650, sco
         highestScore = score;
 
         // Determine color based on the score
-        if (score < 3) highestScoreColor = RISK_BAND_COLORS.LOW;
-        else if (score < 6) highestScoreColor = RISK_BAND_COLORS.MEDIUM;
-        else if (score < 10) highestScoreColor = RISK_BAND_COLORS.HIGH;
+        if (score <= 5) highestScoreColor = RISK_BAND_COLORS.LOW;
+        else if (score <= 10) highestScoreColor = RISK_BAND_COLORS.MEDIUM;
+        else if (score <= 20) highestScoreColor = RISK_BAND_COLORS.HIGH;
         else highestScoreColor = RISK_BAND_COLORS.EXTREME;
       }
     });

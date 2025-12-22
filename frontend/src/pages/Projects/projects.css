@@ -1,22 +1,22 @@
-.home-root {
+.projects-root {
   margin: 24px auto;
   max-width: 1100px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
   padding: 0 12px;
 }
 
-.home-header h1 {
+.projects-header h1 {
   margin: 0 0 4px;
   font-size: 28px;
   font-weight: 700;
 }
 
-.home-header p {
+.projects-header p {
   margin: 4px 0 12px;
 }
 
-.home-header .ok { color: #0b7a0b; }
-.home-header .down { color: #b00020; }
+.projects-header .ok { color: #0b7a0b; }
+.projects-header .down { color: #b00020; }
 .error { color: #b00020; }
 
 .search-panel {

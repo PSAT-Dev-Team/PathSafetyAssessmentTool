@@ -15,12 +15,12 @@ export const RISK_BAND_COLORS = {
 
 /**
  * Get risk band color based on score
- * Band thresholds: Low (≤3), Medium (3-6), High (6-10), Extreme (>10)
+ * Band thresholds: Low (0-5), Medium (5-10), High (10-20), Extreme (20+)
  */
 export function getRiskBandColor(score: number): string {
-  if (score <= 3) return RISK_BAND_COLORS.LOW;
-  if (score <= 6) return RISK_BAND_COLORS.MEDIUM;
-  if (score <= 10) return RISK_BAND_COLORS.HIGH;
+  if (score <= 5) return RISK_BAND_COLORS.LOW;
+  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
+  if (score <= 20) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 }
 
@@ -28,9 +28,9 @@ export function getRiskBandColor(score: number): string {
  * Get risk band label based on score
  */
 export function getRiskBandLabel(score: number): 'Low' | 'Medium' | 'High' | 'Extreme' {
-  if (score <= 3) return 'Low';
-  if (score <= 6) return 'Medium';
-  if (score <= 10) return 'High';
+  if (score <= 5) return 'Low';
+  if (score <= 10) return 'Medium';
+  if (score <= 20) return 'High';
   return 'Extreme';
 }
 
@@ -38,8 +38,8 @@ export function getRiskBandLabel(score: number): 'Low' | 'Medium' | 'High' | 'Ex
  * Get risk band index (1-4) based on score
  */
 export function getRiskBandIndex(score: number): 1 | 2 | 3 | 4 {
-  if (score <= 3) return 1;
-  if (score <= 6) return 2;
-  if (score <= 10) return 3;
+  if (score <= 5) return 1;
+  if (score <= 10) return 2;
+  if (score <= 20) return 3;
   return 4;
 }

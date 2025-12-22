@@ -16,7 +16,8 @@ import ShapefileModal from "./components/ShapefileModal";
 import "./sidebar.css";
 
 const LINKS = [
-  { to: "/home", label: "Home" },
+  { to: "/projects/create", label: "Create Project", isCreate: true },
+  { to: "/home", label: "Projects" },
   // { to: "/treatment", label: "Treatment Projection" }, // Temporarily removed
 ];
 
@@ -192,11 +193,11 @@ export default function Sidebar() {
         <div className="psat-brand">PSAT</div>
 
         <div className="psat-actions">
-          {LINKS.map(({ to, label }) => {
+          {LINKS.map(({ to, label, isCreate }) => {
             const active = pathname.startsWith(to);
             return (
               <Button
-                onClick={() => navigateSidebar(to)}
+                onClick={() => isCreate ? createProject() : navigateSidebar(to)}
                 key={to}
                 colorPalette="gray"
                 variant={active ? "solid" : "outline"}
@@ -266,10 +267,7 @@ export default function Sidebar() {
       {/* Home, Treatment List, and Analysis Pages - Show project management buttons */}
       {(onHome || onTreatment || onAnalysis) && (
         <div className="psat-side-bottom">
-          <Button onClick={createProject} colorPalette="gray" variant="surface" size="sm" width="100%">
-            Create Project
-          </Button>
-          <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" mt={2} width="100%">
+          <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" width="100%">
             Update GIS Layers
           </Button>
         </div>

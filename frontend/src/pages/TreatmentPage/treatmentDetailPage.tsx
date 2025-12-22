@@ -299,9 +299,9 @@ const extractScores = (scoreRow: any): ScoreType => {
 };
 
 const getScoreColor = (score: number): string => {
-  if (score <= 3) return RISK_BAND_COLORS.LOW;      // Low
-  if (score <= 6) return RISK_BAND_COLORS.MEDIUM;   // Medium
-  if (score <= 10) return RISK_BAND_COLORS.HIGH;    // High
+  if (score <= 5) return RISK_BAND_COLORS.LOW;      // Low
+  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;  // Medium
+  if (score <= 20) return RISK_BAND_COLORS.HIGH;    // High
   return RISK_BAND_COLORS.EXTREME;                  // Extreme
 };
 
@@ -329,13 +329,12 @@ const calculatePreviewScores = (beforeScores: ScoreType, selectedTreatmentIds: S
   };
 };
 
-// Convert score to band (1-5)
+// Convert score to band (1-4): Low (1), Medium (2), High (3), Extreme (4)
 const calculateBandFromScore = (score: number): number => {
-  if (score <= 3) return 1;
-  if (score <= 6) return 2;
-  if (score <= 10) return 3;
-  if (score <= 20) return 4;
-  return 5;
+  if (score <= 5) return 1;
+  if (score <= 10) return 2;
+  if (score <= 20) return 3;
+  return 4;
 };
 
 // Calculate band distributions for pie charts

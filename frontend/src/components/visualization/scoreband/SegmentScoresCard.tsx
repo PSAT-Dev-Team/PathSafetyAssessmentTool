@@ -40,30 +40,30 @@ const CRASH_TYPES = [
 ];
 
 const getBandColor = (score: number): string => {
-  if (score < 3) return RISK_BAND_COLORS.LOW;
-  if (score < 6) return RISK_BAND_COLORS.MEDIUM;
-  if (score < 10) return RISK_BAND_COLORS.HIGH;
+  if (score <= 5) return RISK_BAND_COLORS.LOW;
+  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
+  if (score <= 20) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 };
 
 const getLightBgColor = (score: number): string => {
-  if (score < 3) return RISK_BAND_COLORS.LOW;
-  if (score < 6) return RISK_BAND_COLORS.MEDIUM;
-  if (score < 10) return RISK_BAND_COLORS.HIGH;
+  if (score <= 5) return RISK_BAND_COLORS.LOW;
+  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
+  if (score <= 20) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 };
 
 const getDarkBgColor = (score: number): string => {
-  if (score < 3) return RISK_BAND_COLORS.LOW;
-  if (score < 6) return RISK_BAND_COLORS.MEDIUM;
-  if (score < 10) return RISK_BAND_COLORS.HIGH;
+  if (score <= 5) return RISK_BAND_COLORS.LOW;
+  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
+  if (score <= 20) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 };
 
 const getBandLabel = (score: number): string => {
-  if (score < 3) return "Low";
-  if (score < 6) return "Medium";
-  if (score < 10) return "High";
+  if (score <= 5) return "Low";
+  if (score <= 10) return "Medium";
+  if (score <= 20) return "High";
   return "Extreme";
 };
 
@@ -88,7 +88,7 @@ export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
     if (!scores) return RISK_BAND_COLORS.LOW;
 
     let highestScore = 0;
-    let highestScoreColor = RISK_BAND_COLORS.LOW;
+    let highestScoreColor: string = RISK_BAND_COLORS.LOW;
 
     CRASH_TYPES.forEach((type) => {
       const score = scores[type.key as keyof typeof scores] || 0;
