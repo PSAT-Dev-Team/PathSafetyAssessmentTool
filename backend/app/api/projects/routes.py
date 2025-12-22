@@ -351,7 +351,7 @@ def _ensure_models_ready():
 
 @bp.get("")
 def list_projects():
-    """List projects with metadata including tags."""
+    """List projects with metadata including tags, date_created, and last_updated."""
     ctx = get_ctx()
     pm = ctx["pm"]
     names = pm.list_names()
@@ -361,12 +361,22 @@ def list_projects():
     for name in names:
         try:
             proj = pm.project(name)
-            projects.append({
+            project_data = {
                 "name": name,
                 "tags": proj.metadata.tags or []
-            })
+            }
+
+            # Add date_created if available
+            if hasattr(proj.metadata, 'date_created') and proj.metadata.date_created:
+                project_data["date_created"] = proj.metadata.date_created.isoformat()
+
+            # Add last_updated if available
+            if hasattr(proj.metadata, 'last_updated') and proj.metadata.last_updated:
+                project_data["last_updated"] = proj.metadata.last_updated.isoformat()
+
+            projects.append(project_data)
         except Exception:
-            # If metadata fails to load, return project with empty tags
+            # If metadata fails to load, return project with empty tags and no dates
             projects.append({
                 "name": name,
                 "tags": []
@@ -461,6 +471,80 @@ def get_attribute_mappings():
         mappings[field] = reverse
     return jsonify(mappings)
 
+def _convert_attribute_types(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert attribute values to appropriate types for scoring.
+
+    Frontend sends all values as strings via JSON. This function converts them to:
+    - int for lookup-based attributes (most of them)
+    - float for numeric attributes (ROAD_AADT, speeds)
+    """
+    df_copy = df.copy()
+
+    # Attributes that should be integers (lookup table keys)
+    # These are used for lookups in the scoring algorithm
+    integer_attrs = [
+        'Area type',
+        'Facility Type',
+        'Facility access',
+        'Loose or slippery surface',
+        'Tram or Train Rails',
+        'Major Surface Deformation or Drain Opening',
+        'Fixed Obstacle on Facility',
+        'Non-Fixed Obstacle on Facility',
+        'Delineation',
+        'Light Segregation',
+        'Facility Width per Direction',
+        'Flow Direction',
+        'Width Restriction',
+        'Adjacent Road Lane 0-1m',
+        'Adjacent Vehicle Parking 0-1m',
+        'Adjacent Severe Hazard 0-1m',
+        'Adjacent object or level change 0-1m',
+        'Adjacent Sidewalk 0-1m',
+        'Adjacent Road Lane 1-3m',
+        'Adjacent Vehicle Parking 1-3m',
+        'Adjacent Severe Hazard 1-3m',
+        'Adjacent object or level change 1-3m',
+        'Adjacent Sidewalk 1-3m',
+        'Grade',
+        'Curvature',
+        'Street Lighting',
+        'Pedestrian Crossing',
+        'Intersecting Bicycle Facility',
+        'Intersection Approach',
+        'Intersection or Road Crossing',
+        'Crossing Facility',
+        'Number of lanes – adjacent road',
+        'Number of lanes – intersecting road',
+        'Property Access',
+        'Peak pedestrian flow along or across facility',
+        'Peak bicycle/LV traffic flow',
+        'Observed proportion of cargo bikes and mopeds',
+        'Bicycle/LV speed – average',
+        'Bicycle/LV speed differential',
+        'Heavy vehicle flow',
+    ]
+
+    # Attributes that should be floats (numeric values)
+    float_attrs = ['Road AADT', 'Road speed limit', 'Road operating speed (mean)']
+
+    for col in df_copy.columns:
+        if col in integer_attrs:
+            # Convert string to int, handling None/NaN values
+            df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(1).astype(int)
+        elif col in float_attrs:
+            # Convert string to float, handling None/NaN values
+            if col == 'Road AADT':
+                df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(5000)
+            elif col == 'Road speed limit':
+                df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(50)
+            else:
+                df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(50)
+
+    return df_copy
+
+
 @bp.post("/<project_name>/score")
 def calculate_score(project_name: str):
     """
@@ -511,17 +595,23 @@ def calculate_score(project_name: str):
     ver = proj.latest()
 
     # Load attributes from disk (or use provided attributes from request)
-    attrs = ver.attributes.df
+    attrs_df = ver.attributes.df
     payload = request.get_json(silent=True) or {}
+    is_single_row_calculation = False
+
     if "attributes" in payload:
         # Frontend sent modified attributes - use those instead
-        attrs = serializer.Attributes(values=None)
-        attrs.df = serializer.pd.DataFrame(payload["attributes"])
+        attrs_df = serializer.pd.DataFrame(payload["attributes"])
+        # Convert string values to appropriate types for scoring
+        attrs_df = _convert_attribute_types(attrs_df)
+        # Check if this is a single row calculation (for real-time score updates)
+        is_single_row_calculation = len(payload["attributes"]) == 1
 
     # Log input for debugging
-    print(f"\n\n\n\n[calculate_score] Processing {len(attrs)} rows for project '{project_name}'")
-    print(f"\n\n\n\n[calculate_score] Attribute columns: {list(attrs.columns)}")
-    print(f"\n\n\n\n[calculate_score] Sample input (first row):\n{attrs.iloc[0].to_dict() if len(attrs) > 0 else 'No data'}")
+    print(f"\n\n\n\n[calculate_score] Processing {len(attrs_df)} rows for project '{project_name}'")
+    print(f"\n\n\n\n[calculate_score] Single row calculation: {is_single_row_calculation}")
+    print(f"\n\n\n\n[calculate_score] Attribute columns: {list(attrs_df.columns)}")
+    print(f"\n\n\n\n[calculate_score] Sample input (first row):\n{attrs_df.iloc[0].to_dict() if len(attrs_df) > 0 else 'No data'}")
 
     # ==========================================
     # MAIN CALCULATION: Native Python scoring
@@ -529,7 +619,7 @@ def calculate_score(project_name: str):
     # This replaces the old Excel COM automation approach:
     # OLD: results_df = CRI.cycleRAP_interface.calculate_cycleRAP_score(attrs)
     # NEW: Cross-platform native Python implementation
-    results_df = calculate_cyclerap_score_native(attrs)
+    results_df = calculate_cyclerap_score_native(attrs_df)
 
     # Log output for debugging
     print(f"\n\n\n\n[calculate_score] Calculation complete. Generated {len(results_df)} result rows")
@@ -537,12 +627,20 @@ def calculate_score(project_name: str):
     print(f"\n\n\n\n[calculate_score] Sample output (first row):\n{results_df.iloc[0].to_dict() if len(results_df) > 0 else 'No data'}")
 
     # ==========================================
-    # PERSIST RESULTS: Save to disk
+    # PERSIST RESULTS: Save to disk (only if full calculation)
     # ==========================================
-    ver._results = serializer.Results()
-    ver.results.df = results_df
-    proj.save_all()
-    print(f"\n\n\n\n[calculate_score] Results saved to disk for project '{project_name}'")
+    # Only save to disk if this is a full project calculation, not a single-row real-time update
+    if not is_single_row_calculation:
+        ver._results = serializer.Results()
+        ver.results.df = results_df
+        proj.save_all()
+        print(f"\n\n\n\n[calculate_score] Results saved to disk for project '{project_name}'")
+
+        # Update last_updated
+        proj.metadata.last_updated = datetime.date.today()
+        proj.metadata.serialize(proj.project_path)
+    else:
+        print(f"\n\n\n\n[calculate_score] Single-row calculation - not saving to disk")
 
     # Return results to frontend
     return jsonify({"ok": True, "result_rows": results_df.to_dict(orient="records")})
@@ -720,6 +818,10 @@ def apply_treatments(project_name: str):
         ver.treatment.df = treatment_df
         ver.treatment.df_dirty = True
         proj.save_all()
+
+        # Update last_updated
+        proj.metadata.last_updated = datetime.date.today()
+        proj.metadata.serialize(proj.project_path)
 
         return jsonify({
             "ok": True,
@@ -1090,6 +1192,10 @@ def save_treatments(project_name: str):
         # Save all pending changes
         proj.save_all()
 
+        # Update last_updated
+        proj.metadata.last_updated = datetime.date.today()
+        proj.metadata.serialize(proj.project_path)
+
         return jsonify({
             "ok": True,
             "message": "Treatments saved successfully"
@@ -1119,6 +1225,11 @@ def update_attributes(name: str):
     ver.attributes.df = pd.DataFrame(rows)
     ver.attributes.df_dirty = True
     proj.save_all()  # If a day rolls over, a new version may be created
+
+    # Update last_updated
+    proj.metadata.last_updated = datetime.date.today()
+    proj.metadata.serialize(proj.project_path)
+
     return ok({"ok": True})
 
 #-----------------------------------------------------------------------------------
@@ -2154,6 +2265,10 @@ def autocode_all(project_name: str):
         # Note: UI typically passes save=False to keep changes temporary until user clicks Save
         if save and ok_count > 0:
             ver.save_all()
+
+            # Update last_updated
+            proj.metadata.last_updated = datetime.date.today()
+            proj.metadata.serialize(proj.project_path)
 
         # Return the updated attributes DataFrame so frontend can update UI without refetching
         # This enables temporary (in-memory) changes that aren't persisted until Save is clicked
