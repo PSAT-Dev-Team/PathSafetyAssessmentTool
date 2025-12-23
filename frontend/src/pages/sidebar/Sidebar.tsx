@@ -16,10 +16,11 @@ import ShapefileModal from "./components/ShapefileModal";
 import "./sidebar.css";
 
 const LINKS = [
-  { to: "/projects/create", label: "Create Project", isCreate: true },
   { to: "/home", label: "Projects" },
-  // { to: "/treatment", label: "Treatment Projection" }, // Temporarily removed
+  { to: "/treatment", label: "Treatment Projection" },
 ];
+
+const CREATE_PROJECT_LINK = { to: "/projects/create", label: "Create Project", isCreate: true };
 
 const ANALYSIS_LINKS = [
   { to: "/analysis/attribute", label: "Path Analysis" },
@@ -193,11 +194,20 @@ export default function Sidebar() {
         <div className="psat-brand">PSAT</div>
 
         <div className="psat-actions">
-          {LINKS.map(({ to, label, isCreate }) => {
+          <Button
+            onClick={() => createProject()}
+            colorPalette="gray"
+            variant="outline"
+            size="sm"
+          >
+            {CREATE_PROJECT_LINK.label}
+          </Button>
+
+          {LINKS.map(({ to, label }) => {
             const active = pathname.startsWith(to);
             return (
               <Button
-                onClick={() => isCreate ? createProject() : navigateSidebar(to)}
+                onClick={() => navigateSidebar(to)}
                 key={to}
                 colorPalette="gray"
                 variant={active ? "solid" : "outline"}

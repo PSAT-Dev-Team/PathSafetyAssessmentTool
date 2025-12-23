@@ -173,52 +173,201 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return () => { aborted = true; };
   }, [selectedProjects, projectColors]);
 
-  // Generate colors for attribute categories
+  // Generate colors for attribute categories based on safety implications
   const attributeCategoryColors = useMemo(() => {
     if (!selectedAttribute) return {};
 
-    const categoryColors: Record<string, string> = {
-      // Default colors for common categories
-      "Present": "#16A34A", // Green
-      "Not Present": "#DC2626", // Red
-      "Adequate": "#16A34A", // Green
-      "Inadequate": "#DC2626", // Red
-      "Wide": "#16A34A", // Green
-      "Narrow": "#CA8A04", // Yellow
-      "Very Narrow": "#DC2626", // Red
-      "One Way": "#2563EB", // Blue
-      "Two Way": "#9333EA", // Purple
+    const categoryColors: Record<string, string | Record<string, string>> = {
       // Safety Score Band colors (CycleRAP Risk Bands)
       "Not Selected": "#9CA3AF", // Gray
       "Low": "#87C424", // Green (CycleRAP Low)
       "Medium": "#FFCC1A", // Yellow (CycleRAP Medium)
       "High": "#FF5B1A", // Orange (CycleRAP High)
       "Extreme": "#CD1AFF", // Purple (CycleRAP Extreme)
-      "Moderate to high": "#DC2626", // Red
-      "None": "#6B7280", // Gray
-      "Shared": "#DC2626", // Red
-      "Separate/NA": "#16A34A", // Green
-      "Sharp Turn Present": "#DC2626", // Red
-      "No Sharp Turn Present": "#16A34A", // Green
-      "< 5 Degrees": "#16A34A", // Green
-      "=/> 5 Degrees": "#DC2626", // Red
-      "< 20km/h": "#16A34A", // Green
-      "=/> 20km/h": "#DC2626", // Red
-      "< 10km/h": "#16A34A", // Green
-      "=/> 10km/h": "#DC2626", // Red
-      "1 per Direction/NA": "#16A34A", // Green
-      "> 1 per Direction": "#DC2626", // Red
+
+      // Facility configuration - attributes where Present = Danger (Red), Not Present = Safe (Green)
+      "Adjacent Sidewalk 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Road Lane 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Vehicle Parking 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Severe Hazard 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent object or level change 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Road Lane 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Vehicle Parking 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Severe Hazard 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent object or level change 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+
+      // Facility clear width - attributes where Present = Danger (Red), Not Present = Safe (Green)
+      "Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
+
+      // Light Segregation - Present = Safe (Green), Not Present = Danger (Red)
+      "Light Segregation": { "Present": "#16A34A", "Not Present": "#DC2626" },
+
+      // Facility configuration - Adequate = Safe (Green), Inadequate = Danger (Red)
+      "Facility access": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
+
+      // Facility surface conditions - attributes where Present = Danger (Red), Not Present = Safe (Green)
+      "Loose or slippery surface": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Major Surface Deformation or Drain Opening": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Tram or Train Rails": { "Present": "#DC2626", "Not Present": "#16A34A" },
+
+      // Facility surface conditions - Present = Safe (Green), Not Present = Danger (Red)
+      "Delineation": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
+
+      // Facility surface conditions - Grade (Safe = Green, Dangerous = Red)
+      "Grade": { "< 5 Degrees": "#16A34A", "=/> 5 Degrees": "#DC2626" },
+
+      // Facility surface conditions - Curvature
+      "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
+
+      // Facility clear width - Width
+      "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#CA8A04", "Very Narrow": "#DC2626" },
+
+      // Flow & Speed - Flow
+      "Peak pedestrian flow along or across facility": { "None": "#6B7280", "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Peak bicycle/LV traffic flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Observed proportion of cargo bikes and mopeds": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Heavy vehicle flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+
+      // Flow & Speed - Speed (Faster = more dangerous)
+      "Bicycle/LV speed – average": { "< 20km/h": "#16A34A", "=/> 20km/h": "#DC2626" },
+      "Bicycle/LV speed differential": { "< 10km/h": "#16A34A", "=/> 10km/h": "#DC2626" },
+
+      // Intersection - attributes where Present = Safe (Green), Not Present = Danger (Red)
+      "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
+
+      // Intersection - Property Access (Present = Danger, Not Present = Safe)
+      "Property Access": { "Present": "#DC2626", "Not Present": "#16A34A" },
+
+      // Intersection approach
+      "Intersection Approach": { "Separate/NA": "#16A34A", "Shared": "#DC2626" },
+
+      // Number of lanes (More = dangerous on adjacent road, Equal = safer)
+      "Number of lanes – adjacent road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+      "Number of lanes – intersecting road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+
+      // Flow direction
+      "Flow Direction": { "One Way": "#2563EB", "Two Way": "#9333EA" },
+
       // Facility Types
-      "Sidewalk": "#2563EB",
-      "Multi-Use Path": "#16A34A",
-      "Off-Road Bicycle Path": "#10B981",
-      "On-road Bicycle Lane": "#CA8A04",
-      "Road Shoulder": "#F59E0B",
-      "Mixed Traffic Road Lane": "#DC2626",
+      "Facility Type": {
+        "Sidewalk": "#2563EB",
+        "Multi-Use Path": "#16A34A",
+        "Off-Road Bicycle Path": "#10B981",
+        "On-road Bicycle Lane": "#CA8A04",
+        "Road Shoulder": "#F59E0B",
+        "Mixed Traffic Road Lane": "#DC2626",
+      },
+
+      // Area type (neutral colors)
+      "Area type": {
+        "Inner Urban": "#2563EB",
+        "Outer Urban": "#3B82F6",
+        "Rural": "#10B981",
+        "Industrial": "#6B7280",
+      },
     };
 
-    return categoryColors;
+    // Get color for selectedAttribute - handle both direct string values and object mappings
+    const attributeColors = categoryColors[selectedAttribute];
+    if (typeof attributeColors === "object" && attributeColors !== null) {
+      return attributeColors as Record<string, string>;
+    }
+
+    // For simple string-to-color mappings, return empty (handled by legend logic)
+    return {} as Record<string, string>;
   }, [selectedAttribute]);
+
+  // Helper function to get color for a specific attribute and category value
+  const getCategoryColor = (attribute: string, category: string): string => {
+    // For Safety Score attributes (VB Band, BB Band, SB Band, BP Band), use the category value directly for color lookup
+    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(attribute);
+
+    const categoryColors: Record<string, string | Record<string, string>> = {
+      // Safety Score Band colors (CycleRAP Risk Bands) - these apply to all safety score attributes
+      "Not Selected": "#9CA3AF",
+      "Low": "#87C424",
+      "Medium": "#FFCC1A",
+      "High": "#FF5B1A",
+      "Extreme": "#CD1AFF",
+      // Facility configuration
+      "Adjacent Sidewalk 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Road Lane 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Vehicle Parking 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Severe Hazard 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent object or level change 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Road Lane 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Vehicle Parking 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Severe Hazard 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent object or level change 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      // Facility clear width
+      "Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Light Segregation": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Facility access": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
+      // Facility surface conditions
+      "Loose or slippery surface": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Major Surface Deformation or Drain Opening": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Tram or Train Rails": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Delineation": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Grade": { "< 5 Degrees": "#16A34A", "=/> 5 Degrees": "#DC2626" },
+      "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
+      "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#CA8A04", "Very Narrow": "#DC2626" },
+      // Flow & Speed
+      "Peak pedestrian flow along or across facility": { "None": "#6B7280", "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Peak bicycle/LV traffic flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Observed proportion of cargo bikes and mopeds": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Heavy vehicle flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Bicycle/LV speed – average": { "< 20km/h": "#16A34A", "=/> 20km/h": "#DC2626" },
+      "Bicycle/LV speed differential": { "< 10km/h": "#16A34A", "=/> 10km/h": "#DC2626" },
+      // Intersection
+      "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Property Access": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Intersection Approach": { "Separate/NA": "#16A34A", "Shared": "#DC2626" },
+      "Number of lanes – adjacent road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+      "Number of lanes – intersecting road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+      "Flow Direction": { "One Way": "#2563EB", "Two Way": "#9333EA" },
+      "Facility Type": {
+        "Sidewalk": "#2563EB",
+        "Multi-Use Path": "#16A34A",
+        "Off-Road Bicycle Path": "#10B981",
+        "On-road Bicycle Lane": "#CA8A04",
+        "Road Shoulder": "#F59E0B",
+        "Mixed Traffic Road Lane": "#DC2626",
+      },
+      "Area type": {
+        "Inner Urban": "#2563EB",
+        "Outer Urban": "#3B82F6",
+        "Rural": "#10B981",
+        "Industrial": "#6B7280",
+      },
+    };
+
+    // For safety score attributes, look up the category value directly (it will be Low, Medium, High, Extreme, Not Selected)
+    if (isSafetyScore) {
+      return categoryColors[category] as string || "#6B7280";
+    }
+
+    // For other attributes, look up by attribute name
+    const attributeColors = categoryColors[attribute];
+    if (typeof attributeColors === "object" && attributeColors !== null) {
+      return (attributeColors as Record<string, string>)[category] || "#6B7280";
+    }
+    if (typeof attributeColors === "string") {
+      return attributeColors;
+    }
+    return "#6B7280"; // Default gray
+  };
 
   // Extract all points from all projects with their metadata
   const allPoints = useMemo(() => {
@@ -321,7 +470,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               // Use attribute color
               const attrValue = attributes[primaryFocusAttribute];
               attrValueText = getAttrText(primaryFocusAttribute, attrValue);
-              pointColor = attributeCategoryColors[attrValueText] || "#6B7280"; // Gray as fallback
+              pointColor = getCategoryColor(primaryFocusAttribute, attrValueText);
             }
 
             pts.push({
@@ -339,7 +488,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
 
     return pts;
-  }, [projectsData, primaryFocusAttribute, activeFilters, attrMappings, attributeCategoryColors, categoryToggles]);
+  }, [projectsData, primaryFocusAttribute, activeFilters, attrMappings, categoryToggles]);
 
   const allLatLngs = useMemo(() => allPoints.map(p => p.latlng), [allPoints]);
 
@@ -415,7 +564,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       });
     });
 
-    // Sort categories with special handling for safety score bands
+    // Sort categories with special handling for safety score bands and facility width
     const categories = Array.from(categoriesInFilteredData);
     const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(categoryFilterAttribute || "");
 
@@ -426,6 +575,17 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         const aIndex = riskOrder.indexOf(a);
         const bIndex = riskOrder.indexOf(b);
         // If both are in riskOrder, use their indices; otherwise put them at the end
+        if (aIndex === -1 && bIndex === -1) return 0;
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+      });
+    } else if (categoryFilterAttribute === "Facility Width per Direction") {
+      // For facility width, sort in the order: Very Narrow, Narrow, Wide
+      const widthOrder = ["Very Narrow", "Narrow", "Wide"];
+      categories.sort((a, b) => {
+        const aIndex = widthOrder.indexOf(a);
+        const bIndex = widthOrder.indexOf(b);
         if (aIndex === -1 && bIndex === -1) return 0;
         if (aIndex === -1) return 1;
         if (bIndex === -1) return -1;
@@ -737,37 +897,48 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   </Text>
                   <HStack gap="4" flexWrap="wrap">
                     {availableCategories.map((category) => {
-                      const color = attributeCategoryColors[category] || "gray";
+                      // Get the hex color from getCategoryColor
+                      const hexColor = getCategoryColor(categoryFilterAttribute, category);
+
+                      // Map hex colors to Chakra color palettes for Switch component styling
                       const colorMap: Record<string, string> = {
+                        // Safety Score colors (CycleRAP Risk Bands)
+                        "#87C424": "green",      // Low
+                        "#FFCC1A": "yellow",     // Medium
+                        "#FF5B1A": "orange",     // High
+                        "#CD1AFF": "purple",     // Extreme
+                        "#9CA3AF": "gray",       // Not Selected
+                        // Green shades (Safe)
                         "#16A34A": "green",
+                        "#10B981": "teal",
+                        // Red shades (Danger)
                         "#DC2626": "red",
+                        // Yellow/Orange shades
                         "#CA8A04": "yellow",
+                        "#F59E0B": "orange",
+                        // Blue/Purple shades
                         "#2563EB": "blue",
                         "#9333EA": "purple",
+                        // Default
                         "#6B7280": "gray",
-                        "#10B981": "teal",
-                        "#F59E0B": "orange",
-                        "#87C424": "green",
-                        "#FFCC1A": "yellow",
-                        "#FF5B1A": "orange",
-                        "#CD1AFF": "purple",
-                        "#9CA3AF": "gray",
                       };
-                      const colorPalette = colorMap[color] || "gray";
+                      const colorPalette = colorMap[hexColor] || "gray";
+                      const isChecked = categoryToggles[categoryFilterAttribute]?.[category] || false;
 
                       return (
                         <Flex key={category} align="center" gap="2">
                           <Text
                             fontSize="sm"
                             fontWeight="medium"
-                            color={categoryToggles[categoryFilterAttribute]?.[category] ? `${colorPalette}.600` : "gray.500"}
+                            color={isChecked ? hexColor : "gray.500"}
+                            style={{ color: isChecked ? hexColor : undefined }}
                           >
                             {category}
                           </Text>
                           <Switch
                             colorPalette={colorPalette}
                             size="sm"
-                            checked={categoryToggles[categoryFilterAttribute]?.[category] || false}
+                            checked={isChecked}
                             onCheckedChange={(e) => {
                               setCategoryToggles(prev => ({
                                 ...prev,
@@ -880,19 +1051,22 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                           categories.sort();
                         }
 
-                        return categories.map((category) => (
-                          <Flex key={category} align="center" gap="1.5">
-                            <Box
-                              w="12px"
-                              h="12px"
-                              borderRadius="full"
-                              bg={attributeCategoryColors[category] || "#6B7280"}
-                            />
-                            <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
-                              {category}
-                            </Text>
-                          </Flex>
-                        ));
+                        return categories.map((category) => {
+                          const hexColor = getCategoryColor(primaryFocusAttribute || "", category);
+                          return (
+                            <Flex key={category} align="center" gap="1.5">
+                              <Box
+                                w="12px"
+                                h="12px"
+                                borderRadius="full"
+                                bg={hexColor}
+                              />
+                              <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
+                                {category}
+                              </Text>
+                            </Flex>
+                          );
+                        });
                       })()}
                     </Flex>
                   </>
