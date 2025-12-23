@@ -3,7 +3,6 @@ import { Tooltip } from "../../../components/ui/tooltip";
 import { Switch } from "../../../components/ui/switch";
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useParams } from "react-router-dom";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 import { MapContainer, TileLayer, CircleMarker, Polyline, useMap } from "react-leaflet";
@@ -13,9 +12,10 @@ import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";
 
 type Props = {
-  feature: Feature<LineString, any> | null; // 当前段（父组件传入）
+  projectName: string;                       // Current project name from parent
+  feature: Feature<LineString, any> | null;  // 当前段（父组件传入）
   index: number;                             // 当前页（父组件传入，0-based）
-  onJump?: (idx: number) => void;  // ← 新增
+  onJump?: (idx: number) => void;            // Jump to segment callback
   containerHeight?: number;                  // 容器总高度（包括header）
   scores?: ScoreRow[];                       // Optional scores passed from parent for real-time updates
 };
@@ -49,9 +49,7 @@ function FitBounds({ points }: { points: [number, number][] }) {
   return null;
 }
 
-export default function GeoDataPanel({ index, onJump, containerHeight = 650, scores: externalScores }: Props) {
-  // 从路由拿项目名（不改父组件）
-  const { projectName } = useParams<{ projectName: string }>();
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }

@@ -70,8 +70,8 @@ export default function Home() {
   const [nameQuery, setNameQuery] = useState("");
   const [tagFilter, setTagFilter] = useState<string>("");
 
-  // Selected Project
-  const [selected, setSelected] = useState<string | null>(null);
+  // Selected Projects (multiple selection)
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Delete dialog state
   const [openDelete, setOpenDelete] = useState(false);
@@ -123,23 +123,35 @@ export default function Home() {
     return list;
   }, [projects, nameQuery, tagFilter]);
 
-  
-  const onRowClick = (name: string) => setSelected(name);
-
-  // 你可按需要替换为真实后端接口
-  const loadProject = async () => {
-    if (!selected) return;
-    // 例：跳转到项目详情路由
-    navigate(`/coding/${encodeURIComponent(selected)}`);
+  // Toggle project selection
+  const onRowClick = (name: string) => {
+    setSelected(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(name)) {
+        newSet.delete(name);
+      } else {
+        newSet.add(name);
+      }
+      return newSet;
+    });
   };
 
-  // 编辑成功回调
+  // Load selected projects
+  const loadProject = async () => {
+    if (selected.size === 0) return;
+    // Convert set to array and encode as query params
+    const projectNames = Array.from(selected);
+    const encodedNames = projectNames.map(name => encodeURIComponent(name));
+    navigate(`/coding/${encodedNames.join(',')}`);
+  };
+
+  // Edit success callback
   const handleEditSuccess = (newName: string, newTags: string[]) => {
     if (!editingProject) return;
 
     const oldName = editingProject.name;
 
-    // 更新本地列表
+    // Update local list
     setProjectList((prev) => {
       if (!prev) return prev;
       return {
@@ -149,31 +161,37 @@ export default function Home() {
       };
     });
 
-    // 如果编辑的项目是当前选中的，并且名称改变了，更新选中的项目
-    if (selected === oldName && newName !== oldName) {
-      setSelected(newName);
+    // If edited project is currently selected and name changed, update selection
+    if (selected.has(oldName) && newName !== oldName) {
+      setSelected(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(oldName);
+        newSet.add(newName);
+        return newSet;
+      });
     }
   };
 
-// 打开确认对话框
+  // Open delete confirmation dialog for first selected project
   const askDelete = () => {
-    if (!selected) return;
+    if (selected.size === 0) return;
     setOpenDelete(true);
   };
 
-  // 真正删除
+  // Delete selected projects
   const confirmDelete = async () => {
-    if (!selected) return;
+    if (selected.size === 0) return;
     try {
       setDeleting(true);
-      await apiDeleteProject(selected);
-      // 本地把它从列表移除
+      // Delete all selected projects
+      await Promise.all(Array.from(selected).map(name => apiDeleteProject(name)));
+      // Remove from local list
       setProjectList((prev) =>
         prev
-          ? { projects: prev.projects.filter((p) => p.name !== selected) }
+          ? { projects: prev.projects.filter((p) => !selected.has(p.name)) }
           : prev
       );
-      setSelected(null);
+      setSelected(new Set());
       setOpenDelete(false);
     } catch (e: any) {
       console.error("Delete failed:", e);
@@ -267,7 +285,7 @@ export default function Home() {
               </tr>
             ) : (
               filtered.map((p) => {
-                const isSelected = selected === p.name;
+                const isSelected = selected.has(p.name);
                 // Find Pre/Post tag if it exists
                 const phaseTag = p.tags?.find(tag => tag === "Pre" || tag === "Post");
                 // Get all other tags (excluding Pre/Post)
@@ -278,11 +296,11 @@ export default function Home() {
                     key={p.name}
                     className={isSelected ? "row selected" : "row"}
                     onClick={() => onRowClick(p.name)}
+                    style={{ cursor: "pointer" }}
                   >
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <input
-                        type="radio"
-                        name="projectSelect"
+                        type="checkbox"
                         checked={isSelected}
                         onChange={() => onRowClick(p.name)}
                         aria-label={`Select ${p.name}`}
@@ -360,17 +378,22 @@ export default function Home() {
         />
       )}
 
-      {/* 删除确认 Dialog */}
+      {/* Delete confirmation Dialog */}
       <Dialog.Root open={openDelete} onOpenChange={(d) => setOpenDelete(d.open)}>
         <Portal>
           <Dialog.Backdrop />
           <Dialog.Positioner>
             <Dialog.Content>
               <Dialog.Header>
-                <Dialog.Title>Delete project?</Dialog.Title>
+                <Dialog.Title>Delete {selected.size} project(s)?</Dialog.Title>
               </Dialog.Header>
               <Dialog.Body>
-                This will permanently remove{" "}<strong>{selected}</strong> and its files.
+                This will permanently remove the following projects and their files:
+                <ul style={{ marginTop: "12px", paddingLeft: "20px" }}>
+                  {Array.from(selected).map(name => (
+                    <li key={name}><strong>{name}</strong></li>
+                  ))}
+                </ul>
               </Dialog.Body>
               <Dialog.Footer>
                 <Dialog.ActionTrigger asChild>

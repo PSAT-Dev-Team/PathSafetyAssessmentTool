@@ -29,7 +29,6 @@ const GROUP_ORDER = [
   "Facility clear width",
   "Facility surface conditions",
   "Intersection",
-  "Others",
   "Flow & Speed",
 ] as const;
 
@@ -90,7 +89,6 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
     "Number of lanes – adjacent road",
     "Number of lanes – intersecting road",
   ],
-  Others: [],
 };
 
 /** ====== Aliases: display name -> real key in row ====== */
@@ -173,8 +171,6 @@ function groupEntries(row: AttributeRow) {
     const hit = keyToGroup[k];
     if (hit) {
       grouped[hit.group].push([k, v]);
-    } else {
-      grouped["Others"].push([k, v]);
     }
   }
 

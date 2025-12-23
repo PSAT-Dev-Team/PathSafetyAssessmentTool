@@ -5,9 +5,10 @@ type CodingSidebarProps = {
   onSave: () => Promise<void> | void;
   onExit: () => void;
 
-  // 新增：自动编码
+  // Auto-coding callbacks
   onAutoCodeOne: () => Promise<void> | void;
   onAutoCodeAll: () => Promise<void> | void;
+  onAutoCodeAllProjects: () => Promise<void> | void;
 };
 
 export default function CodingSidebar({
@@ -15,6 +16,7 @@ export default function CodingSidebar({
   onExit,
   onAutoCodeOne,
   onAutoCodeAll,
+  onAutoCodeAllProjects,
 }: CodingSidebarProps) {
   return (
     <Flex direction="column" h="100%">
@@ -34,6 +36,12 @@ export default function CodingSidebar({
       <Button onClick={onAutoCodeAll} w="100%" size="sm" variant="outline" colorPalette="gray">
         Auto-code all
       </Button>
+
+      <GridItem colSpan={2}>
+        <Button onClick={onAutoCodeAllProjects} w="100%" size="sm" variant="outline" colorPalette="blue">
+          Autocode All Projects
+        </Button>
+      </GridItem>
       </Grid>
 
       <Spacer />

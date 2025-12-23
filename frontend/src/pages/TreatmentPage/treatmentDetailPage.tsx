@@ -692,6 +692,7 @@ export default function TreatmentDetailPage() {
         {/* Left: Map Preview */}
         <GridItem>
           <GeoDataPanel
+            projectName={name!}
             feature={
               geoFeatures[currentIndex]?.geometry?.type === "LineString"
                 ? (geoFeatures[currentIndex] as any)

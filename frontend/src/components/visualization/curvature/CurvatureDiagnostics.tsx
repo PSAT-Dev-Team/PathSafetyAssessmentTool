@@ -38,7 +38,7 @@ export function CurvatureDiagnostics({ diagnostics, curvature }: CurvatureDiagno
   const [isOpen, setIsOpen] = useState(false);
 
   // Only show diagnostics for sharp turns
-  if (curvature !== 1 || !diagnostics) {
+  if (curvature !== 1 || !diagnostics || diagnostics.min_radius === undefined) {
     return null;
   }
 

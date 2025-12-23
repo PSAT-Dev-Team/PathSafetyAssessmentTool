@@ -18,7 +18,7 @@ export default function App() {
 
       <Route element={<AppLayout />}>
         <Route path="/home" element={<Home />} />
-        <Route path="/coding/:projectName" element={<CodingPage />} />
+        <Route path="/coding/:projectNames" element={<CodingPage />} />
         <Route path="/treatment" element={<TreatmentPage />} />
         <Route path="/treatment/:projectName" element={<TreatmentDetailPage />} />
         <Route path="/analysis/attribute" element={<AttributeAnalysisPage />} />

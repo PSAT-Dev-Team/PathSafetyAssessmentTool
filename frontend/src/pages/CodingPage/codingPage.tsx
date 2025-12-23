@@ -34,50 +34,124 @@ import { autocodeImage, autocodeGIS, autocodeAll } from "../../api";
 
 import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
-import GeoDataPanel from "./components/GeoDataPanel"; // ← 用你之前的组件（保持文件名/路径）
+import GeoDataPanel from "./components/GeoDataPanel";
 import { saveAttributes } from "../../api";
 import { CurvatureVisualizationPanel } from "../../components/visualization/curvature/CurvatureVisualizationPanel";
 import "../../components/visualization/curvature/CurvatureVisualizationPanel.css";
 import { WidthVisualizationPanel } from "../../components/visualization/width/WidthVisualizationPanel";
 import "../../components/visualization/width/WidthVisualizationPanel.css";
-// import { ScoreBandDistributionPanel } from "../../components/visualization/scoreband/ScoreBandDistributionPanel"; // Temporarily removed
-// import "../../components/visualization/scoreband/ScoreBandDistributionPanel.css"; // Temporarily removed
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
 
 
-// 兜底类型
 type ProjectDetail = { name: string; versions: string[]; latest: string };
 type AttributesResponse = { rows: AttributeRow[] };
 type AttrMappings = Record<string, Record<string, string>>;
 
 const PANEL_HEIGHT = 500;
-const CONTROLS_H = 56; // 翻页按钮条高度（可按需微调）
+const CONTROLS_H = 56;
 
+// Type for project data
+type ProjectDataState = {
+  detail: ProjectDetail | null;
+  attrs: AttributeRow[];
+  geoFeatures: Feature[];
+  scores: any[];
+  currentPage: number;
+  changedFieldsByRow: Record<number, string[]>;
+  fieldSourcesByRow: Record<number, Record<string, string>>;
+  loading: boolean;
+  error: string | null;
+  editedRow: AttributeRow | null;
+};
 
+const defaultProjectData: ProjectDataState = {
+  detail: null,
+  attrs: [],
+  geoFeatures: [],
+  scores: [],
+  currentPage: 1,
+  changedFieldsByRow: {},
+  fieldSourcesByRow: {},
+  loading: true,
+  error: null,
+  editedRow: null,
+};
 
 export default function CodingPage() {
-  const { projectName } = useParams<{ projectName: string }>();
+  const { projectNames } = useParams<{ projectNames: string }>();
 
-  const name = useMemo(() => {
-    if (!projectName) return null;
-    try { return decodeURIComponent(projectName); } catch { return projectName; }
-  }, [projectName]);
+  // Parse multiple project names from URL
+  const projectList = useMemo(() => {
+    if (!projectNames) return [];
+    try {
+      return projectNames.split(',').map(name => {
+        try {
+          return decodeURIComponent(name);
+        } catch {
+          return name;
+        }
+      });
+    } catch {
+      return [];
+    }
+  }, [projectNames]);
 
+  // Current active project tab
+  const [activeTabIndex, setActiveTabIndex] = useState(0);
+  const currentProjectName = projectList[activeTabIndex] ?? null;
+
+  // State for each project: keyed by project name
+  const [projectData, setProjectData] = useState<Record<string, ProjectDataState>>({});
+
+  // Global state
   const [autoCoding, setAutoCoding] = useState(false);
   const [autoCodeMsg, setAutoCodeMsg] = useState<string>("");
   const [progress, setProgress] = useState<number>(0);
+  const [projectProgress, setProjectProgress] = useState<Record<string, { processed: number; total: number }>>({});
+  const [attrMappings, setAttrMappings] = useState<AttrMappings>({});
 
-  // Track cleanup timeout to ensure it always executes
+  // Refs for cleanup
   const cleanupTimeoutRef = useRef<number | null>(null);
-
-  // Track debounce timeout for score calculation
   const scoreDebounceRef = useRef<Record<number, number>>({});
+  const autoCodingRef = useRef(false);
+
+  // Get current project data with defaults
+  const currentData = useMemo<ProjectDataState>(() => {
+    if (!currentProjectName) return defaultProjectData;
+    return projectData[currentProjectName] || defaultProjectData;
+  }, [projectData, currentProjectName]);
+
+  // Shorthand accessors
+  const {
+    detail,
+    attrs,
+    geoFeatures,
+    scores,
+    currentPage,
+    changedFieldsByRow,
+    fieldSourcesByRow,
+    loading,
+    error,
+    editedRow,
+  } = currentData;
+
+  // Helper to update a specific project's data
+  const updateProjectData = (projectName: string, updates: Partial<ProjectDataState>) => {
+    setProjectData(prev => ({
+      ...prev,
+      [projectName]: {
+        ...prev[projectName] || defaultProjectData,
+        ...updates,
+      },
+    }));
+  };
 
   // Helper function to clear auto-coding state
   const clearAutoCodingState = useCallback(() => {
     setAutoCoding(false);
     setAutoCodeMsg("");
     setProgress(0);
+    setProjectProgress({});
     if (cleanupTimeoutRef.current !== null) {
       clearTimeout(cleanupTimeoutRef.current);
       cleanupTimeoutRef.current = null;
@@ -91,7 +165,6 @@ export default function CodingPage() {
         clearTimeout(cleanupTimeoutRef.current);
         cleanupTimeoutRef.current = null;
       }
-      // Clear all debounce timeouts
       Object.values(scoreDebounceRef.current).forEach(timeout => {
         if (timeout !== undefined) {
           clearTimeout(timeout);
@@ -101,34 +174,12 @@ export default function CodingPage() {
     };
   }, []);
 
-  // Track which fields were changed by auto-coding for each row
-  const [changedFieldsByRow, setChangedFieldsByRow] = useState<Record<number, string[]>>({});
-  // Track the source (CV/GIS) for each changed field
-  const [fieldSourcesByRow, setFieldSourcesByRow] = useState<Record<number, Record<string, string>>>({});
+  // Keep autoCodingRef in sync with autoCoding state
+  useEffect(() => {
+    autoCodingRef.current = autoCoding;
+  }, [autoCoding]);
 
-  const [detail, setDetail] = useState<ProjectDetail | null>(null);
-  const [attrs, setAttrs] = useState<AttributeRow[]>([]);
-  const [geoFeatures, setGeoFeatures] = useState<Feature[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Segment scores
-  const [scores, setScores] = useState<Array<{
-    BB: number;
-    "BB Band": number;
-    BP: number;
-    "BP Band": number;
-    SB: number;
-    "SB Band": number;
-    VB: number;
-    "VB Band": number;
-    "CycleRAP score": number;
-    "CycleRAP score Band": number;
-  }>>([]);
-
-  const [attrMappings, setAttrMappings] = useState<AttrMappings>({});
   const len = attrs.length;
-  const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageInput, setPageInput] = useState(String(currentPage));
 
   const currentIndex = useMemo(
@@ -140,22 +191,11 @@ export default function CodingPage() {
     () => (len > 0 ? attrs[currentIndex] : null),
     [attrs, currentIndex]
   );
-  const [editedRow, setEditedRow] = useState<AttributeRow | null>(null);
 
-  // 取当前行的图片引用（按你数据列名兜底）
-  // 根据当前行推导图片引用（优先 editedRow，其次 currentAttr）
-  // function isLineStringFeature(
-  //   f: Feature<Geometry, any> | undefined | null
-  // ): f is Feature<LineString, any> {
-  //   return !!f && f.geometry?.type === "LineString";
-  // }
-
-  // ✅ 补：当前要素（LineString），便于统一读取
   const currentFeature = useMemo<Feature | null>(() => {
     return geoFeatures[currentIndex] ?? null;
   }, [geoFeatures, currentIndex]);
 
-  // ✅ 补：当前图片引用（多兜底：优先 attrs，其次 feature.properties）
   const imgRef = useMemo<string | undefined>(() => {
     const fromAttr =
       (attrs?.[currentIndex] as any)?.["Image Reference"] ??
@@ -169,36 +209,39 @@ export default function CodingPage() {
       p?.["image"] ??
       p?.["img"];
 
-    // 关键：返回 undefined（而不是 null）
     return (fromAttr ?? fromFeature) || undefined;
   }, [attrs, currentIndex, currentFeature]);
 
-  // ✅ 补：把 { 字段名: 数值代码 } 合并到“当前行”
   const applyUpdatesToCurrentRow = useCallback(
     (updates: Record<string, number | string | boolean | null>) => {
       if (!updates || Object.keys(updates).length === 0) return;
-      setAttrs((prev) => {
-        const copy = [...prev];
-        if (copy[currentIndex]) {
-          copy[currentIndex] = { ...copy[currentIndex], ...updates };
-        }
-        return copy;
+      if (!currentProjectName) return;
+      setProjectData(prev => {
+        const projName = currentProjectName;
+        return {
+          ...prev,
+          [projName]: {
+            ...prev[projName] || defaultProjectData,
+            attrs: (prev[projName]?.attrs || []).map((row, i) =>
+              i === currentIndex ? { ...row, ...updates } : row
+            ),
+          },
+        };
       });
     },
-    [setAttrs, currentIndex]
+    [currentIndex, currentProjectName]
   );
 
-  // ✅ 监听：仅对当前记录进行自动编码（先 CV 后 GIS，再合并）
+  // Auto-code one segment
   useEffect(() => {
-    // 这里假设你已有 `name`（项目名）。如果变量名不同，请替换。
-    // 需要保证：name、imgRef、currentFeature（LineString）都准备好。
-    if (!name) return;
+    if (!currentProjectName) return;
 
     const handler = async () => {
-      if (autoCoding) return; // ✅ guard: already running
+      if (autoCodingRef.current) return;
 
       try {
         setAutoCoding(true);
+        autoCodingRef.current = true;
         setAutoCodeMsg("Starting…");
         setProgress(5);
 
@@ -210,11 +253,11 @@ export default function CodingPage() {
 
         setAutoCodeMsg("Running Computer Vision…");
         setProgress(35);
-        const cvPromise = autocodeImage(name, imgRef);
+        const cvPromise = autocodeImage(currentProjectName, imgRef);
 
         setAutoCodeMsg("Running GIS rules…");
         setProgress(65);
-        const gisPromise = autocodeGIS(name, line);
+        const gisPromise = autocodeGIS(currentProjectName, line);
 
         const [cv, g] = await Promise.all([cvPromise, gisPromise]);
 
@@ -222,52 +265,38 @@ export default function CodingPage() {
         setProgress(85);
         const merged = { ...(cv?.updates ?? {}), ...(g?.updates ?? {}) };
 
-        // Track changed fields from both CV and GIS
         const cvChanged = cv?.changed_fields ?? [];
         const gisChanged = g?.changed_fields ?? [];
         const allChanged = [...new Set([...cvChanged, ...gisChanged])];
 
-        // Build field sources mapping
         const fieldSources: Record<string, string> = {};
         cvChanged.forEach(field => { fieldSources[field] = "CV"; });
-        gisChanged.forEach(field => { fieldSources[field] = "GIS"; }); // GIS overrides CV
+        gisChanged.forEach(field => { fieldSources[field] = "GIS"; });
 
-        // Update changed fields tracking for current row
-        setChangedFieldsByRow(prev => ({
-          ...prev,
-          [currentIndex]: allChanged
-        }));
-
-        // Update field sources tracking for current row
-        setFieldSourcesByRow(prev => ({
-          ...prev,
-          [currentIndex]: fieldSources
-        }));
+        updateProjectData(currentProjectName, {
+          changedFieldsByRow: {
+            ...changedFieldsByRow,
+            [currentIndex]: allChanged
+          },
+          fieldSourcesByRow: {
+            ...fieldSourcesByRow,
+            [currentIndex]: fieldSources
+          }
+        });
 
         applyUpdatesToCurrentRow(merged);
 
-        // Recalculate scores after attributes are updated
         setProgress(95);
-        if (name && currentIndex !== undefined && attrs[currentIndex]) {
+        if (currentProjectName && currentIndex !== undefined && attrs[currentIndex]) {
           try {
             const updatedRow = { ...attrs[currentIndex], ...merged };
-            const newScore = await calculateScoreForRow(name, updatedRow);
+            const newScore = await calculateScoreForRow(currentProjectName, updatedRow);
 
-            // Update scores for the current segment
-            setScores(prev => {
-              const next = [...prev];
-              while (next.length <= currentIndex) {
-                next.push({} as any);
-              }
-              if (next[currentIndex]) {
-                next[currentIndex] = { ...next[currentIndex], ...newScore };
-              } else {
-                next[currentIndex] = newScore as any;
-              }
-              return next;
+            updateProjectData(currentProjectName, {
+              scores: scores.map((score, i) =>
+                i === currentIndex ? { ...score, ...newScore } : score
+              )
             });
-
-            console.log("Auto-code: Score updated for segment", currentIndex, "new scores:", newScore);
           } catch (e: any) {
             console.warn("Failed to recalculate score after autocode:", e?.message);
           }
@@ -287,120 +316,267 @@ export default function CodingPage() {
           type: "error",
         });
       } finally {
-        // Clear any existing timeout and schedule new cleanup
         if (cleanupTimeoutRef.current !== null) {
           clearTimeout(cleanupTimeoutRef.current);
         }
-        // 稍微停 300ms 让 100% 有个完成感
         cleanupTimeoutRef.current = window.setTimeout(() => {
           clearAutoCodingState();
         }, 300);
       }
     };
 
-
-
-    // 事件名：你可以在别处 window.dispatchEvent(new Event("psat:autocode:one"))
     window.addEventListener("psat:autocode:one", handler);
     return () => window.removeEventListener("psat:autocode:one", handler);
-  }, [name, imgRef, currentFeature, applyUpdatesToCurrentRow, currentIndex, autoCoding]);
+  }, [currentProjectName, imgRef, currentFeature, applyUpdatesToCurrentRow, currentIndex, attrs, scores, changedFieldsByRow, fieldSourcesByRow]);
 
-  // ========================================================================
-  // AUTO-CODE ALL: Bulk auto-coding for all images in the project
-  // ========================================================================
-  // Triggered by "Auto-code all" button in sidebar via "psat:autocode:all" event
-  //
-  // Key behavior:
-  // - Passes save=false to keep changes temporary (in frontend state only)
-  // - Changes persist in UI as you navigate between images
-  // - Changes are NOT saved to disk until user clicks Save button
-  // - This allows reviewing all auto-coded values before committing
+  // Auto-code all segments
   useEffect(() => {
-    if (!name) return;
+    if (!currentProjectName) return;
 
     const handler = async () => {
-      if (autoCoding) return; // Prevent concurrent auto-coding
+      if (autoCodingRef.current) return;
       try {
         setAutoCoding(true);
+        autoCodingRef.current = true;
         setAutoCodeMsg("CV + GIS for all records…");
         setProgress(10);
+        const attrLength = attrs.length;
+        setProjectProgress({ [currentProjectName]: { processed: 0, total: attrLength } });
 
-        // Call backend with save=false to get updates without persisting to disk
-        const r = await autocodeAll(name, { all: true, save: false });
-        // r contains: { saved, total, ok, fail, errors, changed_by_row, sources_by_row, updated_attributes }
+        // Process each segment one-by-one for real-time progress
+        const allChangedFieldsByRow: Record<number, string[]> = {};
+        const allSourcesByRow: Record<number, Record<string, string>> = {};
+        let totalOk = 0;
+        let totalFail = 0;
+        const errors: any[] = [];
 
-        setProgress(90);
-
-        // Update change tracking for field highlighting in AttributesPanel
-        // changed_by_row: { row_index: [field_names] } - which fields changed per row
-        if ("changed_by_row" in r && r.changed_by_row) {
-          setChangedFieldsByRow(r.changed_by_row);
-        }
-
-        // Update field source tracking for CV/GIS badges in AttributesPanel
-        // sources_by_row: { row_index: { field_name: "CV"|"GIS" } }
-        if ("sources_by_row" in r && r.sources_by_row) {
-          setFieldSourcesByRow(r.sources_by_row);
-        }
-
-        // Update attributes state with the returned data (temporary, in-memory only)
-        // This replaces the old approach of refetching from server, which would
-        // return unchanged data since we didn't save
-        const isBulkResult = "updated_attributes" in r && r.updated_attributes;
-        if (isBulkResult) {
-          setAttrs(r.updated_attributes!);
-        }
-
-        // Recalculate scores for all segments after attributes are updated
-        setProgress(95);
-        if (name && isBulkResult && Array.isArray(r.updated_attributes)) {
+        for (let i = 0; i < attrs.length; i++) {
           try {
-            console.log("Auto-code all: Recalculating scores for", r.updated_attributes.length, "segments");
+            const r = await autocodeAll(currentProjectName, { indices: [i], save: false });
 
-            // Calculate scores for all updated attributes
-            const res = await fetch(`/api/projects/${encodeURIComponent(name)}/score`, {
+            // Update progress after each segment
+            setProjectProgress({ [currentProjectName]: { processed: i + 1, total: attrLength } });
+
+            if ("changed_by_row" in r && r.changed_by_row) {
+              Object.assign(allChangedFieldsByRow, r.changed_by_row);
+            }
+
+            if ("sources_by_row" in r && r.sources_by_row) {
+              Object.assign(allSourcesByRow, r.sources_by_row);
+            }
+
+            if ("ok" in r) totalOk += r.ok || 0;
+            if ("fail" in r) totalFail += r.fail || 0;
+            if ("errors" in r && r.errors && r.errors.length > 0) {
+              errors.push(...r.errors);
+            }
+          } catch (e: any) {
+            totalFail++;
+            errors.push({ segment: i, reason: e?.message });
+          }
+        }
+
+        // After all segments processed, fetch updated attributes and recalculate scores
+        setProgress(85);
+        try {
+          const a = await fetchProjectAttributes(currentProjectName) as AttributesResponse;
+          if (a?.rows) {
+            updateProjectData(currentProjectName, {
+              attrs: a.rows,
+              changedFieldsByRow: allChangedFieldsByRow,
+              fieldSourcesByRow: allSourcesByRow,
+            });
+
+            // Recalculate scores
+            const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/score`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ attributes: r.updated_attributes }),
+              body: JSON.stringify({ attributes: a.rows }),
             });
 
             if (res.ok) {
               const result = await res.json();
               if (result.ok && Array.isArray(result.result_rows)) {
-                setScores(result.result_rows);
-                console.log("Auto-code all: Scores updated for all segments");
+                updateProjectData(currentProjectName, {
+                  scores: result.result_rows,
+                });
               }
-            } else {
-              console.warn("Failed to recalculate scores after autocode all");
             }
-          } catch (e: any) {
-            console.warn("Failed to recalculate scores after autocode all:", e?.message);
           }
+        } catch (e: any) {
+          console.warn("Failed to fetch updated attributes or recalculate scores:", e?.message);
         }
 
         setProgress(100);
         setAutoCodeMsg("Completed");
 
-        // Show results to user
-        if ("total" in r) {
-          // Log detailed error information to browser console for debugging
-          // Errors include: { index: number, reason: string } for each failed row
-          if (r.fail > 0 && r.errors && r.errors.length > 0) {
-            console.error("Auto-coding errors:", r.errors);
+        const totalProcessed = totalOk + totalFail;
+        toaster.create({
+          title: "Auto-code (all) done",
+          description: `Total: ${totalProcessed}, OK: ${totalOk}, Failed: ${totalFail}${totalFail > 0 ? " (check console for details)" : ""}`,
+          type: totalFail > 0 ? "warning" : "success",
+        });
+
+        if (totalFail > 0 && errors.length > 0) {
+          console.error("Auto-coding errors:", errors);
+        }
+      } catch (e: any) {
+        toaster.create({
+          title: "Auto-code failed",
+          description: String(e?.message ?? e),
+          type: "error",
+        });
+      } finally {
+        if (cleanupTimeoutRef.current !== null) {
+          clearTimeout(cleanupTimeoutRef.current);
+        }
+        cleanupTimeoutRef.current = window.setTimeout(() => {
+          clearAutoCodingState();
+        }, 300);
+      }
+    };
+
+    window.addEventListener("psat:autocode:all", handler);
+    return () => window.removeEventListener("psat:autocode:all", handler);
+  }, [currentProjectName, attrs.length]);
+
+  // Auto-code all segments in all loaded projects
+  useEffect(() => {
+    const handler = async () => {
+      if (autoCodingRef.current) return;
+      try {
+        setAutoCoding(true);
+        autoCodingRef.current = true;
+        setAutoCodeMsg("CV + GIS for all segments in all projects…");
+        setProgress(10);
+
+        // Auto-code all projects sequentially
+        const projectsToAutocode = projectList;
+        let totalProcessed = 0;
+        let totalSuccessful = 0;
+        let totalFailed = 0;
+        const errors: any[] = [];
+
+        // Initialize project progress with correct totals
+        const initialProgress: Record<string, { processed: number; total: number }> = {};
+        projectsToAutocode.forEach(name => {
+          const projDataSnapshot = projectData[name];
+          let total = 0;
+          if (projDataSnapshot?.attrs && Array.isArray(projDataSnapshot.attrs)) {
+            total = projDataSnapshot.attrs.length;
+          }
+          initialProgress[name] = { processed: 0, total };
+        });
+        setProjectProgress(initialProgress);
+
+        for (let i = 0; i < projectsToAutocode.length; i++) {
+          const projectName = projectsToAutocode[i];
+          // Get the actual attrs length for this project from the current state
+          let projectAttrsLength = 0;
+          const projectDataSnapshot = projectData[projectName];
+          if (projectDataSnapshot?.attrs && Array.isArray(projectDataSnapshot.attrs)) {
+            projectAttrsLength = projectDataSnapshot.attrs.length;
           }
 
-          // Show summary toast notification
+          setAutoCodeMsg(`Auto-coding project ${i + 1}/${projectsToAutocode.length}: ${projectName}…`);
+          setProgress(10 + (i / projectsToAutocode.length) * 80);
+
+          // Mark project as started with correct total
+          setProjectProgress(prev => ({
+            ...prev,
+            [projectName]: { processed: 0, total: projectAttrsLength }
+          }));
+
+          try {
+            const projectChangedFieldsByRow: Record<number, string[]> = {};
+            const projectSourcesByRow: Record<number, Record<string, string>> = {};
+            let projectOk = 0;
+            let projectFail = 0;
+
+            // Process each segment one-by-one for real-time progress
+            for (let segmentIdx = 0; segmentIdx < projectAttrsLength; segmentIdx++) {
+              try {
+                const r = await autocodeAll(projectName, { indices: [segmentIdx], save: false });
+
+                // Update progress after each segment
+                setProjectProgress(prev => ({
+                  ...prev,
+                  [projectName]: { processed: segmentIdx + 1, total: projectAttrsLength }
+                }));
+
+                if ("changed_by_row" in r && r.changed_by_row) {
+                  Object.assign(projectChangedFieldsByRow, r.changed_by_row);
+                }
+
+                if ("sources_by_row" in r && r.sources_by_row) {
+                  Object.assign(projectSourcesByRow, r.sources_by_row);
+                }
+
+                if ("ok" in r) projectOk += r.ok || 0;
+                if ("fail" in r) projectFail += r.fail || 0;
+                if ("errors" in r && r.errors && r.errors.length > 0) {
+                  errors.push(...r.errors);
+                }
+              } catch (e: any) {
+                projectFail++;
+                errors.push({ projectName, segment: segmentIdx, reason: e?.message });
+              }
+            }
+
+            // After all segments of this project are processed, fetch updated attributes
+            try {
+              const a = await fetchProjectAttributes(projectName) as AttributesResponse;
+              if (a?.rows) {
+                updateProjectData(projectName, {
+                  attrs: a.rows,
+                  changedFieldsByRow: projectChangedFieldsByRow,
+                  fieldSourcesByRow: projectSourcesByRow,
+                });
+
+                // Recalculate scores
+                const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/score`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ attributes: a.rows }),
+                });
+
+                if (res.ok) {
+                  const result = await res.json();
+                  if (result.ok && Array.isArray(result.result_rows)) {
+                    updateProjectData(projectName, {
+                      scores: result.result_rows,
+                    });
+                  }
+                }
+              }
+            } catch (e: any) {
+              console.warn("Failed to fetch updated attributes or recalculate scores for project", projectName, e?.message);
+            }
+
+            totalProcessed += projectAttrsLength;
+            totalSuccessful += projectOk;
+            totalFailed += projectFail;
+          } catch (e: any) {
+            console.error("Failed to autocode project", projectName, e?.message);
+            totalFailed += projectAttrsLength;
+            errors.push({ projectName, reason: e?.message });
+          }
+        }
+
+        setProgress(95);
+
+        // Notify map of score updates
+        window.dispatchEvent(new CustomEvent("psat:scores:updated"));
+
+        setProgress(100);
+        setAutoCodeMsg("Completed");
+
+        // Show summary
+        if (totalProcessed > 0) {
           toaster.create({
-            title: "Auto-code (all) done",
-            description: `Total: ${r.total}, OK: ${r.ok}, Failed: ${r.fail}${r.fail > 0 ? " (check console for details)" : ""}`,
-            type: r.fail > 0 ? "warning" : "success",
-          });
-        } else {
-          // Fallback for unexpected response format (should not happen)
-          toaster.create({
-            title: "Auto-code (all) done",
-            description: r?.saved ? "Updated & saved." : "Updated (unsaved).",
-            type: "success",
+            title: "Auto-code (all projects) done",
+            description: `Total: ${totalProcessed}, OK: ${totalSuccessful}, Failed: ${totalFailed}${totalFailed > 0 ? " (check console for details)" : ""}`,
+            type: totalFailed > 0 ? "warning" : "success",
           });
         }
       } catch (e: any) {
@@ -410,69 +586,78 @@ export default function CodingPage() {
           type: "error",
         });
       } finally {
-        // Clear any existing timeout and schedule new cleanup
         if (cleanupTimeoutRef.current !== null) {
           clearTimeout(cleanupTimeoutRef.current);
         }
-        // Brief delay to show 100% completion before hiding progress overlay
         cleanupTimeoutRef.current = window.setTimeout(() => {
           clearAutoCodingState();
         }, 300);
       }
     };
 
-    // Listen for "Auto-code all" button click from Sidebar
-    // Event is dispatched in Sidebar.tsx when user clicks the button
-    window.addEventListener("psat:autocode:all", handler);
-    return () => window.removeEventListener("psat:autocode:all", handler);
-  }, [name, autoCoding]);
+    window.addEventListener("psat:autocode:all-projects", handler);
+    return () => window.removeEventListener("psat:autocode:all-projects", handler);
+  }, [projectList, projectData]);
 
-
-
-  // 拉数据
+  // Load project data
   useEffect(() => {
-    if (!name) return;
+    if (!currentProjectName) return;
+
+    // If already loaded, don't reload
+    if (projectData[currentProjectName] && !projectData[currentProjectName].loading) {
+      return;
+    }
+
     let cancelled = false;
-    setLoading(true);
-    setError(null);
+
     (async () => {
       try {
+        updateProjectData(currentProjectName, { loading: true, error: null });
+
         const [d, a, gjson] = await Promise.all([
-          fetchProjectDetail(name),
-          fetchProjectAttributes(name) as Promise<AttributesResponse>,
-          fetchProjectGeoJSON(name) as Promise<FeatureCollection>,
+          fetchProjectDetail(currentProjectName),
+          fetchProjectAttributes(currentProjectName) as Promise<AttributesResponse>,
+          fetchProjectGeoJSON(currentProjectName) as Promise<FeatureCollection>,
         ]);
+
         if (cancelled) return;
-        setDetail(d ?? null);
-        setAttrs(a?.rows ?? []);
-        setGeoFeatures(gjson?.features ?? []);
-        setCurrentPage(1);
+
+        updateProjectData(currentProjectName, {
+          detail: d ?? null,
+          attrs: a?.rows ?? [],
+          geoFeatures: gjson?.features ?? [],
+          currentPage: 1,
+          editedRow: null,
+          loading: false,
+        });
       } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "Unknown error");
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          updateProjectData(currentProjectName, {
+            error: e?.message ?? "Unknown error",
+            loading: false,
+          });
+        }
       }
     })();
-    return () => { cancelled = true; };
-  }, [name]);
 
-  // Auto-calculate scores on project load if they don't exist
+    return () => { cancelled = true; };
+  }, [currentProjectName]);
+
+  // Auto-calculate scores on project load
   useEffect(() => {
-    if (!name || attrs.length === 0) return;
+    if (!currentProjectName || attrs.length === 0) return;
 
     let isMounted = true;
 
     (async () => {
       try {
-        // First, try to fetch existing scores
-        const res = await fetch(`/api/projects/${encodeURIComponent(name)}/results`);
+        const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/results`);
         if (!res.ok) {
           throw new Error("Failed to fetch results");
         }
 
         const data = await res.json();
 
-        // If no scores exist or result_rows is empty, auto-calculate them
         if (!data.ok || !Array.isArray(data.result_rows) || data.result_rows.length === 0) {
           let loadingToastId: string | undefined;
 
@@ -484,16 +669,16 @@ export default function CodingPage() {
             });
           }
 
-          // Calculate scores for all segments
-          const result = await calculateScore(name);
+          const result = await calculateScore(currentProjectName);
 
           if (isMounted && result.ok && Array.isArray(result.result_rows)) {
-            // Dismiss loading toast
             if (loadingToastId) {
               toaster.dismiss(loadingToastId);
             }
 
-            setScores(result.result_rows as any);
+            updateProjectData(currentProjectName, {
+              scores: result.result_rows as any,
+            });
             console.log("Scores auto-calculated:", result.result_rows.length, "segments");
             toaster.create({
               title: "Scores calculated",
@@ -501,29 +686,27 @@ export default function CodingPage() {
               type: "success",
             });
 
-            // Notify other components (like GeoDataPanel) that scores have been updated
             window.dispatchEvent(new CustomEvent("psat:scores:updated"));
           } else if (isMounted && loadingToastId) {
-            // Dismiss loading toast if calculation failed
             toaster.dismiss(loadingToastId);
           }
         } else if (isMounted) {
-          // Scores exist, just load them
-          setScores(data.result_rows as any);
+          updateProjectData(currentProjectName, {
+            scores: data.result_rows as any,
+          });
           console.log("Scores loaded:", data.result_rows.length, "segments");
         }
       } catch (e: any) {
         if (isMounted) {
           console.warn("Failed to auto-calculate scores:", e?.message);
-          // Silently fail - scores will be empty but user can still browse attributes
         }
       }
     })();
 
     return () => { isMounted = false; };
-  }, [name, attrs.length]);
+  }, [currentProjectName, attrs.length]);
 
-  // 映射
+  // Fetch attribute mappings (global, not per-project)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -537,103 +720,86 @@ export default function CodingPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // 保存
+  // Save handler
   useEffect(() => {
     function handleSave() {
-      if (!name || !attrs) return;
-      saveAttributes(name, attrs)
+      if (!currentProjectName || !attrs) return;
+      saveAttributes(currentProjectName, attrs)
         .then(() => toaster.create({ title: "Saved", description: "Changes saved successfully.", type: "success" }))
         .catch((e) => toaster.create({ title: "Save failed", description: String(e?.message ?? e), type: "error" }));
     }
 
     window.addEventListener("psat:save", handleSave);
     return () => window.removeEventListener("psat:save", handleSave);
-  }, [name, attrs]);
+  }, [currentProjectName, attrs]);
 
-  // 编辑副本
+  // Update edited row when current row changes
   useEffect(() => {
-    setEditedRow(currentAttr ? { ...currentAttr } : null);
-  }, [currentAttr]);
+    if (!currentProjectName) return;
+    updateProjectData(currentProjectName, {
+      editedRow: currentAttr ? { ...currentAttr } : null,
+    });
+  }, [currentAttr, currentProjectName]);
 
-  // 子面板回调：某个字段改变
+  // Handlers for attribute editing
   const onAttrChange = useCallback(
     (key: string, value: string | number | boolean | null) => {
-      setEditedRow(prev => (prev ? { ...prev, [key]: value } : prev));
+      if (!currentProjectName) return;
+      updateProjectData(currentProjectName, {
+        editedRow: editedRow ? { ...editedRow, [key]: value } : null,
+      });
     },
-    []
+    [editedRow, currentProjectName]
   );
 
   const editCurrentAttr = (field: string, value: string | number | boolean | null) => {
-    if (!attrs || !attrs[currentIndex]) return;
+    if (!currentProjectName || !attrs || !attrs[currentIndex]) return;
 
-    // Create the updated row with the new value - make sure to include ALL attributes
     const updatedRow = { ...attrs[currentIndex], [field]: value };
 
-    // Update the attributes in state immediately for responsiveness
-    setAttrs(prev => {
-      if (!prev) return prev;
-      const next = [...prev];
-      next[currentIndex] = updatedRow;
-      return next;
+    updateProjectData(currentProjectName, {
+      attrs: attrs.map((row, i) =>
+        i === currentIndex ? updatedRow : row
+      ),
     });
 
-    // Debounce score calculation to avoid excessive API calls while typing
     const currentIdx = currentIndex;
 
-    // Clear any existing timeout for this row
     if (scoreDebounceRef.current[currentIdx] !== undefined) {
       clearTimeout(scoreDebounceRef.current[currentIdx]);
     }
 
-    // Set a new debounced timeout
     scoreDebounceRef.current[currentIdx] = window.setTimeout(async () => {
-      if (!name) return;
+      if (!currentProjectName) return;
 
       try {
-        // Log what we're sending to the API for debugging
         console.log("Calling calculateScoreForRow with updated row:", updatedRow);
 
-        const newScore = await calculateScoreForRow(name, updatedRow);
+        const newScore = await calculateScoreForRow(currentProjectName, updatedRow);
 
         console.log("Received scores from API:", newScore);
 
-        // Update scores for the current segment only
-        setScores(prev => {
-          // Ensure the array is large enough to hold the current index
-          const next = [...prev];
-
-          // Fill any gaps with empty objects if needed
-          while (next.length <= currentIdx) {
-            next.push({} as any);
-          }
-
-          // Update the score at the current index
-          if (next[currentIdx]) {
-            next[currentIdx] = { ...next[currentIdx], ...newScore };
-          } else {
-            next[currentIdx] = newScore as any;
-          }
-
-          console.log("CodingPage: Score state updated for segment", currentIdx, "field", field, "scores array now has", next.length, "items, updated score:", next[currentIdx]);
-
-          return next;
+        updateProjectData(currentProjectName, {
+          scores: scores.map((score, i) =>
+            i === currentIdx
+              ? { ...score, ...newScore }
+              : score
+          ),
         });
 
-        // Notify map component to update segment colors
         window.dispatchEvent(new CustomEvent("psat:scores:updated"));
       } catch (e: any) {
         console.warn("Failed to recalculate score:", e?.message);
-        // Silently fail - allow editing even if score calculation fails
       }
-    }, 500); // 500ms debounce delay
+    }, 500);
   };
 
-  // 翻页
+  // Pagination
   const gotoPage = useCallback((page: number) => {
-    if (len === 0) return;
+    if (len === 0 || !currentProjectName) return;
     const clamped = Math.min(Math.max(1, page), len);
-    setCurrentPage(clamped);
-  }, [len]);
+    updateProjectData(currentProjectName, { currentPage: clamped });
+  }, [len, currentProjectName]);
 
   useEffect(() => {
     setPageInput(String(currentPage));
@@ -654,8 +820,8 @@ export default function CodingPage() {
     return () => clearTimeout(t);
   }, [pageInput, commitPage]);
 
-  if (!name) {
-    return <Box p="4"><Text color="red.500">Invalid project name.</Text></Box>;
+  if (projectList.length === 0) {
+    return <Box p="4"><Text color="red.500">No projects selected.</Text></Box>;
   }
 
   if (loading) {
@@ -676,63 +842,104 @@ export default function CodingPage() {
 
   return (
     <Box p="4">
-      {/* 顶部信息与分页 */}
       {autoCoding && (
-      <Portal>
-        <Box
-          position="fixed"
-          inset={0}
-          bg="blackAlpha.400"
-          backdropFilter="blur(2px)"
-          zIndex={1000}
-          aria-busy="true"
-        >
-          {/* 顶部可控进度条（Chakra v3 语法） */}
-          <Progress.Root
-            value={progress}         // 受控
-            min={0}
-            max={100}
-            orientation="horizontal"
-            colorPalette="blue"
-            variant="subtle"
-            size="sm"
-            position="absolute"
-            top={0}
-            left={0}
-            right={0}
-            zIndex={1001}
+        <Portal>
+          <Box
+            position="fixed"
+            inset={0}
+            bg="blackAlpha.400"
+            backdropFilter="blur(2px)"
+            zIndex={1000}
+            aria-busy="true"
           >
-            <Progress.Track>
-              <Progress.Range />
-            </Progress.Track>
-            {/* 可选：右上角展示百分比 */}
-            {/* <Progress.ValueText /> */}
-          </Progress.Root>
+            <Progress.Root
+              value={progress}
+              min={0}
+              max={100}
+              orientation="horizontal"
+              colorPalette="blue"
+              variant="subtle"
+              size="sm"
+              position="absolute"
+              top={0}
+              left={0}
+              right={0}
+              zIndex={1001}
+            >
+              <Progress.Track>
+                <Progress.Range />
+              </Progress.Track>
+            </Progress.Root>
 
+            <Flex minH="100vh" align="center" justify="center" p="4">
+              <Card.Root shadow="lg" borderRadius="2xl" maxW="md" w="full">
+                <CardBody>
+                  <Flex direction="column" gap="4">
+                    <Flex align="center" gap="3">
+                      <Spinner />
+                      <Box>
+                        <Text fontWeight="bold">Auto-coding…</Text>
+                        <Text fontSize="sm" color="gray.600">
+                          {autoCodeMsg || "Please wait while models run."}
+                        </Text>
+                      </Box>
+                    </Flex>
 
-          {/* 中央卡片 */}
-          <Flex minH="100vh" align="center" justify="center" p="4">
-            <Card.Root shadow="lg" borderRadius="2xl" maxW="sm" w="full">
-              <CardBody>
-                <Flex align="center" gap="3">
-                  <Spinner />
-                  <Box>
-                    <Text fontWeight="bold">Auto-coding…</Text>
-                    <Text fontSize="sm" color="gray.600">
-                      {autoCodeMsg || "Please wait while models run."}
-                    </Text>
-                  </Box>
-                </Flex>
-              </CardBody>
-            </Card.Root>
-          </Flex>
-        </Box>
-      </Portal>
-    )}
+                    {Object.entries(projectProgress).length > 0 && (
+                      <Flex direction="column" gap="3">
+                        {Object.entries(projectProgress).map(([projectName, { processed, total }]) => (
+                          <Box key={projectName}>
+                            <Flex justify="space-between" mb="2" align="center">
+                              <Text fontSize="sm" fontWeight="medium">{projectName}</Text>
+                              <Text fontSize="xs" color="gray.600">{processed}/{total}</Text>
+                            </Flex>
+                            <Progress.Root
+                              value={total > 0 ? (processed / total) * 100 : 0}
+                              min={0}
+                              max={100}
+                              colorPalette="blue"
+                              size="sm"
+                            >
+                              <Progress.Track>
+                                <Progress.Range />
+                              </Progress.Track>
+                            </Progress.Root>
+                          </Box>
+                        ))}
+                      </Flex>
+                    )}
+                  </Flex>
+                </CardBody>
+              </Card.Root>
+            </Flex>
+          </Box>
+        </Portal>
+      )}
+
+      {projectList.length > 1 && (
+        <Flex gap="2" mb="4" wrap="wrap">
+          {projectList.map((projectName, index) => {
+            const projData = projectData[projectName];
+            const projSegmentCount = projData?.attrs.length ?? 0;
+            const isActive = activeTabIndex === index;
+            return (
+              <Button
+                key={projectName}
+                onClick={() => setActiveTabIndex(index)}
+                variant={isActive ? "solid" : "outline"}
+                colorPalette={isActive ? "blue" : "gray"}
+                size="md"
+              >
+                {projectName} ({projSegmentCount})
+              </Button>
+            );
+          })}
+        </Flex>
+      )}
 
       <Flex justify="space-between" align="center" mb="3">
         <Box>
-          <Text fontSize="lg" fontWeight="bold">{detail?.name ?? name}</Text>
+          <Text fontSize="lg" fontWeight="bold">{detail?.name ?? currentProjectName}</Text>
           {detail?.latest && (
             <Text fontSize="sm" color="gray.600">Latest version: {detail.latest}</Text>
           )}
@@ -748,15 +955,15 @@ export default function CodingPage() {
             min={1}
             max={len || 1}
             defaultValue={String(currentPage)}
-            value={pageInput}                    // ← 受控
+            value={pageInput}
             onValueChange={(e) => setPageInput(e.value)}
           >
             <NumberInput.Control />
             <NumberInput.Input
-              onBlur={() => commitPage(pageInput)}        // 失焦立刻提交
+              onBlur={() => commitPage(pageInput)}
               onKeyDown={(ev) => {
                 if (ev.key === "Enter") {
-                  ev.currentTarget.blur();                // 触发 onBlur 提交
+                  ev.currentTarget.blur();
                 }
               }}
             />
@@ -768,27 +975,24 @@ export default function CodingPage() {
         templateColumns={{ base: "1fr", md: "1fr 1fr" }}
         gap="16px"
       >
-        {/* 第一行：Image */}
         <GridItem>
           <ImagePanel
-            projectName={name}
+            projectName={currentProjectName!}
             imageRef={imgRef}
             panelHeight={PANEL_HEIGHT}
           />
         </GridItem>
 
-        {/* 第一行：Attributes */}
         <GridItem
           display="flex"
           flexDirection="column"
-          minH={`${PANEL_HEIGHT}px`} // 右侧总高度至少与左侧面板一致
+          minH={`${PANEL_HEIGHT}px`}
         >
-          {/* 面板容器：占据剩余空间，允许内部滚动 */}
-          <Box flex="1 1 auto" minH={0} >
+          <Box flex="1 1 auto" minH={0}>
             <AttributesPanel
               row={editedRow}
               mappings={attrMappings}
-              panelHeight={PANEL_HEIGHT - CONTROLS_H} // 保持你原来的传值
+              panelHeight={PANEL_HEIGHT - CONTROLS_H}
               onChange={onAttrChange}
               onEdit={editCurrentAttr}
               changedFields={changedFieldsByRow[currentIndex] || []}
@@ -796,7 +1000,6 @@ export default function CodingPage() {
             />
           </Box>
 
-          {/* 底部按钮条：固定在列底，避免被内容覆盖 */}
           <Flex
             flex="0 0 auto"
             h={`${CONTROLS_H}px`}
@@ -807,7 +1010,7 @@ export default function CodingPage() {
             pt="2"
             position="relative"
             zIndex={1}
-            bg="bg"              // Chakra v3 语义色，防止半透明内容“透”下来
+            bg="bg"
           >
             <Button
               flex="1"
@@ -833,51 +1036,40 @@ export default function CodingPage() {
           </Flex>
         </GridItem>
 
-
-        {/* 第二行：GeoData 跨两列（在 md 及以上），在手机上一列自然会排在下面 */}
         <GridItem colSpan={{ base: 1, md: 2 }}>
           <GeoDataPanel
+            projectName={currentProjectName!}
             feature={
               geoFeatures[currentIndex]?.geometry?.type === "LineString"
-                ? (geoFeatures[currentIndex] as any) // 已做类型守卫
+                ? (geoFeatures[currentIndex] as any)
                 : null
             }
             index={currentIndex}
-            onJump={(i) => setCurrentPage(i + 1)}
+            onJump={(i) => gotoPage(i + 1)}
             scores={scores}
           />
         </GridItem>
 
-        {/* CycleRAP Score Band Distributions - 跨两列 */}
-        {/* Temporarily removed
-        <GridItem colSpan={{ base: 1, md: 2 }}>
-          <ScoreBandDistributionPanel projectName={name} />
-        </GridItem>
-        */}
-
-        {/* 第三行：Facility Width Analysis (Collapsible) - 跨两列 */}
         {currentFeature?.geometry?.type === "LineString" && (
           <GridItem colSpan={{ base: 1, md: 2 }}>
             <WidthVisualizationPanel
-              projectName={name}
+              projectName={currentProjectName!}
               coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
               segmentIndex={currentIndex}
             />
           </GridItem>
         )}
 
-        {/* 第四行：Curvature Visualization (Collapsible) - 跨两列 */}
         {currentFeature?.geometry?.type === "LineString" && (
           <GridItem colSpan={{ base: 1, md: 2 }}>
             <CurvatureVisualizationPanel
-              projectName={name}
+              projectName={currentProjectName!}
               coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
               segmentIndex={currentIndex}
             />
           </GridItem>
         )}
 
-        {/* Segment Crash Type Scores - 跨两列 */}
         <GridItem colSpan={{ base: 1, md: 2 }}>
           <Box
             bg="white"
