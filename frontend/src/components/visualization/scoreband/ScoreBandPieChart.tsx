@@ -77,8 +77,8 @@ export default function ScoreBandPieChart({
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
 
-    // Don't show label for very small slices
-    if (percent < 0.05) return null;
+    // Don't show label for extremely small slices (less than 1%)
+    if (percent < 0.01) return null;
 
     return (
       <text
@@ -87,8 +87,10 @@ export default function ScoreBandPieChart({
         fill="black"
         textAnchor={x > cx ? "start" : "end"}
         dominantBaseline="central"
-        fontSize="14"
-        fontWeight="bold"
+        fontSize="16"
+        fontWeight="900"
+        stroke="white"
+        strokeWidth="2"
       >
         {`${(percent * 100).toFixed(0)}%`}
       </text>
@@ -213,7 +215,7 @@ export default function ScoreBandPieChart({
               _dark={{ color: "gray.300" }}
             >
               <Box w="12px" h="12px" borderRadius="full" bg={item.color} flexShrink={0} />
-              <Text fontSize="xs">{item.label} {item.percentage.toFixed(0)}%</Text>
+              <Text fontSize="xs" fontWeight="bold">{item.label} {item.percentage.toFixed(0)}%</Text>
             </Flex>
           ))}
         </Box>
