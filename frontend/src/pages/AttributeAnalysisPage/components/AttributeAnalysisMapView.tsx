@@ -263,7 +263,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
 
       // Facility clear width - Width
-      "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#CA8A04", "Very Narrow": "#DC2626" },
+      "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#FFCC1A", "Very Narrow": "#DC2626" },
 
       // Flow & Speed - Flow
       "Peak pedestrian flow along or across facility": { "None": "#6B7280", "Low": "#16A34A", "Moderate to high": "#DC2626" },
@@ -370,7 +370,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
       "Grade": { "< 5 Degrees": "#16A34A", "=/> 5 Degrees": "#DC2626" },
       "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
-      "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#CA8A04", "Very Narrow": "#DC2626" },
+      "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#FFCC1A", "Very Narrow": "#DC2626" },
       // Flow & Speed
       "Peak pedestrian flow along or across facility": { "None": "#6B7280", "Low": "#16A34A", "Moderate to high": "#DC2626" },
       "Peak bicycle/LV traffic flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
@@ -950,7 +950,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                       const colorMap: Record<string, string> = {
                         // Safety Score colors (CycleRAP Risk Bands)
                         "#87C424": "green",      // Low
-                        "#FFCC1A": "yellow",     // Medium
+                        "#FFCC1A": "yellow",     // Medium / Narrow
                         "#FF5B1A": "orange",     // High
                         "#CD1AFF": "purple",     // Extreme
                         "#9CA3AF": "gray",       // Not Selected
@@ -960,7 +960,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                         // Red shades (Danger)
                         "#DC2626": "red",
                         // Yellow/Orange shades
-                        "#CA8A04": "yellow",
                         "#F59E0B": "orange",
                         // Blue/Purple shades
                         "#2563EB": "blue",
