@@ -6,7 +6,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
-import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, type AttributeRow } from "../../../api";
+import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, type AttributeRow } from "../../../api";
+import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 // --- EPSG:3414 (SVY21 / Singapore TM) definition -> EPSG:4326 ---
 proj4.defs(
@@ -51,6 +52,7 @@ type ProjectData = {
   projectName: string;
   geoFeatures: Feature<LineString, any>[];
   attributes: AttributeRow[];
+  scores: Record<string, any>[]; // Raw crash type scores (BB, SB, VB, BP)
   color: string;
 };
 
@@ -103,6 +105,31 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       .then(setAttrMappings)
       .catch(e => console.error("Failed to load attribute mappings:", e));
   }, []);
+
+  // Get crash type color based on raw score using same logic as Coding Page
+  const getCrashTypeColor = (crashTypeScores: Record<string, any>): string => {
+    const crashTypes = ["BB", "BP", "SB", "VB"];
+    let highestScore = 0;
+    let highestScoreColor: string = RISK_BAND_COLORS.LOW;
+
+    // Find the crash type with the highest score
+    crashTypes.forEach((crashType) => {
+      const score = crashTypeScores[crashType] || 0;
+
+      if (score > highestScore) {
+        highestScore = score;
+
+        // Determine color based on the raw score (same as Coding Page)
+        // Thresholds: Low (0-5), Medium (5-10), High (10-20), Extreme (20+)
+        if (score <= 5) highestScoreColor = RISK_BAND_COLORS.LOW;
+        else if (score <= 10) highestScoreColor = RISK_BAND_COLORS.MEDIUM;
+        else if (score <= 20) highestScoreColor = RISK_BAND_COLORS.HIGH;
+        else highestScoreColor = RISK_BAND_COLORS.EXTREME;
+      }
+    });
+
+    return highestScoreColor;
+  };
 
   // Get the attribute to show categories for
   const categoryFilterAttribute = activeFilters[categoryFilterAttributeIndex];
@@ -173,16 +200,18 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         setErr(null);
 
         const promises = selectedProjects.map(async (projectName) => {
-          // Fetch geodata and attributes in parallel
-          const [geoJson, attrResponse] = await Promise.all([
+          // Fetch geodata, attributes, and scores in parallel
+          const [geoJson, attrResponse, scoresResponse] = await Promise.all([
             fetchProjectGeoJSON(projectName),
-            fetchProjectAttributes(projectName)
+            fetchProjectAttributes(projectName),
+            calculateScore(projectName)
           ]);
 
           return {
             projectName,
             geoFeatures: geoJson.features as Feature<LineString, any>[],
             attributes: attrResponse.rows,
+            scores: scoresResponse.result_rows,
             color: projectColors[projectName],
           };
         });
@@ -482,10 +511,33 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               pointColor = projectData.color;
               attrValueText = projectData.projectName;
             } else if (primaryFocusAttribute) {
-              // Use attribute value to determine color and text
-              const attrValue = attributes[primaryFocusAttribute];
-              attrValueText = getAttrText(primaryFocusAttribute, attrValue);
-              pointColor = getCategoryColor(primaryFocusAttribute, attrValueText);
+              // Check if it's a safety band attribute
+              const isSafetyBand = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute);
+
+              if (isSafetyBand && projectData.scores && projectData.scores.length > i) {
+                // Use raw crash type scores for safety bands (same as Coding Page)
+                const segmentScores = projectData.scores[i];
+                pointColor = getCrashTypeColor(segmentScores);
+                // Set the display text to the category name based on highest crash type score
+                const crashTypes = ["BB", "BP", "SB", "VB"];
+                let highestScore = 0;
+                crashTypes.forEach((ct) => {
+                  const score = segmentScores[ct] || 0;
+                  if (score > highestScore) {
+                    highestScore = score;
+                  }
+                });
+                // Convert the crash type name to category label
+                if (highestScore <= 5) attrValueText = "Low";
+                else if (highestScore <= 10) attrValueText = "Medium";
+                else if (highestScore <= 20) attrValueText = "High";
+                else attrValueText = "Extreme";
+              } else {
+                // Use attribute color for non-safety-band attributes
+                const attrValue = attributes[primaryFocusAttribute];
+                attrValueText = getAttrText(primaryFocusAttribute, attrValue);
+                pointColor = getCategoryColor(primaryFocusAttribute, attrValueText);
+              }
             }
 
             pts.push({

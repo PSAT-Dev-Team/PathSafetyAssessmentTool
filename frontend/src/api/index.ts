@@ -58,17 +58,6 @@ export async function fetchProjectAttributes(projectName: string): Promise<Attri
   return res.json()
 }
 
-// Project results (crash type scores and bands)
-export type ResultRow = Record<string, string | number | boolean | null>;
-export type ResultsResponse = { ok: boolean; result_rows: ResultRow[] };
-
-export async function fetchProjectResults(projectName: string): Promise<ResultsResponse> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/results`)
-
-  if (!res.ok) throw new Error(`Failed GET /api/projects/${projectName}/results`)
-
-  return res.json()
-}
 
 // Project GEO data
 export async function fetchProjectGeoJSON(projectName: string): Promise<FeatureCollection> {
