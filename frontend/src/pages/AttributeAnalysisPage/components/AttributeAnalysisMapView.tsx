@@ -106,29 +106,12 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       .catch(e => console.error("Failed to load attribute mappings:", e));
   }, []);
 
-  // Get crash type color based on raw score using same logic as Coding Page
-  const getCrashTypeColor = (crashTypeScores: Record<string, any>): string => {
-    const crashTypes = ["BB", "BP", "SB", "VB"];
-    let highestScore = 0;
-    let highestScoreColor: string = RISK_BAND_COLORS.LOW;
-
-    // Find the crash type with the highest score
-    crashTypes.forEach((crashType) => {
-      const score = crashTypeScores[crashType] || 0;
-
-      if (score > highestScore) {
-        highestScore = score;
-
-        // Determine color based on the raw score (same as Coding Page)
-        // Thresholds: Low (0-5), Medium (5-10), High (10-20), Extreme (20+)
-        if (score <= 5) highestScoreColor = RISK_BAND_COLORS.LOW;
-        else if (score <= 10) highestScoreColor = RISK_BAND_COLORS.MEDIUM;
-        else if (score <= 20) highestScoreColor = RISK_BAND_COLORS.HIGH;
-        else highestScoreColor = RISK_BAND_COLORS.EXTREME;
-      }
-    });
-
-    return highestScoreColor;
+  // Get color for a specific crash type score based on thresholds
+  const getScoreColor = (score: number): string => {
+    if (score <= 5) return RISK_BAND_COLORS.LOW;
+    if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
+    if (score <= 20) return RISK_BAND_COLORS.HIGH;
+    return RISK_BAND_COLORS.EXTREME;
   };
 
   // Get the attribute to show categories for
@@ -515,22 +498,19 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               const isSafetyBand = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute);
 
               if (isSafetyBand && projectData.scores && projectData.scores.length > i) {
-                // Use raw crash type scores for safety bands (same as Coding Page)
+                // For safety bands, use the specific crash type score (not the highest of all)
                 const segmentScores = projectData.scores[i];
-                pointColor = getCrashTypeColor(segmentScores);
-                // Set the display text to the category name based on highest crash type score
-                const crashTypes = ["BB", "BP", "SB", "VB"];
-                let highestScore = 0;
-                crashTypes.forEach((ct) => {
-                  const score = segmentScores[ct] || 0;
-                  if (score > highestScore) {
-                    highestScore = score;
-                  }
-                });
-                // Convert the crash type name to category label
-                if (highestScore <= 5) attrValueText = "Low";
-                else if (highestScore <= 10) attrValueText = "Medium";
-                else if (highestScore <= 20) attrValueText = "High";
+                // Map band name to crash type key (e.g., "SB Band" -> "SB")
+                const crashTypeKey = primaryFocusAttribute.replace(" Band", "");
+                const crashTypeScore = segmentScores[crashTypeKey] || 0;
+
+                // Apply threshold to get color
+                pointColor = getScoreColor(crashTypeScore);
+
+                // Get category label based on the specific crash type score
+                if (crashTypeScore <= 5) attrValueText = "Low";
+                else if (crashTypeScore <= 10) attrValueText = "Medium";
+                else if (crashTypeScore <= 20) attrValueText = "High";
                 else attrValueText = "Extreme";
               } else {
                 // Use attribute color for non-safety-band attributes
