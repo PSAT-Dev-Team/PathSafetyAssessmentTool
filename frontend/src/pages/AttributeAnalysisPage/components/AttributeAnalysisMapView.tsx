@@ -110,23 +110,23 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // Helper function to convert numeric attribute value to text using mappings
   const getAttrText = (attrName: string, attrValue: any): string => {
     // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
-    // Data contains band indices that map to risk categories:
-    // 1=Low, 2=Medium, 3=High, 4=Extreme, 5=Extreme (for very high CycleRAP scores > 20)
+    // Backend band indices from calculate_risk_band():
+    // 1: score 0-3, 2: score 3-6, 3: score 6-10, 4: score 10-20, 5: score 20+
+    //
+    // Map to frontend categories (Low: 0-5, Medium: 5-10, High: 10-20, Extreme: 20+)
     if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(attrName)) {
       const numValue = Number(attrValue);
       if (isNaN(numValue)) {
         return "Low"; // Default to Low if invalid
       }
 
-      // Map numeric index to risk category name
-      // Based on colorConstants.ts thresholds:
-      // Low: 0-5, Medium: 5-10, High: 10-20, Extreme: 20+
+      // Map backend band indices to frontend categories
       const riskCategoryMap: Record<number, string> = {
-        1: "Low",      // Band 1
-        2: "Medium",   // Band 2
-        3: "High",     // Band 3
-        4: "Extreme",  // Band 4
-        5: "Extreme",  // Band 5 (for scores > 20)
+        1: "Low",      // Backend band 1 (score 0-3) → Low
+        2: "Low",      // Backend band 2 (score 3-6) → Low (since frontend Low is 0-5)
+        3: "Medium",   // Backend band 3 (score 6-10) → Medium
+        4: "High",     // Backend band 4 (score 10-20) → High
+        5: "Extreme",  // Backend band 5 (score 20+) → Extreme
       };
 
       return riskCategoryMap[numValue] || "Low"; // Default to Low if unknown
