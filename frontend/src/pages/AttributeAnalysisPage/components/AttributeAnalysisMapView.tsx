@@ -455,20 +455,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 // Check if this filter attribute's category toggle is enabled
                 const filterToggles = categoryToggles[filterAttr];
                 if (filterToggles && Object.keys(filterToggles).length > 0) {
-                  // For "Project", default to enabled if not explicitly set
-                  if (filterAttr === "Project") {
-                    if (filterToggles[attrValueText] === false) {
-                      matchesAllFilters = false;
-                      break;
-                    }
-                  } else {
-                    // For other attributes, default to disabled if not explicitly set
-                    if (!filterToggles[attrValueText]) {
-                      matchesAllFilters = false;
-                      break;
-                    }
+                  // If toggles exist for this attribute, check if the current value is enabled
+                  // If the specific value toggle is not true, skip this segment
+                  if (filterToggles[attrValueText] !== true) {
+                    matchesAllFilters = false;
+                    break;
                   }
                 }
+                // If no toggles exist for this attribute, all values are shown (no filtering)
               }
 
               if (!matchesAllFilters) {
