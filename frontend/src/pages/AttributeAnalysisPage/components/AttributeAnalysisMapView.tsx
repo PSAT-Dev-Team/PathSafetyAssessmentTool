@@ -245,81 +245,69 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           shared: [],
         };
 
-        // Collect all segment points from all projects and group by grid region
-        const gridRegions = new Map<string, [number, number][]>();
-        const gridSize = 0.003; // Approximately 300m at equator
-
+        // Collect all segment points from all projects for GIS fetching
+        const segmentPoints: [number, number][] = [];
         projectsData.forEach(projectData => {
           projectData.geoFeatures.forEach(feature => {
             if (feature.geometry.type === "LineString" && feature.geometry.coordinates.length > 0) {
+              // Get the first point of each segment
               const [lon, lat] = feature.geometry.coordinates[0];
-              const gridKey = `${Math.floor(lon / gridSize)},${Math.floor(lat / gridSize)}`;
-              if (!gridRegions.has(gridKey)) {
-                gridRegions.set(gridKey, []);
-              }
-              gridRegions.get(gridKey)!.push([lon, lat]);
+              segmentPoints.push([lon, lat]);
             }
           });
         });
 
-        if (gridRegions.size === 0) {
+        if (segmentPoints.length === 0) {
           if (!aborted) setGisLayers(allGisLayers);
           return;
         }
 
-        // Process grid regions with a limit to prevent excessive API calls
-        const maxRegions = 20; // Limit to 20 grid regions max
-        const regionEntries = Array.from(gridRegions.entries());
-        const regionsToProcess = regionEntries.slice(0, maxRegions);
+        // Fetch GIS layers for each segment point with a 100m radius
+        // Use a Set to avoid fetching duplicate data for overlapping regions
+        const processedRegions = new Set<string>();
 
-        // Fetch GIS layers for each grid region in parallel per project
-        const fetchPromises: Promise<void>[] = [];
+        for (const point of segmentPoints) {
+          // Create a grid key to avoid fetching overlapping regions multiple times
+          const gridSize = 0.003; // Approximately 300m at equator
+          const gridKey = `${Math.floor(point[0] / gridSize)},${Math.floor(point[1] / gridSize)}`;
 
-        regionsToProcess.forEach(([, points]) => {
-          // Use a representative point from the region (first point)
-          const point = points[0];
+          if (processedRegions.has(gridKey)) continue;
+          processedRegions.add(gridKey);
 
-          projectsData.forEach(projectData => {
-            fetchPromises.push(
-              (async () => {
-                try {
-                  const response = await fetchGISLayers(
-                    projectData.projectName,
-                    point,
-                    100, // 100m radius around segment
-                    layersToFetch
-                  );
+          try {
+            // Fetch for each project that contains this point's nearby segments
+            for (const projectData of projectsData) {
+              const response = await fetchGISLayers(
+                projectData.projectName,
+                point,
+                100, // 100m radius around each segment
+                layersToFetch
+              );
 
-                  if (response.ok) {
-                    Object.entries(response.layers).forEach(([layerName, features]) => {
-                      if (layerName === "cycling" && showCycling) {
-                        allGisLayers.cycling.push(...features);
-                      } else if (layerName === "footpath" && showFootpath) {
-                        allGisLayers.footpath.push(...features);
-                      } else if (layerName === "shared" && showShared) {
-                        allGisLayers.shared.push(...features);
-                      }
-                    });
+              if (response.ok) {
+                Object.entries(response.layers).forEach(([layerName, features]) => {
+                  if (layerName === "cycling" && showCycling) {
+                    allGisLayers.cycling.push(...features);
+                  } else if (layerName === "footpath" && showFootpath) {
+                    allGisLayers.footpath.push(...features);
+                  } else if (layerName === "shared" && showShared) {
+                    allGisLayers.shared.push(...features);
                   }
-                } catch (e) {
-                  console.error(`Failed to fetch GIS layers for ${projectData.projectName}:`, e);
-                }
-              })()
-            );
-          });
-        });
+                });
+              }
+            }
+          } catch (e) {
+            console.error(`Failed to fetch GIS layers for point [${point[0]}, ${point[1]}]:`, e);
+          }
+        }
 
-        // Wait for all fetches to complete
-        await Promise.all(fetchPromises);
-
-        // Deduplicate GIS layer features using Map for efficiency
+        // Deduplicate GIS layer features by their coordinates
         const deduplicateLayers = (features: Array<{ coordinates: [number, number][]; properties: Record<string, any> }>) => {
-          const seen = new Map<string, boolean>();
+          const seen = new Set<string>();
           return features.filter(feature => {
-            // Use first and last coordinate as a simpler key
-            const key = `${feature.coordinates[0]},${feature.coordinates[feature.coordinates.length - 1]}`;
+            const key = JSON.stringify(feature.coordinates);
             if (seen.has(key)) return false;
-            seen.set(key, true);
+            seen.add(key);
             return true;
           });
         };
