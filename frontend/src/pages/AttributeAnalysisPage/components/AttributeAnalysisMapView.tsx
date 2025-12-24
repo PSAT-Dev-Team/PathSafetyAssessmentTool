@@ -1126,7 +1126,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
             {!loading && !err && (
               <MapContainer
                 center={initialCenter.current}
-                zoom={12}
+                zoom={13}
+                maxZoom={22}
                 style={{ width: "100%", height: "100%" }}
                 scrollWheelZoom
               >
