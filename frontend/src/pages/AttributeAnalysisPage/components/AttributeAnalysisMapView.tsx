@@ -1135,6 +1135,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 <TileLayer
                   url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                   attribution='&copy; OpenStreetMap contributors & CARTO'
+                  maxZoom={22}
                 />
 
                 {/* Auto-fit bounds if data is available and shouldAutoFit is true */}
