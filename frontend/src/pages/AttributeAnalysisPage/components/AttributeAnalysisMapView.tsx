@@ -235,7 +235,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       return;
     }
 
-    // Fetch GIS layers for all projects around their center points
+    // Fetch GIS layers for all loaded segments and surrounding area
     let aborted = false;
     (async () => {
       try {
@@ -245,48 +245,79 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           shared: [],
         };
 
-        // Fetch GIS layers for each project
-        for (const projectData of projectsData) {
+        // Collect all segment points from all projects for GIS fetching
+        const segmentPoints: [number, number][] = [];
+        projectsData.forEach(projectData => {
+          projectData.geoFeatures.forEach(feature => {
+            if (feature.geometry.type === "LineString" && feature.geometry.coordinates.length > 0) {
+              // Get the first point of each segment
+              const [lon, lat] = feature.geometry.coordinates[0];
+              segmentPoints.push([lon, lat]);
+            }
+          });
+        });
+
+        if (segmentPoints.length === 0) {
+          if (!aborted) setGisLayers(allGisLayers);
+          return;
+        }
+
+        // Fetch GIS layers for each segment point with a 100m radius
+        // Use a Set to avoid fetching duplicate data for overlapping regions
+        const processedRegions = new Set<string>();
+
+        for (const point of segmentPoints) {
+          // Create a grid key to avoid fetching overlapping regions multiple times
+          const gridSize = 0.003; // Approximately 300m at equator
+          const gridKey = `${Math.floor(point[0] / gridSize)},${Math.floor(point[1] / gridSize)}`;
+
+          if (processedRegions.has(gridKey)) continue;
+          processedRegions.add(gridKey);
+
           try {
-            // Get center point of all features for this project
-            const allCoords: [number, number][] = [];
-            projectData.geoFeatures.forEach(feature => {
-              if (feature.geometry.type === "LineString") {
-                allCoords.push(...feature.geometry.coordinates as [number, number][]);
+            // Fetch for each project that contains this point's nearby segments
+            for (const projectData of projectsData) {
+              const response = await fetchGISLayers(
+                projectData.projectName,
+                point,
+                100, // 100m radius around each segment
+                layersToFetch
+              );
+
+              if (response.ok) {
+                Object.entries(response.layers).forEach(([layerName, features]) => {
+                  if (layerName === "cycling" && showCycling) {
+                    allGisLayers.cycling.push(...features);
+                  } else if (layerName === "footpath" && showFootpath) {
+                    allGisLayers.footpath.push(...features);
+                  } else if (layerName === "shared" && showShared) {
+                    allGisLayers.shared.push(...features);
+                  }
+                });
               }
-            });
-
-            if (allCoords.length === 0) continue;
-
-            // Calculate center point
-            const centerLon = allCoords.reduce((sum, c) => sum + c[0], 0) / allCoords.length;
-            const centerLat = allCoords.reduce((sum, c) => sum + c[1], 0) / allCoords.length;
-
-            const response = await fetchGISLayers(
-              projectData.projectName,
-              [centerLon, centerLat],
-              200,
-              layersToFetch
-            );
-
-            if (response.ok) {
-              Object.entries(response.layers).forEach(([layerName, features]) => {
-                if (layerName === "cycling" && showCycling) {
-                  allGisLayers.cycling.push(...features);
-                } else if (layerName === "footpath" && showFootpath) {
-                  allGisLayers.footpath.push(...features);
-                } else if (layerName === "shared" && showShared) {
-                  allGisLayers.shared.push(...features);
-                }
-              });
             }
           } catch (e) {
-            console.error(`Failed to fetch GIS layers for ${projectData.projectName}:`, e);
+            console.error(`Failed to fetch GIS layers for point [${point[0]}, ${point[1]}]:`, e);
           }
         }
 
+        // Deduplicate GIS layer features by their coordinates
+        const deduplicateLayers = (features: Array<{ coordinates: [number, number][]; properties: Record<string, any> }>) => {
+          const seen = new Set<string>();
+          return features.filter(feature => {
+            const key = JSON.stringify(feature.coordinates);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        };
+
         if (!aborted) {
-          setGisLayers(allGisLayers);
+          setGisLayers({
+            footpath: deduplicateLayers(allGisLayers.footpath),
+            cycling: deduplicateLayers(allGisLayers.cycling),
+            shared: deduplicateLayers(allGisLayers.shared),
+          });
         }
       } catch (e) {
         console.error("Failed to fetch GIS layers:", e);
