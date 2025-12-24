@@ -17,7 +17,7 @@ import "./sidebar.css";
 
 const LINKS = [
   { to: "/home", label: "Projects" },
-  { to: "/treatment", label: "Treatment Projection" },
+  { to: "/treatment", label: "Treatment Application" },
 ];
 
 const CREATE_PROJECT_LINK = { to: "/projects/create", label: "Create Project", isCreate: true };

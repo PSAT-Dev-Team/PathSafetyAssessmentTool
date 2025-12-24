@@ -26,6 +26,8 @@ import {
   fetchAttributeMappings,
   calculateScore,
   calculateScoreForRow,
+  fetchProjectMetadata,
+  updateProject,
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
@@ -62,6 +64,7 @@ type ProjectDataState = {
   loading: boolean;
   error: string | null;
   editedRow: AttributeRow | null;
+  verified?: boolean;
 };
 
 const defaultProjectData: ProjectDataState = {
@@ -144,6 +147,23 @@ export default function CodingPage() {
         ...updates,
       },
     }));
+  };
+
+  // Toggle verified status for a project
+  const toggleVerified = async (projectName: string, currentVerified: boolean) => {
+    try {
+      await updateProject(projectName, { tags: undefined, verified: !currentVerified });
+      updateProjectData(projectName, { verified: !currentVerified });
+      // Notify other pages (like projects list) of the verified status change
+      window.dispatchEvent(new CustomEvent("psat:verified:updated", { detail: { projectName, verified: !currentVerified } }));
+    } catch (e: any) {
+      console.error("Failed to update verification status:", e);
+      toaster.create({
+        title: "Failed to update",
+        description: e?.message ?? "Failed to update verification status",
+        type: "error",
+      });
+    }
   };
 
   // Helper function to clear auto-coding state
@@ -614,10 +634,11 @@ export default function CodingPage() {
       try {
         updateProjectData(currentProjectName, { loading: true, error: null });
 
-        const [d, a, gjson] = await Promise.all([
+        const [d, a, gjson, metadata] = await Promise.all([
           fetchProjectDetail(currentProjectName),
           fetchProjectAttributes(currentProjectName) as Promise<AttributesResponse>,
           fetchProjectGeoJSON(currentProjectName) as Promise<FeatureCollection>,
+          fetchProjectMetadata(currentProjectName).catch(() => null),
         ]);
 
         if (cancelled) return;
@@ -628,6 +649,7 @@ export default function CodingPage() {
           geoFeatures: gjson?.features ?? [],
           currentPage: 1,
           editedRow: null,
+          verified: metadata?.verified ?? false,
           loading: false,
         });
       } catch (e: any) {
@@ -938,12 +960,54 @@ export default function CodingPage() {
       )}
 
       <Flex justify="space-between" align="center" mb="3">
-        <Box>
-          <Text fontSize="lg" fontWeight="bold">{detail?.name ?? currentProjectName}</Text>
-          {detail?.latest && (
-            <Text fontSize="sm" color="gray.600">Latest version: {detail.latest}</Text>
-          )}
-        </Box>
+        <Flex align="center" gap="3">
+          <span style={{ fontSize: "20px" }}>
+            {currentData.verified ? "✅" : "⏳"}
+          </span>
+          <Box>
+            <Text fontSize="lg" fontWeight="bold">{detail?.name ?? currentProjectName}</Text>
+            {detail?.latest && (
+              <Text fontSize="sm" color="gray.600">Latest version: {detail.latest}</Text>
+            )}
+          </Box>
+          <Button
+            onClick={() => toggleVerified(currentProjectName!, currentData.verified ?? false)}
+            size="sm"
+            variant={currentData.verified ? "outline" : "solid"}
+            colorPalette={currentData.verified ? "green" : "blue"}
+            css={
+              currentData.verified
+                ? {
+                    transition: "all 0.2s ease-in-out",
+                    "&:hover": {
+                      backgroundColor: "#ef4444 !important",
+                      color: "white !important",
+                      borderColor: "#ef4444 !important",
+                    },
+                  }
+                : {
+                    transition: "all 0.2s ease-in-out",
+                    "&:hover": {
+                      backgroundColor: "#22c55e !important",
+                      color: "white !important",
+                      borderColor: "#22c55e !important",
+                    },
+                  }
+            }
+            onMouseEnter={(e) => {
+              if (currentData.verified) {
+                e.currentTarget.textContent = "Set To Pending";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentData.verified) {
+                e.currentTarget.textContent = "Verified";
+              }
+            }}
+          >
+            {currentData.verified ? "Verified" : "Mark As Verified"}
+          </Button>
+        </Flex>
 
         <Flex align="center" gap="3">
           <Text fontSize="sm" color="gray.600">

@@ -4,7 +4,6 @@ import {
   Portal,
   Select,
   createListCollection,
-  Box,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { LuPencil } from "react-icons/lu";
@@ -72,6 +71,27 @@ export default function TreatmentPage() {
     fetchProjectList()
       .then((data) => setProjectList(data))
       .catch((e) => console.error("Failed to fetch projects:", e));
+  }, []);
+
+  // Listen for project verified status changes from coding page
+  useEffect(() => {
+    const handleVerificationUpdate = (event: CustomEvent) => {
+      const { projectName, verified } = event.detail;
+      console.log("Verification update received:", projectName, verified);
+
+      // Update the project list directly
+      setProjectList((prev) => {
+        if (!prev) return prev;
+        return {
+          projects: prev.projects.map((p) =>
+            p.name === projectName ? { ...p, verified } : p
+          ),
+        };
+      });
+    };
+
+    window.addEventListener("psat:verified:updated", handleVerificationUpdate as EventListener);
+    return () => window.removeEventListener("psat:verified:updated", handleVerificationUpdate as EventListener);
   }, []);
 
   // Process projects
@@ -193,9 +213,9 @@ export default function TreatmentPage() {
             <tr>
               <th style={{ width: 48 }}></th>
               <th>Project Name</th>
-              <th style={{ width: 120 }}>Status</th>
+              <th style={{ width: 120 }}>Verified</th>
               <th>Tags</th>
-              <th style={{ width: 120 }}>Actions</th>
+              <th style={{ width: 180 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -208,8 +228,6 @@ export default function TreatmentPage() {
             ) : (
               filtered.map((p) => {
                 const isSelected = selected === p.name;
-                // Find Pre/Post tag if it exists
-                const phaseTag = p.tags?.find(tag => tag === "Pre" || tag === "Post");
                 // Get all other tags (excluding Pre/Post)
                 const otherTags = p.tags?.filter(tag => tag !== "Pre" && tag !== "Post") || [];
 
@@ -230,22 +248,9 @@ export default function TreatmentPage() {
                     </td>
                     <td title={p.name}>{p.name}</td>
                     <td>
-                      {phaseTag && (
-                        <Box
-                          as="span"
-                          bg={phaseTag === "Pre" ? "orange.subtle" : "green.subtle"}
-                          color={phaseTag === "Pre" ? "orange.fg" : "green.fg"}
-                          borderColor={phaseTag === "Pre" ? "orange.emphasized" : "green.emphasized"}
-                          borderWidth="1px"
-                          fontSize="xs"
-                          fontWeight="semibold"
-                          px="2"
-                          py="1"
-                          borderRadius="md"
-                        >
-                          {phaseTag}
-                        </Box>
-                      )}
+                      <span style={{ fontSize: "16px" }}>
+                        {p.verified ? "✅" : "⏳"}
+                      </span>
                     </td>
                     <td>
                       <div className="tags-container">

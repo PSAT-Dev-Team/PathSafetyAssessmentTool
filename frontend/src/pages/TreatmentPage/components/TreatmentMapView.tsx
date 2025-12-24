@@ -96,7 +96,6 @@ export default function TreatmentMapView() {
                 zoom={12}
                 style={{ width: "100%", height: "100%" }}
                 scrollWheelZoom
-                preferCanvas
               >
                 {/* Tile Layer */}
                 <TileLayer

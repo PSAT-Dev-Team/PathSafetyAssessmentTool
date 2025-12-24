@@ -107,6 +107,35 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // Get the attribute to show categories for
   const categoryFilterAttribute = activeFilters[categoryFilterAttributeIndex];
 
+  // Helper function to convert numeric attribute value to text using mappings
+  const getAttrText = (attrName: string, attrValue: any): string => {
+    // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
+    // Data contains numeric indices: 0=Low, 1=Low, 2=Medium, 3=High, 4=Extreme
+    // Only 4 categories exist: Low, Medium, High, Extreme
+    if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(attrName)) {
+      const numValue = Number(attrValue);
+      if (isNaN(numValue)) {
+        return "Low"; // Default to Low if invalid
+      }
+
+      // Map numeric index to risk category name (only 4 categories)
+      const riskCategoryMap: Record<number, string> = {
+        0: "Low",
+        1: "Low",
+        2: "Medium",
+        3: "High",
+        4: "Extreme",
+      };
+
+      return riskCategoryMap[numValue] || "Low"; // Default to Low if unknown
+    }
+
+    // If we have a mapping for this attribute and the value is a number
+    if (attrMappings[attrName] && typeof attrValue === "number") {
+      return attrMappings[attrName][String(attrValue)] || String(attrValue);
+    }
+    return String(attrValue);
+  };
 
   // Generate distinct colors for each project
   const projectColors = useMemo(() => {
@@ -178,8 +207,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     if (!selectedAttribute) return {};
 
     const categoryColors: Record<string, string | Record<string, string>> = {
-      // Safety Score Band colors (CycleRAP Risk Bands)
-      "Not Selected": "#9CA3AF", // Gray
+      // Safety Score Band colors (CycleRAP Risk Bands) - Only 4 categories
       "Low": "#87C424", // Green (CycleRAP Low)
       "Medium": "#FFCC1A", // Yellow (CycleRAP Medium)
       "High": "#FF5B1A", // Orange (CycleRAP High)
@@ -279,6 +307,17 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       return attributeColors as Record<string, string>;
     }
 
+    // For safety score bands (Low, Medium, High, Extreme), return the direct color mapping
+    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(selectedAttribute || "");
+    if (isSafetyScore) {
+      return {
+        "Low": categoryColors["Low"] as string,
+        "Medium": categoryColors["Medium"] as string,
+        "High": categoryColors["High"] as string,
+        "Extreme": categoryColors["Extreme"] as string,
+      };
+    }
+
     // For simple string-to-color mappings, return empty (handled by legend logic)
     return {} as Record<string, string>;
   }, [selectedAttribute]);
@@ -355,13 +394,15 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
     // For safety score attributes, look up the category value directly (it will be Low, Medium, High, Extreme, Not Selected)
     if (isSafetyScore) {
-      return categoryColors[category] as string || "#6B7280";
+      const color = categoryColors[category] as string || "#6B7280";
+      return color;
     }
 
     // For other attributes, look up by attribute name
     const attributeColors = categoryColors[attribute];
     if (typeof attributeColors === "object" && attributeColors !== null) {
-      return (attributeColors as Record<string, string>)[category] || "#6B7280";
+      const color = (attributeColors as Record<string, string>)[category] || "#6B7280";
+      return color;
     }
     if (typeof attributeColors === "string") {
       return attributeColors;
@@ -380,29 +421,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       color: string;
       attributeValue: string;
     }[] = [];
-
-    // Helper function to convert numeric attribute value to text using mappings
-    const getAttrText = (attrName: string, attrValue: any): string => {
-      // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
-      if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(attrName)) {
-        const safetyScoreBands: Record<number, string> = {
-          0: "Not Selected",
-          1: "Low",
-          2: "Medium",
-          3: "High",
-          4: "Extreme",
-        };
-        if (typeof attrValue === "number") {
-          return safetyScoreBands[attrValue] || String(attrValue);
-        }
-      }
-
-      // If we have a mapping for this attribute and the value is a number
-      if (attrMappings[attrName] && typeof attrValue === "number") {
-        return attrMappings[attrName][String(attrValue)] || String(attrValue);
-      }
-      return String(attrValue);
-    };
 
     projectsData.forEach((projectData) => {
       projectData.geoFeatures.forEach((feature, i) => {
@@ -492,30 +510,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   const allLatLngs = useMemo(() => allPoints.map(p => p.latlng), [allPoints]);
 
-  // Helper function to convert numeric attribute value to text using mappings
-  const getAttrText = (attrName: string, attrValue: any): string => {
-    // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
-    if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(attrName)) {
-      const safetyScoreBands: Record<number, string> = {
-        0: "Not Selected",
-        1: "Low",
-        2: "Medium",
-        3: "High",
-        4: "Extreme",
-        5: "Extreme",
-      };
-      if (typeof attrValue === "number") {
-        return safetyScoreBands[attrValue] || "Not Selected";
-      }
-    }
-
-    // If we have a mapping for this attribute and the value is a number
-    if (attrMappings[attrName] && typeof attrValue === "number") {
-      return attrMappings[attrName][String(attrValue)] || String(attrValue);
-    }
-    return String(attrValue);
-  };
-
   // Get only the categories that exist in the FILTERED data for the selected category filter attribute
   const availableCategories = useMemo(() => {
     if (!categoryFilterAttribute) return [];
@@ -546,7 +540,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               const attrValue = attributes[filterAttr];
               attrValueText = getAttrText(filterAttr, attrValue);
             }
-            if (!attrValueText || attrValueText === "Not Selected") {
+            if (!attrValueText) {
               matchesOtherFilters = false;
               break;
             }
@@ -556,7 +550,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           if (matchesOtherFilters) {
             const attrValue = attributes[categoryFilterAttribute];
             const attrValueText = getAttrText(categoryFilterAttribute, attrValue);
-            if (attrValueText && attrValueText !== "Not Selected") {
+            if (attrValueText) {
               categoriesInFilteredData.add(attrValueText);
             }
           }
@@ -923,18 +917,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                         "#6B7280": "gray",
                       };
                       const colorPalette = colorMap[hexColor] || "gray";
-                      const isChecked = categoryToggles[categoryFilterAttribute]?.[category] || false;
+                      const isChecked = categoryToggles[categoryFilterAttribute]?.[category] ?? true;
 
                       return (
                         <Flex key={category} align="center" gap="2">
-                          <Text
-                            fontSize="sm"
-                            fontWeight="medium"
-                            color={isChecked ? hexColor : "gray.500"}
-                            style={{ color: isChecked ? hexColor : undefined }}
-                          >
+                          <div style={{ fontSize: "14px", fontWeight: "500", color: hexColor }}>
                             {category}
-                          </Text>
+                          </div>
                           <Switch
                             colorPalette={colorPalette}
                             size="sm"
@@ -1059,7 +1048,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                                 w="12px"
                                 h="12px"
                                 borderRadius="full"
-                                bg={hexColor}
+                                style={{ backgroundColor: hexColor }}
                               />
                               <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
                                 {category}
@@ -1114,7 +1103,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 zoom={12}
                 style={{ width: "100%", height: "100%" }}
                 scrollWheelZoom
-                preferCanvas
               >
                 {/* Tile Layer */}
                 <TileLayer

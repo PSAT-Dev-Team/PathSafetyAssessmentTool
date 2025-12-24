@@ -338,6 +338,7 @@ class ProjectMetadata:
         self.progress     : int             = None
         self.size         : int             = None
         self.tags         : list[str]       = None
+        self.verified     : bool            = False
 
     # === SERIALIZATION ===
 
@@ -358,6 +359,7 @@ class ProjectMetadata:
             self.progress   = data.get("progress")
             self.size       = data.get("size")
             self.tags       = data.get("tags")
+            self.verified   = data.get("verified", False)
 
     def serialize(self, to_dir: Path):
         to_dir.mkdir(parents=True, exist_ok=True)
@@ -371,7 +373,8 @@ class ProjectMetadata:
                 "dataset": self.dataset,
                 "progress": self.progress,
                 "size": self.size,
-                "tags": self.tags
+                "tags": self.tags,
+                "verified": self.verified
             }, f, indent=4)
             
 

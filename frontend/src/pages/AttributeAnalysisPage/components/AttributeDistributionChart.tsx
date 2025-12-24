@@ -100,7 +100,7 @@ export default function AttributeDistributionChart({
       </Flex>
 
       {/* Chart Container */}
-      <Box h="500px" w="100%">
+      <Box h="500px" w="100%" minH="500px" position="relative">
         <ResponsiveContainer width="100%" height="100%">
           {chartType === "pie" ? (
             <PieChart>
@@ -137,17 +137,16 @@ export default function AttributeDistributionChart({
                         p="4"
                         borderRadius="lg"
                         boxShadow="0 8px 20px rgba(0, 0, 0, 0.15)"
-                        borderWidth="2px"
-                        borderColor={data.color}
+                        style={{ borderWidth: "2px", borderColor: data.color }}
                       >
-                        <Text fontSize="md" fontWeight="bold" mb="2" color={data.color}>
+                        <Text fontSize="md" fontWeight="bold" mb="2" style={{ color: data.color }}>
                           {data.category}
                         </Text>
                         <Flex direction="column" gap="1">
                           <Text fontSize="sm" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.200" }}>
                             Count: {data.count}
                           </Text>
-                          <Text fontSize="lg" fontWeight="bold" color={data.color}>
+                          <Text fontSize="lg" fontWeight="bold" style={{ color: data.color }}>
                             {data.percentage}%
                           </Text>
                         </Flex>
@@ -173,20 +172,18 @@ export default function AttributeDistributionChart({
                         py="1.5"
                         borderRadius="full"
                         boxShadow="0 2px 8px rgba(0, 0, 0, 0.1)"
-                        borderWidth="2px"
-                        borderColor={item.color}
+                        style={{ borderColor: item.color, borderWidth: "2px" }}
                       >
                         <Box
                           w="10px"
                           h="10px"
                           borderRadius="full"
-                          bg={item.color}
-                          boxShadow={`0 0 8px ${item.color}`}
+                          style={{ backgroundColor: item.color, boxShadow: `0 0 8px ${item.color}` }}
                         />
                         <Text fontSize="sm" fontWeight="semibold">
                           {item.category}
                         </Text>
-                        <Text fontSize="xs" fontWeight="bold" color={item.color}>
+                        <Text fontSize="xs" fontWeight="bold" style={{ color: item.color }}>
                           {item.percentage}%
                         </Text>
                       </Flex>
@@ -228,17 +225,16 @@ export default function AttributeDistributionChart({
                         p="4"
                         borderRadius="lg"
                         boxShadow="0 8px 20px rgba(0, 0, 0, 0.15)"
-                        borderWidth="2px"
-                        borderColor={data.color}
+                        style={{ borderWidth: "2px", borderColor: data.color }}
                       >
-                        <Text fontSize="md" fontWeight="bold" mb="2" color={data.color}>
+                        <Text fontSize="md" fontWeight="bold" mb="2" style={{ color: data.color }}>
                           {data.category}
                         </Text>
                         <Flex direction="column" gap="1">
                           <Text fontSize="sm" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.200" }}>
                             Count: {data.count}
                           </Text>
-                          <Text fontSize="lg" fontWeight="bold" color={data.color}>
+                          <Text fontSize="lg" fontWeight="bold" style={{ color: data.color }}>
                             {data.percentage}%
                           </Text>
                         </Flex>
@@ -279,20 +275,18 @@ export default function AttributeDistributionChart({
                         py="1.5"
                         borderRadius="full"
                         boxShadow="0 2px 8px rgba(0, 0, 0, 0.1)"
-                        borderWidth="2px"
-                        borderColor={item.color}
+                        style={{ borderColor: item.color, borderWidth: "2px" }}
                       >
                         <Box
                           w="10px"
                           h="10px"
                           borderRadius="full"
-                          bg={item.color}
-                          boxShadow={`0 0 8px ${item.color}`}
+                          style={{ backgroundColor: item.color, boxShadow: `0 0 8px ${item.color}` }}
                         />
                         <Text fontSize="sm" fontWeight="semibold">
                           {item.category}
                         </Text>
-                        <Text fontSize="xs" fontWeight="bold" color={item.color}>
+                        <Text fontSize="xs" fontWeight="bold" style={{ color: item.color }}>
                           {item.percentage}%
                         </Text>
                       </Flex>

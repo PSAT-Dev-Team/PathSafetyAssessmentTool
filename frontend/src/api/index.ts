@@ -13,6 +13,7 @@ export interface ProjectListItem {
   tags: string[];
   date_created?: string;
   last_updated?: string;
+  verified?: boolean;
 }
 
 export interface FileResponse {
@@ -35,6 +36,13 @@ export type ProjectDetail = {
 export async function fetchProjectDetail(projectName: string): Promise<ProjectDetail> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}`)
   if (!res.ok) throw new Error(`Failed GET /api/projects/${projectName}`)
+  return res.json()
+}
+
+// Fetch project metadata including verified status
+export async function fetchProjectMetadata(projectName: string): Promise<ProjectListItem> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/metadata`)
+  if (!res.ok) throw new Error(`Failed to fetch metadata for ${projectName}`)
   return res.json()
 }
 
@@ -111,10 +119,10 @@ export async function deleteProject(projectName: string) {
   return (await res.json()) as { ok?: boolean; name?: string };
 }
 
-// Update Project Metadata (name and/or tags)
+// Update Project Metadata (name, tags, and/or verified status)
 export async function updateProject(
   projectName: string,
-  updates: { new_name?: string; tags?: string[] }
+  updates: { new_name?: string; tags?: string[]; verified?: boolean }
 ) {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}`, {
     method: "PATCH",
@@ -125,7 +133,7 @@ export async function updateProject(
     const msg = await res.text().catch(() => res.statusText);
     throw new Error(msg || "Update failed");
   }
-  return (await res.json()) as { ok?: boolean; name?: string; tags?: string[] };
+  return (await res.json()) as { ok?: boolean; name?: string; tags?: string[]; verified?: boolean };
 }
 
 export async function autocodeImage(project: string, imageRef: string) {

@@ -363,7 +363,8 @@ def list_projects():
             proj = pm.project(name)
             project_data = {
                 "name": name,
-                "tags": proj.metadata.tags or []
+                "tags": proj.metadata.tags or [],
+                "verified": getattr(proj.metadata, 'verified', False)
             }
 
             # Add date_created if available
@@ -379,7 +380,8 @@ def list_projects():
             # If metadata fails to load, return project with empty tags and no dates
             projects.append({
                 "name": name,
-                "tags": []
+                "tags": [],
+                "verified": False
             })
 
     return jsonify({"projects": projects})
@@ -394,6 +396,19 @@ def get_project(project_name: str):
         "name": proj.metadata.project_name,
         "versions": [v.path.name for v in proj.versions],
         "latest": ver.path.name
+    })
+
+@bp.get("/<project_name>/metadata")
+def get_project_metadata(project_name: str):
+    """Get project metadata including verified status."""
+    ctx = get_ctx()
+    proj: Project = ctx["pm"].project(project_name)
+    return jsonify({
+        "name": proj.metadata.project_name,
+        "tags": proj.metadata.tags or [],
+        "verified": getattr(proj.metadata, 'verified', False),
+        "date_created": proj.metadata.date_created.isoformat() if hasattr(proj.metadata, 'date_created') and proj.metadata.date_created else None,
+        "last_updated": proj.metadata.last_updated.isoformat() if hasattr(proj.metadata, 'last_updated') and proj.metadata.last_updated else None
     })
 
 @bp.get("/<project_name>/versions/latest/attributes")
@@ -1421,9 +1436,9 @@ def delete_project(project_name: str):
 @bp.patch("/<project_name>")
 def update_project_metadata(project_name: str):
     """
-    Update project metadata (name and/or tags):
+    Update project metadata (name, tags, and/or verified status):
     PATCH /api/projects/<project_name>
-    Body: { "new_name": "...", "tags": [...] }
+    Body: { "new_name": "...", "tags": [...], "verified": true/false }
     """
     ctx = get_ctx()
     pm = ctx["pm"]
@@ -1432,6 +1447,7 @@ def update_project_metadata(project_name: str):
         payload = request.get_json(force=True, silent=True) or {}
         new_name = payload.get("new_name")
         new_tags = payload.get("tags")
+        new_verified = payload.get("verified")
 
         # Get the project
         try:
@@ -1444,6 +1460,12 @@ def update_project_metadata(project_name: str):
             if not isinstance(new_tags, list):
                 return fail("Tags must be an array", 400)
             proj.metadata.tags = new_tags
+            proj.metadata.last_updated = datetime.date.today()
+            proj.metadata.serialize(proj.project_path)
+
+        # Update verified status if provided
+        if new_verified is not None:
+            proj.metadata.verified = bool(new_verified)
             proj.metadata.last_updated = datetime.date.today()
             proj.metadata.serialize(proj.project_path)
 
@@ -1480,7 +1502,8 @@ def update_project_metadata(project_name: str):
         return ok({
             "ok": True,
             "name": new_name if new_name else project_name,
-            "tags": proj.metadata.tags or []
+            "tags": proj.metadata.tags or [],
+            "verified": proj.metadata.verified
         })
 
     except Exception as e:
