@@ -761,13 +761,39 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       });
 
       // Convert to array format for the chart
-      return Object.entries(categoryCounts)
+      const chartData = Object.entries(categoryCounts)
         .map(([category, count]) => ({
           category,
           count,
           color: attributeCategoryColors[category] || "#6B7280",
-        }))
-        .sort((a, b) => b.count - a.count); // Sort by count descending
+        }));
+
+      // Apply semantic ordering for specific attributes
+      if (primaryFocusAttribute === "Facility Width per Direction") {
+        const widthOrder = ["Very Narrow", "Narrow", "Wide"];
+        return chartData.sort((a, b) => {
+          const aIndex = widthOrder.indexOf(a.category);
+          const bIndex = widthOrder.indexOf(b.category);
+          if (aIndex === -1 && bIndex === -1) return 0;
+          if (aIndex === -1) return 1;
+          if (bIndex === -1) return -1;
+          return aIndex - bIndex;
+        });
+      } else if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute)) {
+        // For safety score bands, sort in the order: Low, Medium, High, Extreme
+        const riskOrder = ["Low", "Medium", "High", "Extreme"];
+        return chartData.sort((a, b) => {
+          const aIndex = riskOrder.indexOf(a.category);
+          const bIndex = riskOrder.indexOf(b.category);
+          if (aIndex === -1 && bIndex === -1) return 0;
+          if (aIndex === -1) return 1;
+          if (bIndex === -1) return -1;
+          return aIndex - bIndex;
+        });
+      } else {
+        // Default: sort by count descending
+        return chartData.sort((a, b) => b.count - a.count);
+      }
     }
   }, [allPoints, primaryFocusAttribute, attributeCategoryColors, projectColors]);
 
