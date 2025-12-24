@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal } from "@chakra-ui/react";
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, Polyline } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import { Switch } from "../../../components/ui/switch";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
-import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchGISLayers, type AttributeRow } from "../../../api";
+import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, type AttributeRow } from "../../../api";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 // --- EPSG:3414 (SVY21 / Singapore TM) definition -> EPSG:4326 ---
@@ -76,14 +76,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Track which attribute is the primary focus for coloring
   const [primaryFocusAttribute, setPrimaryFocusAttribute] = useState<string | null>(null);
-
-  // GIS layer toggle states
-  const [showFootpath, setShowFootpath] = useState(false);
-  const [showCycling, setShowCycling] = useState(false);
-  const [showShared, setShowShared] = useState(false);
-
-  // GIS layer data
-  const [gisLayers, setGisLayers] = useState<Record<string, Array<{ coordinates: [number, number][]; properties: Record<string, any> }>>>({});
 
   // Update primaryFocusAttribute when selected attributes change
   useEffect(() => {
@@ -221,80 +213,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
     return () => { aborted = true; };
   }, [selectedProjects, projectColors]);
-
-  // Fetch GIS layers when toggles change
-  useEffect(() => {
-    const layersToFetch: string[] = [];
-    if (showFootpath) layersToFetch.push("footpath");
-    if (showCycling) layersToFetch.push("cycling");
-    if (showShared) layersToFetch.push("shared");
-
-    // If no layers to fetch, clear the GIS data
-    if (layersToFetch.length === 0) {
-      setGisLayers({});
-      return;
-    }
-
-    // Fetch GIS layers for all projects around their center points
-    let aborted = false;
-    (async () => {
-      try {
-        const allGisLayers: Record<string, Array<{ coordinates: [number, number][]; properties: Record<string, any> }>> = {
-          footpath: [],
-          cycling: [],
-          shared: [],
-        };
-
-        // Fetch GIS layers for each project
-        for (const projectData of projectsData) {
-          try {
-            // Get center point of all features for this project
-            const allCoords: [number, number][] = [];
-            projectData.geoFeatures.forEach(feature => {
-              if (feature.geometry.type === "LineString") {
-                allCoords.push(...feature.geometry.coordinates as [number, number][]);
-              }
-            });
-
-            if (allCoords.length === 0) continue;
-
-            // Calculate center point
-            const centerLon = allCoords.reduce((sum, c) => sum + c[0], 0) / allCoords.length;
-            const centerLat = allCoords.reduce((sum, c) => sum + c[1], 0) / allCoords.length;
-
-            const response = await fetchGISLayers(
-              projectData.projectName,
-              [centerLon, centerLat],
-              200,
-              layersToFetch
-            );
-
-            if (response.ok) {
-              Object.entries(response.layers).forEach(([layerName, features]) => {
-                if (layerName === "cycling" && showCycling) {
-                  allGisLayers.cycling.push(...features);
-                } else if (layerName === "footpath" && showFootpath) {
-                  allGisLayers.footpath.push(...features);
-                } else if (layerName === "shared" && showShared) {
-                  allGisLayers.shared.push(...features);
-                }
-              });
-            }
-          } catch (e) {
-            console.error(`Failed to fetch GIS layers for ${projectData.projectName}:`, e);
-          }
-        }
-
-        if (!aborted) {
-          setGisLayers(allGisLayers);
-        }
-      } catch (e) {
-        console.error("Failed to fetch GIS layers:", e);
-      }
-    })();
-
-    return () => { aborted = true; };
-  }, [projectsData, showFootpath, showCycling, showShared]);
 
   // Generate colors for attribute categories based on safety implications
   const attributeCategoryColors = useMemo(() => {
@@ -873,50 +791,11 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     >
       {/* Tabs */}
       <Tabs.Root value={activeTab} onValueChange={(e) => setActiveTab(e.value)}>
-        <Flex justify="space-between" align="center" borderBottom="1px solid" borderColor="gray.200" bg="white" _dark={{ bg: "gray.800" }} py="3" px="4" gap="4" flexWrap="wrap">
-          <Flex align="center" gap="4">
-            <Tabs.List>
-              <Tabs.Trigger value="map">Map View</Tabs.Trigger>
-              <Tabs.Trigger value="table">Table View</Tabs.Trigger>
-            </Tabs.List>
-
-            {/* GIS Layer Toggles */}
-            {activeTab === "map" && (
-              <HStack gap="4" borderLeft="1px solid" borderColor="gray.300" pl="4">
-                <Flex align="center" gap="2">
-                  <Switch
-                    colorPalette="blue"
-                    checked={showFootpath}
-                    onCheckedChange={(e) => setShowFootpath(e.checked)}
-                  />
-                  <Text fontSize="sm" fontWeight="medium" color={showFootpath ? "blue.600" : "gray.600"}>
-                    Footpath
-                  </Text>
-                </Flex>
-                <Flex align="center" gap="2">
-                  <Switch
-                    colorPalette="green"
-                    checked={showCycling}
-                    onCheckedChange={(e) => setShowCycling(e.checked)}
-                  />
-                  <Text fontSize="sm" fontWeight="medium" color={showCycling ? "green.600" : "gray.600"}>
-                    Cycling Path
-                  </Text>
-                </Flex>
-                <Flex align="center" gap="2">
-                  <Switch
-                    colorPalette="orange"
-                    checked={showShared}
-                    onCheckedChange={(e) => setShowShared(e.checked)}
-                  />
-                  <Text fontSize="sm" fontWeight="medium" color={showShared ? "orange.600" : "gray.600"}>
-                    Shared Path
-                  </Text>
-                </Flex>
-              </HStack>
-            )}
-          </Flex>
-
+        <Flex justify="space-between" align="center" borderBottom="1px solid" borderColor="gray.200" bg="white" _dark={{ bg: "gray.800" }} py="3" px="4">
+          <Tabs.List>
+            <Tabs.Trigger value="map">Map View</Tabs.Trigger>
+            <Tabs.Trigger value="table">Table View</Tabs.Trigger>
+          </Tabs.List>
           {allPoints.length > 0 && (
             <Button
               colorPalette="blue"
@@ -1264,29 +1143,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
                 {/* Pan to specific project bounds when button clicked */}
                 {panToBounds && <PanToBounds bounds={panToBounds} />}
-
-                {/* Render GIS Layers */}
-                {gisLayers.footpath && gisLayers.footpath.map((feature, idx) => (
-                  <Polyline
-                    key={`footpath-${idx}`}
-                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
-                    pathOptions={{ color: "#1E90FF", weight: 3, opacity: 0.8 }}
-                  />
-                ))}
-                {gisLayers.cycling && gisLayers.cycling.map((feature, idx) => (
-                  <Polyline
-                    key={`cycling-${idx}`}
-                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
-                    pathOptions={{ color: "#00B400", weight: 3, opacity: 0.8 }}
-                  />
-                ))}
-                {gisLayers.shared && gisLayers.shared.map((feature, idx) => (
-                  <Polyline
-                    key={`shared-${idx}`}
-                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
-                    pathOptions={{ color: "#E68C00", weight: 3, opacity: 0.8 }}
-                  />
-                ))}
 
                 {/* Render all points as markers */}
                 {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
