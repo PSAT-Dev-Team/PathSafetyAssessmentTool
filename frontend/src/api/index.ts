@@ -46,15 +46,27 @@ export async function fetchProjectMetadata(projectName: string): Promise<Project
   return res.json()
 }
 
-// 一Project attributes
+// Project attributes
 export type AttributeRow = Record<string, string | number | boolean | null>;
 export type AttributesResponse = { rows: AttributeRow[] };
 
 export async function fetchProjectAttributes(projectName: string): Promise<AttributesResponse> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/versions/latest/attributes`)
-  
+
   if (!res.ok) throw new Error(`Failed GET /api/projects/${projectName}/versions/latest/attributes`)
-  
+
+  return res.json()
+}
+
+// Project results (crash type scores and bands)
+export type ResultRow = Record<string, string | number | boolean | null>;
+export type ResultsResponse = { ok: boolean; result_rows: ResultRow[] };
+
+export async function fetchProjectResults(projectName: string): Promise<ResultsResponse> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/results`)
+
+  if (!res.ok) throw new Error(`Failed GET /api/projects/${projectName}/results`)
+
   return res.json()
 }
 
