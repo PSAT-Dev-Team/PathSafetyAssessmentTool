@@ -77,9 +77,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // Track which attribute is the primary focus for coloring
   const [primaryFocusAttribute, setPrimaryFocusAttribute] = useState<string | null>(null);
 
-  // Get the first selected attribute for visualization/coloring
-  const selectedAttribute = selectedAttributes.find(attr => attr !== null);
-
   // Update primaryFocusAttribute when selected attributes change
   useEffect(() => {
     const activeAttrs = selectedAttributes.filter(attr => attr !== null);
@@ -219,7 +216,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Generate colors for attribute categories based on safety implications
   const attributeCategoryColors = useMemo(() => {
-    if (!selectedAttribute) return {};
+    if (!primaryFocusAttribute) return {};
 
     const categoryColors: Record<string, string | Record<string, string>> = {
       // Safety Score Band colors (CycleRAP Risk Bands) - Only 4 categories
@@ -316,14 +313,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       },
     };
 
-    // Get color for selectedAttribute - handle both direct string values and object mappings
-    const attributeColors = categoryColors[selectedAttribute];
+    // Get color for primaryFocusAttribute - handle both direct string values and object mappings
+    const attributeColors = categoryColors[primaryFocusAttribute];
     if (typeof attributeColors === "object" && attributeColors !== null) {
       return attributeColors as Record<string, string>;
     }
 
     // For safety score bands (Low, Medium, High, Extreme), return the direct color mapping
-    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(selectedAttribute || "");
+    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute || "");
     if (isSafetyScore) {
       return {
         "Low": categoryColors["Low"] as string,
@@ -335,7 +332,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
     // For simple string-to-color mappings, return empty (handled by legend logic)
     return {} as Record<string, string>;
-  }, [selectedAttribute]);
+  }, [primaryFocusAttribute]);
 
   // Helper function to get color for a specific attribute and category value
   const getCategoryColor = (attribute: string, category: string): string => {
