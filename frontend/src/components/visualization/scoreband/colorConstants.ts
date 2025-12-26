@@ -46,7 +46,6 @@ export function getRiskBandLabel(score: number): 'Low' | 'Medium' | 'High' | 'Ex
 /**
  * Get risk band index based on score
  * Returns 1-4 for band indices: 1=Low, 2=Medium, 3=High, 4=Extreme
- * (Backend may use indices 1-5 where bands 4-5 both map to Extreme)
  */
 export function getRiskBandIndex(score: number): 1 | 2 | 3 | 4 {
   if (score <= 5) return 1;    // Low: 0-5

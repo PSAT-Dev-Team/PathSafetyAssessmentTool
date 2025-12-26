@@ -19,7 +19,6 @@ const BAND_INFO: Record<number, { label: string; color: string }> = {
   2: { label: "Medium", color: RISK_BAND_COLORS.MEDIUM },
   3: { label: "High", color: RISK_BAND_COLORS.HIGH },
   4: { label: "Extreme", color: RISK_BAND_COLORS.EXTREME },
-  5: { label: "Extreme", color: RISK_BAND_COLORS.EXTREME },
 };
 
 interface ChartDataPoint {
@@ -38,19 +37,7 @@ export default function ScoreBandPieChart({
   const chartData: ChartDataPoint[] = useMemo(() => {
     const total = Object.values(bandCounts).reduce((sum, count) => sum + count, 0);
 
-    // Merge bands 4 and 5 into a single "Extreme" category
-    const mergedBandCounts: Record<number, number> = {};
-    Object.entries(bandCounts).forEach(([band, count]) => {
-      const bandNum = parseInt(band);
-      if (bandNum === 5) {
-        // Merge band 5 into band 4
-        mergedBandCounts[4] = (mergedBandCounts[4] || 0) + count;
-      } else {
-        mergedBandCounts[bandNum] = count;
-      }
-    });
-
-    return Object.entries(mergedBandCounts)
+    return Object.entries(bandCounts)
       .filter(([_, count]) => count > 0) // Only show non-zero bands
       .map(([band, count]) => {
         const bandNum = parseInt(band);

@@ -416,25 +416,22 @@ def calculate_cyclerap_score(row: pd.Series, cm3: float, cm16: float, cm25: floa
 
 def calculate_risk_band(score: float) -> int:
     """
-    Convert a risk score to a risk band category (1-5 scale).
+    Convert a risk score to a risk band category (1-4 scale).
 
-    Band Thresholds:
-    - 1: Low (0-3)
-    - 2: Medium-Low (3-6)
-    - 3: Medium (6-10)
-    - 4: High (10-20)
-    - 5: Extreme (20+)
+    Band Thresholds (4 categories only):
+    - 1: Low (0-5)
+    - 2: Medium (5-10)
+    - 3: High (10-20)
+    - 4: Extreme (20+)
     """
-    if score <= 3:
+    if score <= 5:
         return 1
-    elif score <= 6:
-        return 2
     elif score <= 10:
-        return 3
+        return 2
     elif score <= 20:
-        return 4
+        return 3
     else:
-        return 5
+        return 4
 
 
 def calculate_cyclerap_score_native(attributes_df: pd.DataFrame) -> pd.DataFrame:

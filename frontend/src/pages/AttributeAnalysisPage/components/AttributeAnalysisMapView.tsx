@@ -130,27 +130,38 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Helper function to convert numeric attribute value to text using mappings
   const getAttrText = (attrName: string, attrValue: any): string => {
-    // Handle safety score band values (VB Band, BB Band, SB Band, BP Band, CycleRAP Score)
-    // Backend band indices from calculate_risk_band():
-    // 1: score 0-3, 2: score 3-6, 3: score 6-10, 4: score 10-20, 5: score 20+
-    //
-    // Map to frontend categories (Low: 0-5, Medium: 5-10, High: 10-20, Extreme: 20+)
-    if (["VB Band", "BB Band", "SB Band", "BP Band", "CycleRAP Score"].includes(attrName)) {
+    // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
+    // These map to exactly 4 categories based on score thresholds:
+    // Low: 0-5, Medium: 5-10, High: 10-20, Extreme: 20+
+    if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(attrName)) {
       const numValue = Number(attrValue);
       if (isNaN(numValue)) {
         return "Low"; // Default to Low if invalid
       }
 
-      // Map backend band indices to frontend categories
+      // Map backend bands to frontend categories: Low, Medium, High, Extreme
+      // Note: Band 5 may still exist in old data, map it to Extreme
       const riskCategoryMap: Record<number, string> = {
-        1: "Low",      // Backend band 1 (score 0-3) → Low
-        2: "Low",      // Backend band 2 (score 3-6) → Low (since frontend Low is 0-5)
-        3: "Medium",   // Backend band 3 (score 6-10) → Medium
-        4: "High",     // Backend band 4 (score 10-20) → High
-        5: "Extreme",  // Backend band 5 (score 20+) → Extreme
+        1: "Low",      // Band 1: score 0-5
+        2: "Medium",   // Band 2: score 5-10
+        3: "High",     // Band 3: score 10-20
+        4: "Extreme",  // Band 4: score 20+
+        5: "Extreme",  // Band 5 (legacy): score 20+ - treat same as Band 4
       };
 
       return riskCategoryMap[numValue] || "Low"; // Default to Low if unknown
+    }
+
+    // Special handling for CycleRAP Score - calculated from actual score, not a band index
+    if (attrName === "CycleRAP Score") {
+      // This shouldn't happen as CycleRAP Score is calculated in the filter logic,
+      // but handle it gracefully just in case
+      const scoreValue = Number(attrValue);
+      if (isNaN(scoreValue)) return "Low";
+      if (scoreValue <= 5) return "Low";
+      if (scoreValue <= 10) return "Medium";
+      if (scoreValue <= 20) return "High";
+      return "Extreme";
     }
 
     // If we have a mapping for this attribute and the value is a number
@@ -194,18 +205,26 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         setErr(null);
 
         const promises = selectedProjects.map(async (projectName) => {
-          // Fetch geodata, attributes, and scores in parallel
-          const [geoJson, attrResponse, scoresResponse] = await Promise.all([
+          // Fetch geodata and attributes (required)
+          const [geoJson, attrResponse] = await Promise.all([
             fetchProjectGeoJSON(projectName),
             fetchProjectAttributes(projectName),
-            calculateScore(projectName)
           ]);
+
+          // Fetch scores (optional - if fails, continue with empty scores)
+          let scores: Record<string, any>[] = [];
+          try {
+            const scoresResponse = await calculateScore(projectName);
+            scores = scoresResponse.result_rows || [];
+          } catch (e) {
+            console.warn(`Failed to load scores for ${projectName}, continuing without scores`);
+          }
 
           return {
             projectName,
             geoFeatures: geoJson.features as Feature<LineString, any>[],
             attributes: attrResponse.rows,
-            scores: scoresResponse.result_rows,
+            scores: scores,
             color: projectColors[projectName],
           };
         });
@@ -456,57 +475,85 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           const attributes = projectData.attributes[i];
 
           if (attributes) {
-            // Check if segment matches all active filters
-            // Segments must have non-empty values for ALL selected filter attributes
-            if (activeFilters.length > 0) {
-              let matchesAllFilters = true;
+            // Check if segment matches all active filters AND category toggles
+            let matchesAllFilters = true;
 
-              for (const filterAttr of activeFilters) {
-                let attrValueText = "";
+            // First, check all active filters (top tabs)
+            for (const filterAttr of activeFilters) {
+              let attrValueText = "";
 
-                // Special handling for "Project" filter
-                if (filterAttr === "Project") {
-                  attrValueText = projectData.projectName;
-                } else if (filterAttr === "CycleRAP Score") {
-                  // Special handling for CycleRAP Score - calculate it from scores
-                  if (projectData.scores && projectData.scores.length > i) {
-                    const segmentScores = projectData.scores[i];
-                    const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
-                    const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+              // Special handling for "Project" filter
+              if (filterAttr === "Project") {
+                attrValueText = projectData.projectName;
+              } else if (filterAttr === "CycleRAP Score") {
+                // Special handling for CycleRAP Score - calculate it from scores
+                if (projectData.scores && projectData.scores.length > i) {
+                  const segmentScores = projectData.scores[i];
+                  const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
+                  const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
 
-                    if (scoreValue <= 5) attrValueText = "Low";
-                    else if (scoreValue <= 10) attrValueText = "Medium";
-                    else if (scoreValue <= 20) attrValueText = "High";
-                    else attrValueText = "Extreme";
-                  } else {
-                    attrValueText = "Low"; // Default if no scores
-                  }
+                  if (scoreValue <= 5) attrValueText = "Low";
+                  else if (scoreValue <= 10) attrValueText = "Medium";
+                  else if (scoreValue <= 20) attrValueText = "High";
+                  else attrValueText = "Extreme";
                 } else {
-                  const attrValue = attributes[filterAttr];
-                  attrValueText = getAttrText(filterAttr, attrValue);
+                  attrValueText = "Low"; // Default if no scores
                 }
+              } else {
+                const attrValue = attributes[filterAttr];
+                attrValueText = getAttrText(filterAttr, attrValue);
+              }
 
-                // Skip if this filter attribute has no value
-                if (!attrValueText || attrValueText === "Not Selected") {
+              // Skip if this filter attribute has no value
+              if (!attrValueText || attrValueText === "Not Selected") {
+                matchesAllFilters = false;
+                break;
+              }
+
+              // Check if this filter attribute's category toggle is enabled
+              const filterToggles = categoryToggles[filterAttr];
+              if (filterToggles && Object.keys(filterToggles).length > 0) {
+                // If toggles exist for this attribute, check if the current value is enabled
+                const isToggled = filterToggles[attrValueText];
+                if (isToggled === false) {
                   matchesAllFilters = false;
                   break;
                 }
+              }
+            }
 
-                // Check if this filter attribute's category toggle is enabled
-                const filterToggles = categoryToggles[filterAttr];
-                if (filterToggles && Object.keys(filterToggles).length > 0) {
-                  // If toggles exist for this attribute, check if the current value is enabled
-                  // If the specific value toggle is not true, skip this segment
-                  if (filterToggles[attrValueText] !== true) {
-                    matchesAllFilters = false;
-                    break;
-                  }
+            if (!matchesAllFilters) {
+              return; // Skip segment - doesn't match active filters or their toggles
+            }
+
+            // Also check the category filter attribute's toggles (even if not in activeFilters)
+            // This allows filtering by the selected tab's categories
+            if (categoryFilterAttribute && categoryFilterAttribute !== "Project") {
+              let categoryValueText = "";
+
+              if (categoryFilterAttribute === "CycleRAP Score") {
+                if (projectData.scores && projectData.scores.length > i) {
+                  const segmentScores = projectData.scores[i];
+                  const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
+                  const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+
+                  if (scoreValue <= 5) categoryValueText = "Low";
+                  else if (scoreValue <= 10) categoryValueText = "Medium";
+                  else if (scoreValue <= 20) categoryValueText = "High";
+                  else categoryValueText = "Extreme";
                 }
-                // If no toggles exist for this attribute, all values are shown (no filtering)
+              } else {
+                const attrValue = attributes[categoryFilterAttribute];
+                categoryValueText = getAttrText(categoryFilterAttribute, attrValue);
               }
 
-              if (!matchesAllFilters) {
-                return; // Skip segment - doesn't match all filters or category toggles
+              // Apply category toggles
+              const categoryTogglesForAttr = categoryToggles[categoryFilterAttribute];
+              if (categoryTogglesForAttr && Object.keys(categoryTogglesForAttr).length > 0 && categoryValueText) {
+                const isToggled = categoryTogglesForAttr[categoryValueText];
+                if (isToggled === false) {
+                  return; // Skip segment - this category is toggled off
+                }
               }
             }
 
@@ -573,120 +620,56 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   const allLatLngs = useMemo(() => allPoints.map(p => p.latlng), [allPoints]);
 
-  // Get only the categories that exist in the FILTERED data for the selected category filter attribute
+  // Get only the categories that exist in the data for the selected category filter attribute
+  // Filters are INDEPENDENT - we show all categories that exist in the full dataset, not filtered by other filters
   const availableCategories = useMemo(() => {
     if (!categoryFilterAttribute) return [];
 
-    // Get unique categories from segments that match all other active filters
-    const categoriesInFilteredData = new Set<string>();
-
-    // Get the other filters (all except the current category filter attribute)
-    const otherFilters = activeFilters.filter(f => f !== categoryFilterAttribute);
+    // Get unique categories from all segments, independent of other filters
+    const categoriesInData = new Set<string>();
 
     projectsData.forEach((projectData) => {
       // If categoryFilterAttribute is "Project", collect unique project names
       if (categoryFilterAttribute === "Project") {
-        categoriesInFilteredData.add(projectData.projectName);
+        categoriesInData.add(projectData.projectName);
         return;
       }
 
-      // Special handling for CycleRAP Score - always include all risk categories
+      // Special handling for CycleRAP Score
       if (categoryFilterAttribute === "CycleRAP Score") {
         projectData.geoFeatures.forEach((_, i) => {
-          const attributes = projectData.attributes[i];
-          if (attributes && projectData.scores && projectData.scores.length > i) {
-            // Check if this segment matches all OTHER filters
-            let matchesOtherFilters = true;
-            for (const filterAttr of otherFilters) {
-              let attrValueText = "";
-              if (filterAttr === "Project") {
-                attrValueText = projectData.projectName;
-              } else if (filterAttr === "CycleRAP Score") {
-                // Special handling for CycleRAP Score in other filters
-                const segmentScores = projectData.scores[i];
-                const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
-                const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+          if (projectData.scores && projectData.scores.length > i) {
+            const segmentScores = projectData.scores[i];
+            const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
+            const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
 
-                if (scoreValue <= 5) attrValueText = "Low";
-                else if (scoreValue <= 10) attrValueText = "Medium";
-                else if (scoreValue <= 20) attrValueText = "High";
-                else attrValueText = "Extreme";
-              } else {
-                const attrValue = attributes[filterAttr];
-                attrValueText = getAttrText(filterAttr, attrValue);
-              }
-              if (!attrValueText) {
-                matchesOtherFilters = false;
-                break;
-              }
-            }
+            let category = "Low";
+            if (scoreValue <= 5) category = "Low";
+            else if (scoreValue <= 10) category = "Medium";
+            else if (scoreValue <= 20) category = "High";
+            else category = "Extreme";
 
-            // If matches all other filters, calculate CycleRAP Score category
-            if (matchesOtherFilters) {
-              const segmentScores = projectData.scores[i];
-              const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
-              const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
-
-              let category = "Low";
-              if (scoreValue <= 5) category = "Low";
-              else if (scoreValue <= 10) category = "Medium";
-              else if (scoreValue <= 20) category = "High";
-              else category = "Extreme";
-
-              categoriesInFilteredData.add(category);
-            }
+            categoriesInData.add(category);
           }
         });
         return;
       }
 
+      // For other attributes (including safety band attributes like BP Band, VB Band, etc.)
       projectData.geoFeatures.forEach((_, i) => {
         const attributes = projectData.attributes[i];
         if (attributes) {
-          // Check if this segment matches all OTHER filters (not the category filter itself)
-          let matchesOtherFilters = true;
-          for (const filterAttr of otherFilters) {
-            let attrValueText = "";
-            if (filterAttr === "Project") {
-              attrValueText = projectData.projectName;
-            } else if (filterAttr === "CycleRAP Score") {
-              // Special handling for CycleRAP Score in other filters
-              if (projectData.scores && projectData.scores.length > i) {
-                const segmentScores = projectData.scores[i];
-                const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
-                const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
-
-                if (scoreValue <= 5) attrValueText = "Low";
-                else if (scoreValue <= 10) attrValueText = "Medium";
-                else if (scoreValue <= 20) attrValueText = "High";
-                else attrValueText = "Extreme";
-              } else {
-                attrValueText = "Low";
-              }
-            } else {
-              const attrValue = attributes[filterAttr];
-              attrValueText = getAttrText(filterAttr, attrValue);
-            }
-            if (!attrValueText) {
-              matchesOtherFilters = false;
-              break;
-            }
-          }
-
-          // If matches all other filters, add its category for the category filter attribute
-          if (matchesOtherFilters) {
-            const attrValue = attributes[categoryFilterAttribute];
-            const attrValueText = getAttrText(categoryFilterAttribute, attrValue);
-            if (attrValueText) {
-              categoriesInFilteredData.add(attrValueText);
-            }
+          const attrValue = attributes[categoryFilterAttribute];
+          const attrValueText = getAttrText(categoryFilterAttribute, attrValue);
+          if (attrValueText) {
+            categoriesInData.add(attrValueText);
           }
         }
       });
     });
 
     // Sort categories with special handling for safety score bands and facility width
-    const categories = Array.from(categoriesInFilteredData);
+    const categories = Array.from(categoriesInData);
     const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "CycleRAP Score"].includes(categoryFilterAttribute || "");
 
     if (isSafetyScore) {
@@ -717,27 +700,39 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     }
 
     return categories;
-  }, [categoryFilterAttribute, activeFilters, projectsData, attrMappings]);
+  }, [categoryFilterAttribute, projectsData, attrMappings]);
 
-  // Initialize category toggles when category filter attribute changes
+  // Initialize category toggles when category filter attribute changes or available categories change
   useEffect(() => {
     if (!categoryFilterAttribute) {
       return;
     }
 
-    // Initialize toggles for the current category filter attribute if not already set
+    // Initialize/update toggles for the current category filter attribute
     setCategoryToggles(prev => {
-      if (prev[categoryFilterAttribute]) {
-        // Already initialized, keep existing state
-        return prev;
+      const newToggles = { ...prev };
+
+      // If this attribute doesn't have toggles yet, create them
+      if (!newToggles[categoryFilterAttribute]) {
+        newToggles[categoryFilterAttribute] = {};
       }
 
-      // Create new toggles for this attribute with all categories enabled by default
-      const newToggles = { ...prev };
-      newToggles[categoryFilterAttribute] = {};
+      // Update toggles to match available categories
+      // Preserve all existing user-set toggles, add new categories with default true
+      const updatedAttributeToggles: Record<string, boolean> = {
+        ...newToggles[categoryFilterAttribute], // Keep all existing toggles
+      };
+
+      // Add any new categories from availableCategories that aren't already toggled
       availableCategories.forEach(category => {
-        newToggles[categoryFilterAttribute][category] = true;
+        if (!(category in updatedAttributeToggles)) {
+          // Only add if not already set by user
+          updatedAttributeToggles[category] = true;
+        }
       });
+
+      newToggles[categoryFilterAttribute] = updatedAttributeToggles;
+
       return newToggles;
     });
   }, [categoryFilterAttribute, availableCategories]);

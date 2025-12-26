@@ -352,10 +352,10 @@ const calculateBandDistributions = (scoreRows: any[]) => {
     const sbBand = row["SB Band"];
     const bpBand = row["BP Band"];
 
-    if (vbBand >= 1 && vbBand <= 5) distributions.VB[vbBand as keyof typeof distributions.VB]++;
-    if (bbBand >= 1 && bbBand <= 5) distributions.BB[bbBand as keyof typeof distributions.BB]++;
-    if (sbBand >= 1 && sbBand <= 5) distributions.SB[sbBand as keyof typeof distributions.SB]++;
-    if (bpBand >= 1 && bpBand <= 5) distributions.BP[bpBand as keyof typeof distributions.BP]++;
+    if (vbBand >= 1 && vbBand <= 4) distributions.VB[vbBand as keyof typeof distributions.VB]++;
+    if (bbBand >= 1 && bbBand <= 4) distributions.BB[bbBand as keyof typeof distributions.BB]++;
+    if (sbBand >= 1 && sbBand <= 4) distributions.SB[sbBand as keyof typeof distributions.SB]++;
+    if (bpBand >= 1 && bpBand <= 4) distributions.BP[bpBand as keyof typeof distributions.BP]++;
   });
 
   return distributions;
