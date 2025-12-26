@@ -23,8 +23,10 @@ function renderGroupedAttributes(items: any[]) {
     "Intersection": [],
   };
 
-  // Group items
+  // Group items - only include valid items
   items.forEach((item) => {
+    if (!item || !item.value) return; // Skip invalid items
+
     if (item.value === "Not Selected" || item.value === "Project") {
       groupedItems[item.value].push(item);
     } else if (item.group) {
@@ -53,7 +55,7 @@ function renderGroupedAttributes(items: any[]) {
         if (groupItems.length === 0) return null;
 
         return (
-          <Box key={groupName}>
+          <Box key={`group-${groupName}-${groupIndex}`}>
             {/* Divider before group header (except for first group) */}
             {groupIndex > 0 && (
               <Box
@@ -81,14 +83,17 @@ function renderGroupedAttributes(items: any[]) {
               </Text>
             )}
             {/* Group items */}
-            {groupItems.map((item: any) => (
-              <Combobox.Item item={item} key={item.value}>
-                <Flex align="center" gap="2" width="100%">
-                  <Text flex="1">{item.label}</Text>
-                </Flex>
-                <Combobox.ItemIndicator />
-              </Combobox.Item>
-            ))}
+            {groupItems.map((item: any) => {
+              if (!item || !item.value) return null;
+              return (
+                <Combobox.Item item={item} key={item.value}>
+                  <Flex align="center" gap="2" width="100%">
+                    <Text flex="1">{item.label}</Text>
+                  </Flex>
+                  <Combobox.ItemIndicator />
+                </Combobox.Item>
+              );
+            })}
           </Box>
         );
       })}
@@ -112,6 +117,12 @@ interface SafetyScoreConfig {
 }
 
 const safetyScoreAttributes: SafetyScoreConfig[] = [
+  {
+    name: "CycleRAP Score",
+    displayName: "CycleRAP Score",
+    group: "Safety Score",
+    options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
+  },
   {
     name: "VB Band",
     displayName: "Vehicle-Bicycle (VB)",
@@ -421,13 +432,22 @@ export default function AttributesDropdown({
   const getFilteredAttributes = (inputValue: string, currentIndex: number) => {
     let filtered = allAttributes;
 
+    // Get the currently selected attribute for this filter
+    const currentAttribute = selectedAttributes[currentIndex];
+
     // Exclude attributes already selected in other filters
     const selectedAttributeNames = selectedAttributes
       .filter((_, i) => i !== currentIndex) // Exclude current filter
       .filter((attr) => attr !== null) as string[];
 
     filtered = filtered.filter(
-      (attr) => !selectedAttributeNames.includes(attr.value) || attr.value === "Not Selected"
+      (attr) =>
+        // Always include the current filter's value
+        attr.value === currentAttribute ||
+        // Always include "Not Selected"
+        attr.value === "Not Selected" ||
+        // Exclude attributes selected in other filters
+        !selectedAttributeNames.includes(attr.value)
     );
 
     // Apply search filter
@@ -440,10 +460,14 @@ export default function AttributesDropdown({
   };
 
   // Create collections with filtered attributes for each filter
-  const getAttributeCollection = (inputValue: string, currentIndex: number) =>
-    createListCollection({
-      items: getFilteredAttributes(inputValue, currentIndex),
+  const getAttributeCollection = (inputValue: string, currentIndex: number) => {
+    const items = getFilteredAttributes(inputValue, currentIndex);
+    // Ensure all items are valid objects with value and label
+    const validItems = items.filter(item => item && typeof item === 'object' && item.value && item.label);
+    return createListCollection({
+      items: validItems,
     });
+  };
 
   const hasAnyFilter = selectedAttributes.some(attr => attr !== null);
 
@@ -499,7 +523,12 @@ export default function AttributesDropdown({
                     <Combobox.Root
                       collection={attributeCollection}
                       value={[currentValue]}
-                      onValueChange={(e) => handleAttributeChange(index, e.value[0])}
+                      onValueChange={(e) => {
+                        // Only handle the change if a valid value is selected
+                        if (e.value[0]) {
+                          handleAttributeChange(index, e.value[0]);
+                        }
+                      }}
                       inputValue={inputValue}
                       onInputValueChange={(e) => setInputValues(inputValues.map((v, i) => i === index ? e.inputValue : v))}
                     >
@@ -514,7 +543,9 @@ export default function AttributesDropdown({
                         <Combobox.Positioner>
                           <Combobox.Content maxH="400px" overflowY="auto">
                             <Combobox.Empty>No attributes found</Combobox.Empty>
-                            {renderGroupedAttributes(attributeCollection.items)}
+                            {attributeCollection.items.length > 0 ? (
+                              renderGroupedAttributes(attributeCollection.items)
+                            ) : null}
                           </Combobox.Content>
                         </Combobox.Positioner>
                       </Portal>

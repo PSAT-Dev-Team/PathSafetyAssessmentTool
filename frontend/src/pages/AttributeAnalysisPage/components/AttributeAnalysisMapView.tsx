@@ -111,17 +111,31 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return RISK_BAND_COLORS.EXTREME;
   };
 
+  // Initialize default toggles for all active filters when they change
+  useEffect(() => {
+    setCategoryToggles(prev => {
+      const updated = { ...prev };
+      // Initialize toggles for new active filters if they don't exist
+      for (const filterAttr of activeFilters) {
+        if (!updated[filterAttr]) {
+          updated[filterAttr] = {};
+        }
+      }
+      return updated;
+    });
+  }, [activeFilters]);
+
   // Get the attribute to show categories for
   const categoryFilterAttribute = activeFilters[categoryFilterAttributeIndex];
 
   // Helper function to convert numeric attribute value to text using mappings
   const getAttrText = (attrName: string, attrValue: any): string => {
-    // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
+    // Handle safety score band values (VB Band, BB Band, SB Band, BP Band, CycleRAP Score)
     // Backend band indices from calculate_risk_band():
     // 1: score 0-3, 2: score 3-6, 3: score 6-10, 4: score 10-20, 5: score 20+
     //
     // Map to frontend categories (Low: 0-5, Medium: 5-10, High: 10-20, Extreme: 20+)
-    if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(attrName)) {
+    if (["VB Band", "BB Band", "SB Band", "BP Band", "CycleRAP Score"].includes(attrName)) {
       const numValue = Number(attrValue);
       if (isNaN(numValue)) {
         return "Low"; // Default to Low if invalid
@@ -320,7 +334,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     }
 
     // For safety score bands (Low, Medium, High, Extreme), return the direct color mapping
-    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute || "");
+    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "CycleRAP Score"].includes(primaryFocusAttribute || "");
     if (isSafetyScore) {
       return {
         "Low": categoryColors["Low"] as string,
@@ -336,8 +350,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Helper function to get color for a specific attribute and category value
   const getCategoryColor = (attribute: string, category: string): string => {
-    // For Safety Score attributes (VB Band, BB Band, SB Band, BP Band), use the category value directly for color lookup
-    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(attribute);
+    // For Safety Score attributes (VB Band, BB Band, SB Band, BP Band, CycleRAP Score), use the category value directly for color lookup
+    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "CycleRAP Score"].includes(attribute);
 
     const categoryColors: Record<string, string | Record<string, string>> = {
       // Safety Score Band colors (CycleRAP Risk Bands) - these apply to all safety score attributes
@@ -453,6 +467,20 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 // Special handling for "Project" filter
                 if (filterAttr === "Project") {
                   attrValueText = projectData.projectName;
+                } else if (filterAttr === "CycleRAP Score") {
+                  // Special handling for CycleRAP Score - calculate it from scores
+                  if (projectData.scores && projectData.scores.length > i) {
+                    const segmentScores = projectData.scores[i];
+                    const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
+                    const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+
+                    if (scoreValue <= 5) attrValueText = "Low";
+                    else if (scoreValue <= 10) attrValueText = "Medium";
+                    else if (scoreValue <= 20) attrValueText = "High";
+                    else attrValueText = "Extreme";
+                  } else {
+                    attrValueText = "Low"; // Default if no scores
+                  }
                 } else {
                   const attrValue = attributes[filterAttr];
                   attrValueText = getAttrText(filterAttr, attrValue);
@@ -491,23 +519,32 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               pointColor = projectData.color;
               attrValueText = projectData.projectName;
             } else if (primaryFocusAttribute) {
-              // Check if it's a safety band attribute
+              // Check if it's a safety band attribute or CycleRAP Score
               const isSafetyBand = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute);
+              const isCycleRAPScore = primaryFocusAttribute === "CycleRAP Score";
 
-              if (isSafetyBand && projectData.scores && projectData.scores.length > i) {
-                // For safety bands, use the specific crash type score (not the highest of all)
+              if ((isSafetyBand || isCycleRAPScore) && projectData.scores && projectData.scores.length > i) {
+                // For safety bands and CycleRAP Score, use the score value
                 const segmentScores = projectData.scores[i];
-                // Map band name to crash type key (e.g., "SB Band" -> "SB")
-                const crashTypeKey = primaryFocusAttribute.replace(" Band", "");
-                const crashTypeScore = segmentScores[crashTypeKey] || 0;
+
+                let scoreValue = 0;
+                if (isSafetyBand) {
+                  // Map band name to crash type key (e.g., "SB Band" -> "SB")
+                  const crashTypeKey = primaryFocusAttribute.replace(" Band", "");
+                  scoreValue = segmentScores[crashTypeKey] || 0;
+                } else if (isCycleRAPScore) {
+                  // For CycleRAP Score, get the maximum score across all crash types
+                  const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
+                  scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+                }
 
                 // Apply threshold to get color
-                pointColor = getScoreColor(crashTypeScore);
+                pointColor = getScoreColor(scoreValue);
 
-                // Get category label based on the specific crash type score
-                if (crashTypeScore <= 5) attrValueText = "Low";
-                else if (crashTypeScore <= 10) attrValueText = "Medium";
-                else if (crashTypeScore <= 20) attrValueText = "High";
+                // Get category label based on the score
+                if (scoreValue <= 5) attrValueText = "Low";
+                else if (scoreValue <= 10) attrValueText = "Medium";
+                else if (scoreValue <= 20) attrValueText = "High";
                 else attrValueText = "Extreme";
               } else {
                 // Use attribute color for non-safety-band attributes
@@ -553,6 +590,56 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         return;
       }
 
+      // Special handling for CycleRAP Score - always include all risk categories
+      if (categoryFilterAttribute === "CycleRAP Score") {
+        projectData.geoFeatures.forEach((_, i) => {
+          const attributes = projectData.attributes[i];
+          if (attributes && projectData.scores && projectData.scores.length > i) {
+            // Check if this segment matches all OTHER filters
+            let matchesOtherFilters = true;
+            for (const filterAttr of otherFilters) {
+              let attrValueText = "";
+              if (filterAttr === "Project") {
+                attrValueText = projectData.projectName;
+              } else if (filterAttr === "CycleRAP Score") {
+                // Special handling for CycleRAP Score in other filters
+                const segmentScores = projectData.scores[i];
+                const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
+                const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+
+                if (scoreValue <= 5) attrValueText = "Low";
+                else if (scoreValue <= 10) attrValueText = "Medium";
+                else if (scoreValue <= 20) attrValueText = "High";
+                else attrValueText = "Extreme";
+              } else {
+                const attrValue = attributes[filterAttr];
+                attrValueText = getAttrText(filterAttr, attrValue);
+              }
+              if (!attrValueText) {
+                matchesOtherFilters = false;
+                break;
+              }
+            }
+
+            // If matches all other filters, calculate CycleRAP Score category
+            if (matchesOtherFilters) {
+              const segmentScores = projectData.scores[i];
+              const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
+              const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+
+              let category = "Low";
+              if (scoreValue <= 5) category = "Low";
+              else if (scoreValue <= 10) category = "Medium";
+              else if (scoreValue <= 20) category = "High";
+              else category = "Extreme";
+
+              categoriesInFilteredData.add(category);
+            }
+          }
+        });
+        return;
+      }
+
       projectData.geoFeatures.forEach((_, i) => {
         const attributes = projectData.attributes[i];
         if (attributes) {
@@ -562,6 +649,20 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
             let attrValueText = "";
             if (filterAttr === "Project") {
               attrValueText = projectData.projectName;
+            } else if (filterAttr === "CycleRAP Score") {
+              // Special handling for CycleRAP Score in other filters
+              if (projectData.scores && projectData.scores.length > i) {
+                const segmentScores = projectData.scores[i];
+                const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
+                const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+
+                if (scoreValue <= 5) attrValueText = "Low";
+                else if (scoreValue <= 10) attrValueText = "Medium";
+                else if (scoreValue <= 20) attrValueText = "High";
+                else attrValueText = "Extreme";
+              } else {
+                attrValueText = "Low";
+              }
             } else {
               const attrValue = attributes[filterAttr];
               attrValueText = getAttrText(filterAttr, attrValue);
@@ -586,7 +687,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
     // Sort categories with special handling for safety score bands and facility width
     const categories = Array.from(categoriesInFilteredData);
-    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(categoryFilterAttribute || "");
+    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "CycleRAP Score"].includes(categoryFilterAttribute || "");
 
     if (isSafetyScore) {
       // For safety score, sort in the order: Low, Medium, High, Extreme
@@ -779,8 +880,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           if (bIndex === -1) return -1;
           return aIndex - bIndex;
         });
-      } else if (["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute)) {
-        // For safety score bands, sort in the order: Low, Medium, High, Extreme
+      } else if (["VB Band", "BB Band", "SB Band", "BP Band", "CycleRAP Score"].includes(primaryFocusAttribute)) {
+        // For safety score bands and CycleRAP Score, sort in the order: Low, Medium, High, Extreme
         const riskOrder = ["Low", "Medium", "High", "Extreme"];
         return chartData.sort((a, b) => {
           const aIndex = riskOrder.indexOf(a.category);
@@ -915,8 +1016,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 </Box>
               )}
 
-              {/* Category Toggles - Only show when an attribute (not Project) is selected */}
-              {primaryFocusAttribute && primaryFocusAttribute !== "Project" && availableCategories.length > 0 && (
+              {/* Category/Project Toggles - Show when filtering by categories or Project */}
+              {((primaryFocusAttribute && primaryFocusAttribute !== "Project" && availableCategories.length > 0) || (primaryFocusAttribute === "Project" && selectedProjects.length > 0)) && (
                 <Box mb="3" pb="3" borderBottom="1px solid" borderColor="gray.200">
                   <Flex justify="space-between" align="center" mb="3">
                     <Text fontSize="xs" fontWeight="semibold" color="gray.600" _dark={{ color: "gray.300" }}>
@@ -942,9 +1043,11 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                     {activeFilters.length > 1 ? `Showing categories for: ${categoryFilterAttribute}` : categoryFilterAttribute}
                   </Text>
                   <HStack gap="4" flexWrap="wrap">
-                    {availableCategories.map((category) => {
-                      // Get the hex color from getCategoryColor
-                      const hexColor = getCategoryColor(categoryFilterAttribute, category);
+                    {(categoryFilterAttribute === "Project" ? selectedProjects : availableCategories).map((category) => {
+                      // Get the hex color from getCategoryColor or projectColors for projects
+                      const hexColor = categoryFilterAttribute === "Project"
+                        ? projectColors[category]
+                        : getCategoryColor(categoryFilterAttribute, category);
 
                       // Map hex colors to Chakra color palettes for Switch component styling
                       const colorMap: Record<string, string> = {
@@ -961,9 +1064,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                         "#DC2626": "red",
                         // Yellow/Orange shades
                         "#F59E0B": "orange",
-                        // Blue/Purple shades
+                        "#CA8A04": "yellow",     // Project Yellow
+                        "#EA580C": "orange",     // Project Orange
+                        // Blue/Purple/Cyan shades
                         "#2563EB": "blue",
                         "#9333EA": "purple",
+                        "#0891B2": "cyan",       // Cyan
+                        "#DB2777": "pink",       // Pink
                         // Default
                         "#6B7280": "gray",
                       };
@@ -972,6 +1079,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
                       return (
                         <Flex key={category} align="center" gap="2">
+                          {categoryFilterAttribute === "Project" && (
+                            <Box
+                              w="12px"
+                              h="12px"
+                              borderRadius="full"
+                              bg={hexColor}
+                            />
+                          )}
                           <div style={{ fontSize: "14px", fontWeight: "500", color: hexColor }}>
                             {category}
                           </div>
@@ -985,51 +1100,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                                 [categoryFilterAttribute]: {
                                   ...prev[categoryFilterAttribute],
                                   [category]: e.checked
-                                }
-                              }));
-                            }}
-                          />
-                        </Flex>
-                      );
-                    })}
-                  </HStack>
-                </Box>
-              )}
-
-              {/* Project Filter Toggles - Show when "Project" is in active filters OR is the Primary Focus */}
-              {(activeFilters.includes("Project") || primaryFocusAttribute === "Project") && selectedProjects.length > 0 && (
-                <Box mb="3" pb="3" borderBottom="1px solid" borderColor="gray.200">
-                  <Text fontSize="xs" fontWeight="semibold" color="gray.600" _dark={{ color: "gray.300" }} mb="3">
-                    Filter Projects:
-                  </Text>
-                  <HStack gap="4" flexWrap="wrap">
-                    {selectedProjects.map((project) => {
-                      const colorPalette = "blue";
-                      return (
-                        <Flex key={project} align="center" gap="2">
-                          <Box
-                            w="12px"
-                            h="12px"
-                            borderRadius="full"
-                            bg={projectColors[project]}
-                          />
-                          <Text
-                            fontSize="sm"
-                            fontWeight="medium"
-                            color={categoryToggles["Project"]?.[project] ? "blue.600" : "gray.500"}
-                          >
-                            {project}
-                          </Text>
-                          <Switch
-                            colorPalette={colorPalette}
-                            size="sm"
-                            checked={categoryToggles["Project"]?.[project] !== false}
-                            onCheckedChange={(e) => {
-                              setCategoryToggles(prev => ({
-                                ...prev,
-                                "Project": {
-                                  ...prev["Project"],
-                                  [project]: e.checked
                                 }
                               }));
                             }}
@@ -1075,8 +1145,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                         let categories = Array.from(new Set(allPoints.map(p => p.attributeValue)))
                           .filter(val => val); // Remove empty values
 
-                        // Special sorting for safety score attributes
-                        const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute || "");
+                        // Special sorting for safety score attributes and CycleRAP Score
+                        const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "CycleRAP Score"].includes(primaryFocusAttribute || "");
                         if (isSafetyScore) {
                           const riskOrder = ["Low", "Medium", "High", "Extreme"];
                           categories.sort((a, b) => {
