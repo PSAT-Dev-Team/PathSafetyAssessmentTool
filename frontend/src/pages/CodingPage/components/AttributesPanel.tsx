@@ -329,7 +329,17 @@ export default function AttributesPanel({
                               <NativeSelect.Field
                                 value={strVal}
                                 onChange={(e) => {
-                                  const val = e.target.value === "" ? null : e.target.value;
+                                  let val: string | number | boolean | null = e.target.value === "" ? null : e.target.value;
+
+                                  // Convert to original value's type if needed
+                                  if (val !== null && originalRow) {
+                                    const originalValue = originalRow[k];
+                                    // If original was a number, convert the string to a number
+                                    if (typeof originalValue === 'number' && typeof val === 'string' && !Number.isNaN(Number(val))) {
+                                      val = Number(val);
+                                    }
+                                  }
+
                                   onChange?.(k, val);
                                   onEdit?.(k, val);
                                 }}
