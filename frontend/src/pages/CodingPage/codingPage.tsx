@@ -684,13 +684,8 @@ export default function CodingPage() {
         const originals = JSON.parse(stored) as AttributeRow[];
         if (Array.isArray(originals) && currentIndex < originals.length) {
           const original = originals[currentIndex];
-          console.log(`[DEBUG] Retrieved original for row ${currentIndex}:`, original);
           return original || null;
-        } else {
-          console.warn(`[DEBUG] Array validation failed. Array.isArray=${Array.isArray(originals)}, length=${originals?.length}, currentIndex=${currentIndex}`);
         }
-      } else {
-        console.warn(`[DEBUG] No stored original values found for key: autocode_original_${currentProjectName}`);
       }
     } catch (e) {
       console.warn("Failed to retrieve original autocode values:", e);
@@ -819,7 +814,6 @@ export default function CodingPage() {
     });
 
     // Dispatch event to notify validation component of attribute change
-    console.log(`[DEBUG editCurrentAttr] Dispatching event: field=${field}, value=${value}, rowIndex=${currentIndex}`);
     window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
       detail: { projectName: currentProjectName, rowIndex: currentIndex, field, value }
     }));

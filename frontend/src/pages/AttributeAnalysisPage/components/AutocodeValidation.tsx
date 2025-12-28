@@ -185,7 +185,6 @@ export default function AutocodeValidation({
 
     // Use loaded original values, or attributes if no originals exist
     const valuesToCompare = originalValues.length > 0 ? originalValues : attributes;
-    console.log(`[DEBUG AutocodeValidation] Recalculating stats. Original values count: ${originalValues.length}, Current attributes count: ${attributes.length}`);
 
     // Calculate stats for each attribute group
     for (const group of GROUP_ORDER) {
@@ -236,8 +235,7 @@ export default function AutocodeValidation({
 
   // Listen for attribute changes from CodingPage
   useEffect(() => {
-    const handleAttributeChange = (event: any) => {
-      console.log(`[DEBUG AutocodeValidation] Event received:`, event.type, event.detail);
+    const handleAttributeChange = () => {
       // Trigger recalculation on attribute changes
       setUpdateTrigger(prev => prev + 1);
     };

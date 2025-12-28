@@ -211,33 +211,18 @@ export default function AttributesPanel({
 
   // Check if a field value differs from the original autocode value
   const isManuallyEdited = (key: string, currentValue: any): boolean => {
-    if (!originalRow) {
-      console.warn(`[DEBUG isManuallyEdited] No originalRow available`);
-      return false;
-    }
+    if (!originalRow) return false;
     const originalValue = originalRow[key];
     // Use strict comparison to detect any change from original
     // Handle null/undefined as equivalent
     if (currentValue === null || currentValue === undefined) {
-      const result = originalValue !== null && originalValue !== undefined;
-      if (result) {
-        console.log(`[DEBUG isManuallyEdited] Key "${key}": currentValue=${currentValue}, originalValue=${originalValue}, isEdited=${result}`);
-      }
-      return result;
+      return originalValue !== null && originalValue !== undefined;
     }
     if (originalValue === null || originalValue === undefined) {
-      const result = currentValue !== null && currentValue !== undefined;
-      if (result) {
-        console.log(`[DEBUG isManuallyEdited] Key "${key}": currentValue=${currentValue}, originalValue=${originalValue}, isEdited=${result}`);
-      }
-      return result;
+      return currentValue !== null && currentValue !== undefined;
     }
     // For non-null values, compare directly
-    const result = currentValue !== originalValue;
-    if (result) {
-      console.log(`[DEBUG isManuallyEdited] Key "${key}": currentValue=${currentValue}, originalValue=${originalValue}, isEdited=${result}`);
-    }
-    return result;
+    return currentValue !== originalValue;
   };
 
   // collect groups with fields (for tabs)

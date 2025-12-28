@@ -20,19 +20,8 @@ interface EditProjectModalProps {
   onSuccess: (newName: string, newTags: string[]) => void;
 }
 
-// Get border color for Pre/Post tags
-function getTagBorderColor(tag: string): string {
-  if (tag === "Pre") return "#fb923c"; // orange.emphasized
-  if (tag === "Post") return "#22c55e"; // green.emphasized
-  return "rgba(0, 0, 0, 0.1)";
-}
-
 // Generate a consistent, bright, varied color for each unique tag (same as home.tsx)
 function getTagColor(tag: string): string {
-  // Fixed colors for Pre/Post - matching the analysis pages (orange.subtle and green.subtle)
-  if (tag === "Pre") return "#fed7aa"; // orange.subtle
-  if (tag === "Post") return "#bbf7d0"; // green.subtle
-
   let hash = 0;
   for (let i = 0; i < tag.length; i++) {
     hash = tag.charCodeAt(i) + ((hash << 5) - hash);
@@ -94,15 +83,6 @@ export default function EditProjectModal({
   }
 
   function removeTag(tagToRemove: string) {
-    // Prevent removal of Pre/Post tags
-    if (tagToRemove === "Pre" || tagToRemove === "Post") {
-      toaster.create({
-        title: "Cannot Remove Tag",
-        description: "Pre and Post tags are compulsory and cannot be removed.",
-        type: "warning",
-      });
-      return;
-    }
     setTags(tags.filter((t) => t !== tagToRemove));
   }
 
@@ -184,30 +164,24 @@ export default function EditProjectModal({
                 <Text className="edit-form-label">Tags</Text>
                 <Box className="tag-input-container">
                   <Box className="tag-input-wrapper">
-                    {tags.map((tag) => {
-                      const isCompulsory = tag === "Pre" || tag === "Post";
-                      return (
-                        <Box
-                          key={tag}
-                          className="tag-chip"
-                          style={{
-                            backgroundColor: getTagColor(tag),
-                            borderColor: getTagBorderColor(tag),
-                          }}
+                    {tags.map((tag) => (
+                      <Box
+                        key={tag}
+                        className="tag-chip"
+                        style={{
+                          backgroundColor: getTagColor(tag),
+                        }}
+                      >
+                        <span className="tag-chip-text">{tag}</span>
+                        <button
+                          className="tag-chip-remove"
+                          onClick={() => removeTag(tag)}
+                          aria-label={`Remove ${tag}`}
                         >
-                          <span className="tag-chip-text">{tag}</span>
-                          {!isCompulsory && (
-                            <button
-                              className="tag-chip-remove"
-                              onClick={() => removeTag(tag)}
-                              aria-label={`Remove ${tag}`}
-                            >
-                              ×
-                            </button>
-                          )}
-                        </Box>
-                      );
-                    })}
+                          ×
+                        </button>
+                      </Box>
+                    ))}
                     <Input
                       value={tagInput}
                       onChange={(e) => setTagInput(e.target.value)}

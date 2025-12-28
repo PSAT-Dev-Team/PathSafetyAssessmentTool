@@ -18,19 +18,8 @@ interface FileListResponse {
   projects: ProjectListItem[];
 }
 
-// Get border color for Pre/Post tags
-function getTagBorderColor(tag: string): string {
-  if (tag === "Pre") return "#fb923c"; // orange.emphasized
-  if (tag === "Post") return "#22c55e"; // green.emphasized
-  return "rgba(0, 0, 0, 0.1)";
-}
-
 // Generate a consistent, bright, varied color for each unique tag
 function getTagColor(tag: string): string {
-  // Fixed colors for Pre/Post - matching the analysis pages (orange.subtle and green.subtle)
-  if (tag === "Pre") return "#fed7aa"; // orange.subtle
-  if (tag === "Post") return "#bbf7d0"; // green.subtle
-
   // Simple hash function to convert string to number
   let hash = 0;
   for (let i = 0; i < tag.length; i++) {
@@ -306,8 +295,6 @@ export default function Home() {
             ) : (
               filtered.map((p) => {
                 const isSelected = selected.has(p.name);
-                // Get all other tags (excluding Pre/Post)
-                const otherTags = p.tags?.filter(tag => tag !== "Pre" && tag !== "Post") || [];
 
                 return (
                   <tr
@@ -332,14 +319,13 @@ export default function Home() {
                     </td>
                     <td>
                       <div className="tags-container">
-                        {otherTags.length > 0 ? (
-                          otherTags.map((tag) => (
+                        {p.tags && p.tags.length > 0 ? (
+                          p.tags.map((tag) => (
                             <span
                               key={tag}
                               className="tag-badge"
                               style={{
                                 backgroundColor: getTagColor(tag),
-                                borderColor: getTagBorderColor(tag),
                                 borderWidth: "1px",
                                 borderStyle: "solid",
                               }}

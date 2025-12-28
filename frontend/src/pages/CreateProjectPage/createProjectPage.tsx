@@ -11,26 +11,13 @@ import {
   Select,
   Portal,
   createListCollection,
-  Flex,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { listSourceFolders, createProjectFromFolder } from "../../api";
-import { Switch } from "../../components/ui/switch";
 import "../Projects/components/EditProjectModal.css";
-
-// Get border color for Pre/Post tags
-function getTagBorderColor(tag: string): string {
-  if (tag === "Pre") return "#fb923c"; // orange.emphasized
-  if (tag === "Post") return "#22c55e"; // green.emphasized
-  return "rgba(0, 0, 0, 0.1)";
-}
 
 // Generate a consistent, bright, varied color for each unique tag (same as EditProjectModal)
 function getTagColor(tag: string): string {
-  // Fixed colors for Pre/Post - matching the analysis pages (orange.subtle and green.subtle)
-  if (tag === "Pre") return "#fed7aa"; // orange.subtle
-  if (tag === "Post") return "#bbf7d0"; // green.subtle
-
   let hash = 0;
   for (let i = 0; i < tag.length; i++) {
     hash = tag.charCodeAt(i) + ((hash << 5) - hash);
@@ -57,7 +44,6 @@ export default function CreateProjectPage() {
   const [folder, setFolder] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
-  const [phase, setPhase] = useState<"Pre" | "Post">("Pre");
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -108,13 +94,7 @@ export default function CreateProjectPage() {
     try {
       setCreating(true);
       setErr(null);
-      // Combine user tags with the compulsory phase tag
-      const allTags = [...tags];
-      // Always ensure the phase tag is included
-      if (!allTags.includes(phase)) {
-        allTags.push(phase);
-      }
-      const data = await createProjectFromFolder(name.trim(), folder, allTags);
+      const data = await createProjectFromFolder(name.trim(), folder, tags);
       const proj = data?.name ?? name.trim();
       nav(`/coding/${encodeURIComponent(proj)}`);
     } catch (e: any) {
@@ -159,36 +139,6 @@ export default function CreateProjectPage() {
           </Box>
 
           <Box>
-            <Text fontSize="sm" mb={2}>
-              Project Phase
-            </Text>
-            <Flex align="center" gap={3}>
-              <Text
-                fontSize="sm"
-                fontWeight={phase === "Pre" ? "semibold" : "normal"}
-                color={phase === "Pre" ? "orange.600" : "gray.500"}
-              >
-                Pre-Treatment
-              </Text>
-              <Switch
-                checked={phase === "Post"}
-                onCheckedChange={(e) => setPhase(e.checked ? "Post" : "Pre")}
-                colorPalette={phase === "Post" ? "green" : "orange"}
-              />
-              <Text
-                fontSize="sm"
-                fontWeight={phase === "Post" ? "semibold" : "normal"}
-                color={phase === "Post" ? "green.600" : "gray.500"}
-              >
-                Post-Treatment
-              </Text>
-            </Flex>
-            <Text color="gray.500" fontSize="xs" mt={1}>
-              This tag will be automatically added to the project
-            </Text>
-          </Box>
-
-          <Box>
             <Text fontSize="sm" mb={1}>
               Tags (optional)
             </Text>
@@ -200,7 +150,6 @@ export default function CreateProjectPage() {
                     className="tag-chip"
                     style={{
                       backgroundColor: getTagColor(tag),
-                      borderColor: getTagBorderColor(tag),
                     }}
                   >
                     <span className="tag-chip-text">{tag}</span>
