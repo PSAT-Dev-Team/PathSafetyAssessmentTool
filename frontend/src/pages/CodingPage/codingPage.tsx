@@ -43,6 +43,7 @@ import "../../components/visualization/curvature/CurvatureVisualizationPanel.css
 import { WidthVisualizationPanel } from "../../components/visualization/width/WidthVisualizationPanel";
 import "../../components/visualization/width/WidthVisualizationPanel.css";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
+import AutocodeValidation from "../AttributeAnalysisPage/components/AutocodeValidation";
 
 
 type ProjectDetail = { name: string; versions: string[]; latest: string };
@@ -643,9 +644,18 @@ export default function CodingPage() {
 
         if (cancelled) return;
 
+        const attributes = a?.rows ?? [];
+
+        // Store original autocode values in sessionStorage for validation tracking
+        try {
+          sessionStorage.setItem(`autocode_original_${currentProjectName}`, JSON.stringify(attributes));
+        } catch {
+          console.warn("Failed to store original autocode values");
+        }
+
         updateProjectData(currentProjectName, {
           detail: d ?? null,
-          attrs: a?.rows ?? [],
+          attrs: attributes,
           geoFeatures: gjson?.features ?? [],
           currentPage: 1,
           editedRow: null,
@@ -664,6 +674,29 @@ export default function CodingPage() {
 
     return () => { cancelled = true; };
   }, [currentProjectName]);
+
+  // Get original autocode values for current row
+  const originalCurrentAttr = useMemo<AttributeRow | null>(() => {
+    if (!currentProjectName || currentIndex < 0) return null;
+    try {
+      const stored = sessionStorage.getItem(`autocode_original_${currentProjectName}`);
+      if (stored) {
+        const originals = JSON.parse(stored) as AttributeRow[];
+        if (Array.isArray(originals) && currentIndex < originals.length) {
+          const original = originals[currentIndex];
+          console.log(`[DEBUG] Retrieved original for row ${currentIndex}:`, original);
+          return original || null;
+        } else {
+          console.warn(`[DEBUG] Array validation failed. Array.isArray=${Array.isArray(originals)}, length=${originals?.length}, currentIndex=${currentIndex}`);
+        }
+      } else {
+        console.warn(`[DEBUG] No stored original values found for key: autocode_original_${currentProjectName}`);
+      }
+    } catch (e) {
+      console.warn("Failed to retrieve original autocode values:", e);
+    }
+    return null;
+  }, [currentProjectName, currentIndex]);
 
   // Auto-calculate scores on project load
   useEffect(() => {
@@ -784,6 +817,12 @@ export default function CodingPage() {
         i === currentIndex ? updatedRow : row
       ),
     });
+
+    // Dispatch event to notify validation component of attribute change
+    console.log(`[DEBUG editCurrentAttr] Dispatching event: field=${field}, value=${value}, rowIndex=${currentIndex}`);
+    window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+      detail: { projectName: currentProjectName, rowIndex: currentIndex, field, value }
+    }));
 
     const currentIdx = currentIndex;
 
@@ -1055,6 +1094,7 @@ export default function CodingPage() {
           <Box flex="1 1 auto" minH={0}>
             <AttributesPanel
               row={editedRow}
+              originalRow={originalCurrentAttr}
               mappings={attrMappings}
               panelHeight={PANEL_HEIGHT - CONTROLS_H}
               onChange={onAttrChange}
@@ -1133,6 +1173,14 @@ export default function CodingPage() {
             />
           </GridItem>
         )}
+
+        <GridItem colSpan={{ base: 1, md: 2 }}>
+          <AutocodeValidation
+            projectName={currentProjectName!}
+            attributes={attrs}
+            panelHeight={350}
+          />
+        </GridItem>
 
         <GridItem colSpan={{ base: 1, md: 2 }}>
           <Box

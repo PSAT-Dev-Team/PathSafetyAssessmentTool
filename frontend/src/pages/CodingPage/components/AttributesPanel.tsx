@@ -15,6 +15,7 @@ import {
 /** ====== Props ====== */
 type Props = {
   row: AttributeRow | null;
+  originalRow?: AttributeRow | null; // Original autocode values for comparison
   mappings?: AttrMappings;
   panelHeight?: number; // px
   onChange?: (key: string, value: string | number | boolean | null) => void;
@@ -195,6 +196,7 @@ const toDisplayString = (v: unknown): string => {
 /** ====== Component ====== */
 export default function AttributesPanel({
   row,
+  originalRow,
   mappings = {},
   panelHeight = 420,
   onChange,
@@ -206,6 +208,37 @@ export default function AttributesPanel({
 
   // Create a Set for fast lookup of changed fields
   const changedFieldsSet = useMemo(() => new Set(changedFields), [changedFields]);
+
+  // Check if a field value differs from the original autocode value
+  const isManuallyEdited = (key: string, currentValue: any): boolean => {
+    if (!originalRow) {
+      console.warn(`[DEBUG isManuallyEdited] No originalRow available`);
+      return false;
+    }
+    const originalValue = originalRow[key];
+    // Use strict comparison to detect any change from original
+    // Handle null/undefined as equivalent
+    if (currentValue === null || currentValue === undefined) {
+      const result = originalValue !== null && originalValue !== undefined;
+      if (result) {
+        console.log(`[DEBUG isManuallyEdited] Key "${key}": currentValue=${currentValue}, originalValue=${originalValue}, isEdited=${result}`);
+      }
+      return result;
+    }
+    if (originalValue === null || originalValue === undefined) {
+      const result = currentValue !== null && currentValue !== undefined;
+      if (result) {
+        console.log(`[DEBUG isManuallyEdited] Key "${key}": currentValue=${currentValue}, originalValue=${originalValue}, isEdited=${result}`);
+      }
+      return result;
+    }
+    // For non-null values, compare directly
+    const result = currentValue !== originalValue;
+    if (result) {
+      console.log(`[DEBUG isManuallyEdited] Key "${key}": currentValue=${currentValue}, originalValue=${originalValue}, isEdited=${result}`);
+    }
+    return result;
+  };
 
   // collect groups with fields (for tabs)
   const groupsWithFields = useMemo(() => {
@@ -261,6 +294,7 @@ export default function AttributesPanel({
                       const dict = mappings[k];
                       const strVal: string = toDisplayString(v);
                       const isChanged = changedFieldsSet.has(k);
+                      const isEdited = isManuallyEdited(k, v);
                       const source = fieldSources[k]; // "CV" | "GIS" | undefined
 
                       return (
@@ -271,9 +305,9 @@ export default function AttributesPanel({
                           gap="1"
                           p="2"
                           borderRadius="md"
-                          bg={isChanged ? "yellow.100" : "transparent"}
-                          borderWidth={isChanged ? "2px" : "0px"}
-                          borderColor={isChanged ? "yellow.500" : "transparent"}
+                          bg={isChanged ? "yellow.100" : isEdited ? "red.50" : "transparent"}
+                          borderWidth={isChanged || isEdited ? "2px" : "0px"}
+                          borderColor={isChanged ? "yellow.500" : isEdited ? "red.200" : "transparent"}
                           transition="all 0.2s"
                         >
                           <Text
@@ -283,6 +317,11 @@ export default function AttributesPanel({
                           >
                             {k}
                             {isChanged && source && ` ✨ (${source})`}
+                            {isEdited && !isChanged && (
+                              <Text as="span" color="red.600" fontWeight="bold" ml="1">
+                                (Manual Edit Done)
+                              </Text>
+                            )}
                           </Text>
 
                           {dict ? (
