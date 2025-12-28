@@ -152,6 +152,24 @@ export default function AutocodeValidation({
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<(typeof GROUP_ORDER)[number]>("Facility configuration");
 
+  // Normalize attribute values to consistent types (convert numeric strings to numbers)
+  const normalizeAttributeValues = (attrs: AttributeRow[]): AttributeRow[] => {
+    return attrs.map(row => {
+      const normalized: AttributeRow = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (value === null || value === undefined) {
+          normalized[key] = value;
+        } else if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value)) {
+          // Convert numeric strings to numbers
+          normalized[key] = Number(value);
+        } else {
+          normalized[key] = value;
+        }
+      }
+      return normalized;
+    });
+  };
+
   // Load original autocode values from sessionStorage
   const loadOriginalValues = (): AttributeRow[] => {
     try {
@@ -174,10 +192,11 @@ export default function AutocodeValidation({
     // Load original values
     const originalValues = loadOriginalValues();
 
-    // If no original values exist, this is the first load - store current as original
+    // If no original values exist, this is the first load - store current as original (normalized)
     if (originalValues.length === 0) {
       try {
-        sessionStorage.setItem(`autocode_original_${projectName}`, JSON.stringify(attributes));
+        const normalized = normalizeAttributeValues(attributes);
+        sessionStorage.setItem(`autocode_original_${projectName}`, JSON.stringify(normalized));
       } catch {
         console.warn("Failed to store original autocode values");
       }
@@ -204,8 +223,31 @@ export default function AutocodeValidation({
           const currentValue = attributes[i]?.[realKey];
           const originalValue = valuesToCompare[i]?.[realKey];
 
-          // Strict comparison: values must be exactly the same (including type)
-          const isChanged = currentValue !== originalValue;
+          // Determine if value has changed from original
+          let isChanged = true;
+
+          // Handle null/undefined as equivalent
+          if ((currentValue === null || currentValue === undefined) &&
+              (originalValue === null || originalValue === undefined)) {
+            isChanged = false;
+          }
+          // Strict comparison first (same type, same value)
+          else if (currentValue === originalValue) {
+            isChanged = false;
+          }
+          // Type-aware comparison for numeric values
+          else if (typeof currentValue === 'number' && typeof originalValue === 'string') {
+            const parsedOriginal = Number(originalValue);
+            if (!Number.isNaN(parsedOriginal) && currentValue === parsedOriginal) {
+              isChanged = false;
+            }
+          }
+          else if (typeof currentValue === 'string' && typeof originalValue === 'number') {
+            const parsedCurrent = Number(currentValue);
+            if (!Number.isNaN(parsedCurrent) && parsedCurrent === originalValue) {
+              isChanged = false;
+            }
+          }
 
           if (isChanged) {
             changedCount++;

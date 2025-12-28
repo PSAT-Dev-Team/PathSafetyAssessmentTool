@@ -253,6 +253,38 @@ export default function CodingPage() {
     [currentIndex, currentProjectName]
   );
 
+  // Normalize attribute values to consistent types (convert numeric strings to numbers)
+  const normalizeAttributeValues = (attrs: AttributeRow[]): AttributeRow[] => {
+    return attrs.map(row => {
+      const normalized: AttributeRow = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (value === null || value === undefined) {
+          normalized[key] = value;
+        } else if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value)) {
+          // Convert numeric strings to numbers
+          normalized[key] = Number(value);
+        } else {
+          normalized[key] = value;
+        }
+      }
+      return normalized;
+    });
+  };
+
+  // Update the autocode baseline after autocode runs
+  const updateAutocodeBaseline = useCallback(
+    (updatedAttrs: AttributeRow[]) => {
+      if (!currentProjectName) return;
+      try {
+        const normalized = normalizeAttributeValues(updatedAttrs);
+        sessionStorage.setItem(`autocode_original_${currentProjectName}`, JSON.stringify(normalized));
+      } catch (e) {
+        console.warn("Failed to update autocode baseline:", e);
+      }
+    },
+    [currentProjectName]
+  );
+
   // Auto-code one segment
   useEffect(() => {
     if (!currentProjectName) return;
@@ -307,6 +339,12 @@ export default function CodingPage() {
 
         applyUpdatesToCurrentRow(merged);
 
+        // Update autocode baseline with new values
+        const updatedAttrs = attrs.map((row, i) =>
+          i === currentIndex ? { ...row, ...merged } : row
+        );
+        updateAutocodeBaseline(updatedAttrs);
+
         setProgress(95);
         if (currentProjectName && currentIndex !== undefined && attrs[currentIndex]) {
           try {
@@ -348,7 +386,7 @@ export default function CodingPage() {
 
     window.addEventListener("psat:autocode:one", handler);
     return () => window.removeEventListener("psat:autocode:one", handler);
-  }, [currentProjectName, imgRef, currentFeature, applyUpdatesToCurrentRow, currentIndex, attrs, scores, changedFieldsByRow, fieldSourcesByRow]);
+  }, [currentProjectName, imgRef, currentFeature, applyUpdatesToCurrentRow, updateAutocodeBaseline, currentIndex, attrs, scores, changedFieldsByRow, fieldSourcesByRow]);
 
   // Auto-code all segments
   useEffect(() => {
@@ -408,6 +446,9 @@ export default function CodingPage() {
               fieldSourcesByRow: allSourcesByRow,
             });
 
+            // Update autocode baseline with new values from all segments
+            updateAutocodeBaseline(a.rows);
+
             // Recalculate scores
             const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/score`, {
               method: "POST",
@@ -459,7 +500,7 @@ export default function CodingPage() {
 
     window.addEventListener("psat:autocode:all", handler);
     return () => window.removeEventListener("psat:autocode:all", handler);
-  }, [currentProjectName, attrs.length]);
+  }, [currentProjectName, attrs.length, updateAutocodeBaseline]);
 
   // Auto-code all segments in all loaded projects
   useEffect(() => {
@@ -554,6 +595,13 @@ export default function CodingPage() {
                   fieldSourcesByRow: projectSourcesByRow,
                 });
 
+                // Update autocode baseline for this project
+                try {
+                  sessionStorage.setItem(`autocode_original_${projectName}`, JSON.stringify(a.rows));
+                } catch (e) {
+                  console.warn("Failed to update autocode baseline for project:", projectName, e);
+                }
+
                 // Recalculate scores
                 const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/score`, {
                   method: "POST",
@@ -646,9 +694,23 @@ export default function CodingPage() {
 
         const attributes = a?.rows ?? [];
 
-        // Store original autocode values in sessionStorage for validation tracking
+        // Store original autocode values in sessionStorage for validation tracking (normalized for consistent types)
         try {
-          sessionStorage.setItem(`autocode_original_${currentProjectName}`, JSON.stringify(attributes));
+          // Normalize numeric strings to numbers for consistent comparison
+          const normalized = attributes.map(row => {
+            const normalizedRow: AttributeRow = {};
+            for (const [key, value] of Object.entries(row)) {
+              if (value === null || value === undefined) {
+                normalizedRow[key] = value;
+              } else if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value)) {
+                normalizedRow[key] = Number(value);
+              } else {
+                normalizedRow[key] = value;
+              }
+            }
+            return normalizedRow;
+          });
+          sessionStorage.setItem(`autocode_original_${currentProjectName}`, JSON.stringify(normalized));
         } catch {
           console.warn("Failed to store original autocode values");
         }

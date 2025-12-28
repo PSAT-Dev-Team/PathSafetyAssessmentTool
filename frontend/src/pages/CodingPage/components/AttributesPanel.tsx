@@ -213,7 +213,7 @@ export default function AttributesPanel({
   const isManuallyEdited = (key: string, currentValue: any): boolean => {
     if (!originalRow) return false;
     const originalValue = originalRow[key];
-    // Use strict comparison to detect any change from original
+
     // Handle null/undefined as equivalent
     if (currentValue === null || currentValue === undefined) {
       return originalValue !== null && originalValue !== undefined;
@@ -221,8 +221,29 @@ export default function AttributesPanel({
     if (originalValue === null || originalValue === undefined) {
       return currentValue !== null && currentValue !== undefined;
     }
-    // For non-null values, compare directly
-    return currentValue !== originalValue;
+
+    // Strict comparison first (same type, same value)
+    if (currentValue === originalValue) {
+      return false;
+    }
+
+    // Type-aware comparison for numeric values
+    // If one is a number and one is a string, try numeric comparison
+    if (typeof currentValue === 'number' && typeof originalValue === 'string') {
+      const parsedOriginal = Number(originalValue);
+      if (!Number.isNaN(parsedOriginal) && currentValue === parsedOriginal) {
+        return false;
+      }
+    }
+    if (typeof currentValue === 'string' && typeof originalValue === 'number') {
+      const parsedCurrent = Number(currentValue);
+      if (!Number.isNaN(parsedCurrent) && parsedCurrent === originalValue) {
+        return false;
+      }
+    }
+
+    // If we get here, values are genuinely different
+    return true;
   };
 
   // collect groups with fields (for tabs)
