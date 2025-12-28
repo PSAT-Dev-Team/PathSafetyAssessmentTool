@@ -511,11 +511,12 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               }
 
               // Check if this filter attribute's category toggle is enabled
+              // Use ?? true to default to true when toggle is not set (all categories visible by default)
               const filterToggles = categoryToggles[filterAttr];
               if (filterToggles && Object.keys(filterToggles).length > 0) {
                 // If toggles exist for this attribute, check if the current value is enabled
-                const isToggled = filterToggles[attrValueText];
-                if (isToggled === false) {
+                const isToggled = filterToggles[attrValueText] ?? true;
+                if (!isToggled) {
                   matchesAllFilters = false;
                   break;
                 }
