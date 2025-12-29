@@ -2335,3 +2335,109 @@ def autocode_all(project_name: str):
     except Exception as e:
         traceback.print_exc()
         return fail(f"autocode_all error: {e}", 500)
+
+
+# ===== Baseline Management Endpoints =====
+
+@bp.get("/<project_name>/baseline/exists")
+def baseline_exists(project_name: str):
+    """Check if baseline CSV exists for a project."""
+    try:
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        proj = pm.project(project_name)
+
+        baseline_path = proj.project_path / "baseline" / f"{project_name}_baseline.csv"
+        exists = baseline_path.exists()
+
+        return ok({"exists": exists})
+    except KeyError:
+        return fail("Project not found", 404)
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"Error checking baseline: {e}", 500)
+
+
+@bp.get("/<project_name>/baseline")
+def get_baseline(project_name: str):
+    """
+    Get baseline CSV as JSON array of row dictionaries.
+
+    Response:
+        {
+            "ok": true,
+            "rows": [
+                {"Facility Type": 2, "Area type": 1, ...},
+                ...
+            ]
+        }
+    """
+    try:
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        proj = pm.project(project_name)
+
+        baseline_path = proj.project_path / "baseline" / f"{project_name}_baseline.csv"
+
+        if not baseline_path.exists():
+            return ok({"rows": []})  # No baseline yet
+
+        # Read CSV and convert to JSON
+        baseline_df = pd.read_csv(baseline_path)
+        rows = baseline_df.to_dict(orient="records")
+
+        return ok({"rows": rows})
+
+    except KeyError:
+        return fail("Project not found", 404)
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"Error reading baseline: {e}", 500)
+
+
+@bp.post("/<project_name>/baseline")
+def save_baseline(project_name: str):
+    """
+    Create or update baseline CSV for a project.
+
+    Body:
+        {
+            "rows": [
+                {"Facility Type": 2, "Area type": 1, ...},
+                ...
+            ]
+        }
+
+    Response:
+        {
+            "ok": true,
+            "message": "Baseline saved successfully"
+        }
+    """
+    try:
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        proj = pm.project(project_name)
+
+        data = request.get_json(force=True, silent=True) or {}
+        rows = data.get("rows")
+
+        if not isinstance(rows, list):
+            return fail("rows must be an array", 400)
+
+        # Create baseline directory if not exists
+        baseline_dir = proj.project_path / "baseline"
+        baseline_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create DataFrame and save to CSV
+        baseline_df = pd.DataFrame(rows)
+        baseline_path = baseline_dir / f"{project_name}_baseline.csv"
+        baseline_df.to_csv(baseline_path, index=False, encoding='utf-8')
+
+        return ok({"message": "Baseline saved successfully"})
+
+    except KeyError:
+        return fail("Project not found", 404)
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"Error saving baseline: {e}", 500)

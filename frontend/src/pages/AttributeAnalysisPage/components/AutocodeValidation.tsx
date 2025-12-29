@@ -170,11 +170,13 @@ export default function AutocodeValidation({
     });
   };
 
-  // Load original autocode values from sessionStorage
-  const loadOriginalValues = (): AttributeRow[] => {
+  // Load original autocode values from server baseline CSV
+  const loadOriginalValues = async (): Promise<AttributeRow[]> => {
     try {
-      const stored = sessionStorage.getItem(`autocode_original_${projectName}`);
-      return stored ? JSON.parse(stored) : [];
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectName)}/baseline`);
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.rows || [];
     } catch {
       return [];
     }
@@ -182,97 +184,107 @@ export default function AutocodeValidation({
 
   // Calculate validation statistics
   useEffect(() => {
-    if (!attributes || attributes.length === 0) {
-      setValidationStats({});
-      return;
-    }
-
-    const newStats: Record<string, ValidationStats[]> = {};
-
-    // Load original values
-    const originalValues = loadOriginalValues();
-
-    // If no original values exist, this is the first load - store current as original (normalized)
-    if (originalValues.length === 0) {
-      try {
-        const normalized = normalizeAttributeValues(attributes);
-        sessionStorage.setItem(`autocode_original_${projectName}`, JSON.stringify(normalized));
-      } catch {
-        console.warn("Failed to store original autocode values");
+    const calculateStats = async () => {
+      if (!attributes || attributes.length === 0) {
+        setValidationStats({});
+        return;
       }
-    }
 
-    // Use loaded original values, or attributes if no originals exist
-    const valuesToCompare = originalValues.length > 0 ? originalValues : attributes;
+      const newStats: Record<string, ValidationStats[]> = {};
 
-    // Calculate stats for each attribute group
-    for (const group of GROUP_ORDER) {
-      const fieldList = GROUP_RULES[group];
-      if (!fieldList) continue;
+      // Load original values from server
+      let originalValues = await loadOriginalValues();
 
-      const groupStats: ValidationStats[] = [];
+      // If no original values exist, this is the first load - store current as original (normalized)
+      if (originalValues.length === 0) {
+        try {
+          const normalized = normalizeAttributeValues(attributes);
+          // Save baseline to server
+          await fetch(`/api/projects/${encodeURIComponent(projectName)}/baseline`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: normalized })
+          });
+          originalValues = normalized;
+        } catch {
+          console.warn("Failed to store original autocode values");
+        }
+      }
 
-      for (const displayName of fieldList) {
-        const realKey = KEY_ALIASES[displayName] ?? displayName;
+      // Use loaded original values, or attributes if no originals exist
+      const valuesToCompare = originalValues.length > 0 ? originalValues : attributes;
 
-        // Count unchanged vs changed values
-        let unchangedCount = 0;
-        let changedCount = 0;
+      // Calculate stats for each attribute group
+      for (const group of GROUP_ORDER) {
+        const fieldList = GROUP_RULES[group];
+        if (!fieldList) continue;
 
-        for (let i = 0; i < attributes.length; i++) {
-          const currentValue = attributes[i]?.[realKey];
-          const originalValue = valuesToCompare[i]?.[realKey];
+        const groupStats: ValidationStats[] = [];
 
-          // Determine if value has changed from original
-          let isChanged = true;
+        for (const displayName of fieldList) {
+          const realKey = KEY_ALIASES[displayName] ?? displayName;
 
-          // Handle null/undefined as equivalent
-          if ((currentValue === null || currentValue === undefined) &&
-              (originalValue === null || originalValue === undefined)) {
-            isChanged = false;
-          }
-          // Strict comparison first (same type, same value)
-          else if (currentValue === originalValue) {
-            isChanged = false;
-          }
-          // Type-aware comparison for numeric values
-          else if (typeof currentValue === 'number' && typeof originalValue === 'string') {
-            const parsedOriginal = Number(originalValue);
-            if (!Number.isNaN(parsedOriginal) && currentValue === parsedOriginal) {
+          // Count unchanged vs changed values
+          let unchangedCount = 0;
+          let changedCount = 0;
+
+          for (let i = 0; i < attributes.length; i++) {
+            const currentValue = attributes[i]?.[realKey];
+            const originalValue = valuesToCompare[i]?.[realKey];
+
+            // Determine if value has changed from original
+            let isChanged = true;
+
+            // Handle null/undefined as equivalent
+            if ((currentValue === null || currentValue === undefined) &&
+                (originalValue === null || originalValue === undefined)) {
               isChanged = false;
             }
-          }
-          else if (typeof currentValue === 'string' && typeof originalValue === 'number') {
-            const parsedCurrent = Number(currentValue);
-            if (!Number.isNaN(parsedCurrent) && parsedCurrent === originalValue) {
+            // Strict comparison first (same type, same value)
+            else if (currentValue === originalValue) {
               isChanged = false;
+            }
+            // Type-aware comparison for numeric values
+            else if (typeof currentValue === 'number' && typeof originalValue === 'string') {
+              const parsedOriginal = Number(originalValue);
+              if (!Number.isNaN(parsedOriginal) && currentValue === parsedOriginal) {
+                isChanged = false;
+              }
+            }
+            else if (typeof currentValue === 'string' && typeof originalValue === 'number') {
+              const parsedCurrent = Number(currentValue);
+              if (!Number.isNaN(parsedCurrent) && parsedCurrent === originalValue) {
+                isChanged = false;
+              }
+            }
+
+            if (isChanged) {
+              changedCount++;
+            } else {
+              unchangedCount++;
             }
           }
 
-          if (isChanged) {
-            changedCount++;
-          } else {
-            unchangedCount++;
-          }
+          const totalCount = attributes.length;
+          const correctnessPercentage = totalCount > 0 ? (unchangedCount / totalCount) * 100 : 0;
+
+          groupStats.push({
+            displayName,
+            realKey,
+            totalCount,
+            unchangedCount,
+            changedCount,
+            correctnessPercentage,
+          });
         }
 
-        const totalCount = attributes.length;
-        const correctnessPercentage = totalCount > 0 ? (unchangedCount / totalCount) * 100 : 0;
-
-        groupStats.push({
-          displayName,
-          realKey,
-          totalCount,
-          unchangedCount,
-          changedCount,
-          correctnessPercentage,
-        });
+        newStats[group] = groupStats;
       }
 
-      newStats[group] = groupStats;
-    }
+      setValidationStats(newStats);
+    };
 
-    setValidationStats(newStats);
+    calculateStats();
   }, [projectName, attributes, updateTrigger]);
 
   // Listen for attribute changes from CodingPage

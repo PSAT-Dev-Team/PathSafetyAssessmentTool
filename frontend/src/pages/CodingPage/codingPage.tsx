@@ -277,9 +277,14 @@ export default function CodingPage() {
       if (!currentProjectName) return;
       try {
         const normalized = normalizeAttributeValues(updatedAttrs);
-        sessionStorage.setItem(`autocode_original_${currentProjectName}`, JSON.stringify(normalized));
+        // Save updated baseline to server
+        fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/baseline`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: normalized })
+        }).catch(e => console.warn("Failed to update autocode baseline:", e));
       } catch (e) {
-        console.warn("Failed to update autocode baseline:", e);
+        console.warn("Failed to normalize autocode baseline:", e);
       }
     },
     [currentProjectName]
@@ -597,7 +602,11 @@ export default function CodingPage() {
 
                 // Update autocode baseline for this project
                 try {
-                  sessionStorage.setItem(`autocode_original_${projectName}`, JSON.stringify(a.rows));
+                  fetch(`/api/projects/${encodeURIComponent(projectName)}/baseline`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ rows: a.rows })
+                  }).catch(e => console.warn("Failed to update baseline for:", projectName, e));
                 } catch (e) {
                   console.warn("Failed to update autocode baseline for project:", projectName, e);
                 }
@@ -694,9 +703,9 @@ export default function CodingPage() {
 
         const attributes = a?.rows ?? [];
 
-        // Store original autocode values in sessionStorage for validation tracking (normalized for consistent types)
+        // Store original autocode values (baseline) for validation tracking
+        // This is version 0 of the baseline - created when project is first loaded
         try {
-          // Normalize numeric strings to numbers for consistent comparison
           const normalized = attributes.map(row => {
             const normalizedRow: AttributeRow = {};
             for (const [key, value] of Object.entries(row)) {
@@ -710,9 +719,15 @@ export default function CodingPage() {
             }
             return normalizedRow;
           });
-          sessionStorage.setItem(`autocode_original_${currentProjectName}`, JSON.stringify(normalized));
+
+          // Save baseline to server (version 0 - default values)
+          fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/baseline`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: normalized })
+          }).catch(e => console.warn("Failed to store baseline:", e));
         } catch {
-          console.warn("Failed to store original autocode values");
+          console.warn("Failed to normalize or store baseline values");
         }
 
         updateProjectData(currentProjectName, {
@@ -737,23 +752,40 @@ export default function CodingPage() {
     return () => { cancelled = true; };
   }, [currentProjectName]);
 
+  // Store baseline rows fetched from server
+  const [baselineRows, setBaselineRows] = useState<AttributeRow[]>([]);
+
+  // Fetch baseline from server when project changes
+  useEffect(() => {
+    if (!currentProjectName) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/baseline`);
+        if (!res.ok) {
+          setBaselineRows([]);
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) {
+          setBaselineRows(data.rows || []);
+        }
+      } catch (e) {
+        console.warn("Failed to fetch baseline:", e);
+        setBaselineRows([]);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [currentProjectName]);
+
   // Get original autocode values for current row
   const originalCurrentAttr = useMemo<AttributeRow | null>(() => {
-    if (!currentProjectName || currentIndex < 0) return null;
-    try {
-      const stored = sessionStorage.getItem(`autocode_original_${currentProjectName}`);
-      if (stored) {
-        const originals = JSON.parse(stored) as AttributeRow[];
-        if (Array.isArray(originals) && currentIndex < originals.length) {
-          const original = originals[currentIndex];
-          return original || null;
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to retrieve original autocode values:", e);
-    }
-    return null;
-  }, [currentProjectName, currentIndex]);
+    if (currentIndex < 0 || currentIndex >= baselineRows.length) return null;
+    return baselineRows[currentIndex] || null;
+  }, [currentIndex, baselineRows]);
 
   // Auto-calculate scores on project load
   useEffect(() => {
