@@ -282,6 +282,11 @@ export default function CodingPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rows: normalized })
+        }).then(() => {
+          // Dispatch event to notify AutocodeValidation to refetch baseline
+          window.dispatchEvent(new CustomEvent("psat:baseline:updated", {
+            detail: { projectName: currentProjectName }
+          }));
         }).catch(e => console.warn("Failed to update autocode baseline:", e));
       } catch (e) {
         console.warn("Failed to normalize autocode baseline:", e);
@@ -705,29 +710,37 @@ export default function CodingPage() {
 
         // Store original autocode values (baseline) for validation tracking
         // This is version 0 of the baseline - created when project is first loaded
+        // IMPORTANT: Only create baseline if it doesn't exist - don't overwrite on subsequent loads
         try {
-          const normalized = attributes.map(row => {
-            const normalizedRow: AttributeRow = {};
-            for (const [key, value] of Object.entries(row)) {
-              if (value === null || value === undefined) {
-                normalizedRow[key] = value;
-              } else if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value)) {
-                normalizedRow[key] = Number(value);
-              } else {
-                normalizedRow[key] = value;
-              }
-            }
-            return normalizedRow;
-          });
+          const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/baseline`);
+          const baselineData = await res.json();
+          const baselineExists = baselineData?.rows && baselineData.rows.length > 0;
 
-          // Save baseline to server (version 0 - default values)
-          fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/baseline`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rows: normalized })
-          }).catch(e => console.warn("Failed to store baseline:", e));
+          // Only save baseline if it doesn't already exist
+          if (!baselineExists) {
+            const normalized = attributes.map(row => {
+              const normalizedRow: AttributeRow = {};
+              for (const [key, value] of Object.entries(row)) {
+                if (value === null || value === undefined) {
+                  normalizedRow[key] = value;
+                } else if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value)) {
+                  normalizedRow[key] = Number(value);
+                } else {
+                  normalizedRow[key] = value;
+                }
+              }
+              return normalizedRow;
+            });
+
+            // Save baseline to server (version 0 - default values) only on first load
+            fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/baseline`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ rows: normalized })
+            }).catch(e => console.warn("Failed to store baseline:", e));
+          }
         } catch {
-          console.warn("Failed to normalize or store baseline values");
+          console.warn("Failed to check or store baseline values");
         }
 
         updateProjectData(currentProjectName, {
@@ -779,6 +792,30 @@ export default function CodingPage() {
     })();
 
     return () => { cancelled = true; };
+  }, [currentProjectName]);
+
+  // Listen for baseline updates from autocode operations and refetch
+  useEffect(() => {
+    const handleBaselineUpdate = async () => {
+      if (!currentProjectName) return;
+
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/baseline`);
+        if (!res.ok) {
+          setBaselineRows([]);
+          return;
+        }
+        const data = await res.json();
+        setBaselineRows(data.rows || []);
+      } catch (e) {
+        console.warn("Failed to refetch baseline after autocode:", e);
+      }
+    };
+
+    window.addEventListener("psat:baseline:updated", handleBaselineUpdate);
+    return () => {
+      window.removeEventListener("psat:baseline:updated", handleBaselineUpdate);
+    };
   }, [currentProjectName]);
 
   // Get original autocode values for current row

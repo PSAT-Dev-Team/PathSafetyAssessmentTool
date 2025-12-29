@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useState } from "react";
+import { useMemo, useEffect, useState, useCallback } from "react";
 import type { AttributeRow } from "../../../api";
 import "./AutocodeValidation.css";
 
@@ -148,7 +148,7 @@ export default function AutocodeValidation({
   attributes,
 }: Props) {
   const [validationStats, setValidationStats] = useState<Record<string, ValidationStats[]>>({});
-  const [updateTrigger, setUpdateTrigger] = useState(0);
+  const [baselineRows, setBaselineRows] = useState<AttributeRow[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<(typeof GROUP_ORDER)[number]>("Facility configuration");
 
@@ -170,140 +170,156 @@ export default function AutocodeValidation({
     });
   };
 
-  // Load original autocode values from server baseline CSV
-  const loadOriginalValues = async (): Promise<AttributeRow[]> => {
+  // Helper function to fetch baseline (extracted so it can be called from multiple places)
+  const fetchBaseline = useCallback(async () => {
+    if (!projectName) {
+      setBaselineRows([]);
+      return;
+    }
+
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(projectName)}/baseline`);
-      if (!response.ok) return [];
-      const data = await response.json();
-      return data.rows || [];
-    } catch {
-      return [];
-    }
-  };
-
-  // Calculate validation statistics
-  useEffect(() => {
-    const calculateStats = async () => {
-      if (!attributes || attributes.length === 0) {
-        setValidationStats({});
+      if (!response.ok) {
+        setBaselineRows([]);
         return;
       }
+      const data = await response.json();
+      const rows = data.rows || [];
+      setBaselineRows(rows);
 
-      const newStats: Record<string, ValidationStats[]> = {};
-
-      // Load original values from server
-      let originalValues = await loadOriginalValues();
-
-      // If no original values exist, this is the first load - store current as original (normalized)
-      if (originalValues.length === 0) {
+      // If no baseline exists, create it from current attributes (version 0)
+      if (rows.length === 0 && attributes && attributes.length > 0) {
         try {
           const normalized = normalizeAttributeValues(attributes);
-          // Save baseline to server
           await fetch(`/api/projects/${encodeURIComponent(projectName)}/baseline`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ rows: normalized })
           });
-          originalValues = normalized;
+          setBaselineRows(normalized);
         } catch {
-          console.warn("Failed to store original autocode values");
+          console.warn("Failed to create baseline");
         }
       }
+    } catch {
+      console.warn("Failed to fetch baseline");
+      setBaselineRows([]);
+    }
+  }, [projectName, attributes]);
 
-      // Use loaded original values, or attributes if no originals exist
-      const valuesToCompare = originalValues.length > 0 ? originalValues : attributes;
+  // Fetch and cache baseline from server on project load (separate from stats calculation)
+  useEffect(() => {
+    if (!projectName) {
+      setBaselineRows([]);
+      return;
+    }
 
-      // Calculate stats for each attribute group
-      for (const group of GROUP_ORDER) {
-        const fieldList = GROUP_RULES[group];
-        if (!fieldList) continue;
+    let cancelled = false;
 
-        const groupStats: ValidationStats[] = [];
+    fetchBaseline().then(() => {
+      if (!cancelled) {
+        // Baseline fetched successfully
+      }
+    });
 
-        for (const displayName of fieldList) {
-          const realKey = KEY_ALIASES[displayName] ?? displayName;
+    return () => { cancelled = true; };
+  }, [projectName, attributes.length, fetchBaseline]); // Re-fetch if project changes or attributes length changes
 
-          // Count unchanged vs changed values
-          let unchangedCount = 0;
-          let changedCount = 0;
+  // Calculate validation statistics (uses cached baseline)
+  useEffect(() => {
+    if (!attributes || attributes.length === 0) {
+      setValidationStats({});
+      return;
+    }
 
-          for (let i = 0; i < attributes.length; i++) {
-            const currentValue = attributes[i]?.[realKey];
-            const originalValue = valuesToCompare[i]?.[realKey];
+    const newStats: Record<string, ValidationStats[]> = {};
 
-            // Determine if value has changed from original
-            let isChanged = true;
+    // Use cached baseline, or attributes if no baseline exists
+    const valuesToCompare = baselineRows.length > 0 ? baselineRows : attributes;
 
-            // Handle null/undefined as equivalent
-            if ((currentValue === null || currentValue === undefined) &&
-                (originalValue === null || originalValue === undefined)) {
+    // Calculate stats for each attribute group
+    for (const group of GROUP_ORDER) {
+      const fieldList = GROUP_RULES[group];
+      if (!fieldList) continue;
+
+      const groupStats: ValidationStats[] = [];
+
+      for (const displayName of fieldList) {
+        const realKey = KEY_ALIASES[displayName] ?? displayName;
+
+        // Count unchanged vs changed values
+        let unchangedCount = 0;
+        let changedCount = 0;
+
+        for (let i = 0; i < attributes.length; i++) {
+          const currentValue = attributes[i]?.[realKey];
+          const originalValue = valuesToCompare[i]?.[realKey];
+
+          // Determine if value has changed from original
+          let isChanged = true;
+
+          // Handle null/undefined as equivalent
+          if ((currentValue === null || currentValue === undefined) &&
+              (originalValue === null || originalValue === undefined)) {
+            isChanged = false;
+          }
+          // Strict comparison first (same type, same value)
+          else if (currentValue === originalValue) {
+            isChanged = false;
+          }
+          // Type-aware comparison for numeric values
+          else if (typeof currentValue === 'number' && typeof originalValue === 'string') {
+            const parsedOriginal = Number(originalValue);
+            if (!Number.isNaN(parsedOriginal) && currentValue === parsedOriginal) {
               isChanged = false;
             }
-            // Strict comparison first (same type, same value)
-            else if (currentValue === originalValue) {
+          }
+          else if (typeof currentValue === 'string' && typeof originalValue === 'number') {
+            const parsedCurrent = Number(currentValue);
+            if (!Number.isNaN(parsedCurrent) && parsedCurrent === originalValue) {
               isChanged = false;
-            }
-            // Type-aware comparison for numeric values
-            else if (typeof currentValue === 'number' && typeof originalValue === 'string') {
-              const parsedOriginal = Number(originalValue);
-              if (!Number.isNaN(parsedOriginal) && currentValue === parsedOriginal) {
-                isChanged = false;
-              }
-            }
-            else if (typeof currentValue === 'string' && typeof originalValue === 'number') {
-              const parsedCurrent = Number(currentValue);
-              if (!Number.isNaN(parsedCurrent) && parsedCurrent === originalValue) {
-                isChanged = false;
-              }
-            }
-
-            if (isChanged) {
-              changedCount++;
-            } else {
-              unchangedCount++;
             }
           }
 
-          const totalCount = attributes.length;
-          const correctnessPercentage = totalCount > 0 ? (unchangedCount / totalCount) * 100 : 0;
-
-          groupStats.push({
-            displayName,
-            realKey,
-            totalCount,
-            unchangedCount,
-            changedCount,
-            correctnessPercentage,
-          });
+          if (isChanged) {
+            changedCount++;
+          } else {
+            unchangedCount++;
+          }
         }
 
-        newStats[group] = groupStats;
+        const totalCount = attributes.length;
+        const correctnessPercentage = totalCount > 0 ? (unchangedCount / totalCount) * 100 : 0;
+
+        groupStats.push({
+          displayName,
+          realKey,
+          totalCount,
+          unchangedCount,
+          changedCount,
+          correctnessPercentage,
+        });
       }
 
-      setValidationStats(newStats);
-    };
+      newStats[group] = groupStats;
+    }
 
-    calculateStats();
-  }, [projectName, attributes, updateTrigger]);
+    setValidationStats(newStats);
+  }, [attributes, baselineRows]); // Recalculate whenever attributes OR baseline changes
 
-  // Listen for attribute changes from CodingPage
+  // Listen for baseline updates from autocode operations
   useEffect(() => {
-    const handleAttributeChange = () => {
-      // Trigger recalculation on attribute changes
-      setUpdateTrigger(prev => prev + 1);
+    const handleBaselineUpdate = () => {
+      // Refetch baseline when it's updated by autocode
+      fetchBaseline();
     };
 
-    window.addEventListener("psat:attribute:changed", handleAttributeChange);
-    window.addEventListener("psat:save", handleAttributeChange);
-    window.addEventListener("psat:scores:updated", handleAttributeChange);
+    window.addEventListener("psat:baseline:updated", handleBaselineUpdate);
 
     return () => {
-      window.removeEventListener("psat:attribute:changed", handleAttributeChange);
-      window.removeEventListener("psat:save", handleAttributeChange);
-      window.removeEventListener("psat:scores:updated", handleAttributeChange);
+      window.removeEventListener("psat:baseline:updated", handleBaselineUpdate);
     };
-  }, []);
+  }, [fetchBaseline]);
 
   const groupsWithFields = useMemo(() => {
     return GROUP_ORDER.filter(g => (validationStats[g] ?? []).length > 0);
