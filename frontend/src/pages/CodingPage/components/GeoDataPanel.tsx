@@ -1,11 +1,10 @@
 import { Card, CardHeader, CardBody, Heading, Text, Box, Flex, HStack } from "@chakra-ui/react";
-import { Tooltip } from "../../../components/ui/tooltip";
 import { Switch } from "../../../components/ui/switch";
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
-import { MapContainer, TileLayer, CircleMarker, Polyline, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Polyline, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -396,14 +395,15 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 const keyWithScore = `${idx}-${scoreValue?.toFixed(2) ?? "loading"}`;
 
                 return (
-                  <Tooltip key={keyWithScore} content={label}>
-                    <CircleMarker
-                      center={latlng}
-                      radius={radius}
-                      pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
-                      eventHandlers={{ click: () => onJump?.(idx) }}   // ← 点击跳页
-                    />
-                  </Tooltip>
+                  <CircleMarker
+                    key={keyWithScore}
+                    center={latlng}
+                    radius={radius}
+                    pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
+                    eventHandlers={{ click: () => onJump?.(idx) }}   // ← 点击跳页
+                  >
+                    <Tooltip>{label}</Tooltip>
+                  </CircleMarker>
                 );
               })}
 

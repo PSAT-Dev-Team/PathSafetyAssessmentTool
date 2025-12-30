@@ -14,6 +14,7 @@ import CodingSidebar from "./components/CodingSidebar";
 import TreatmentSidebar from "./components/TreatmentSidebar";
 import ShapefileModal from "./components/ShapefileModal";
 import ImageUploadModal from "./components/ImageUploadModal";
+import ExitConfirmationDialog from "./components/ExitConfirmationDialog";
 import "./sidebar.css";
 
 const LINKS = [
@@ -23,7 +24,7 @@ const LINKS = [
 const CREATE_PROJECT_LINK = { to: "/projects/create", label: "Create Project", isCreate: true };
 
 const ANALYSIS_LINKS = [
-  { to: "/analysis/attribute", label: "Path Analysis" },
+  { to: "/analysis/path", label: "Path Analysis" },
   { to: "/analysis/post-treatment", label: "Post-Treatment Analysis" },
 ];
 
@@ -32,6 +33,9 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
   const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const [treatmentExitDialogOpen, setTreatmentExitDialogOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const createProject = () => {
     navigate(`/projects/create`);
@@ -164,8 +168,29 @@ export default function Sidebar() {
   };
 
   const onExit = useCallback(() => {
+    setExitDialogOpen(true);
+  }, []);
+
+  const handleSaveAndExit = useCallback(() => {
+    setIsSaving(true);
+    window.dispatchEvent(new CustomEvent("psat:save"));
+
+    // Give the save event a moment to complete before navigating
+    setTimeout(() => {
+      setIsSaving(false);
+      setExitDialogOpen(false);
+      navigate(`/home`);
+    }, 500);
+  }, [navigate]);
+
+  const handleDiscardAndExit = useCallback(() => {
+    setExitDialogOpen(false);
     navigate(`/home`);
   }, [navigate]);
+
+  const handleExitCancel = useCallback(() => {
+    setExitDialogOpen(false);
+  }, []);
 
   // Treatment save and exit handlers
   const onTreatmentSave = useCallback(async () => {
@@ -197,8 +222,33 @@ export default function Sidebar() {
   }, [projectName]);
 
   const onTreatmentExit = useCallback(() => {
+    setTreatmentExitDialogOpen(true);
+  }, []);
+
+  const handleTreatmentSaveAndExit = useCallback(() => {
+    setIsSaving(true);
+    onTreatmentSave().then(() => {
+      setIsSaving(false);
+      setTreatmentExitDialogOpen(false);
+      navigate(`/home`);
+    }).catch(() => {
+      setIsSaving(false);
+      toaster.create({
+        title: "Save failed",
+        description: "Failed to save treatments. Please try again.",
+        type: "error",
+      });
+    });
+  }, [navigate, onTreatmentSave]);
+
+  const handleTreatmentDiscardAndExit = useCallback(() => {
+    setTreatmentExitDialogOpen(false);
     navigate(`/home`);
   }, [navigate]);
+
+  const handleTreatmentExitCancel = useCallback(() => {
+    setTreatmentExitDialogOpen(false);
+  }, []);
 
   return (
     <aside className="psat-sidebar" aria-label="PSAT sidebar">
@@ -321,6 +371,24 @@ export default function Sidebar() {
 
       {/* Image Upload Modal */}
       <ImageUploadModal open={imageUploadModalOpen} onClose={closeImageUploadModal} />
+
+      {/* Coding Exit Confirmation Dialog */}
+      <ExitConfirmationDialog
+        open={exitDialogOpen}
+        onSaveAndExit={handleSaveAndExit}
+        onDiscardAndExit={handleDiscardAndExit}
+        onCancel={handleExitCancel}
+        isSaving={isSaving}
+      />
+
+      {/* Treatment Exit Confirmation Dialog */}
+      <ExitConfirmationDialog
+        open={treatmentExitDialogOpen}
+        onSaveAndExit={handleTreatmentSaveAndExit}
+        onDiscardAndExit={handleTreatmentDiscardAndExit}
+        onCancel={handleTreatmentExitCancel}
+        isSaving={isSaving}
+      />
     </aside>
   );
 }

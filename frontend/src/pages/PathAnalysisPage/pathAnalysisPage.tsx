@@ -11,11 +11,12 @@ import {
 } from "@chakra-ui/react";
 import { fetchProjectList, type FileResponse } from "../../api";
 import AttributesDropdown from "./components/AttributesDropdown";
-import AttributeAnalysisMapView from "./components/AttributeAnalysisMapView";
+import PathAnalysisMapView from "./components/PathAnalysisMapView";
 import AttributeDistributionChart from "./components/AttributeDistributionChart";
-import "./attributeAnalysisPage.css";
+import AggregatedScoreBandPanel from "./components/AggregatedScoreBandPanel";
+import "./pathAnalysisPage.css";
 
-export default function AttributeAnalysisPage() {
+export default function PathAnalysisPage() {
   // Project list state
   const [projectList, setProjectList] = useState<FileResponse | null>(null);
   const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
@@ -452,7 +453,7 @@ export default function AttributeAnalysisPage() {
 
       {/* Map/Table Section */}
       <Box mb="6">
-        <AttributeAnalysisMapView
+        <PathAnalysisMapView
           selectedProjects={loadedProjects}
           selectedAttributes={selectedAttributes}
           onChartDataUpdate={setChartData}
@@ -472,6 +473,13 @@ export default function AttributeAnalysisPage() {
             categoryData={chartData.categoryDistributionData}
             selectedAttribute={chartData.primaryFocusAttribute}
           />
+        </Box>
+      )}
+
+      {/* Aggregated Score Band Distribution Panel */}
+      {loadedProjects.length > 0 && (
+        <Box mt="6">
+          <AggregatedScoreBandPanel selectedProjects={loadedProjects} />
         </Box>
       )}
     </Box>

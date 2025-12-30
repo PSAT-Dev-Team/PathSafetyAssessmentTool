@@ -71,13 +71,11 @@ export default function AttributeDistributionChart({
       <text
         x={x}
         y={y}
-        fill="white"
+        fill="black"
         textAnchor={x > cx ? "start" : "end"}
         dominantBaseline="central"
         fontSize="16"
         fontWeight="bold"
-        stroke="rgba(0,0,0,0.3)"
-        strokeWidth="0.5"
       >
         {`${(percent * 100).toFixed(0)}%`}
       </text>

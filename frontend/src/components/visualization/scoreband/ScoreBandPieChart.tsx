@@ -76,8 +76,6 @@ export default function ScoreBandPieChart({
         dominantBaseline="central"
         fontSize="16"
         fontWeight="900"
-        stroke="white"
-        strokeWidth="2"
       >
         {`${(percent * 100).toFixed(0)}%`}
       </text>
@@ -198,8 +196,8 @@ export default function ScoreBandPieChart({
               align="center"
               gap="2"
               fontSize="xs"
-              color="gray.700"
-              _dark={{ color: "gray.300" }}
+              color="black"
+              _dark={{ color: "white" }}
             >
               <Box w="12px" h="12px" borderRadius="full" bg={item.color} flexShrink={0} />
               <Text fontSize="xs" fontWeight="bold">{item.label} {item.percentage.toFixed(0)}%</Text>

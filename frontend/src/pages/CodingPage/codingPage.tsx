@@ -43,7 +43,7 @@ import "../../components/visualization/curvature/CurvatureVisualizationPanel.css
 import { WidthVisualizationPanel } from "../../components/visualization/width/WidthVisualizationPanel";
 import "../../components/visualization/width/WidthVisualizationPanel.css";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
-import AutocodeValidation from "../AttributeAnalysisPage/components/AutocodeValidation";
+import AutocodeValidation from "../PathAnalysisPage/components/AutocodeValidation";
 
 
 type ProjectDetail = { name: string; versions: string[]; latest: string };
