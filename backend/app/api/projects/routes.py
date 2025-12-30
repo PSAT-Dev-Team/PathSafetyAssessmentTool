@@ -1415,6 +1415,70 @@ def create_project_from_folder():
 
     return ok({"ok": True, "name": project_name})
 
+@bp.post("/folders/upload-images")
+def upload_images_to_source_folder():
+    """
+    Upload images to a source folder in the /in directory.
+    POST /api/projects/folders/upload-images
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+
+    try:
+        # Get folder name from request
+        folder_name = request.form.get('folder_name')
+        if not folder_name or not folder_name.strip():
+            return fail("Folder name is required", 400)
+
+        folder_name = folder_name.strip()
+
+        # Get the source folder path (in directory)
+        source_dir: Path = pm.in_path / folder_name
+        source_dir.mkdir(parents=True, exist_ok=True)
+
+        # Get uploaded files
+        if 'images' not in request.files:
+            return fail("No image files provided", 400)
+
+        uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            return fail("No image files provided", 400)
+
+        count = 0
+        errors = []
+
+        # Allowed image extensions
+        allowed_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'}
+
+        for file in uploaded_files:
+            if file.filename == '':
+                errors.append("Empty filename")
+                continue
+
+            # Validate file extension
+            file_ext = Path(file.filename).suffix.lower()
+            if file_ext not in allowed_extensions:
+                errors.append(f"Invalid file type: {file.filename}")
+                continue
+
+            try:
+                # Save file to source folder
+                file_path = source_dir / file.filename
+                file.save(str(file_path))
+                count += 1
+            except Exception as e:
+                errors.append(f"Failed to save {file.filename}: {str(e)}")
+
+        return ok({
+            "count": count,
+            "errors": errors,
+            "message": f"Uploaded {count} image(s) to folder '{folder_name}'"
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"Error uploading images: {e}", 500)
+
 @bp.delete("/<project_name>")
 def delete_project(project_name: str):
     """

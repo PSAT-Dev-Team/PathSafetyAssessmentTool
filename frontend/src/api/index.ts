@@ -629,3 +629,24 @@ export async function saveTreatments(
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
+
+/**
+ * Upload images to a source folder in the /in directory
+ * @param folderName - Name of the folder to create/upload to in /in directory
+ * @param files - Array of image files to upload
+ */
+export async function uploadImagesToSourceFolder(
+  folderName: string,
+  files: File[]
+): Promise<{ count: number; errors: string[] }> {
+  const formData = new FormData();
+  formData.append("folder_name", folderName);
+  files.forEach(file => formData.append("images", file));
+
+  const res = await fetch("/api/projects/folders/upload-images", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}

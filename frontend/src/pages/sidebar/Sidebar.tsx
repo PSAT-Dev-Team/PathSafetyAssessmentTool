@@ -13,11 +13,11 @@ import {
 import CodingSidebar from "./components/CodingSidebar";
 import TreatmentSidebar from "./components/TreatmentSidebar";
 import ShapefileModal from "./components/ShapefileModal";
+import ImageUploadModal from "./components/ImageUploadModal";
 import "./sidebar.css";
 
 const LINKS = [
   { to: "/home", label: "Projects" },
-  { to: "/treatment", label: "Treatment Application" },
 ];
 
 const CREATE_PROJECT_LINK = { to: "/projects/create", label: "Create Project", isCreate: true };
@@ -31,6 +31,7 @@ export default function Sidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
+  const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
 
   const createProject = () => {
     navigate(`/projects/create`);
@@ -42,6 +43,14 @@ export default function Sidebar() {
 
   const closeShapefileModal = () => {
     setShapefileModalOpen(false);
+  };
+
+  const openImageUploadModal = () => {
+    setImageUploadModalOpen(true);
+  };
+
+  const closeImageUploadModal = () => {
+    setImageUploadModalOpen(false);
   };
 
   const navigateSidebar = (to: string) => {
@@ -247,6 +256,16 @@ export default function Sidebar() {
               ))}
             </MenuContent>
           </MenuRoot>
+
+          {/* Treatment Application Button */}
+          <Button
+            onClick={() => navigateSidebar("/treatment")}
+            colorPalette="gray"
+            variant={onTreatment ? "solid" : "outline"}
+            size="sm"
+          >
+            Treatment Application
+          </Button>
         </div>
       </div>
 
@@ -279,8 +298,17 @@ export default function Sidebar() {
         </div>
       )}
 
-      {/* Home, Treatment List, and Analysis Pages - Show project management buttons */}
-      {(onHome || onTreatment || onAnalysis) && (
+      {/* Home and Create Project Pages - Show Upload Images button */}
+      {(onHome || pathname === "/projects/create") && (
+        <div className="psat-side-bottom">
+          <Button onClick={openImageUploadModal} colorPalette="green" variant="surface" size="sm" width="100%">
+            Upload Images
+          </Button>
+        </div>
+      )}
+
+      {/* Treatment List and Analysis Pages - Show project management buttons */}
+      {(onTreatment || onAnalysis) && (
         <div className="psat-side-bottom">
           <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" width="100%">
             Update GIS Layers
@@ -290,6 +318,9 @@ export default function Sidebar() {
 
       {/* Shapefile Management Modal */}
       <ShapefileModal open={shapefileModalOpen} onClose={closeShapefileModal} />
+
+      {/* Image Upload Modal */}
+      <ImageUploadModal open={imageUploadModalOpen} onClose={closeImageUploadModal} />
     </aside>
   );
 }
