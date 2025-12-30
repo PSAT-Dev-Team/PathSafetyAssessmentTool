@@ -8,12 +8,12 @@ import {
   Heading,
   Input,
   Text,
-  Select,
   Portal,
+  Combobox,
   createListCollection,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
-import { listSourceFolders, createProjectFromFolder } from "../../api";
+import { listSourceFolders, createProjectFromFolder, fetchProjectList } from "../../api";
 import "../Projects/components/EditProjectModal.css";
 
 // Generate a consistent, bright, varied color for each unique tag (same as EditProjectModal)
@@ -39,6 +39,7 @@ function getTagColor(tag: string): string {
 export default function CreateProjectPage() {
   const nav = useNavigate();
   const [folders, setFolders] = useState<string[]>([]);
+  const [existingTags, setExistingTags] = useState<string[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
@@ -53,8 +54,18 @@ export default function CreateProjectPage() {
       try {
         setLoadingFolders(true);
         setErr(null);
-        const items = await listSourceFolders({ signal: ctrl.signal });
-        setFolders(items);
+        const [foldersData, projectsData] = await Promise.all([
+          listSourceFolders({ signal: ctrl.signal }),
+          fetchProjectList()
+        ]);
+        setFolders(foldersData);
+
+        // Extract all unique tags from existing projects
+        const tagSet = new Set<string>();
+        projectsData.projects.forEach(p => {
+          p.tags?.forEach(tag => tagSet.add(tag));
+        });
+        setExistingTags(Array.from(tagSet).sort());
       } catch (e: any) {
         if (e?.name !== "AbortError") setErr(e?.message ?? "Failed to load folders");
       } finally {
@@ -104,13 +115,6 @@ export default function CreateProjectPage() {
     }
   };
 
-  const collection = useMemo(
-    () =>
-      createListCollection({
-        items: folders.map((f) => ({ label: f, value: f })),
-      }),
-    [folders]
-  );
 
   return (
     <Box p={4} maxW="700px" mx="auto">
@@ -162,17 +166,50 @@ export default function CreateProjectPage() {
                     </button>
                   </Box>
                 ))}
-                <Input
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={handleTagInputKeyDown}
-                  placeholder="Type tag and press comma or enter"
-                  className="tag-input-field"
-                />
+                <Combobox.Root
+                  collection={createListCollection({
+                    items: existingTags.map(t => ({ label: t, value: t }))
+                  })}
+                  inputValue={tagInput}
+                  onInputValueChange={({ inputValue }) => setTagInput(inputValue)}
+                  onValueChange={({ value }) => {
+                    if (value.length > 0) {
+                      const selectedTag = value[0];
+                      if (selectedTag && !tags.includes(selectedTag)) {
+                        setTags([...tags, selectedTag]);
+                        setTagInput("");
+                      }
+                    }
+                  }}
+                >
+                  <Combobox.Control>
+                    <Combobox.Input
+                      placeholder="Type tag and press comma or enter"
+                      className="tag-input-field"
+                      onKeyDown={handleTagInputKeyDown}
+                    />
+                  </Combobox.Control>
+                  <Portal>
+                    <Combobox.Positioner>
+                      <Combobox.Content>
+                        {existingTags
+                          .filter(t =>
+                            t.toLowerCase().includes(tagInput.toLowerCase()) &&
+                            !tags.includes(t)
+                          )
+                          .map(t => (
+                            <Combobox.Item key={t} item={{ label: t, value: t }}>
+                              {t}
+                            </Combobox.Item>
+                          ))}
+                      </Combobox.Content>
+                    </Combobox.Positioner>
+                  </Portal>
+                </Combobox.Root>
               </Box>
             </Box>
             <Text color="gray.500" fontSize="xs" mt={1}>
-              Press comma (,) or Enter to add a tag
+              Press comma (,) or Enter to add a tag. Click a suggestion or type to select existing tags.
             </Text>
           </Box>
 
@@ -181,39 +218,33 @@ export default function CreateProjectPage() {
               Source Folder
             </Text>
 
-            <Select.Root
-              collection={collection}
-              size="sm"
-              width="100%"
-              value={folder ? [folder] : []}
-              onValueChange={({ value }) => setFolder(value[0] ?? "")}
+            <Combobox.Root
+              collection={createListCollection({
+                items: folders.map(f => ({ label: f, value: f }))
+              })}
+              inputValue={folder}
+              onInputValueChange={({ inputValue }) => setFolder(inputValue)}
               disabled={loadingFolders}
             >
-              <Select.HiddenSelect name="source-folder" />
-              <Select.Control>
-                <Select.Trigger>
-                  <Select.ValueText
-                    placeholder={loadingFolders ? "Loading..." : "Select a folder"}
-                  />
-                </Select.Trigger>
-                <Select.IndicatorGroup>
-                  <Select.Indicator />
-                </Select.IndicatorGroup>
-              </Select.Control>
-
+              <Combobox.Control>
+                <Combobox.Input
+                  placeholder={loadingFolders ? "Loading..." : "Select a folder"}
+                />
+              </Combobox.Control>
               <Portal>
-                <Select.Positioner>
-                  <Select.Content>
-                    {collection.items.map((item) => (
-                      <Select.Item item={item} key={item.value}>
-                        {item.label}
-                        <Select.ItemIndicator />
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Positioner>
+                <Combobox.Positioner>
+                  <Combobox.Content>
+                    {folders
+                      .filter(f => f.toLowerCase().includes(folder.toLowerCase()))
+                      .map(f => (
+                        <Combobox.Item key={f} item={{ label: f, value: f }}>
+                          {f}
+                        </Combobox.Item>
+                      ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
               </Portal>
-            </Select.Root>
+            </Combobox.Root>
 
             {err && (
               <Text color="red.600" fontSize="xs" mt={1}>

@@ -361,6 +361,7 @@ export default function AttributesDropdown({
   onAttributeChange
 }: AttributesDropdownProps) {
   const [inputValues, setInputValues] = useState<string[]>(selectedAttributes.map(() => ""));
+  const [openComboboxes, setOpenComboboxes] = useState<boolean[]>(selectedAttributes.map(() => false));
 
   const getFilterLabel = (index: number): string => {
     const labels = ["1st", "2nd", "3rd", "4th", "5th"];
@@ -395,20 +396,24 @@ export default function AttributesDropdown({
     if (selectedAttributes.length < 5) {
       onAttributeChange([...selectedAttributes, null]);
       setInputValues([...inputValues, ""]);
+      setOpenComboboxes([...openComboboxes, false]);
     }
   };
 
   const handleRemoveFilter = (index: number) => {
     const newAttributes = selectedAttributes.filter((_, i) => i !== index);
     const newInputValues = inputValues.filter((_, i) => i !== index);
+    const newOpenComboboxes = openComboboxes.filter((_, i) => i !== index);
     onAttributeChange(newAttributes);
     setInputValues(newInputValues);
+    setOpenComboboxes(newOpenComboboxes);
   };
 
   // Reset all filters
   const handleResetFilters = () => {
     onAttributeChange([null]);
     setInputValues([""]);
+    setOpenComboboxes([false]);
   };
 
   // All attribute names including "Not Selected" and "Project"
@@ -523,6 +528,12 @@ export default function AttributesDropdown({
                     <Combobox.Root
                       collection={attributeCollection}
                       value={[currentValue]}
+                      open={openComboboxes[index]}
+                      onOpenChange={(details) => {
+                        const newOpenComboboxes = [...openComboboxes];
+                        newOpenComboboxes[index] = details.open;
+                        setOpenComboboxes(newOpenComboboxes);
+                      }}
                       onValueChange={(e) => {
                         // Only handle the change if a valid value is selected
                         if (e.value[0]) {
@@ -532,8 +543,16 @@ export default function AttributesDropdown({
                       inputValue={inputValue}
                       onInputValueChange={(e) => setInputValues(inputValues.map((v, i) => i === index ? e.inputValue : v))}
                     >
-                      <Combobox.Control>
-                        <Combobox.Input placeholder="Select attribute..." />
+                      <Combobox.Control
+                        onClick={() => {
+                          const newOpenComboboxes = [...openComboboxes];
+                          newOpenComboboxes[index] = true;
+                          setOpenComboboxes(newOpenComboboxes);
+                        }}
+                      >
+                        <Combobox.Input
+                          placeholder="Select attribute..."
+                        />
                         <Combobox.IndicatorGroup>
                           <Combobox.ClearTrigger />
                           <Combobox.Trigger />

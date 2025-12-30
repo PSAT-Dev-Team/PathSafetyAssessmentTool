@@ -3,6 +3,9 @@
   max-width: 1100px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
   padding: 0 12px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
 }
 
 .projects-header h1 {
@@ -79,13 +82,23 @@
   font-size: 12px;
 }
 
-.table-wrap {
+.table-container {
   /* border: 1px solid #e5e7eb; */ /* Replaced for dark mode */
   border: 1px solid var(--chakra-colors-border-subtle);
   border-radius: 12px;
-  overflow: hidden;
   /* background: #fff; */ /* Replaced for dark mode */
   background: var(--chakra-colors-bg);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  margin-bottom: 24px;
+  min-height: 0;
+}
+
+.table-wrap {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .project-table {
@@ -122,6 +135,18 @@
 .project-table tbody tr.selected {
   /* background: #eef2ff; */ /* Replaced for dark mode */
   background: var(--chakra-colors-blue-subtle);
+}
+
+.project-table tbody tr.select-all-row {
+  font-weight: 600;
+  /* background: #f3f4f6; */ /* Replaced for dark mode */
+  background: var(--chakra-colors-bg-subtle);
+  border-bottom: 1px solid var(--chakra-colors-border-subtle);
+}
+
+.project-table tbody tr.select-all-row:hover {
+  /* background: #e5e7eb; */ /* Replaced for dark mode */
+  background: var(--chakra-colors-bg-muted);
 }
 
 .project-table td.empty {

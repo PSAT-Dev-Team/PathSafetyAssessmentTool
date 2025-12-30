@@ -35,6 +35,10 @@ export default function AttributeAnalysisPage() {
   const [projectInputValue, setProjectInputValue] = useState("");
   const [tagsInputValue, setTagsInputValue] = useState("");
 
+  // Combobox open states
+  const [projectComboboxOpen, setProjectComboboxOpen] = useState(false);
+  const [tagsComboboxOpen, setTagsComboboxOpen] = useState(false);
+
   // Chart data state
   const [chartData, setChartData] = useState<{
     categoryDistributionData: { category: string; count: number; color: string }[];
@@ -148,10 +152,13 @@ export default function AttributeAnalysisPage() {
   // Create collections for dropdowns (using filtered data)
   const projectCollection = useMemo(() =>
     createListCollection({
-      items: filteredProjects.map((p) => ({
-        label: p.name,
-        value: p.name,
-      })),
+      items: [
+        { label: "Select All", value: "SELECT_ALL" },
+        ...filteredProjects.map((p) => ({
+          label: p.name,
+          value: p.name,
+        })),
+      ],
     }), [filteredProjects]
   );
 
@@ -208,12 +215,32 @@ export default function AttributeAnalysisPage() {
               collection={projectCollection}
               multiple
               value={selectedProjects}
-              onValueChange={(e) => setSelectedProjects(e.value)}
+              open={projectComboboxOpen}
+              onOpenChange={(details) => setProjectComboboxOpen(details.open)}
+              onValueChange={(e) => {
+                if (e.value.includes("SELECT_ALL")) {
+                  // If SELECT_ALL is in the value and all projects are already selected, deselect all
+                  const allProjectNames = filteredProjects.map(p => p.name);
+                  if (selectedProjects.length === allProjectNames.length &&
+                      allProjectNames.every(name => selectedProjects.includes(name))) {
+                    setSelectedProjects([]);
+                  } else {
+                    // Otherwise, select all filtered projects (excluding the SELECT_ALL option itself)
+                    setSelectedProjects(allProjectNames);
+                  }
+                } else {
+                  setSelectedProjects(e.value);
+                }
+              }}
               inputValue={projectInputValue}
               onInputValueChange={(e) => setProjectInputValue(e.inputValue)}
             >
-              <Combobox.Control>
-                <Combobox.Input placeholder="Type to search projects..." />
+              <Combobox.Control
+                onClick={() => setProjectComboboxOpen(true)}
+              >
+                <Combobox.Input
+                  placeholder="Type to search projects..."
+                />
                 <Combobox.IndicatorGroup>
                   <Combobox.ClearTrigger />
                   <Combobox.Trigger />
@@ -223,20 +250,26 @@ export default function AttributeAnalysisPage() {
                 <Combobox.Positioner>
                   <Combobox.Content maxH="300px" overflowY="auto">
                     <Combobox.Empty>No projects found</Combobox.Empty>
-                    {projectCollection.items.map((item) => (
-                      <Combobox.Item item={item} key={item.value}>
-                        <Flex align="center" gap="2" width="100%">
-                          <input
-                            type="checkbox"
-                            checked={selectedProjects.includes(item.value)}
-                            readOnly
-                            style={{ pointerEvents: "none" }}
-                          />
-                          <Text>{item.label}</Text>
-                        </Flex>
-                        <Combobox.ItemIndicator />
-                      </Combobox.Item>
-                    ))}
+                    {projectCollection.items.map((item) => {
+                      const isSelectAll = item.value === "SELECT_ALL";
+                      const isChecked = isSelectAll
+                        ? filteredProjects.length > 0 && filteredProjects.every(p => selectedProjects.includes(p.name))
+                        : selectedProjects.includes(item.value);
+                      return (
+                        <Combobox.Item item={item} key={item.value}>
+                          <Flex align="center" gap="2" width="100%">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              readOnly
+                              style={{ pointerEvents: "none" }}
+                            />
+                            <Text fontWeight={isSelectAll ? "bold" : "normal"}>{item.label}</Text>
+                          </Flex>
+                          <Combobox.ItemIndicator />
+                        </Combobox.Item>
+                      );
+                    })}
                   </Combobox.Content>
                 </Combobox.Positioner>
               </Portal>
@@ -325,12 +358,18 @@ export default function AttributeAnalysisPage() {
               collection={tagsCollection}
               multiple
               value={tagsFilter}
+              open={tagsComboboxOpen}
+              onOpenChange={(details) => setTagsComboboxOpen(details.open)}
               onValueChange={(e) => setTagsFilter(e.value)}
               inputValue={tagsInputValue}
               onInputValueChange={(e) => setTagsInputValue(e.inputValue)}
             >
-              <Combobox.Control>
-                <Combobox.Input placeholder="Type to search tags..." />
+              <Combobox.Control
+                onClick={() => setTagsComboboxOpen(true)}
+              >
+                <Combobox.Input
+                  placeholder="Type to search tags..."
+                />
                 <Combobox.IndicatorGroup>
                   <Combobox.ClearTrigger />
                   <Combobox.Trigger />

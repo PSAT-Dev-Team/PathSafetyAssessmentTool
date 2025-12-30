@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   Button,
   Portal,
-  Select,
+  Combobox,
   createListCollection,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
@@ -56,9 +56,11 @@ export default function TreatmentPage() {
   // Filter states
   const [nameQuery, setNameQuery] = useState("");
   const [tagFilter, setTagFilter] = useState<string>("");
+  const [tagFilterInputValue, setTagFilterInputValue] = useState("");
+  const [tagFilterComboboxOpen, setTagFilterComboboxOpen] = useState(false);
 
-  // Selected Project
-  const [selected, setSelected] = useState<string | null>(null);
+  // Selected Projects (multi-select)
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Edit dialog state
   const [openEdit, setOpenEdit] = useState(false);
@@ -120,11 +122,35 @@ export default function TreatmentPage() {
     return list;
   }, [projects, nameQuery, tagFilter]);
 
-  const onRowClick = (name: string) => setSelected(name);
+  // Toggle project selection
+  const onRowClick = (name: string) => {
+    setSelected(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(name)) {
+        newSet.delete(name);
+      } else {
+        newSet.add(name);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle select all projects
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length && filtered.length > 0) {
+      // All are selected, deselect all
+      setSelected(new Set());
+    } else {
+      // Select all
+      setSelected(new Set(filtered.map(p => p.name)));
+    }
+  };
 
   const loadProject = async () => {
-    if (!selected) return;
-    navigate(`/treatment/${encodeURIComponent(selected)}`);
+    if (selected.size === 0) return;
+    const projectNames = Array.from(selected);
+    const encodedNames = projectNames.map(name => encodeURIComponent(name));
+    navigate(`/treatment/${encodedNames[0]}`);
   };
 
   const handleEditSuccess = (newName: string, newTags: string[]) => {
@@ -138,68 +164,99 @@ export default function TreatmentPage() {
         ),
       };
     });
-    if (selected === oldName && newName !== oldName) {
-      setSelected(newName);
+    if (selected.has(oldName) && newName !== oldName) {
+      setSelected(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(oldName);
+        newSet.add(newName);
+        return newSet;
+      });
     }
   };
 
   return (
-    <div className="home-root">
+    <div className="projects-root">
       {/* Search Panel */}
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
             <label htmlFor="nameQuery">Search by project name</label>
-            <input
-              id="nameQuery"
-              type="text"
-              placeholder="Type project name…"
-              value={nameQuery}
-              onChange={(e) => setNameQuery(e.target.value)}
-            />
+            <Combobox.Root
+              collection={createListCollection({
+                items: projects.map(p => ({ label: p.name, value: p.name }))
+              })}
+              inputValue={nameQuery}
+              onInputValueChange={({ inputValue }) => setNameQuery(inputValue)}
+            >
+              <Combobox.Control>
+                <Combobox.Input
+                  id="nameQuery"
+                  placeholder="Type project name…"
+                />
+              </Combobox.Control>
+              <Portal>
+                <Combobox.Positioner>
+                  <Combobox.Content>
+                    {projects
+                      .filter(p => p.name.toLowerCase().includes(nameQuery.toLowerCase()))
+                      .map(p => (
+                        <Combobox.Item key={p.name} item={{ label: p.name, value: p.name }}>
+                          {p.name}
+                        </Combobox.Item>
+                      ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
+              </Portal>
+            </Combobox.Root>
           </div>
           <div className="search-item">
             <label htmlFor="tagFilter">Filter by tag</label>
-            <Select.Root
+            <Combobox.Root
               collection={createListCollection({
                 items: [
                   { label: "All tags", value: "" },
                   ...allTags.map(tag => ({ label: tag, value: tag }))
                 ]
               })}
-              size="sm"
               value={tagFilter ? [tagFilter] : [""]}
               onValueChange={({ value }) => setTagFilter(value[0] ?? "")}
+              inputValue={tagFilterInputValue}
+              onInputValueChange={(e) => setTagFilterInputValue(e.inputValue)}
+              open={tagFilterComboboxOpen}
+              onOpenChange={(details) => setTagFilterComboboxOpen(details.open)}
             >
-              <Select.HiddenSelect name="tag-filter" />
-              <Select.Control>
-                <Select.Trigger>
-                  <Select.ValueText placeholder="All tags" />
-                </Select.Trigger>
-                <Select.IndicatorGroup>
-                  <Select.Indicator />
-                </Select.IndicatorGroup>
-              </Select.Control>
+              <Combobox.Control
+                onClick={() => setTagFilterComboboxOpen(true)}
+              >
+                <Combobox.Input
+                  id="tagFilter"
+                  placeholder="All tags"
+                />
+                <Combobox.IndicatorGroup>
+                  <Combobox.ClearTrigger />
+                  <Combobox.Trigger />
+                </Combobox.IndicatorGroup>
+              </Combobox.Control>
               <Portal>
-                <Select.Positioner>
-                  <Select.Content>
-                    <Select.Item item={{ label: "All tags", value: "" }} key="">
+                <Combobox.Positioner>
+                  <Combobox.Content>
+                    <Combobox.Item item={{ label: "All tags", value: "" }} key="">
                       All tags
-                      <Select.ItemIndicator />
-                    </Select.Item>
-                    {allTags.map((tag) => (
-                      <Select.Item item={{ label: tag, value: tag }} key={tag}>
-                        {tag}
-                        <Select.ItemIndicator />
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Positioner>
+                    </Combobox.Item>
+                    {allTags
+                      .filter(tag => tag.toLowerCase().includes(tagFilterInputValue.toLowerCase()))
+                      .map((tag) => (
+                        <Combobox.Item item={{ label: tag, value: tag }} key={tag}>
+                          {tag}
+                        </Combobox.Item>
+                      ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
               </Portal>
-            </Select.Root>
+            </Combobox.Root>
           </div>
           <div className="actions-buttons">
-            <Button onClick={loadProject} colorPalette="blue" disabled={!selected}>
+            <Button onClick={loadProject} colorPalette="blue" disabled={selected.size === 0}>
               Load Project
             </Button>
           </div>
@@ -207,91 +264,108 @@ export default function TreatmentPage() {
       </div>
 
       {/* Project Table */}
-      <div className="table-wrap">
-        <table className="project-table">
-          <thead>
-            <tr>
-              <th style={{ width: 48 }}></th>
-              <th>Project Name</th>
-              <th style={{ width: 120 }}>Verified</th>
-              <th>Tags</th>
-              <th style={{ width: 180 }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
+      <div className="table-container">
+        <div className="table-wrap">
+          <table className="project-table">
+            <thead>
               <tr>
-                <td colSpan={5} className="empty">
-                  No projects found
-                </td>
+                <th style={{ width: 48 }}></th>
+                <th>Project Name</th>
+                <th style={{ width: 120 }}>Verification Status</th>
+                <th>Tags</th>
+                <th style={{ width: 180 }}>Actions</th>
               </tr>
-            ) : (
-              filtered.map((p) => {
-                const isSelected = selected === p.name;
-                // Get all other tags (excluding Pre/Post)
-                const otherTags = p.tags?.filter(tag => tag !== "Pre" && tag !== "Post") || [];
-
-                return (
-                  <tr
-                    key={p.name}
-                    className={isSelected ? "row selected" : "row"}
-                    onClick={() => onRowClick(p.name)}
-                  >
-                    <td>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="empty">
+                    No projects found
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  <tr className="select-all-row" onClick={toggleSelectAll} style={{ cursor: "pointer" }}>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <input
-                        type="radio"
-                        name="projectSelect"
-                        checked={isSelected}
-                        onChange={() => onRowClick(p.name)}
-                        aria-label={`Select ${p.name}`}
+                        type="checkbox"
+                        checked={filtered.length > 0 && selected.size === filtered.length}
+                        onChange={toggleSelectAll}
+                        aria-label="Select all projects"
                       />
                     </td>
-                    <td title={p.name}>{p.name}</td>
-                    <td>
-                      <span style={{ fontSize: "16px" }}>
-                        {p.verified ? "✅" : "⏳"}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="tags-container">
-                        {otherTags.length > 0 ? (
-                          otherTags.map((tag) => (
-                            <span
-                              key={tag}
-                              className="tag-badge"
-                              style={{
-                                backgroundColor: getTagColor(tag),
-                                borderColor: getTagBorderColor(tag),
-                                borderWidth: "1px",
-                                borderStyle: "solid",
-                              }}
-                            >
-                              {tag}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="no-tags">—</span>
-                        )}
-                      </div>
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => {
-                          setEditingProject(p);
-                          setOpenEdit(true);
-                        }}
-                        className="row-edit-btn"
-                        aria-label="Edit project"
-                      >
-                        <LuPencil className="row-edit-icon" />
-                      </button>
+                    <td colSpan={4}>
+                      <strong>Select All</strong>
                     </td>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                  {filtered.map((p) => {
+                    const isSelected = selected.has(p.name);
+                    // Get all other tags (excluding Pre/Post)
+                    const otherTags = p.tags?.filter(tag => tag !== "Pre" && tag !== "Post") || [];
+
+                    return (
+                      <tr
+                        key={p.name}
+                        className={isSelected ? "row selected" : "row"}
+                        onClick={() => onRowClick(p.name)}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => onRowClick(p.name)}
+                            aria-label={`Select ${p.name}`}
+                          />
+                        </td>
+                        <td title={p.name}>{p.name}</td>
+                        <td>
+                          <span style={{ fontSize: "16px" }}>
+                            {p.verified ? "✅" : "⏳"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="tags-container">
+                            {otherTags.length > 0 ? (
+                              otherTags.map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="tag-badge"
+                                  style={{
+                                    backgroundColor: getTagColor(tag),
+                                    borderColor: getTagBorderColor(tag),
+                                    borderWidth: "1px",
+                                    borderStyle: "solid",
+                                  }}
+                                >
+                                  {tag}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="no-tags">—</span>
+                            )}
+                          </div>
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => {
+                              setEditingProject(p);
+                              setOpenEdit(true);
+                            }}
+                            className="row-edit-btn"
+                            aria-label="Edit project"
+                          >
+                            <LuPencil className="row-edit-icon" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Edit Dialog */}

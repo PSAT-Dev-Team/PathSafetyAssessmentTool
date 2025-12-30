@@ -69,7 +69,7 @@ export async function fetchProjectGeoJSON(projectName: string): Promise<FeatureC
 }
 
 // ===== types =====
-export type AttrMappings = Record<string, Record<string, string>>; // 字段名 -> { "1": "Outer Urban", ... }
+export type AttrMappings = Record<string, Record<string, string>>; // 字段名 -> { "1": "Suburban", ... }
 
 // ===== fetch mappings (数字 -> 文本) =====
 export async function fetchAttributeMappings(): Promise<AttrMappings> {

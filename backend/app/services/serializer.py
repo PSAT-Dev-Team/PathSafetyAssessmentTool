@@ -15,7 +15,7 @@ from pandas.errors import EmptyDataError
 
 # Mapping
 risk_category                   = {'Default': 0,'Low': 1, 'Medium': 2, 'High': 3, 'Extreme': 4}
-area_type_mapping               = {'Inner Urban': 1, 'Outer Urban': 2, 'Rural': 3, 'Industrial': 4}
+area_type_mapping               = {'Urban': 1, 'Suburban': 2, 'Rural': 3, 'Industrial': 4}
 facility_type_mapping           = {'Sidewalk': 1, 'Multi-Use Path': 2, 'Off-Road Bicycle Path': 3, 
                                     'On-road Bicycle Lane': 4, 'Road Shoulder': 5, 'Mixed Traffic Road Lane': 6}
 presence_mapping                = {'Present': 1, 'Not Present': 2}

@@ -5,8 +5,8 @@ import {
   Dialog,
   Portal,
   CloseButton,
-  Select,
   createListCollection,
+  Combobox,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { LuPencil } from "react-icons/lu";
@@ -57,6 +57,8 @@ export default function Home() {
   // Filter
   const [nameQuery, setNameQuery] = useState("");
   const [tagFilter, setTagFilter] = useState<string>("");
+  const [tagFilterInputValue, setTagFilterInputValue] = useState("");
+  const [tagFilterComboboxOpen, setTagFilterComboboxOpen] = useState(false);
 
   // Selected Projects (multiple selection)
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -145,6 +147,17 @@ export default function Home() {
     });
   };
 
+  // Toggle select all projects
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length && filtered.length > 0) {
+      // All are selected, deselect all
+      setSelected(new Set());
+    } else {
+      // Select all
+      setSelected(new Set(filtered.map(p => p.name)));
+    }
+  };
+
   // Load selected projects
   const loadProject = async () => {
     if (selected.size === 0) return;
@@ -215,53 +228,99 @@ export default function Home() {
         <div className="search-row">
           <div className="search-item">
             <label htmlFor="nameQuery">Search by project name</label>
-            <input
-              id="nameQuery"
-              type="text"
-              placeholder="Type project name…"
-              value={nameQuery}
-              onChange={(e) => setNameQuery(e.target.value)}
-            />
+            <Combobox.Root
+              collection={createListCollection({
+                items: projects.map(p => ({ label: p.name, value: p.name }))
+              })}
+              inputValue={nameQuery}
+              onInputValueChange={({ inputValue }) => setNameQuery(inputValue)}
+            >
+              <Combobox.Control>
+                <Combobox.Input
+                  id="nameQuery"
+                  placeholder="Type project name…"
+                />
+              </Combobox.Control>
+              <Portal>
+                <Combobox.Positioner>
+                  <Combobox.Content>
+                    {nameQuery.length > 0 && (
+                      <Combobox.Item
+                        key="select-all"
+                        item={{ label: "Select All", value: "SELECT_ALL" }}
+                        onClick={() => {
+                          const allNames = projects
+                            .filter(p => p.name.toLowerCase().includes(nameQuery.toLowerCase()))
+                            .map(p => p.name);
+                          // If all are already selected, deselect all; otherwise select all
+                          if (selected.size === allNames.length && allNames.every(name => selected.has(name))) {
+                            setSelected(new Set());
+                          } else {
+                            setSelected(new Set(allNames));
+                          }
+                          setNameQuery("");
+                        }}
+                      >
+                        <strong>Select All</strong>
+                      </Combobox.Item>
+                    )}
+                    {projects
+                      .filter(p => p.name.toLowerCase().includes(nameQuery.toLowerCase()))
+                      .map(p => (
+                        <Combobox.Item key={p.name} item={{ label: p.name, value: p.name }}>
+                          {p.name}
+                        </Combobox.Item>
+                      ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
+              </Portal>
+            </Combobox.Root>
           </div>
           <div className="search-item">
             <label htmlFor="tagFilter">Filter by tag</label>
-            <Select.Root
+            <Combobox.Root
               collection={createListCollection({
                 items: [
                   { label: "All tags", value: "" },
                   ...allTags.map(tag => ({ label: tag, value: tag }))
                 ]
               })}
-              size="sm"
               value={tagFilter ? [tagFilter] : [""]}
               onValueChange={({ value }) => setTagFilter(value[0] ?? "")}
+              inputValue={tagFilterInputValue}
+              onInputValueChange={(e) => setTagFilterInputValue(e.inputValue)}
+              open={tagFilterComboboxOpen}
+              onOpenChange={(details) => setTagFilterComboboxOpen(details.open)}
             >
-              <Select.HiddenSelect name="tag-filter" />
-              <Select.Control>
-                <Select.Trigger>
-                  <Select.ValueText placeholder="All tags" />
-                </Select.Trigger>
-                <Select.IndicatorGroup>
-                  <Select.Indicator />
-                </Select.IndicatorGroup>
-              </Select.Control>
+              <Combobox.Control
+                onClick={() => setTagFilterComboboxOpen(true)}
+              >
+                <Combobox.Input
+                  id="tagFilter"
+                  placeholder="All tags"
+                />
+                <Combobox.IndicatorGroup>
+                  <Combobox.ClearTrigger />
+                  <Combobox.Trigger />
+                </Combobox.IndicatorGroup>
+              </Combobox.Control>
               <Portal>
-                <Select.Positioner>
-                  <Select.Content>
-                    <Select.Item item={{ label: "All tags", value: "" }} key="">
+                <Combobox.Positioner>
+                  <Combobox.Content>
+                    <Combobox.Item item={{ label: "All tags", value: "" }} key="">
                       All tags
-                      <Select.ItemIndicator />
-                    </Select.Item>
-                    {allTags.map((tag) => (
-                      <Select.Item item={{ label: tag, value: tag }} key={tag}>
-                        {tag}
-                        <Select.ItemIndicator />
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Positioner>
+                    </Combobox.Item>
+                    {allTags
+                      .filter(tag => tag.toLowerCase().includes(tagFilterInputValue.toLowerCase()))
+                      .map((tag) => (
+                        <Combobox.Item item={{ label: tag, value: tag }} key={tag}>
+                          {tag}
+                        </Combobox.Item>
+                      ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
               </Portal>
-            </Select.Root>
+            </Combobox.Root>
           </div>
           <div className="actions-buttons">
             <Button onClick={loadProject} colorPalette="blue" disabled={!selected}>
@@ -274,88 +333,105 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="table-wrap">
-        <table className="project-table">
-          <thead>
-            <tr>
-              <th style={{ width: 48 }}></th>
-              <th>Project Name</th>
-              <th style={{ width: 120 }}>Verification Status</th>
-              <th>Tags</th>
-              <th style={{ width: 180 }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
+      <div className="table-container">
+        <div className="table-wrap">
+          <table className="project-table">
+            <thead>
               <tr>
-                <td colSpan={5} className="empty">
-                  No projects found
-                </td>
+                <th style={{ width: 48 }}></th>
+                <th>Project Name</th>
+                <th style={{ width: 120 }}>Verification Status</th>
+                <th>Tags</th>
+                <th style={{ width: 180 }}>Actions</th>
               </tr>
-            ) : (
-              filtered.map((p) => {
-                const isSelected = selected.has(p.name);
-
-                return (
-                  <tr
-                    key={p.name}
-                    className={isSelected ? "row selected" : "row"}
-                    onClick={() => onRowClick(p.name)}
-                    style={{ cursor: "pointer" }}
-                  >
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="empty">
+                    No projects found
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  <tr className="select-all-row" onClick={toggleSelectAll} style={{ cursor: "pointer" }}>
                     <td onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
-                        checked={isSelected}
-                        onChange={() => onRowClick(p.name)}
-                        aria-label={`Select ${p.name}`}
+                        checked={filtered.length > 0 && selected.size === filtered.length}
+                        onChange={toggleSelectAll}
+                        aria-label="Select all projects"
                       />
                     </td>
-                    <td title={p.name}>{p.name}</td>
-                    <td>
-                      <span style={{ fontSize: "16px" }}>
-                        {p.verified ? "✅" : "⏳"}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="tags-container">
-                        {p.tags && p.tags.length > 0 ? (
-                          p.tags.map((tag) => (
-                            <span
-                              key={tag}
-                              className="tag-badge"
-                              style={{
-                                backgroundColor: getTagColor(tag),
-                                borderWidth: "1px",
-                                borderStyle: "solid",
-                              }}
-                            >
-                              {tag}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="no-tags">—</span>
-                        )}
-                      </div>
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => {
-                          setEditingProject(p);
-                          setOpenEdit(true);
-                        }}
-                        className="row-edit-btn"
-                        aria-label="Edit project"
-                      >
-                        <LuPencil className="row-edit-icon" />
-                      </button>
+                    <td colSpan={4}>
+                      <strong>Select All</strong>
                     </td>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                  {filtered.map((p) => {
+                  const isSelected = selected.has(p.name);
+
+                  return (
+                    <tr
+                      key={p.name}
+                      className={isSelected ? "row selected" : "row"}
+                      onClick={() => onRowClick(p.name)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => onRowClick(p.name)}
+                          aria-label={`Select ${p.name}`}
+                        />
+                      </td>
+                      <td title={p.name}>{p.name}</td>
+                      <td>
+                        <span style={{ fontSize: "16px" }}>
+                          {p.verified ? "✅" : "⏳"}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="tags-container">
+                          {p.tags && p.tags.length > 0 ? (
+                            p.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="tag-badge"
+                                style={{
+                                  backgroundColor: getTagColor(tag),
+                                  borderWidth: "1px",
+                                  borderStyle: "solid",
+                                }}
+                              >
+                                {tag}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="no-tags">—</span>
+                          )}
+                        </div>
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => {
+                            setEditingProject(p);
+                            setOpenEdit(true);
+                          }}
+                          className="row-edit-btn"
+                          aria-label="Edit project"
+                        >
+                          <LuPencil className="row-edit-icon" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* 编辑 Dialog */}

@@ -339,8 +339,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
       // Area type (neutral colors)
       "Area type": {
-        "Inner Urban": "#2563EB",
-        "Outer Urban": "#3B82F6",
+        "Urban": "#2563EB",
+        "Suburban": "#3B82F6",
         "Rural": "#10B981",
         "Industrial": "#6B7280",
       },
@@ -430,8 +430,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         "Mixed Traffic Road Lane": "#DC2626",
       },
       "Area type": {
-        "Inner Urban": "#2563EB",
-        "Outer Urban": "#3B82F6",
+        "Urban": "#2563EB",
+        "Suburban": "#3B82F6",
         "Rural": "#10B981",
         "Industrial": "#6B7280",
       },
