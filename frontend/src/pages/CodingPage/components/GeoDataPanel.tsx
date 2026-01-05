@@ -17,12 +17,13 @@ type Props = {
   onJump?: (idx: number) => void;            // Jump to segment callback
   containerHeight?: number;                  // 容器总高度（包括header）
   scores?: ScoreRow[];                       // Optional scores passed from parent for real-time updates
+  subtitle?: string;                         // Optional subtitle to display next to "Map Preview"
 };
 
 type GJ = FeatureCollection<LineString, any>;
 
 type ScoreRow = {
-  "CycleRAP score": number;
+  "Overall Risk Level": number;
   [key: string]: any;
 };
 
@@ -48,7 +49,7 @@ function FitBounds({ points }: { points: [number, number][] }) {
   return null;
 }
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
@@ -58,7 +59,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // CycleRAP scores for color coding - use external scores if provided, otherwise fetch from API
+  // Overall Risk Levels for color coding - use external scores if provided, otherwise fetch from API
   const [scores, setScores] = useState<ScoreRow[]>([]);
 
   // GIS Layer toggles (matching curvature analysis colors)
@@ -105,7 +106,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     try {
       const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/results`);
       if (!res.ok) {
-        console.warn("Could not fetch CycleRAP scores");
+        console.warn("Could not fetch Overall Risk Levels");
         return;
       }
       const data = await res.json();
@@ -114,7 +115,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
         console.log("Scores loaded:", data.result_rows.length, "segments");
       }
     } catch (e: any) {
-      console.warn("Failed to load CycleRAP scores:", e?.message);
+      console.warn("Failed to load Overall Risk Levels:", e?.message);
     }
   }, [decodedName]);
 
@@ -131,7 +132,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     console.log("GeoDataPanel: Internal scores state updated, count:", scores.length);
   }, [scores]);
 
-  // Fetch CycleRAP scores for color coding on component mount (fallback if no external scores)
+  // Fetch Overall Risk Levels for color coding on component mount (fallback if no external scores)
   useEffect(() => {
     if (!decodedName) return;
     // Only fetch if we don't have external scores
@@ -257,9 +258,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
         highestScore = score;
 
         // Determine color based on the score
-        if (score <= 5) highestScoreColor = RISK_BAND_COLORS.LOW;
-        else if (score <= 10) highestScoreColor = RISK_BAND_COLORS.MEDIUM;
-        else if (score <= 20) highestScoreColor = RISK_BAND_COLORS.HIGH;
+        if (score < 10) highestScoreColor = RISK_BAND_COLORS.LOW;
+        else if (score <= 25) highestScoreColor = RISK_BAND_COLORS.MEDIUM;
+        else if (score <= 60) highestScoreColor = RISK_BAND_COLORS.HIGH;
         else highestScoreColor = RISK_BAND_COLORS.EXTREME;
       }
     });
@@ -271,7 +272,14 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     <Card.Root display="flex" flexDirection="column" h={`${containerHeight}px`}>
       <CardHeader py="2" px="4">
         <Flex justify="space-between" align="center">
-          <Heading size="sm">Map Preview</Heading>
+          <Flex align="center" gap="2">
+            <Heading size="sm">Map Preview</Heading>
+            {subtitle && (
+              <Text fontSize="sm" fontWeight="medium" color="gray.600" _dark={{ color: "gray.400" }}>
+                - {subtitle}
+              </Text>
+            )}
+          </Flex>
 
           {/* GIS Layer Toggles */}
           <HStack gap="4">
@@ -389,8 +397,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 const baseColor = getSegmentColor(idx);
                 const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
                 const radius = isActive ? 8 : 5;
-                const scoreValue = scores[idx]?.["CycleRAP score"];
-                const label = `#${idx} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
+                // Handle both new and old column names for backward compatibility
+                const scoreValue = scores[idx]?.["Overall Risk Level"] ?? scores[idx]?.["CycleRAP score"];
+                const label = `#${idx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
                 // Include score in key to force re-render when score changes
                 const keyWithScore = `${idx}-${scoreValue?.toFixed(2) ?? "loading"}`;
 

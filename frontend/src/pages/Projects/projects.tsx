@@ -14,6 +14,10 @@ import EditProjectModal from "./components/EditProjectModal";
 
 import "./projects.css";
 
+const createProject = (navigate: any) => {
+  navigate(`/projects/create`);
+};
+
 interface FileListResponse {
   projects: ProjectListItem[];
 }
@@ -88,16 +92,28 @@ export default function Home() {
   // Listen for project verified status changes from coding page
   useEffect(() => {
     const handleVerificationUpdate = (event: CustomEvent) => {
-      const { projectName, verified } = event.detail;
-      console.log("Verification update received:", projectName, verified);
+      const { projectName, verified, verifiedSegmentCount } = event.detail;
+      console.log("Verification update received:", {
+        projectName,
+        verified,
+        verifiedSegmentCount,
+        eventDetail: event.detail
+      });
 
       // Update the project list directly
       setProjectList((prev) => {
         if (!prev) return prev;
         return {
-          projects: prev.projects.map((p) =>
-            p.name === projectName ? { ...p, verified } : p
-          ),
+          projects: prev.projects.map((p) => {
+            if (p.name === projectName) {
+              const updates: any = {};
+              if (verified !== undefined) updates.verified = verified;
+              if (verifiedSegmentCount !== undefined) updates.verified_segment_count = verifiedSegmentCount;
+              console.log("Updating project:", projectName, "with:", updates);
+              return { ...p, ...updates };
+            }
+            return p;
+          }),
         };
       });
     };
@@ -106,13 +122,45 @@ export default function Home() {
     return () => window.removeEventListener("psat:verified:updated", handleVerificationUpdate as EventListener);
   }, []);
 
+  // Listen for project autocoded status changes from coding page
+  useEffect(() => {
+    const handleAutocodedUpdate = (event: CustomEvent) => {
+      const { projectName, autocodedSegmentCount } = event.detail;
+      console.log("Received psat:autocoded:updated event:", { projectName, autocodedSegmentCount });
+
+      // Update the project list directly
+      setProjectList((prev) => {
+        if (!prev) return prev;
+        return {
+          projects: prev.projects.map((p) => {
+            if (p.name === projectName) {
+              if (autocodedSegmentCount !== undefined) {
+                console.log("Updating autocoded count for", projectName, "to", autocodedSegmentCount);
+                return { ...p, autocoded_segment_count: autocodedSegmentCount };
+              }
+            }
+            return p;
+          }),
+        };
+      });
+    };
+
+    window.addEventListener("psat:autocoded:updated", handleAutocodedUpdate as EventListener);
+    return () => window.removeEventListener("psat:autocoded:updated", handleAutocodedUpdate as EventListener);
+  }, []);
+
   // UseMemo projects
   const projects: ProjectListItem[] = useMemo(() => {
     if (!Projectlist?.projects) return [];
     console.log(Projectlist)
     return Projectlist.projects
       .slice()
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => {
+        // Sort by last_updated descending (most recent first)
+        const dateA = new Date(a.last_updated || 0).getTime();
+        const dateB = new Date(b.last_updated || 0).getTime();
+        return dateB - dateA;
+      });
   }, [Projectlist]);
 
   // Get all unique tags across all projects
@@ -165,6 +213,14 @@ export default function Home() {
     const projectNames = Array.from(selected);
     const encodedNames = projectNames.map(name => encodeURIComponent(name));
     navigate(`/coding/${encodedNames.join(',')}`);
+  };
+
+  // Load treatment application for selected project
+  const loadTreatment = async () => {
+    if (selected.size === 0) return;
+    // Get the first selected project (only one should be selected for treatment)
+    const projectName = Array.from(selected)[0];
+    navigate(`/treatment/${encodeURIComponent(projectName)}`);
   };
 
   // Edit success callback
@@ -323,10 +379,16 @@ export default function Home() {
             </Combobox.Root>
           </div>
           <div className="actions-buttons">
-            <Button onClick={loadProject} colorPalette="blue" disabled={!selected}>
-              Load Project
+            <Button onClick={() => createProject(navigate)} colorPalette="black" variant="solid">
+              Create Project
             </Button>
-            <Button onClick={askDelete} disabled={!selected}>
+            <Button onClick={loadProject} colorPalette="blue" disabled={!selected}>
+              Coding
+            </Button>
+            <Button onClick={loadTreatment} colorPalette="green" disabled={!selected}>
+              Treatment Application
+            </Button>
+            <Button onClick={askDelete} colorPalette="red" disabled={!selected}>
               Delete Project
             </Button>
           </div>
@@ -341,6 +403,7 @@ export default function Home() {
                 <th style={{ width: 48 }}></th>
                 <th>Project Name</th>
                 <th style={{ width: 120 }}>Verification Status</th>
+                <th style={{ width: 120 }}>Autocode Status</th>
                 <th>Tags</th>
                 <th style={{ width: 180 }}>Actions</th>
               </tr>
@@ -348,7 +411,7 @@ export default function Home() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="empty">
+                  <td colSpan={6} className="empty">
                     No projects found
                   </td>
                 </tr>
@@ -387,8 +450,23 @@ export default function Home() {
                       </td>
                       <td title={p.name}>{p.name}</td>
                       <td>
-                        <span style={{ fontSize: "16px" }}>
-                          {p.verified ? "✅" : "⏳"}
+                        <span style={{ fontSize: "14px", fontWeight: "500" }}>
+                          {typeof p.total_segments === 'number' && p.total_segments > 0
+                            ? `${((p.verified_segment_count ?? 0) / p.total_segments * 100).toFixed(1)}%`
+                            : typeof p.total_segments === 'number'
+                            ? "0%"
+                            : "—"}
+                        </span>
+                        {/* Debug: Show raw values if needed */}
+                        {/* (segments: {p.verified_segment_count}/{p.total_segments}) */}
+                      </td>
+                      <td>
+                        <span style={{ fontSize: "14px", fontWeight: "500" }}>
+                          {typeof p.total_segments === 'number' && p.total_segments > 0
+                            ? `${((p.autocoded_segment_count ?? 0) / p.total_segments * 100).toFixed(1)}%`
+                            : typeof p.total_segments === 'number'
+                            ? "0%"
+                            : "—"}
                         </span>
                       </td>
                       <td>

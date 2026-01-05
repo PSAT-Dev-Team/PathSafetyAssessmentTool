@@ -14,6 +14,9 @@ export interface ProjectListItem {
   date_created?: string;
   last_updated?: string;
   verified?: boolean;
+  verified_segment_count?: number;
+  autocoded_segment_count?: number;
+  total_segments?: number;
 }
 
 export interface FileResponse {
@@ -120,10 +123,10 @@ export async function deleteProject(projectName: string) {
   return (await res.json()) as { ok?: boolean; name?: string };
 }
 
-// Update Project Metadata (name, tags, and/or verified status)
+// Update Project Metadata (name, tags, verified status, and/or verified segment count)
 export async function updateProject(
   projectName: string,
-  updates: { new_name?: string; tags?: string[]; verified?: boolean }
+  updates: { new_name?: string; tags?: string[]; verified?: boolean; verified_segment_count?: number; autocoded_segment_count?: number }
 ) {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}`, {
     method: "PATCH",
@@ -134,7 +137,7 @@ export async function updateProject(
     const msg = await res.text().catch(() => res.statusText);
     throw new Error(msg || "Update failed");
   }
-  return (await res.json()) as { ok?: boolean; name?: string; tags?: string[]; verified?: boolean };
+  return (await res.json()) as { ok?: boolean; name?: string; tags?: string[]; verified?: boolean; verified_segment_count?: number; autocoded_segment_count?: number };
 }
 
 export async function autocodeImage(project: string, imageRef: string) {
@@ -474,14 +477,14 @@ export type ApplyTreatmentsResult = {
     BP: number;
     SB: number;
     VB: number;
-    "CycleRAP score": number;
+    "Overall Risk Level": number;
   };
   after_scores: {
     BB: number;
     BP: number;
     SB: number;
     VB: number;
-    "CycleRAP score": number;
+    "Overall Risk Level": number;
   };
 };
 
@@ -499,7 +502,7 @@ export type SegmentTreatmentState = {
     BP: number;
     SB: number;
     VB: number;
-    "CycleRAP score": number;
+    "Overall Risk Level": number;
   };
 };
 

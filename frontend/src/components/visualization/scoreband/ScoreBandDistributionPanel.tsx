@@ -25,8 +25,10 @@ interface ScoreResultRow {
   "SB Band": number;
   "VB": number;
   "VB Band": number;
-  "CycleRAP score": number;
-  "CycleRAP score Band": number;
+  "Overall Risk Level"?: number;
+  "Overall Risk Level Band"?: number;
+  "CycleRAP score"?: number; // Backward compatibility for existing projects
+  "CycleRAP score Band"?: number; // Backward compatibility for existing projects
 }
 
 interface ScoreResultsResponse {
@@ -39,7 +41,7 @@ const CRASH_TYPE_LABELS: Record<string, string> = {
   BB: "Bicycle-Bicycle (BB)",
   SB: "Single-Bicycle (SB)",
   BP: "Bicycle-Pedestrian (BP)",
-  Overall: "Overall CycleRAP Score",
+  Overall: "Overall Risk Level",
 };
 
 export function ScoreBandDistributionPanel({
@@ -69,14 +71,15 @@ export function ScoreBandDistributionPanel({
         const bbBand = row["BB Band"];
         const sbBand = row["SB Band"];
         const bpBand = row["BP Band"];
-        const overallBand = row["CycleRAP score Band"];
+        // Handle both new and old column names for backward compatibility
+        const overallBand = row["Overall Risk Level Band"] ?? row["CycleRAP score Band"];
 
         // Count valid bands (1-4), skip 0 and other invalid values
         if (vbBand >= 1 && vbBand <= 4) distributions.VB[vbBand]++;
         if (bbBand >= 1 && bbBand <= 4) distributions.BB[bbBand]++;
         if (sbBand >= 1 && sbBand <= 4) distributions.SB[sbBand]++;
         if (bpBand >= 1 && bpBand <= 4) distributions.BP[bpBand]++;
-        if (overallBand >= 1 && overallBand <= 4) distributions.Overall[overallBand]++;
+        if (overallBand !== undefined && overallBand >= 1 && overallBand <= 4) distributions.Overall[overallBand]++;
       });
 
       return distributions;
@@ -136,7 +139,7 @@ export function ScoreBandDistributionPanel({
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "bold" }}>
-            CycleRAP Score Band Distributions {isExpanded ? "▼" : "▶"}
+            Overall Risk Level Band Distributions {isExpanded ? "▼" : "▶"}
           </h3>
           {/* Quick summary when collapsed */}
           {!isExpanded && totalSegments > 0 && (
@@ -191,7 +194,7 @@ export function ScoreBandDistributionPanel({
           {/* Charts Grid */}
           {!loading && !error && distributions && totalSegments > 0 && (
             <div className="score-band-charts-container">
-              {/* Overall CycleRAP Score - Full Width at Top */}
+              {/* Overall Risk Level - Full Width at Top */}
               <div className="score-band-overall">
                 <ScoreBandPieChart
                   crashType={CRASH_TYPE_LABELS.Overall}

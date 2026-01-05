@@ -351,7 +351,7 @@ def _ensure_models_ready():
 
 @bp.get("")
 def list_projects():
-    """List projects with metadata including tags, date_created, and last_updated."""
+    """List projects with metadata including tags, date_created, last_updated, and verification segment counts."""
     ctx = get_ctx()
     pm = ctx["pm"]
     names = pm.list_names()
@@ -361,10 +361,21 @@ def list_projects():
     for name in names:
         try:
             proj = pm.project(name)
+            # Get total segment count from latest version's attributes
+            ver = proj.latest()
+            total_segments = 0
+            if ver.attributes and hasattr(ver.attributes, 'df'):
+                df = ver.attributes.df
+                if df is not None and len(df) > 0:
+                    total_segments = len(df)
+
             project_data = {
                 "name": name,
                 "tags": proj.metadata.tags or [],
-                "verified": getattr(proj.metadata, 'verified', False)
+                "verified": getattr(proj.metadata, 'verified', False),
+                "verified_segment_count": getattr(proj.metadata, 'verified_segment_count', 0),
+                "autocoded_segment_count": getattr(proj.metadata, 'autocoded_segment_count', 0),
+                "total_segments": total_segments
             }
 
             # Add date_created if available
@@ -376,12 +387,17 @@ def list_projects():
                 project_data["last_updated"] = proj.metadata.last_updated.isoformat()
 
             projects.append(project_data)
-        except Exception:
+        except Exception as e:
             # If metadata fails to load, return project with empty tags and no dates
+            import traceback
+            traceback.print_exc()
             projects.append({
                 "name": name,
                 "tags": [],
-                "verified": False
+                "verified": False,
+                "verified_segment_count": 0,
+                "autocoded_segment_count": 0,
+                "total_segments": 0
             })
 
     return jsonify({"projects": projects})
@@ -400,13 +416,15 @@ def get_project(project_name: str):
 
 @bp.get("/<project_name>/metadata")
 def get_project_metadata(project_name: str):
-    """Get project metadata including verified status."""
+    """Get project metadata including verified status and verified segment count."""
     ctx = get_ctx()
     proj: Project = ctx["pm"].project(project_name)
     return jsonify({
         "name": proj.metadata.project_name,
         "tags": proj.metadata.tags or [],
         "verified": getattr(proj.metadata, 'verified', False),
+        "verified_segment_count": getattr(proj.metadata, 'verified_segment_count', 0),
+        "autocoded_segment_count": getattr(proj.metadata, 'autocoded_segment_count', 0),
         "date_created": proj.metadata.date_created.isoformat() if hasattr(proj.metadata, 'date_created') and proj.metadata.date_created else None,
         "last_updated": proj.metadata.last_updated.isoformat() if hasattr(proj.metadata, 'last_updated') and proj.metadata.last_updated else None
     })
@@ -590,7 +608,7 @@ def calculate_score(project_name: str):
     This endpoint:
     1) Loads the project's latest attributes DataFrame from disk
     2) Optionally accepts modified attributes from the request body
-    3) Calculates BB, BP, SB, VB, and composite CycleRAP scores
+    3) Calculates BB, BP, SB, VB, and composite Overall Risk Levels
     4) Saves the results back to disk
     5) Returns the calculated scores to the frontend
 
@@ -616,7 +634,7 @@ def calculate_score(project_name: str):
                     "SB Band": 4,
                     "VB": 85.0,
                     "VB Band": 4,
-                    "CycleRAP score": 61.5,
+                    "Overall Risk Level": 61.5,
                     "CycleRAP score Band": 3
                 },
                 ...
@@ -685,7 +703,7 @@ def calculate_score(project_name: str):
 @bp.get("/<project_name>/results")
 def get_results(project_name: str):
     """
-    Retrieve the latest CycleRAP scores for a project.
+    Retrieve the latest Overall Risk Levels for a project.
     Returns the calculated results from the latest version.
     """
     try:
@@ -750,8 +768,8 @@ def apply_treatments(project_name: str):
             "segment_index": 5,
             "treatments_applied": "1,9,14",
             "modified_attributes": { "Facility Type": 4, ... },
-            "before_scores": { "BB": 2.5, "BP": 1.2, "SB": 3.1, "VB": 5.8, "CycleRAP score": 12.6 },
-            "after_scores": { "BB": 1.8, "BP": 0.9, "SB": 2.2, "VB": 3.5, "CycleRAP score": 8.4 }
+            "before_scores": { "BB": 2.5, "BP": 1.2, "SB": 3.1, "VB": 5.8, "Overall Risk Level": 12.6 },
+            "after_scores": { "BB": 1.8, "BP": 0.9, "SB": 2.2, "VB": 3.5, "Overall Risk Level": 8.4 }
         }
     """
     try:
@@ -794,7 +812,7 @@ def apply_treatments(project_name: str):
             "BP": float(before_scores_df["BP"].iloc[0]),
             "SB": float(before_scores_df["SB"].iloc[0]),
             "VB": float(before_scores_df["VB"].iloc[0]),
-            "CycleRAP score": float(before_scores_df["CycleRAP score"].iloc[0])
+            "Overall Risk Level": float(before_scores_df["Overall Risk Level"].iloc[0])
         }
 
         # Calculate after scores (from modified attributes)
@@ -805,7 +823,7 @@ def apply_treatments(project_name: str):
             "BP": float(after_scores_df["BP"].iloc[0]),
             "SB": float(after_scores_df["SB"].iloc[0]),
             "VB": float(after_scores_df["VB"].iloc[0]),
-            "CycleRAP score": float(after_scores_df["CycleRAP score"].iloc[0])
+            "Overall Risk Level": float(after_scores_df["Overall Risk Level"].iloc[0])
         }
 
         # Convert modified_row values to JSON-serializable types
@@ -887,7 +905,7 @@ def get_segment_treatments(project_name: str, segment_index: int):
             "has_treatments": true,
             "treatments_applied": [1, 9, 14],
             "modified_attributes": { "Facility Type": 4, ... },
-            "after_scores": { "BB": 1.8, "BP": 0.9, "SB": 2.2, "VB": 3.5, "CycleRAP score": 8.4 }
+            "after_scores": { "BB": 1.8, "BP": 0.9, "SB": 2.2, "VB": 3.5, "Overall Risk Level": 8.4 }
         }
     """
     try:
@@ -966,7 +984,7 @@ def get_segment_treatments(project_name: str, segment_index: int):
             "BP": float(after_scores_df["BP"].iloc[0].item() if hasattr(after_scores_df["BP"].iloc[0], 'item') else after_scores_df["BP"].iloc[0]),
             "SB": float(after_scores_df["SB"].iloc[0].item() if hasattr(after_scores_df["SB"].iloc[0], 'item') else after_scores_df["SB"].iloc[0]),
             "VB": float(after_scores_df["VB"].iloc[0].item() if hasattr(after_scores_df["VB"].iloc[0], 'item') else after_scores_df["VB"].iloc[0]),
-            "CycleRAP score": float(after_scores_df["CycleRAP score"].iloc[0].item() if hasattr(after_scores_df["CycleRAP score"].iloc[0], 'item') else after_scores_df["CycleRAP score"].iloc[0])
+            "Overall Risk Level": float(after_scores_df["Overall Risk Level"].iloc[0].item() if hasattr(after_scores_df["Overall Risk Level"].iloc[0], 'item') else after_scores_df["Overall Risk Level"].iloc[0])
         }
 
         return jsonify({
@@ -1082,7 +1100,7 @@ def apply_all_treatments(project_name: str):
                     "BP": float(before_scores_df["BP"].iloc[0]),
                     "SB": float(before_scores_df["SB"].iloc[0]),
                     "VB": float(before_scores_df["VB"].iloc[0]),
-                    "CycleRAP score": float(before_scores_df["CycleRAP score"].iloc[0])
+                    "Overall Risk Level": float(before_scores_df["Overall Risk Level"].iloc[0])
                 }
 
                 # Calculate after scores
@@ -1093,7 +1111,7 @@ def apply_all_treatments(project_name: str):
                     "BP": float(after_scores_df["BP"].iloc[0]),
                     "SB": float(after_scores_df["SB"].iloc[0]),
                     "VB": float(after_scores_df["VB"].iloc[0]),
-                    "CycleRAP score": float(after_scores_df["CycleRAP score"].iloc[0])
+                    "Overall Risk Level": float(after_scores_df["Overall Risk Level"].iloc[0])
                 }
 
                 # Update treatment dataframe
@@ -1500,9 +1518,9 @@ def delete_project(project_name: str):
 @bp.patch("/<project_name>")
 def update_project_metadata(project_name: str):
     """
-    Update project metadata (name, tags, and/or verified status):
+    Update project metadata (name, tags, verified status, and/or verified segment count):
     PATCH /api/projects/<project_name>
-    Body: { "new_name": "...", "tags": [...], "verified": true/false }
+    Body: { "new_name": "...", "tags": [...], "verified": true/false, "verified_segment_count": 0 }
     """
     ctx = get_ctx()
     pm = ctx["pm"]
@@ -1512,6 +1530,8 @@ def update_project_metadata(project_name: str):
         new_name = payload.get("new_name")
         new_tags = payload.get("tags")
         new_verified = payload.get("verified")
+        new_verified_segment_count = payload.get("verified_segment_count")
+        new_autocoded_segment_count = payload.get("autocoded_segment_count")
 
         # Get the project
         try:
@@ -1519,17 +1539,33 @@ def update_project_metadata(project_name: str):
         except KeyError:
             return fail("Project not found", 404)
 
+        # Check if any metadata needs updating
+        metadata_updated = False
+
         # Update tags if provided
         if new_tags is not None:
             if not isinstance(new_tags, list):
                 return fail("Tags must be an array", 400)
             proj.metadata.tags = new_tags
-            proj.metadata.last_updated = datetime.date.today()
-            proj.metadata.serialize(proj.project_path)
+            metadata_updated = True
 
         # Update verified status if provided
         if new_verified is not None:
             proj.metadata.verified = bool(new_verified)
+            metadata_updated = True
+
+        # Update verified segment count if provided
+        if new_verified_segment_count is not None:
+            proj.metadata.verified_segment_count = int(new_verified_segment_count)
+            metadata_updated = True
+
+        # Update autocoded segment count if provided
+        if new_autocoded_segment_count is not None:
+            proj.metadata.autocoded_segment_count = int(new_autocoded_segment_count)
+            metadata_updated = True
+
+        # Serialize once after all metadata updates
+        if metadata_updated:
             proj.metadata.last_updated = datetime.date.today()
             proj.metadata.serialize(proj.project_path)
 
@@ -1567,7 +1603,9 @@ def update_project_metadata(project_name: str):
             "ok": True,
             "name": new_name if new_name else project_name,
             "tags": proj.metadata.tags or [],
-            "verified": proj.metadata.verified
+            "verified": proj.metadata.verified,
+            "verified_segment_count": proj.metadata.verified_segment_count,
+            "autocoded_segment_count": proj.metadata.autocoded_segment_count
         })
 
     except Exception as e:

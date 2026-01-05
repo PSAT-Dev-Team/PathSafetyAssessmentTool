@@ -220,12 +220,12 @@ class Results(BaseTable):
         BP_STR                          = "BP"
         SB_STR                          = "SB"
         VB_STR                          = "VB"
-        CYCLERAP_SCORE_STR              = "CycleRAP score"  
+        CYCLERAP_SCORE_STR              = "Overall Risk Level"
         BB_BAND_STR                     = "BB Band"
         BP_BAND_STR                     = "BP Band"
         SB_BAND_STR                     = "SB Band"
         VB_BAND_STR                     = "VB Band"
-        CYCLERAP_SCORE_BAND_STR         = "CycleRAP score Band"
+        CYCLERAP_SCORE_BAND_STR         = "Overall Risk Level Band"
     
     FIELDS_META = {
         Fields.BB_BAND_STR:             risk_category,
@@ -260,7 +260,7 @@ class Treatment(BaseTable):
         BP_REMEDIED_STR         = "BP"
         SB_REMEDIED_STR         = "SB"
         VB_REMEDIED_STR         = "VB"
-        SCORE_REMEDIED_STR      = "CycleRAP score"
+        SCORE_REMEDIED_STR      = "Overall Risk Level"
 
     def __init__(self, size=0):
         super().__init__(self.Fields, size=size)
@@ -339,6 +339,8 @@ class ProjectMetadata:
         self.size         : int             = None
         self.tags         : list[str]       = None
         self.verified     : bool            = False
+        self.verified_segment_count : int   = 0
+        self.autocoded_segment_count : int  = 0
 
     # === SERIALIZATION ===
 
@@ -360,6 +362,8 @@ class ProjectMetadata:
             self.size       = data.get("size")
             self.tags       = data.get("tags")
             self.verified   = data.get("verified", False)
+            self.verified_segment_count = data.get("verified_segment_count", 0)
+            self.autocoded_segment_count = data.get("autocoded_segment_count", 0)
 
     def serialize(self, to_dir: Path):
         to_dir.mkdir(parents=True, exist_ok=True)
@@ -374,7 +378,9 @@ class ProjectMetadata:
                 "progress": self.progress,
                 "size": self.size,
                 "tags": self.tags,
-                "verified": self.verified
+                "verified": self.verified,
+                "verified_segment_count": self.verified_segment_count,
+                "autocoded_segment_count": self.autocoded_segment_count
             }, f, indent=4)
             
 

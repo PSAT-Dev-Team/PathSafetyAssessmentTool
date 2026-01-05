@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Box, Button, Text, Dialog, Portal, Input, createListCollection } from "@chakra-ui/react";
+import { Box, Button, Text, Dialog, Portal, Input } from "@chakra-ui/react";
 import { LuUpload, LuFile, LuX, LuCheck, LuFolder } from "react-icons/lu";
 import { toaster } from "../../../components/ui/toaster";
 import * as api from "../../../api";

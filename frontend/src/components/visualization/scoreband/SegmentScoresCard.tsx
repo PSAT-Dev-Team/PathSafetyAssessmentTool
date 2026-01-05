@@ -8,8 +8,18 @@ interface SegmentScoresCardProps {
     BB: number;
     SB: number;
     BP: number;
-    "CycleRAP score": number;
+    "Overall Risk Level"?: number;
+    "CycleRAP score"?: number; // Backward compatibility for existing projects
   } | null;
+  beforeScores?: {
+    VB: number;
+    BB: number;
+    SB: number;
+    BP: number;
+    "Overall Risk Level"?: number;
+    "CycleRAP score"?: number;
+  } | null; // Optional scores for before/after comparison
+  showPreviewBackground?: boolean; // If true, show light gray background for preview scores
 }
 
 const CRASH_TYPES = [
@@ -40,34 +50,34 @@ const CRASH_TYPES = [
 ];
 
 const getBandColor = (score: number): string => {
-  if (score <= 5) return RISK_BAND_COLORS.LOW;
-  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
-  if (score <= 20) return RISK_BAND_COLORS.HIGH;
+  if (score < 10) return RISK_BAND_COLORS.LOW;
+  if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
+  if (score <= 60) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 };
 
 const getLightBgColor = (score: number): string => {
-  if (score <= 5) return RISK_BAND_COLORS.LOW;
-  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
-  if (score <= 20) return RISK_BAND_COLORS.HIGH;
+  if (score < 10) return RISK_BAND_COLORS.LOW;
+  if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
+  if (score <= 60) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 };
 
 const getDarkBgColor = (score: number): string => {
-  if (score <= 5) return RISK_BAND_COLORS.LOW;
-  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
-  if (score <= 20) return RISK_BAND_COLORS.HIGH;
+  if (score < 10) return RISK_BAND_COLORS.LOW;
+  if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
+  if (score <= 60) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 };
 
 const getBandLabel = (score: number): string => {
-  if (score <= 5) return "Low";
-  if (score <= 10) return "Medium";
-  if (score <= 20) return "High";
+  if (score < 10) return "Low";
+  if (score <= 25) return "Medium";
+  if (score <= 60) return "High";
   return "Extreme";
 };
 
-export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
+export default function SegmentScoresCard({ scores, beforeScores, showPreviewBackground }: SegmentScoresCardProps) {
   const crashTypeScores = useMemo(() => {
     if (!scores) return [];
     return CRASH_TYPES.map((type) => {
@@ -81,9 +91,10 @@ export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
     });
   }, [scores]);
 
-  const totalScore = scores?.["CycleRAP score"] ?? 0;
+  // Handle both new and old column names for backward compatibility
+  const totalScore = scores?.["Overall Risk Level"] ?? scores?.["CycleRAP score"] ?? 0;
 
-  // Determine CycleRAP Score color based on the crash type with the highest score
+  // Determine Overall Risk Level color based on the crash type with the highest score
   const getCycleRAPScoreColor = useMemo(() => {
     if (!scores) return RISK_BAND_COLORS.LOW;
 
@@ -113,109 +124,137 @@ export default function SegmentScoresCard({ scores }: SegmentScoresCardProps) {
   }
 
   return (
-    <Box>
-      <Text fontSize="sm" fontWeight="bold" mb="4" color="gray.900" _dark={{ color: "white" }}>
-        Crash Type Scores
-      </Text>
-
-      {/* 5-column grid with crash type scores + total */}
-      <Grid
-        templateColumns="repeat(5, 1fr)"
-        gap="4"
-        mb="6"
-      >
-        {crashTypeScores.map((type) => (
-          <GridItem key={type.key}>
-            <Flex
-              direction="column"
-              align="center"
-              justify="center"
-              bg={getLightBgColor(type.score)}
-              _dark={{ bg: getDarkBgColor(type.score) }}
-              borderRadius="lg"
-              p="4"
-              textAlign="center"
-              h="140px"
-              color="black"
-            >
-              {/* Label */}
-              <Text fontSize="xs" fontWeight="bold" mb="3">
-                {type.label}
-              </Text>
-
-              {/* Score Value */}
-              <Text
-                fontSize="2xl"
-                fontWeight="bold"
-                mt="auto"
-              >
-                {type.score.toFixed(2)}
+    <Box display="flex" flexDirection="column">
+      <Box flex="1" />
+      <Box flex="0 0 auto">
+        <Flex gap="4" justify="space-between" mb="1" align="center">
+          <Text fontSize="sm" fontWeight="bold" color="gray.900" _dark={{ color: "white" }}>
+            Crash Type Scores
+          </Text>
+          <Flex gap="2" align="center">
+            <Flex align="center" gap="1">
+              <Box w="12px" h="12px" borderRadius="sm" bg={RISK_BAND_COLORS.LOW} flexShrink={0} />
+              <Text fontSize="2xs" color="gray.700" _dark={{ color: "gray.300" }}>
+                Low
               </Text>
             </Flex>
-          </GridItem>
-        ))}
+            <Flex align="center" gap="1">
+              <Box w="12px" h="12px" borderRadius="sm" bg={RISK_BAND_COLORS.MEDIUM} flexShrink={0} />
+              <Text fontSize="2xs" color="gray.700" _dark={{ color: "gray.300" }}>
+                Medium
+              </Text>
+            </Flex>
+            <Flex align="center" gap="1">
+              <Box w="12px" h="12px" borderRadius="sm" bg={RISK_BAND_COLORS.HIGH} flexShrink={0} />
+              <Text fontSize="2xs" color="gray.700" _dark={{ color: "gray.300" }}>
+                High
+              </Text>
+            </Flex>
+            <Flex align="center" gap="1">
+              <Box w="12px" h="12px" borderRadius="sm" bg={RISK_BAND_COLORS.EXTREME} flexShrink={0} />
+              <Text fontSize="2xs" color="gray.700" _dark={{ color: "gray.300" }}>
+                Extreme
+              </Text>
+            </Flex>
+          </Flex>
+        </Flex>
 
-        {/* Total Score */}
-        <GridItem>
-          <Flex
-            direction="column"
-            align="center"
-            justify="center"
-            bg={getCycleRAPScoreColor}
-            borderRadius="lg"
-            p="4"
-            textAlign="center"
-            h="140px"
-            color="black"
+        <Flex gap="2" align="flex-end">
+        {/* 5-column grid with crash type scores + total */}
+        <Box flex="1">
+          <Grid
+            templateColumns="repeat(5, 1fr)"
+            gap="1"
           >
-            {/* Total label */}
-            <Text fontSize="xs" fontWeight="bold" mb="3">
-              CycleRAP Score
-            </Text>
+            {crashTypeScores.map((type) => {
+              const beforeScore = beforeScores ? (beforeScores[type.key as keyof typeof beforeScores] || 0) : null;
+              const reduction = beforeScore !== null ? beforeScore - type.score : null;
+              const improved = reduction !== null && reduction > 0;
 
-            {/* Total score value */}
-            <Text
-              fontSize="2xl"
-              fontWeight="bold"
-              mt="auto"
-            >
-              {totalScore.toFixed(2)}
-            </Text>
-          </Flex>
-        </GridItem>
-      </Grid>
+              return (
+                <GridItem key={type.key}>
+                  <Flex
+                    direction="column"
+                    align="center"
+                    justify="center"
+                    bg={improved && showPreviewBackground ? "gray.50" : getLightBgColor(type.score)}
+                    _dark={{ bg: improved && showPreviewBackground ? "gray.900" : getDarkBgColor(type.score) }}
+                    borderRadius="sm"
+                    p="1"
+                    textAlign="center"
+                    h={reduction !== null ? "65px" : "50px"}
+                    color="black"
+                  >
+                    {/* Label */}
+                    <Text fontSize="xs" fontWeight="bold" lineHeight="1">
+                      {type.shortLabel}
+                    </Text>
 
-      {/* Risk Levels Legend */}
-      <Box>
-        <Text fontSize="xs" fontWeight="bold" mb="2" color="gray.900" _dark={{ color: "white" }}>
-          Risk Levels
-        </Text>
-        <Grid templateColumns="repeat(4, 1fr)" gap="2">
-          <Flex align="center" gap="2">
-            <Box w="16px" h="16px" borderRadius="md" bg={RISK_BAND_COLORS.LOW} />
-            <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
-              Low
-            </Text>
-          </Flex>
-          <Flex align="center" gap="2">
-            <Box w="16px" h="16px" borderRadius="md" bg={RISK_BAND_COLORS.MEDIUM} />
-            <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
-              Medium
-            </Text>
-          </Flex>
-          <Flex align="center" gap="2">
-            <Box w="16px" h="16px" borderRadius="md" bg={RISK_BAND_COLORS.HIGH} />
-            <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
-              High
-            </Text>
-          </Flex>
-          <Flex align="center" gap="2">
-            <Box w="16px" h="16px" borderRadius="md" bg={RISK_BAND_COLORS.EXTREME} />
-            <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.300" }}>
-              Extreme
-            </Text>
-          </Flex>
-        </Grid>
+                    {/* Score Value */}
+                    <Text
+                      fontSize="sm"
+                      fontWeight="bold"
+                    >
+                      {type.score.toFixed(1)}
+                    </Text>
+
+                    {/* Reduction indicator */}
+                    {reduction !== null && improved && (
+                      <Text fontSize="2xs" color={improved ? "green.600" : "gray.600"} _dark={{ color: improved ? "green.300" : "gray.400" }} lineHeight="1" mt="0.5">
+                        ↓ {reduction.toFixed(2)}
+                      </Text>
+                    )}
+                  </Flex>
+                </GridItem>
+              );
+            })}
+
+            {/* Total Score */}
+            <GridItem>
+              {(() => {
+                const beforeTotal = beforeScores ? (beforeScores["Overall Risk Level"] ?? beforeScores["CycleRAP score"] ?? 0) : null;
+                const totalReduction = beforeTotal !== null ? beforeTotal - totalScore : null;
+                const totalImproved = totalReduction !== null && totalReduction > 0;
+
+                return (
+                  <Flex
+                    direction="column"
+                    align="center"
+                    justify="center"
+                    bg={totalImproved && showPreviewBackground ? "gray.50" : getCycleRAPScoreColor}
+                    _dark={{ bg: totalImproved && showPreviewBackground ? "gray.900" : undefined }}
+                    borderRadius="sm"
+                    p="1"
+                    textAlign="center"
+                    h={totalReduction !== null ? "65px" : "50px"}
+                    color="black"
+                  >
+                    {/* Total label */}
+                    <Text fontSize="xs" fontWeight="bold" lineHeight="1">
+                      CycleRAP Score
+                    </Text>
+
+                    {/* Total score value */}
+                    <Text
+                      fontSize="sm"
+                      fontWeight="bold"
+                    >
+                      {totalScore.toFixed(1)}
+                    </Text>
+
+                    {/* Reduction indicator */}
+                    {totalReduction !== null && totalImproved && (
+                      <Text fontSize="2xs" color={totalImproved ? "green.600" : "gray.600"} _dark={{ color: totalImproved ? "green.300" : "gray.400" }} lineHeight="1" mt="0.5">
+                        ↓ {totalReduction.toFixed(2)}
+                      </Text>
+                    )}
+                  </Flex>
+                );
+              })()}
+            </GridItem>
+          </Grid>
+        </Box>
+        </Flex>
       </Box>
     </Box>
   );

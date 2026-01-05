@@ -3,10 +3,10 @@
  * This is the single source of truth for all safety band categorization in the application.
  *
  * All pages must use these exact thresholds:
- * - Low: 0-5
- * - Medium: 5-10
- * - High: 10-20
- * - Extreme: 20+
+ * - Low: <10
+ * - Medium: 10-25
+ * - High: 25-60
+ * - Extreme: >60
  *
  * Used consistently throughout the application for:
  * - Risk Score visualization (Coding Page, Path Analysis)
@@ -23,23 +23,23 @@ export const RISK_BAND_COLORS = {
 
 /**
  * Get risk band color based on score
- * Thresholds: Low (0-5), Medium (5-10), High (10-20), Extreme (20+)
+ * Thresholds: Low (<10), Medium (10-25), High (25-60), Extreme (>60)
  */
 export function getRiskBandColor(score: number): string {
-  if (score <= 5) return RISK_BAND_COLORS.LOW;
-  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
-  if (score <= 20) return RISK_BAND_COLORS.HIGH;
+  if (score < 10) return RISK_BAND_COLORS.LOW;
+  if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
+  if (score <= 60) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 }
 
 /**
  * Get risk band label based on score
- * Thresholds: Low (0-5), Medium (5-10), High (10-20), Extreme (20+)
+ * Thresholds: Low (<10), Medium (10-25), High (25-60), Extreme (>60)
  */
 export function getRiskBandLabel(score: number): 'Low' | 'Medium' | 'High' | 'Extreme' {
-  if (score <= 5) return 'Low';
-  if (score <= 10) return 'Medium';
-  if (score <= 20) return 'High';
+  if (score < 10) return 'Low';
+  if (score <= 25) return 'Medium';
+  if (score <= 60) return 'High';
   return 'Extreme';
 }
 
@@ -48,8 +48,8 @@ export function getRiskBandLabel(score: number): 'Low' | 'Medium' | 'High' | 'Ex
  * Returns 1-4 for band indices: 1=Low, 2=Medium, 3=High, 4=Extreme
  */
 export function getRiskBandIndex(score: number): 1 | 2 | 3 | 4 {
-  if (score <= 5) return 1;    // Low: 0-5
-  if (score <= 10) return 2;   // Medium: 5-10
-  if (score <= 20) return 3;   // High: 10-20
-  return 4;                     // Extreme: 20+
+  if (score < 10) return 1;    // Low: <10
+  if (score <= 25) return 2;   // Medium: 10-25
+  if (score <= 60) return 3;   // High: 25-60
+  return 4;                     // Extreme: >60
 }

@@ -26,8 +26,10 @@ interface ScoreResultRow {
   "SB Band": number;
   "VB": number;
   "VB Band": number;
-  "CycleRAP score": number;
-  "CycleRAP score Band": number;
+  "Overall Risk Level"?: number;
+  "Overall Risk Level Band"?: number;
+  "CycleRAP score"?: number; // Backward compatibility for existing projects
+  "CycleRAP score Band"?: number; // Backward compatibility for existing projects
 }
 
 interface ScoreResultsResponse {
@@ -40,7 +42,7 @@ const CRASH_TYPE_LABELS: Record<string, string> = {
   BB: "Bicycle-Bicycle (BB)",
   SB: "Single-Bicycle (SB)",
   BP: "Bicycle-Pedestrian (BP)",
-  Overall: "Overall CycleRAP Score",
+  Overall: "Overall Risk Level",
 };
 
 export function AggregatedScoreBandPanel({
@@ -87,9 +89,9 @@ export function AggregatedScoreBandPanel({
 
         // Bin the score using the same thresholds as PathAnalysisMapView
         let overallBand = 1; // Default to Low
-        if (maxScore <= 5) overallBand = 1; // Low
-        else if (maxScore <= 10) overallBand = 2; // Medium
-        else if (maxScore <= 20) overallBand = 3; // High
+        if (maxScore < 10) overallBand = 1; // Low
+        else if (maxScore <= 25) overallBand = 2; // Medium
+        else if (maxScore <= 60) overallBand = 3; // High
         else overallBand = 4; // Extreme
 
         distributions.Overall[overallBand]++;
@@ -212,7 +214,7 @@ export function AggregatedScoreBandPanel({
           }}
         >
           <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "bold" }}>
-            Overall CycleRAP Score {isExpanded ? "▼" : "▶"}
+            Overall Risk Level {isExpanded ? "▼" : "▶"}
           </h3>
           {/* Quick summary when collapsed */}
           {!isExpanded && totalSegments > 0 && (
@@ -295,7 +297,7 @@ export function AggregatedScoreBandPanel({
             distributions &&
             totalSegments > 0 && (
               <div className="score-band-charts-container">
-                {/* Overall CycleRAP Score - Full Width at Top */}
+                {/* Overall Risk Level - Full Width at Top */}
                 <div className="score-band-overall">
                   <ScoreBandPieChart
                     crashType={CRASH_TYPE_LABELS.Overall}

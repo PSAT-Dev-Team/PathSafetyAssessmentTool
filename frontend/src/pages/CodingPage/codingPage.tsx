@@ -50,7 +50,7 @@ type ProjectDetail = { name: string; versions: string[]; latest: string };
 type AttributesResponse = { rows: AttributeRow[] };
 type AttrMappings = Record<string, Record<string, string>>;
 
-const PANEL_HEIGHT = 500;
+const PANEL_HEIGHT = 550;
 const CONTROLS_H = 56;
 
 // Type for project data
@@ -66,6 +66,8 @@ type ProjectDataState = {
   error: string | null;
   editedRow: AttributeRow | null;
   verified?: boolean;
+  verifiedSegmentCount?: number;
+  autocodedSegmentCount?: number;
 };
 
 const defaultProjectData: ProjectDataState = {
@@ -114,6 +116,7 @@ export default function CodingPage() {
   const [projectProgress, setProjectProgress] = useState<Record<string, { processed: number; total: number }>>({});
   const [attrMappings, setAttrMappings] = useState<AttrMappings>({});
 
+
   // Refs for cleanup
   const cleanupTimeoutRef = useRef<number | null>(null);
   const scoreDebounceRef = useRef<Record<number, number>>({});
@@ -150,18 +153,47 @@ export default function CodingPage() {
     }));
   };
 
-  // Toggle verified status for a project
-  const toggleVerified = async (projectName: string, currentVerified: boolean) => {
+  // Update verified segment count for a project
+  const updateVerifiedSegmentCount = async (projectName: string, count: number) => {
     try {
-      await updateProject(projectName, { tags: undefined, verified: !currentVerified });
-      updateProjectData(projectName, { verified: !currentVerified });
-      // Notify other pages (like projects list) of the verified status change
-      window.dispatchEvent(new CustomEvent("psat:verified:updated", { detail: { projectName, verified: !currentVerified } }));
+      const totalSegments = projectData[projectName]?.attrs?.length ?? 0;
+      // Clamp the count to be between 0 and total segments
+      const clampedCount = Math.max(0, Math.min(count, totalSegments));
+
+      await updateProject(projectName, { verified_segment_count: clampedCount });
+      updateProjectData(projectName, { verifiedSegmentCount: clampedCount });
+      // Notify other pages of the change with segment count
+      window.dispatchEvent(new CustomEvent("psat:verified:updated", {
+        detail: { projectName, verifiedSegmentCount: clampedCount }
+      }));
     } catch (e: any) {
-      console.error("Failed to update verification status:", e);
+      console.error("Failed to update verified segment count:", e);
       toaster.create({
         title: "Failed to update",
-        description: e?.message ?? "Failed to update verification status",
+        description: e?.message ?? "Failed to update verified segment count",
+        type: "error",
+      });
+    }
+  };
+
+  // Update autocoded segment count for a project
+  const updateAutocodedSegmentCount = async (projectName: string, count: number) => {
+    try {
+      const totalSegments = projectData[projectName]?.attrs?.length ?? 0;
+      // Clamp the count to be between 0 and total segments
+      const clampedCount = Math.max(0, Math.min(count, totalSegments));
+
+      await updateProject(projectName, { autocoded_segment_count: clampedCount });
+      updateProjectData(projectName, { autocodedSegmentCount: clampedCount });
+      // Notify other pages of the change with segment count
+      window.dispatchEvent(new CustomEvent("psat:autocoded:updated", {
+        detail: { projectName, autocodedSegmentCount: clampedCount }
+      }));
+    } catch (e: any) {
+      console.error("Failed to update autocoded segment count:", e);
+      toaster.create({
+        title: "Failed to update",
+        description: e?.message ?? "Failed to update autocoded segment count",
         type: "error",
       });
     }
@@ -202,6 +234,8 @@ export default function CodingPage() {
 
   const len = attrs.length;
   const [pageInput, setPageInput] = useState(String(currentPage));
+  const [segmentInput, setSegmentInput] = useState(String(currentData.verifiedSegmentCount ?? 0));
+  const [autocodedSegmentInput, setAutocodedSegmentInput] = useState(String(currentData.autocodedSegmentCount ?? 0));
 
   const currentIndex = useMemo(
     () => Math.max(0, Math.min(len - 1, currentPage - 1)),
@@ -482,6 +516,13 @@ export default function CodingPage() {
         setProgress(100);
         setAutoCodeMsg("Completed");
 
+        // Update autocoded segment count to total segments when autocode all completes
+        if (totalOk > 0 && totalFail === 0) {
+          // Only set to 100% if all segments were successfully autocoded
+          const totalSegments = attrs.length;
+          updateAutocodedSegmentCount(currentProjectName, totalSegments);
+        }
+
         const totalProcessed = totalOk + totalFail;
         toaster.create({
           title: "Auto-code (all) done",
@@ -510,7 +551,7 @@ export default function CodingPage() {
 
     window.addEventListener("psat:autocode:all", handler);
     return () => window.removeEventListener("psat:autocode:all", handler);
-  }, [currentProjectName, attrs.length, updateAutocodeBaseline]);
+  }, [currentProjectName, attrs.length, updateAutocodeBaseline, updateAutocodedSegmentCount]);
 
   // Auto-code all segments in all loaded projects
   useEffect(() => {
@@ -636,6 +677,11 @@ export default function CodingPage() {
               console.warn("Failed to fetch updated attributes or recalculate scores for project", projectName, e?.message);
             }
 
+            // Update autocoded segment count for this project if autocode was successful
+            if (projectOk > 0 && projectFail === 0) {
+              updateAutocodedSegmentCount(projectName, projectAttrsLength);
+            }
+
             totalProcessed += projectAttrsLength;
             totalSuccessful += projectOk;
             totalFailed += projectFail;
@@ -680,7 +726,7 @@ export default function CodingPage() {
 
     window.addEventListener("psat:autocode:all-projects", handler);
     return () => window.removeEventListener("psat:autocode:all-projects", handler);
-  }, [projectList, projectData]);
+  }, [projectList, projectData, updateAutocodedSegmentCount]);
 
   // Load project data
   useEffect(() => {
@@ -750,6 +796,8 @@ export default function CodingPage() {
           currentPage: 1,
           editedRow: null,
           verified: metadata?.verified ?? false,
+          verifiedSegmentCount: metadata?.verified_segment_count ?? 0,
+          autocodedSegmentCount: metadata?.autocoded_segment_count ?? 0,
           loading: false,
         });
       } catch (e: any) {
@@ -901,18 +949,67 @@ export default function CodingPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Save handler
+  // Save handler - saves all loaded projects (attributes + metadata)
   useEffect(() => {
     function handleSave() {
-      if (!currentProjectName || !attrs) return;
-      saveAttributes(currentProjectName, attrs)
-        .then(() => toaster.create({ title: "Saved", description: "Changes saved successfully.", type: "success" }))
-        .catch((e) => toaster.create({ title: "Save failed", description: String(e?.message ?? e), type: "error" }));
+      if (projectList.length === 0) return;
+
+      // Create save promises for all loaded projects
+      const savePromises = projectList.map(projName => {
+        const projData = projectData[projName];
+        if (!projData?.attrs) return Promise.resolve();
+
+        // Save attributes and metadata together
+        return Promise.all([
+          saveAttributes(projName, projData.attrs),
+          updateProject(projName, {
+            autocoded_segment_count: projData.autocodedSegmentCount ?? 0,
+            verified_segment_count: projData.verifiedSegmentCount ?? 0
+          })
+        ]);
+      });
+
+      Promise.all(savePromises)
+        .then(() => {
+          console.log("Save completed successfully. Dispatching update events...");
+          // Dispatch events to update Projects page for all projects
+          projectList.forEach(projName => {
+            const projData = projectData[projName];
+            if (projData) {
+              console.log(`Dispatching events for ${projName}:`, {
+                verifiedSegmentCount: projData.verifiedSegmentCount ?? 0,
+                autocodedSegmentCount: projData.autocodedSegmentCount ?? 0
+              });
+              // Dispatch verified status update
+              window.dispatchEvent(new CustomEvent("psat:verified:updated", {
+                detail: { projectName: projName, verifiedSegmentCount: projData.verifiedSegmentCount ?? 0 }
+              }));
+              // Dispatch autocoded status update
+              window.dispatchEvent(new CustomEvent("psat:autocoded:updated", {
+                detail: { projectName: projName, autocodedSegmentCount: projData.autocodedSegmentCount ?? 0 }
+              }));
+            }
+          });
+
+          toaster.create({
+            title: "Saved",
+            description: `All ${projectList.length} project(s) saved successfully.`,
+            type: "success"
+          });
+        })
+        .catch((e) => {
+          console.error("Save failed:", e);
+          toaster.create({
+            title: "Save failed",
+            description: String(e?.message ?? e),
+            type: "error"
+          });
+        });
     }
 
     window.addEventListener("psat:save", handleSave);
     return () => window.removeEventListener("psat:save", handleSave);
-  }, [currentProjectName, attrs]);
+  }, [projectList, projectData, updateProject]);
 
   // Update edited row when current row changes
   useEffect(() => {
@@ -991,6 +1088,14 @@ export default function CodingPage() {
     setPageInput(String(currentPage));
   }, [currentPage]);
 
+  useEffect(() => {
+    setSegmentInput(String(currentData.verifiedSegmentCount ?? 0));
+  }, [currentData.verifiedSegmentCount]);
+
+  useEffect(() => {
+    setAutocodedSegmentInput(String(currentData.autocodedSegmentCount ?? 0));
+  }, [currentData.autocodedSegmentCount]);
+
   const commitPage = useCallback(
     (valStr: string) => {
       const raw = Number(valStr);
@@ -1001,10 +1106,50 @@ export default function CodingPage() {
     [gotoPage, len]
   );
 
+  const commitSegment = useCallback(
+    (valStr: string) => {
+      const raw = Number(valStr);
+      if (!Number.isFinite(raw)) return;
+      const clamped = Math.max(0, Math.min(len || 0, raw));
+      updateVerifiedSegmentCount(currentProjectName!, clamped);
+    },
+    [currentProjectName, len, updateVerifiedSegmentCount]
+  );
+
+  const commitAutocodedSegment = useCallback(
+    (valStr: string) => {
+      const raw = Number(valStr);
+      if (!Number.isFinite(raw)) return;
+      const clamped = Math.max(0, Math.min(len || 0, raw));
+      updateAutocodedSegmentCount(currentProjectName!, clamped);
+    },
+    [currentProjectName, len, updateAutocodedSegmentCount]
+  );
+
   useEffect(() => {
     const t = setTimeout(() => commitPage(pageInput), 300);
     return () => clearTimeout(t);
   }, [pageInput, commitPage]);
+
+  useEffect(() => {
+    const t = setTimeout(() => commitSegment(segmentInput), 300);
+    return () => clearTimeout(t);
+  }, [segmentInput, commitSegment]);
+
+  useEffect(() => {
+    const t = setTimeout(() => commitAutocodedSegment(autocodedSegmentInput), 300);
+    return () => clearTimeout(t);
+  }, [autocodedSegmentInput, commitAutocodedSegment]);
+
+  // Warn user before leaving the page (browser close, refresh, etc.)
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   if (projectList.length === 0) {
     return <Box p="4"><Text color="red.500">No projects selected.</Text></Box>;
@@ -1125,52 +1270,65 @@ export default function CodingPage() {
 
       <Flex justify="space-between" align="center" mb="3">
         <Flex align="center" gap="3">
-          <span style={{ fontSize: "20px" }}>
-            {currentData.verified ? "✅" : "⏳"}
-          </span>
           <Box>
             <Text fontSize="lg" fontWeight="bold">{detail?.name ?? currentProjectName}</Text>
             {detail?.latest && (
               <Text fontSize="sm" color="gray.600">Latest version: {detail.latest}</Text>
             )}
           </Box>
-          <Button
-            onClick={() => toggleVerified(currentProjectName!, currentData.verified ?? false)}
-            size="sm"
-            variant={currentData.verified ? "outline" : "solid"}
-            colorPalette={currentData.verified ? "green" : "blue"}
-            css={
-              currentData.verified
-                ? {
-                    transition: "all 0.2s ease-in-out",
-                    "&:hover": {
-                      backgroundColor: "#ef4444 !important",
-                      color: "white !important",
-                      borderColor: "#ef4444 !important",
-                    },
+          <Flex align="center" gap="2">
+            <Text fontSize="sm" fontWeight="bold">Segments Verified:</Text>
+            <NumberInput.Root
+              maxW="80px"
+              min={0}
+              max={len || 0}
+              value={segmentInput}
+              onValueChange={(e) => setSegmentInput(e.value)}
+            >
+              <NumberInput.Control />
+              <NumberInput.Input
+                placeholder="0"
+                onBlur={() => commitSegment(segmentInput)}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter") {
+                    ev.currentTarget.blur();
                   }
-                : {
-                    transition: "all 0.2s ease-in-out",
-                    "&:hover": {
-                      backgroundColor: "#22c55e !important",
-                      color: "white !important",
-                      borderColor: "#22c55e !important",
-                    },
+                }}
+              />
+            </NumberInput.Root>
+            <span style={{ fontSize: "18px", minWidth: "50px" }}>
+              {len > 0
+                ? `${((currentData.verifiedSegmentCount ?? 0) / len * 100).toFixed(1)}%`
+                : "0%"}
+            </span>
+          </Flex>
+
+          <Flex align="center" gap="2">
+            <Text fontSize="sm" fontWeight="bold">Segments Autocoded:</Text>
+            <NumberInput.Root
+              maxW="80px"
+              min={0}
+              max={len || 0}
+              value={autocodedSegmentInput}
+              onValueChange={(e) => setAutocodedSegmentInput(e.value)}
+            >
+              <NumberInput.Control />
+              <NumberInput.Input
+                placeholder="0"
+                onBlur={() => commitAutocodedSegment(autocodedSegmentInput)}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter") {
+                    ev.currentTarget.blur();
                   }
-            }
-            onMouseEnter={(e) => {
-              if (currentData.verified) {
-                e.currentTarget.textContent = "Set To Pending";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (currentData.verified) {
-                e.currentTarget.textContent = "Verified";
-              }
-            }}
-          >
-            {currentData.verified ? "Verified" : "Mark As Verified"}
-          </Button>
+                }}
+              />
+            </NumberInput.Root>
+            <span style={{ fontSize: "18px", minWidth: "50px" }}>
+              {len > 0
+                ? `${((currentData.autocodedSegmentCount ?? 0) / len * 100).toFixed(1)}%`
+                : "0%"}
+            </span>
+          </Flex>
         </Flex>
 
         <Flex align="center" gap="3">
@@ -1203,32 +1361,16 @@ export default function CodingPage() {
         templateColumns={{ base: "1fr", md: "1fr 1fr" }}
         gap="16px"
       >
-        <GridItem>
-          <ImagePanel
-            projectName={currentProjectName!}
-            imageRef={imgRef}
-            panelHeight={PANEL_HEIGHT}
-          />
-        </GridItem>
-
         <GridItem
           display="flex"
           flexDirection="column"
           minH={`${PANEL_HEIGHT}px`}
         >
-          <Box flex="1 1 auto" minH={0}>
-            <AttributesPanel
-              row={editedRow}
-              originalRow={originalCurrentAttr}
-              mappings={attrMappings}
-              panelHeight={PANEL_HEIGHT - CONTROLS_H}
-              onChange={onAttrChange}
-              onEdit={editCurrentAttr}
-              changedFields={changedFieldsByRow[currentIndex] || []}
-              fieldSources={fieldSourcesByRow[currentIndex] || {}}
-            />
-          </Box>
-
+          <ImagePanel
+            projectName={currentProjectName!}
+            imageRef={imgRef}
+            panelHeight={PANEL_HEIGHT}
+          />
           <Flex
             flex="0 0 auto"
             h={`${CONTROLS_H}px`}
@@ -1263,6 +1405,38 @@ export default function CodingPage() {
               Next
             </Button>
           </Flex>
+        </GridItem>
+
+        <GridItem
+          display="flex"
+          flexDirection="column"
+          gap="4"
+        >
+          <Box flex="1 1 auto" minH={0}>
+            <AttributesPanel
+              row={editedRow}
+              originalRow={originalCurrentAttr}
+              mappings={attrMappings}
+              panelHeight={PANEL_HEIGHT - CONTROLS_H}
+              onChange={onAttrChange}
+              onEdit={editCurrentAttr}
+              changedFields={changedFieldsByRow[currentIndex] || []}
+              fieldSources={fieldSourcesByRow[currentIndex] || {}}
+            />
+          </Box>
+
+          <Box
+            bg="white"
+            borderRadius="md"
+            p="1"
+            borderWidth="1px"
+            borderColor="gray.200"
+            _dark={{ bg: "gray.800", borderColor: "gray.600" }}
+          >
+            <SegmentScoresCard
+              scores={scores[currentIndex] || null}
+            />
+          </Box>
         </GridItem>
 
         <GridItem colSpan={{ base: 1, md: 2 }}>
@@ -1305,21 +1479,6 @@ export default function CodingPage() {
             attributes={attrs}
             panelHeight={350}
           />
-        </GridItem>
-
-        <GridItem colSpan={{ base: 1, md: 2 }}>
-          <Box
-            bg="white"
-            borderRadius="md"
-            p="6"
-            borderWidth="1px"
-            borderColor="gray.200"
-            _dark={{ bg: "gray.800", borderColor: "gray.600" }}
-          >
-            <SegmentScoresCard
-              scores={scores[currentIndex] || null}
-            />
-          </Box>
         </GridItem>
       </Grid>
     </Box>

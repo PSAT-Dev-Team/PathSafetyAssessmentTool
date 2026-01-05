@@ -3,17 +3,10 @@ import { Button, Separator } from "@chakra-ui/react";
 import { useMemo, useCallback, useState } from "react";
 import { toaster } from "../../components/ui/toaster";
 import { applyAllTreatments, resetAllTreatments, saveTreatments } from "../../api";
-import {
-  MenuContent,
-  MenuItem,
-  MenuRoot,
-  MenuTrigger,
-} from "@chakra-ui/react";
 
 import CodingSidebar from "./components/CodingSidebar";
 import TreatmentSidebar from "./components/TreatmentSidebar";
 import ShapefileModal from "./components/ShapefileModal";
-import ImageUploadModal from "./components/ImageUploadModal";
 import ExitConfirmationDialog from "./components/ExitConfirmationDialog";
 import "./sidebar.css";
 
@@ -21,25 +14,14 @@ const LINKS = [
   { to: "/home", label: "Projects" },
 ];
 
-const CREATE_PROJECT_LINK = { to: "/projects/create", label: "Create Project", isCreate: true };
-
-const ANALYSIS_LINKS = [
-  { to: "/analysis/path", label: "Path Analysis" },
-  { to: "/analysis/post-treatment", label: "Post-Treatment Analysis" },
-];
 
 export default function Sidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
-  const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [treatmentExitDialogOpen, setTreatmentExitDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
-  const createProject = () => {
-    navigate(`/projects/create`);
-  };
 
   const openShapefileModal = () => {
     setShapefileModalOpen(true);
@@ -47,18 +29,6 @@ export default function Sidebar() {
 
   const closeShapefileModal = () => {
     setShapefileModalOpen(false);
-  };
-
-  const openImageUploadModal = () => {
-    setImageUploadModalOpen(true);
-  };
-
-  const closeImageUploadModal = () => {
-    setImageUploadModalOpen(false);
-  };
-
-  const navigateSidebar = (to: string) => {
-    navigate(to);
   };
 
   // Get the project name
@@ -75,10 +45,18 @@ export default function Sidebar() {
   }, [rawProjectName]);
 
   const inCoding = pathname.startsWith("/coding");
-  const onHome = pathname === "/home";
-  const onTreatment = pathname === "/treatment";
   const onTreatmentDetail = pathname.startsWith("/treatment/") && projectName;
-  const onAnalysis = pathname.startsWith("/analysis");
+
+  // Navigate with exit prompt for coding page
+  const navigateSidebar = useCallback((to: string) => {
+    if (inCoding) {
+      // Always show exit dialog when navigating away from coding page
+      (window as any).psat_pendingNavigation = to;
+      setExitDialogOpen(true);
+    } else {
+      navigate(to);
+    }
+  }, [inCoding, navigate]);
 
   // Bulk treatment operations
   const handleTreatAllSegments = useCallback(async () => {
@@ -171,6 +149,7 @@ export default function Sidebar() {
     setExitDialogOpen(true);
   }, []);
 
+
   const handleSaveAndExit = useCallback(() => {
     setIsSaving(true);
     window.dispatchEvent(new CustomEvent("psat:save"));
@@ -179,17 +158,35 @@ export default function Sidebar() {
     setTimeout(() => {
       setIsSaving(false);
       setExitDialogOpen(false);
-      navigate(`/home`);
+
+      // Navigate to pending location or home
+      const pendingNavigation = (window as any).psat_pendingNavigation;
+      if (pendingNavigation) {
+        navigate(pendingNavigation);
+        (window as any).psat_pendingNavigation = null;
+      } else {
+        navigate(`/home`);
+      }
     }, 500);
   }, [navigate]);
 
   const handleDiscardAndExit = useCallback(() => {
     setExitDialogOpen(false);
-    navigate(`/home`);
+
+    // Navigate to pending location or home
+    const pendingNavigation = (window as any).psat_pendingNavigation;
+    if (pendingNavigation) {
+      navigate(pendingNavigation);
+      (window as any).psat_pendingNavigation = null;
+    } else {
+      navigate(`/home`);
+    }
   }, [navigate]);
 
   const handleExitCancel = useCallback(() => {
     setExitDialogOpen(false);
+    // Clear pending navigation
+    (window as any).psat_pendingNavigation = null;
   }, []);
 
   // Treatment save and exit handlers
@@ -257,15 +254,6 @@ export default function Sidebar() {
         <div className="psat-brand">PSAT</div>
 
         <div className="psat-actions">
-          <Button
-            onClick={() => createProject()}
-            colorPalette="gray"
-            variant="outline"
-            size="sm"
-          >
-            {CREATE_PROJECT_LINK.label}
-          </Button>
-
           {LINKS.map(({ to, label }) => {
             const active = pathname.startsWith(to);
             return (
@@ -281,40 +269,14 @@ export default function Sidebar() {
             );
           })}
 
-          {/* Analysis Dropdown Menu */}
-          <MenuRoot>
-            <MenuTrigger asChild>
-              <Button
-                colorPalette="gray"
-                variant={onAnalysis ? "solid" : "outline"}
-                size="sm"
-              >
-                Analysis ▼
-              </Button>
-            </MenuTrigger>
-            <MenuContent>
-              {ANALYSIS_LINKS.map(({ to, label }) => (
-                <MenuItem
-                  key={to}
-                  value={to}
-                  onClick={() => navigateSidebar(to)}
-                  bg={pathname === to ? "gray.subtle" : "transparent"}
-                  _hover={{ bg: "gray.subtle" }}
-                >
-                  {label}
-                </MenuItem>
-              ))}
-            </MenuContent>
-          </MenuRoot>
-
-          {/* Treatment Application Button */}
+          {/* Path Analysis Button */}
           <Button
-            onClick={() => navigateSidebar("/treatment")}
+            onClick={() => navigateSidebar("/analysis/path")}
             colorPalette="gray"
-            variant={onTreatment ? "solid" : "outline"}
+            variant={pathname === "/analysis/path" ? "solid" : "outline"}
             size="sm"
           >
-            Treatment Application
+            Path Analysis
           </Button>
         </div>
       </div>
@@ -348,29 +310,18 @@ export default function Sidebar() {
         </div>
       )}
 
-      {/* Home and Create Project Pages - Show Upload Images button */}
-      {(onHome || pathname === "/projects/create") && (
-        <div className="psat-side-bottom">
-          <Button onClick={openImageUploadModal} colorPalette="green" variant="surface" size="sm" width="100%">
-            Upload Images
-          </Button>
-        </div>
-      )}
 
-      {/* Treatment List and Analysis Pages - Show project management buttons */}
-      {(onTreatment || onAnalysis) && (
+      {/* Projects Page - Show GIS layer management button */}
+      {pathname === "/home" && (
         <div className="psat-side-bottom">
           <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" width="100%">
-            Update GIS Layers
+            GIS Layer
           </Button>
         </div>
       )}
 
       {/* Shapefile Management Modal */}
       <ShapefileModal open={shapefileModalOpen} onClose={closeShapefileModal} />
-
-      {/* Image Upload Modal */}
-      <ImageUploadModal open={imageUploadModalOpen} onClose={closeImageUploadModal} />
 
       {/* Coding Exit Confirmation Dialog */}
       <ExitConfirmationDialog

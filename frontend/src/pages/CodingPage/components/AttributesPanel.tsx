@@ -22,6 +22,8 @@ type Props = {
   onEdit?: (field: string, value: string | number | boolean | null) => void;
   changedFields?: string[]; // Fields that were changed by auto-coding
   fieldSources?: Record<string, string>; // Field name -> "CV" | "GIS"
+  readOnly?: boolean; // If true, disable editing (display-only mode)
+  headerAction?: React.ReactNode; // Optional action/toggle to display next to "Attributes" heading
 };
 
 /** ====== Group ordering (tab order) ====== */
@@ -203,6 +205,8 @@ export default function AttributesPanel({
   onEdit,
   changedFields = [],
   fieldSources = {},
+  readOnly = false,
+  headerAction,
 }: Props) {
   const grouped = useMemo(() => (row ? groupEntries(row) : null), [row]);
 
@@ -257,8 +261,9 @@ export default function AttributesPanel({
   if (!row) {
     return (
       <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
-        <Card.Header>
-          <Heading size="sm">Attributes</Heading>
+        <Card.Header display="flex" flexDirection="row" justifyContent="space-between" alignItems="center" gap="2">
+          <Heading size="sm" flex="0 0 auto">Attributes</Heading>
+          {headerAction}
         </Card.Header>
         <Card.Body>
           <Text color="gray.500">No attributes</Text>
@@ -269,8 +274,9 @@ export default function AttributesPanel({
 
   return (
     <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
-      <Card.Header>
-        <Heading size="sm">Attributes</Heading>
+      <Card.Header display="flex" flexDirection="row" justifyContent="space-between" alignItems="center" gap="2">
+        <Heading size="sm" flex="0 0 auto">Attributes</Heading>
+        {headerAction}
       </Card.Header>
 
       {/* Tabs occupy the body; content area scrolls independently */}
@@ -311,14 +317,14 @@ export default function AttributesPanel({
                           gap="1"
                           p="2"
                           borderRadius="md"
-                          bg={isChanged ? "yellow.100" : isEdited ? "red.50" : "transparent"}
+                          bg={isChanged ? "green.100" : isEdited ? "red.50" : "transparent"}
                           borderWidth={isChanged || isEdited ? "2px" : "0px"}
-                          borderColor={isChanged ? "yellow.500" : isEdited ? "red.200" : "transparent"}
+                          borderColor={isChanged ? "green.500" : isEdited ? "red.200" : "transparent"}
                           transition="all 0.2s"
                         >
                           <Text
                             fontSize="xs"
-                            color={isChanged ? { base: "yellow.900", _dark: "yellow.900" } : "gray.600"}
+                            color={isChanged ? { base: "green.900", _dark: "green.900" } : "gray.600"}
                             fontWeight={isChanged ? "bold" : "semibold"}
                           >
                             {k}
@@ -331,7 +337,7 @@ export default function AttributesPanel({
                           </Text>
 
                           {dict ? (
-                            <NativeSelect.Root size="sm" width="100%" mt="auto">
+                            <NativeSelect.Root size="sm" width="100%" mt="auto" disabled={readOnly}>
                               <NativeSelect.Field
                                 value={strVal}
                                 onChange={(e) => {
@@ -375,6 +381,7 @@ export default function AttributesPanel({
                             <Input
                               size="sm"
                               value={strVal}
+                              disabled={readOnly}
                               onChange={(e) => {
                                 const raw = e.target.value;
                                 const num = Number(raw);

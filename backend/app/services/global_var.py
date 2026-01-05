@@ -191,13 +191,13 @@ SB_STR                          = "SB"
 SSB_STR                         = "SB Smoothed"
 VB_STR                          = "VB"
 SVB_STR                         = "VBSmoothed"
-CYCLERAP_SCORE_STR              = "CycleRAP score"  
-CYCLERAP_SCORE_SMOOTHED_STR     = "CycleRAP score Smoothed"
+CYCLERAP_SCORE_STR              = "Overall Risk Level"
+CYCLERAP_SCORE_SMOOTHED_STR     = "Overall Risk Level Smoothed"
 BB_BAND_STR                     = "BB Band"
 BP_BAND_STR                     = "BP Band"
 SB_BAND_STR                     = "SB Band"
 VB_BAND_STR                     = "VB Band"
-CYCLERAP_SCORE_BAND_STR         = "CycleRAP score Band"
+CYCLERAP_SCORE_BAND_STR         = "Overall Risk Level Band"
 # == END ==
 
 # TODO: Can be serialized and set to be editable by user

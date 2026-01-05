@@ -1,4 +1,4 @@
-import { Card, Heading, Box, Image, HStack, Text } from "@chakra-ui/react";
+import { Card, Heading, Box, Image, HStack } from "@chakra-ui/react";
 import { useState } from "react";
 import { Slider } from "../../../components/ui/slider";
 
@@ -17,14 +17,10 @@ export default function ImagePanel({ projectName, imageRef, panelHeight = 500 }:
       display="flex"
       flexDirection="column"
     >
-      <Card.Header>
-        <Heading size="sm">Image</Heading>
-      </Card.Header>
-
-      <Box px={4} py={2} borderBottomWidth="1px">
-        <HStack gap={3}>
-          <Text fontSize="sm" minW="80px">Brightness:</Text>
-          <Box flex={1}>
+      <Card.Header borderBottomWidth="1px" py={1} px={3}>
+        <HStack gap={2} align="center" w="100%">
+          <Heading size="sm">Image Brightness:</Heading>
+          <Box flex={1} minW={0}>
             <Slider
               min={0}
               max={200}
@@ -32,9 +28,8 @@ export default function ImagePanel({ projectName, imageRef, panelHeight = 500 }:
               onValueChange={(details) => setBrightness(details.value[0])}
             />
           </Box>
-          <Text fontSize="sm" minW="45px">{brightness}%</Text>
         </HStack>
-      </Box>
+      </Card.Header>
 
       <Card.Body minH={0} >
         {imageRef ? (

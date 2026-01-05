@@ -15,12 +15,12 @@ function renderGroupedAttributes(items: any[]) {
   const groupedItems: Record<string, any[]> = {
     "Not Selected": [],
     "Project": [],
-    "Safety Score": [],
+    "Safety Risk Level": [],
     "Facility configuration": [],
-    "Flow & Speed": [],
     "Facility clear width": [],
     "Facility surface conditions": [],
     "Intersection": [],
+    "Flow & Speed": [],
   };
 
   // Group items - only include valid items
@@ -40,12 +40,12 @@ function renderGroupedAttributes(items: any[]) {
   const groupOrder = [
     "Not Selected",
     "Project",
-    "Safety Score",
+    "Safety Risk Level",
     "Facility configuration",
-    "Flow & Speed",
     "Facility clear width",
     "Facility surface conditions",
     "Intersection",
+    "Flow & Speed",
   ];
 
   return (
@@ -108,7 +108,7 @@ interface AttributeConfig {
   group: string; // Add group field
 }
 
-// Safety Score Crash Types
+// Safety Risk Level Crash Types
 interface SafetyScoreConfig {
   name: string;
   displayName?: string;
@@ -118,33 +118,33 @@ interface SafetyScoreConfig {
 
 const safetyScoreAttributes: SafetyScoreConfig[] = [
   {
-    name: "CycleRAP Score",
-    displayName: "CycleRAP Score",
-    group: "Safety Score",
+    name: "Overall Risk Level",
+    displayName: "Overall Risk Level",
+    group: "Safety Risk Level",
     options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
   },
   {
     name: "VB Band",
     displayName: "Vehicle-Bicycle (VB)",
-    group: "Safety Score",
+    group: "Safety Risk Level",
     options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
   },
   {
     name: "BB Band",
     displayName: "Bicycle-Bicycle (BB)",
-    group: "Safety Score",
+    group: "Safety Risk Level",
     options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
   },
   {
     name: "SB Band",
     displayName: "Single-Bicycle (SB)",
-    group: "Safety Score",
+    group: "Safety Risk Level",
     options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
   },
   {
     name: "BP Band",
     displayName: "Bicycle-Pedestrian (BP)",
-    group: "Safety Score",
+    group: "Safety Risk Level",
     options: ["Not Selected", "Low", "Medium", "High", "Extreme"],
   },
 ];

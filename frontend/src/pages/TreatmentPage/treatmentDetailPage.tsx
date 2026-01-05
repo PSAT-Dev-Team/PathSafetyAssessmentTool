@@ -9,7 +9,10 @@ import {
   Spinner,
   NumberInput,
   Button,
+  Card,
+  Heading,
 } from "@chakra-ui/react";
+import { Switch } from "../../components/ui/switch";
 
 import type { Feature, FeatureCollection } from "geojson";
 
@@ -19,12 +22,15 @@ import {
   fetchProjectGeoJSON,
   applyTreatments,
   getSegmentTreatments,
+  fetchAttributeMappings,
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
 import ImagePanel from "../CodingPage/components/ImagePanel";
+import AttributesPanel from "../CodingPage/components/AttributesPanel";
 import GeoDataPanel from "../CodingPage/components/GeoDataPanel";
-import { RISK_BAND_COLORS } from "../../components/visualization/scoreband/colorConstants";
+import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
+import OverallTreatmentAnalysis from "../../components/visualization/scoreband/OverallTreatmentAnalysis";
 
 type ProjectDetail = { name: string; versions: string[]; latest: string };
 type AttributesResponse = { rows: AttributeRow[] };
@@ -280,6 +286,28 @@ const getApplicableTreatments = (attrs: Record<string, any>): Treatment[] => {
   return TREATMENTS.filter(t => isTreatmentApplicable(t, attrs));
 };
 
+// Apply treatment effects to attributes
+const applyTreatmentEffects = (
+  attrs: Record<string, any>,
+  treatmentIds: number[]
+): { modifiedRow: Record<string, any>; changedAttributes: Set<string> } => {
+  const modified = { ...attrs };
+  const changed = new Set<string>();
+
+  treatmentIds.forEach((treatmentId) => {
+    const treatment = TREATMENTS.find((t) => t.id === treatmentId);
+    if (treatment) {
+      Object.entries(treatment.effects).forEach(([attrName, newValue]) => {
+        if (modified[attrName] !== newValue) {
+          modified[attrName] = newValue;
+          changed.add(attrName);
+        }
+      });
+    }
+  });
+
+  return { modifiedRow: modified, changedAttributes: changed };
+};
 
 // Extract crash scores from result row
 const extractScores = (scoreRow: any): ScoreType => {
@@ -291,15 +319,8 @@ const extractScores = (scoreRow: any): ScoreType => {
     BP: scoreRow["BP"] ?? 0,
     SB: scoreRow["SB"] ?? 0,
     VB: scoreRow["VB"] ?? 0,
-    total: scoreRow["CycleRAP score"] ?? 0,
+    total: scoreRow["Overall Risk Level"] ?? 0,
   };
-};
-
-const getScoreColor = (score: number): string => {
-  if (score <= 5) return RISK_BAND_COLORS.LOW;      // Low
-  if (score <= 10) return RISK_BAND_COLORS.MEDIUM;  // Medium
-  if (score <= 20) return RISK_BAND_COLORS.HIGH;    // High
-  return RISK_BAND_COLORS.EXTREME;                  // Extreme
 };
 
 // Calculate estimated preview scores based on selected treatments
@@ -328,9 +349,9 @@ const calculatePreviewScores = (beforeScores: ScoreType, selectedTreatmentIds: S
 
 // Convert score to band (1-4): Low (1), Medium (2), High (3), Extreme (4)
 const calculateBandFromScore = (score: number): number => {
-  if (score <= 5) return 1;
-  if (score <= 10) return 2;
-  if (score <= 20) return 3;
+  if (score < 10) return 1;
+  if (score <= 25) return 2;
+  if (score <= 60) return 3;
   return 4;
 };
 
@@ -377,6 +398,8 @@ export default function TreatmentDetailPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTreatments, setSelectedTreatments] = useState<Set<number>>(new Set());
+  const [attrMappings, setAttrMappings] = useState<Record<string, Record<string, string>>>({});
+  const [showPostTreatment, setShowPostTreatment] = useState<boolean>(false);
 
   // Treatment application state
   const [treatmentState, setTreatmentState] = useState<Record<number, {
@@ -418,10 +441,47 @@ export default function TreatmentDetailPage() {
         "SB Band": calculateBandFromScore(state.after_scores.SB),
         "VB": state.after_scores.VB,
         "VB Band": calculateBandFromScore(state.after_scores.VB),
+        "Overall Risk Level": state.after_scores.total,
       };
     });
     return calculateBandDistributions(treatedSegments);
   }, [scores, treatmentState]);
+
+  // Create after-treatment scores for map visualization
+  const afterTreatmentScores = useMemo(() => {
+    return scores.map((scoreRow, index) => {
+      const state = treatmentState[index];
+      if (!state?.applied || !state.after_scores) {
+        return scoreRow; // Not treated, return original
+      }
+      // Create new row with after-treatment scores
+      return {
+        ...scoreRow,
+        "BB": state.after_scores.BB,
+        "BP": state.after_scores.BP,
+        "SB": state.after_scores.SB,
+        "VB": state.after_scores.VB,
+        "Overall Risk Level": state.after_scores.total,
+      };
+    });
+  }, [scores, treatmentState]);
+
+  // Compute modified attributes and changed attributes for current segment when treatments are applied
+  const { modifiedAttrs, changedAttributes, changedFieldSources } = useMemo(() => {
+    const state = treatmentState[currentIndex];
+    if (!state?.applied || !state.treatment_ids) {
+      return { modifiedAttrs: attrs[currentIndex] || null, changedAttributes: new Set<string>(), changedFieldSources: {} };
+    }
+    const { modifiedRow, changedAttributes: changed } = applyTreatmentEffects(
+      attrs[currentIndex],
+      state.treatment_ids
+    );
+    const sources: Record<string, string> = {};
+    changed.forEach((attr) => {
+      sources[attr] = "Treatment";
+    });
+    return { modifiedAttrs: modifiedRow, changedAttributes: changed, changedFieldSources: sources };
+  }, [treatmentState, currentIndex, attrs]);
 
   const currentFeature = useMemo<Feature | null>(() => {
     return geoFeatures[currentIndex] ?? null;
@@ -476,6 +536,20 @@ export default function TreatmentDetailPage() {
     };
   }, [name]);
 
+  // Fetch attribute mappings (global, not per-project)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const map = await fetchAttributeMappings();
+        if (!cancelled) setAttrMappings(map);
+      } catch {
+        if (!cancelled) setAttrMappings({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Load treatment state when segment changes
   useEffect(() => {
     if (!name || currentIndex < 0) return;
@@ -499,7 +573,7 @@ export default function TreatmentDetailPage() {
                     BP: state.after_scores.BP,
                     SB: state.after_scores.SB,
                     VB: state.after_scores.VB,
-                    total: state.after_scores["CycleRAP score"],
+                    total: state.after_scores["Overall Risk Level"],
                   }
                 : null,
             },
@@ -544,7 +618,7 @@ export default function TreatmentDetailPage() {
             BP: result.after_scores.BP,
             SB: result.after_scores.SB,
             VB: result.after_scores.VB,
-            total: result.after_scores["CycleRAP score"],
+            total: result.after_scores["Overall Risk Level"],
           },
         },
       }));
@@ -684,9 +758,9 @@ export default function TreatmentDetailPage() {
         </Flex>
       </Flex>
 
-      {/* Main layout: Map (left) + Image (right) */}
+      {/* Map Previews: Before and After Treatment - Side by Side */}
       <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap="16px" mb="6">
-        {/* Left: Map Preview */}
+        {/* Before Treatment Map */}
         <GridItem>
           <GeoDataPanel
             projectName={name!}
@@ -698,16 +772,257 @@ export default function TreatmentDetailPage() {
             index={currentIndex}
             onJump={(i) => setCurrentPage(i + 1)}
             containerHeight={MAP_HEIGHT}
+            subtitle="Before Treatment"
           />
         </GridItem>
 
-        {/* Right: Image + Controls */}
+        {/* After Treatment Map */}
+        <GridItem>
+          <GeoDataPanel
+            projectName={name!}
+            feature={
+              geoFeatures[currentIndex]?.geometry?.type === "LineString"
+                ? (geoFeatures[currentIndex] as any)
+                : null
+            }
+            index={currentIndex}
+            onJump={(i) => setCurrentPage(i + 1)}
+            containerHeight={MAP_HEIGHT}
+            scores={afterTreatmentScores as any}
+            subtitle="After Treatment"
+          />
+        </GridItem>
+      </Grid>
+
+      {/* Treatment Section: 3 columns */}
+      <Card.Root bg="white" _dark={{ bg: "gray.800" }}>
+        <Card.Header>
+          <Heading size="md" color="gray.900" _dark={{ color: "white" }}>
+            Treatment Analysis
+          </Heading>
+        </Card.Header>
+        <Card.Body>
+          <Grid templateColumns={{ base: "1fr", md: "1fr 1fr 1fr" }} gap="6">
+            {/* Column 1: Recommended Treatment */}
+            <GridItem>
+              <Box
+                borderWidth="1px"
+                borderColor="gray.200"
+                borderRadius="md"
+                p="4"
+                bg="gray.50"
+                _dark={{ bg: "gray.700", borderColor: "gray.600" }}
+              >
+                <Text
+                  fontSize="sm"
+                  fontWeight="bold"
+                  mb="3"
+                  color="gray.600"
+                  _dark={{ color: "gray.300" }}
+                >
+                  Recommended Treatment
+                </Text>
+                <Box>
+                  <Text
+                    fontSize="xs"
+                    color="gray.500"
+                    _dark={{ color: "gray.400" }}
+                    mb="3"
+                  >
+                    Select treatments to apply for this section
+                  </Text>
+                  {(() => {
+                    const currentAttr = attrs[currentIndex] as any;
+                    if (!currentAttr) {
+                      return (
+                        <Text fontSize="xs" color="gray.400">
+                          No segment data
+                        </Text>
+                      );
+                    }
+                    const applicable = getApplicableTreatments(currentAttr);
+                    return applicable.length > 0 ? (
+                      <Flex direction="column" gap="3">
+                        {applicable.map((t) => {
+                          const isApplied = treatmentState[currentIndex]?.applied &&
+                                            treatmentState[currentIndex]?.treatment_ids.includes(t.id);
+                          const isDisabled = treatmentState[currentIndex]?.applied;
+
+                          return (
+                            <Flex
+                              key={t.id}
+                              gap="2"
+                              align="flex-start"
+                              p="2"
+                              borderRadius="md"
+                              bg={
+                                isApplied
+                                  ? "green.50"
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.50"
+                                    : "transparent"
+                              }
+                              borderWidth="1px"
+                              borderColor={
+                                isApplied
+                                  ? "green.200"
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.200"
+                                    : "transparent"
+                              }
+                              cursor={isDisabled ? "not-allowed" : "pointer"}
+                              opacity={isDisabled ? 0.6 : 1}
+                              transition="all 0.2s"
+                              _hover={{
+                                bg: isDisabled
+                                  ? undefined
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.100"
+                                    : "gray.100"
+                              }}
+                              _dark={{
+                                bg: isApplied
+                                  ? "green.900"
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.900"
+                                    : "transparent",
+                                borderColor: isApplied
+                                  ? "green.700"
+                                  : selectedTreatments.has(t.id)
+                                    ? "blue.700"
+                                    : "transparent",
+                                _hover: {
+                                  bg: isDisabled
+                                    ? undefined
+                                    : selectedTreatments.has(t.id)
+                                      ? "blue.800"
+                                      : "gray.600"
+                                },
+                              }}
+                              onClick={() => {
+                                if (isDisabled) return;
+                                const newSelected = new Set(selectedTreatments);
+                                if (newSelected.has(t.id)) {
+                                  newSelected.delete(t.id);
+                                } else {
+                                  newSelected.add(t.id);
+                                }
+                                setSelectedTreatments(newSelected);
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isApplied || selectedTreatments.has(t.id)}
+                                disabled={isDisabled}
+                                onChange={() => {}} // Handled by parent Flex onClick
+                                style={{ marginTop: '2px', cursor: isDisabled ? 'not-allowed' : 'pointer' }}
+                                aria-label={`Select treatment: ${t.name}`}
+                              />
+                              <Box flex="1">
+                                <Text fontSize="xs" fontWeight="medium" color="gray.900" _dark={{ color: "white" }}>
+                                  {t.name}
+                                  {isApplied && " ✓"}
+                                </Text>
+                                <Text fontSize="2xs" color="gray.500" _dark={{ color: "gray.400" }}>
+                                  {t.description}
+                                </Text>
+                              </Box>
+                            </Flex>
+                          );
+                        })}
+                      </Flex>
+                    ) : (
+                      <Text fontSize="xs" color="gray.400" _dark={{ color: "gray.500" }}>
+                        No treatments applicable
+                      </Text>
+                    );
+                  })()}
+                  {/* Treatment Action Buttons */}
+                  <Flex direction="column" gap="2" mt="4" pt="4" borderTopWidth="1px" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
+                    {/* Select All / Clear All Button */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      colorScheme={selectedTreatments.size > 0 ? "red" : "blue"}
+                      disabled={
+                        (() => {
+                          const currentAttr = attrs[currentIndex] as any;
+                          if (!currentAttr) return true;
+                          const applicable = getApplicableTreatments(currentAttr);
+                          return applicable.length === 0 || treatmentState[currentIndex]?.applied;
+                        })()
+                      }
+                      onClick={() => {
+                        const currentAttr = attrs[currentIndex] as any;
+                        if (!currentAttr) return;
+
+                        if (selectedTreatments.size > 0) {
+                          // Clear all selected treatments
+                          setSelectedTreatments(new Set());
+                        } else {
+                          // Select all applicable treatments
+                          const applicable = getApplicableTreatments(currentAttr);
+                          setSelectedTreatments(new Set(applicable.map(t => t.id)));
+                        }
+                      }}
+                    >
+                      {selectedTreatments.size > 0 ? (
+                        <>Clear All ({selectedTreatments.size})</>
+                      ) : (
+                        <>
+                          Select All ({(() => {
+                            const currentAttr = attrs[currentIndex] as any;
+                            if (!currentAttr) return 0;
+                            const applicable = getApplicableTreatments(currentAttr);
+                            return applicable.length;
+                          })()})
+                        </>
+                      )}
+                    </Button>
+
+                    {/* Apply Treatment Button */}
+                    <Button
+                      size="sm"
+                      variant="solid"
+                      colorScheme={treatmentState[currentIndex]?.applied ? "green" : "blue"}
+                      disabled={selectedTreatments.size === 0 || applyLoading}
+                      loading={applyLoading}
+                      onClick={handleApplyTreatments}
+                    >
+                      {treatmentState[currentIndex]?.applied
+                        ? "Treatment Applied ✓"
+                        : `Apply Treatment (${selectedTreatments.size})`}
+                    </Button>
+
+                    {/* Reset Button (optional) */}
+                    {treatmentState[currentIndex]?.applied && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        colorScheme="red"
+                        loading={applyLoading}
+                        onClick={handleResetTreatments}
+                      >
+                        Reset
+                      </Button>
+                    )}
+                  </Flex>
+                </Box>
+              </Box>
+            </GridItem>
+
+          </Grid>
+        </Card.Body>
+      </Card.Root>
+
+      {/* Main layout: Image (left) + Attributes (right) - matching CodingPage structure */}
+      <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap="16px" mb="6">
+        {/* Left: Image Panel + Navigation Controls */}
         <GridItem
           display="flex"
           flexDirection="column"
           minH={`${PANEL_HEIGHT}px`}
         >
-          {/* Image Panel */}
           <Box flex="1 1 auto" minH={0}>
             <ImagePanel
               projectName={name}
@@ -724,8 +1039,7 @@ export default function TreatmentDetailPage() {
             minW={0}
             align="center"
             gap="4"
-            pt="4"
-            mt="2"
+            pt="2"
             position="relative"
             zIndex={1}
             bg="bg"
@@ -753,8 +1067,104 @@ export default function TreatmentDetailPage() {
             </Button>
           </Flex>
         </GridItem>
+
+        {/* Right: Crash Type Scores + Attributes Panel */}
+        <GridItem
+          display="flex"
+          flexDirection="column"
+          gap="4"
+        >
+          <Box
+            bg="white"
+            borderRadius="md"
+            p="1"
+            borderWidth="1px"
+            borderColor="gray.200"
+            _dark={{ bg: "gray.800", borderColor: "gray.600" }}
+          >
+            <SegmentScoresCard
+              scores={(() => {
+                if (!showPostTreatment) {
+                  // Pre-treatment: always show original scores
+                  return scores[currentIndex] as any || null;
+                }
+
+                // Post-treatment toggle is on
+                if (treatmentState[currentIndex]?.applied) {
+                  // Treatments have been applied: show real after-treatment scores
+                  return { ...scores[currentIndex], BB: treatmentState[currentIndex]!.after_scores!.BB, BP: treatmentState[currentIndex]!.after_scores!.BP, SB: treatmentState[currentIndex]!.after_scores!.SB, VB: treatmentState[currentIndex]!.after_scores!.VB, "Overall Risk Level": treatmentState[currentIndex]!.after_scores!.total } as any;
+                }
+
+                if (selectedTreatments.size > 0) {
+                  // Treatments are selected but not applied: show preview scores
+                  const beforeScores = extractScores(scores[currentIndex]);
+                  const previewScores = calculatePreviewScores(beforeScores, selectedTreatments);
+                  return { ...scores[currentIndex], BB: previewScores.BB, BP: previewScores.BP, SB: previewScores.SB, VB: previewScores.VB, "Overall Risk Level": previewScores.total } as any;
+                }
+
+                // No treatments selected or applied: show original scores
+                return scores[currentIndex] as any || null;
+              })()}
+              beforeScores={
+                showPostTreatment && (treatmentState[currentIndex]?.applied || selectedTreatments.size > 0)
+                  ? {
+                      BB: scores[currentIndex]?.["BB"] ?? 0,
+                      BP: scores[currentIndex]?.["BP"] ?? 0,
+                      SB: scores[currentIndex]?.["SB"] ?? 0,
+                      VB: scores[currentIndex]?.["VB"] ?? 0,
+                      "Overall Risk Level": scores[currentIndex]?.["Overall Risk Level"] ?? 0,
+                    }
+                  : undefined
+              }
+              showPreviewBackground={
+                showPostTreatment && selectedTreatments.size > 0 && !treatmentState[currentIndex]?.applied
+              }
+            />
+          </Box>
+
+          <Box flex="1 1 auto" minH={0}>
+            <AttributesPanel
+              row={showPostTreatment && treatmentState[currentIndex]?.applied
+                ? modifiedAttrs
+                : attrs[currentIndex] ?? null}
+              mappings={attrMappings}
+              panelHeight={PANEL_HEIGHT - CONTROLS_H}
+              readOnly={true}
+              changedFields={
+                showPostTreatment && treatmentState[currentIndex]?.applied
+                  ? Array.from(changedAttributes)
+                  : undefined
+              }
+              fieldSources={
+                showPostTreatment && treatmentState[currentIndex]?.applied
+                  ? changedFieldSources
+                  : undefined
+              }
+              headerAction={
+                <Flex align="center" gap="2">
+                  <Text fontSize="xs" fontWeight="medium" color={!showPostTreatment ? "blue.600" : "gray.500"}>
+                    Pre
+                  </Text>
+                  <Switch
+                    checked={showPostTreatment}
+                    onCheckedChange={(e) => setShowPostTreatment(e.checked)}
+                    size="sm"
+                  />
+                  <Text fontSize="xs" fontWeight="medium" color={showPostTreatment ? "blue.600" : "gray.500"}>
+                    Post
+                  </Text>
+                </Flex>
+              }
+            />
+          </Box>
+        </GridItem>
       </Grid>
 
+      {/* Overall Treatment Analysis with Before/After Pie Charts */}
+      <OverallTreatmentAnalysis
+        beforeBandCounts={beforeBandCounts}
+        afterBandCounts={afterBandCounts}
+      />
     </Box>
   );
 }

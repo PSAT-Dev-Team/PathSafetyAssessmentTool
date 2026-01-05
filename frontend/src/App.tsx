@@ -6,7 +6,6 @@ import CreateProjectPage from "./pages/CreateProjectPage/createProjectPage"
 import TreatmentPage from "./pages/TreatmentPage/treatmentPage"
 import TreatmentDetailPage from "./pages/TreatmentPage/treatmentDetailPage"
 import PathAnalysisPage from "./pages/PathAnalysisPage/pathAnalysisPage"
-import PostTreatmentAnalysisPage from "./pages/PostTreatmentAnalysisPage/postTreatmentAnalysisPage"
 
 import AppLayout from "./layouts/AppLayout";
 
@@ -22,7 +21,6 @@ export default function App() {
         <Route path="/treatment" element={<TreatmentPage />} />
         <Route path="/treatment/:projectName" element={<TreatmentDetailPage />} />
         <Route path="/analysis/path" element={<PathAnalysisPage />} />
-        <Route path="/analysis/post-treatment" element={<PostTreatmentAnalysisPage />} />
         <Route path="/projects/create" element={<CreateProjectPage />} />
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Route>

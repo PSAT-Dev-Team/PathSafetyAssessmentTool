@@ -14,6 +14,7 @@ import {
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { listSourceFolders, createProjectFromFolder, fetchProjectList } from "../../api";
+import ImageUploadModal from "../sidebar/components/ImageUploadModal";
 import "../Projects/components/EditProjectModal.css";
 
 // Generate a consistent, bright, varied color for each unique tag (same as EditProjectModal)
@@ -47,6 +48,7 @@ export default function CreateProjectPage() {
   const [tagInput, setTagInput] = useState("");
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -218,33 +220,45 @@ export default function CreateProjectPage() {
               Source Folder
             </Text>
 
-            <Combobox.Root
-              collection={createListCollection({
-                items: folders.map(f => ({ label: f, value: f }))
-              })}
-              inputValue={folder}
-              onInputValueChange={({ inputValue }) => setFolder(inputValue)}
-              disabled={loadingFolders}
-            >
-              <Combobox.Control>
-                <Combobox.Input
-                  placeholder={loadingFolders ? "Loading..." : "Select a folder"}
-                />
-              </Combobox.Control>
-              <Portal>
-                <Combobox.Positioner>
-                  <Combobox.Content>
-                    {folders
-                      .filter(f => f.toLowerCase().includes(folder.toLowerCase()))
-                      .map(f => (
-                        <Combobox.Item key={f} item={{ label: f, value: f }}>
-                          {f}
-                        </Combobox.Item>
-                      ))}
-                  </Combobox.Content>
-                </Combobox.Positioner>
-              </Portal>
-            </Combobox.Root>
+            <Box display="flex" gap={2} alignItems="flex-end">
+              <Box flex={1}>
+                    <Combobox.Root
+                  collection={createListCollection({
+                    items: folders.map(f => ({ label: f, value: f }))
+                  })}
+                  inputValue={folder}
+                  onInputValueChange={({ inputValue }) => setFolder(inputValue)}
+                  disabled={loadingFolders}
+                >
+                  <Combobox.Control>
+                    <Combobox.Input
+                      placeholder={loadingFolders ? "Loading..." : "Select a folder"}
+                    />
+                  </Combobox.Control>
+                  <Portal>
+                    <Combobox.Positioner>
+                      <Combobox.Content>
+                        {folders
+                          .filter(f => f.toLowerCase().includes(folder.toLowerCase()))
+                          .map(f => (
+                            <Combobox.Item key={f} item={{ label: f, value: f }}>
+                              {f}
+                            </Combobox.Item>
+                          ))}
+                      </Combobox.Content>
+                    </Combobox.Positioner>
+                  </Portal>
+                </Combobox.Root>
+              </Box>
+              <Button
+                colorPalette="green"
+                variant="surface"
+                size="sm"
+                onClick={() => setImageUploadModalOpen(true)}
+              >
+                Upload Images
+              </Button>
+            </Box>
 
             {err && (
               <Text color="red.600" fontSize="xs" mt={1}>
@@ -268,6 +282,11 @@ export default function CreateProjectPage() {
           </Box>
         </CardBody>
       </Card.Root>
+
+      <ImageUploadModal
+        open={imageUploadModalOpen}
+        onClose={() => setImageUploadModalOpen(false)}
+      />
     </Box>
   );
 }
