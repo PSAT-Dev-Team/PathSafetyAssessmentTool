@@ -102,9 +102,26 @@ export default function CodingPage() {
     }
   }, [projectNames]);
 
-  // Current active project tab
-  const [activeTabIndex, setActiveTabIndex] = useState(0);
-  const currentProjectName = projectList[activeTabIndex] ?? null;
+  // Current active tab (project name or "coding-guide")
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    if (projectNames) {
+      try {
+        const names = projectNames.split(',').map(name => {
+          try {
+            return decodeURIComponent(name);
+          } catch {
+            return name;
+          }
+        });
+        return names[0] ?? "coding-guide";
+      } catch {
+        return "coding-guide";
+      }
+    }
+    return "coding-guide";
+  });
+  const currentProjectName = activeTab === "coding-guide" ? null : activeTab;
+  const isShowingCodingGuide = activeTab === "coding-guide";
 
   // State for each project: keyed by project name
   const [projectData, setProjectData] = useState<Record<string, ProjectDataState>>({});
@@ -153,8 +170,10 @@ export default function CodingPage() {
     }));
   };
 
+
   // Update verified segment count for a project
-  const updateVerifiedSegmentCount = async (projectName: string, count: number) => {
+  const updateVerifiedSegmentCount = async (projectName: string | null, count: number) => {
+    if (!projectName) return;
     try {
       const totalSegments = projectData[projectName]?.attrs?.length ?? 0;
       // Clamp the count to be between 0 and total segments
@@ -177,7 +196,8 @@ export default function CodingPage() {
   };
 
   // Update autocoded segment count for a project
-  const updateAutocodedSegmentCount = async (projectName: string, count: number) => {
+  const updateAutocodedSegmentCount = async (projectName: string | null, count: number) => {
+    if (!projectName) return;
     try {
       const totalSegments = projectData[projectName]?.attrs?.length ?? 0;
       // Clamp the count to be between 0 and total segments
@@ -1155,7 +1175,7 @@ export default function CodingPage() {
     return <Box p="4"><Text color="red.500">No projects selected.</Text></Box>;
   }
 
-  if (loading) {
+  if (!isShowingCodingGuide && loading) {
     return (
       <Flex align="center" justify="center" h="60vh">
         <Spinner size="lg" />
@@ -1163,10 +1183,61 @@ export default function CodingPage() {
     );
   }
 
-  if (error) {
+  if (!isShowingCodingGuide && error) {
     return (
       <Box p="4">
         <Text color="red.500">Error: {error}</Text>
+      </Box>
+    );
+  }
+
+  // Show Coding Guide
+  if (isShowingCodingGuide) {
+    return (
+      <Box p="4">
+        <Flex gap="2" mb="4" wrap="wrap">
+          {projectList.map((projectName) => {
+            const projData = projectData[projectName];
+            const projSegmentCount = projData?.attrs.length ?? 0;
+            const isActive = activeTab === projectName;
+            return (
+              <Button
+                key={projectName}
+                onClick={() => setActiveTab(projectName)}
+                variant={isActive ? "solid" : "outline"}
+                colorPalette={isActive ? "blue" : "gray"}
+                size="md"
+              >
+                {projectName} ({projSegmentCount})
+              </Button>
+            );
+          })}
+          <Button
+            onClick={() => setActiveTab("coding-guide")}
+            variant={isShowingCodingGuide ? "solid" : "outline"}
+            colorPalette={isShowingCodingGuide ? "blue" : "gray"}
+            size="md"
+          >
+            Coding Guide
+          </Button>
+        </Flex>
+        <Box
+          borderWidth="1px"
+          borderColor="gray.200"
+          borderRadius="md"
+          overflow="hidden"
+          h="calc(100vh - 150px)"
+        >
+          <iframe
+            src="/Path Safety Assessment Tool coding sheet.pdf"
+            style={{
+              width: "100%",
+              height: "100%",
+              border: "none",
+            }}
+            title="Coding Guide PDF"
+          />
+        </Box>
       </Box>
     );
   }
@@ -1247,26 +1318,32 @@ export default function CodingPage() {
         </Portal>
       )}
 
-      {projectList.length > 1 && (
-        <Flex gap="2" mb="4" wrap="wrap">
-          {projectList.map((projectName, index) => {
-            const projData = projectData[projectName];
-            const projSegmentCount = projData?.attrs.length ?? 0;
-            const isActive = activeTabIndex === index;
-            return (
-              <Button
-                key={projectName}
-                onClick={() => setActiveTabIndex(index)}
-                variant={isActive ? "solid" : "outline"}
-                colorPalette={isActive ? "blue" : "gray"}
-                size="md"
-              >
-                {projectName} ({projSegmentCount})
-              </Button>
-            );
-          })}
-        </Flex>
-      )}
+      <Flex gap="2" mb="4" wrap="wrap">
+        {projectList.map((projectName) => {
+          const projData = projectData[projectName];
+          const projSegmentCount = projData?.attrs.length ?? 0;
+          const isActive = activeTab === projectName;
+          return (
+            <Button
+              key={projectName}
+              onClick={() => setActiveTab(projectName)}
+              variant={isActive ? "solid" : "outline"}
+              colorPalette={isActive ? "blue" : "gray"}
+              size="md"
+            >
+              {projectName} ({projSegmentCount})
+            </Button>
+          );
+        })}
+        <Button
+          onClick={() => setActiveTab("coding-guide")}
+          variant={isShowingCodingGuide ? "solid" : "outline"}
+          colorPalette={isShowingCodingGuide ? "blue" : "gray"}
+          size="md"
+        >
+          Coding Guide
+        </Button>
+      </Flex>
 
       <Flex justify="space-between" align="center" mb="3">
         <Flex align="center" gap="3">

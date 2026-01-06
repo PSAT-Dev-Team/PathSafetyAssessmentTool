@@ -327,10 +327,45 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
         return;
       }
 
-      // Step 2: Replace the target
-      // Use the path from upload result (already includes category directory)
+      // Step 2: Validate compatibility before replacement
       const uploadedPath = uploadResult.uploaded[0].path;
-      console.log('[Replace] Step 2: Replacing', selectedTargetShapefile, 'with', uploadedPath);
+      console.log('[Replace] Step 2: Validating compatibility');
+
+      // Extract layer name from target path if possible (e.g., "area_type/file.shp" -> "area_type")
+      const layerName = selectedTargetShapefile.split('/')[0];
+
+      const validationResult = await api.validateShapefileReplacement(
+        uploadedPath,
+        selectedTargetShapefile,
+        layerName
+      );
+
+      console.log('[Replace] Validation result:', validationResult);
+
+      // Check for fatal errors
+      if (validationResult.errors.length > 0) {
+        toaster.create({
+          title: "Compatibility Issues Found",
+          description: `Cannot replace: ${validationResult.errors.join("; ")}`,
+          type: "error",
+          duration: 10000,
+        });
+        return;
+      }
+
+      // Check for warnings and ask user confirmation
+      if (validationResult.warnings.length > 0) {
+        const confirmed = window.confirm(
+          `Warnings found:\n\n${validationResult.warnings.join("\n\n")}\n\nContinue with replacement?`
+        );
+        if (!confirmed) {
+          console.log('[Replace] User cancelled due to warnings');
+          return;
+        }
+      }
+
+      // Step 3: Replace the target (now safe)
+      console.log('[Replace] Step 3: Replacing', selectedTargetShapefile, 'with', uploadedPath);
 
       const replaceResult = await api.replaceShapefiles([
         {

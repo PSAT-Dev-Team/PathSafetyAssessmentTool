@@ -31,6 +31,22 @@ low_modhigh_mapping             = {'Low': 1, 'Moderate to high': 2}
 less_more_20_mapping            = {'< 20km/h': 1, '=/> 20km/h': 2}
 less_more_10_mapping            = {'< 10km/h': 1, '=/> 10km/h': 2}
 operating_speed_unit_mapping    = {'km/h': 1, 'mph': 2}
+road_speed_limit_mapping        = {
+    'NA': 'NA',
+    '0 km/h': '0',
+    '10 km/h': '10',
+    '20 km/h': '20',
+    '30 km/h': '30',
+    '40 km/h': '40',
+    '50 km/h': '50',
+    '60 km/h': '60',
+    '70 km/h': '70',
+    '80 km/h': '80',
+    '90 km/h': '90',
+    '100 km/h': '100',
+    '110 km/h': '110',
+    '120 km/h': '120',
+}
 
 class LocWrapper:
     def __init__(self, parent):
@@ -206,7 +222,7 @@ class Attributes(BaseTable):
         Fields.BICYCLE_SPD_DIFF_STR:            less_more_10_mapping,
         Fields.ROAD_AADT_STR:                   None,
         Fields.HEAVY_VHCL_FLOW_STR:             low_modhigh_mapping,
-        Fields.SPD_LIMIT_STR:                   None,
+        Fields.SPD_LIMIT_STR:                   road_speed_limit_mapping,
         Fields.ROAD_OPR_SPEED_AVG_STR:          None,
         Fields.SPEED_UNIT_STR:                  operating_speed_unit_mapping,
     }

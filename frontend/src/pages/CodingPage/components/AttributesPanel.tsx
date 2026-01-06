@@ -258,6 +258,9 @@ export default function AttributesPanel({
 
   const defaultTab = groupsWithFields[0] ?? "Facility configuration";
 
+  // Check if any fields have been changed (for showing the info text)
+  const hasChangedFields = changedFieldsSet.size > 0;
+
   if (!row) {
     return (
       <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
@@ -275,7 +278,18 @@ export default function AttributesPanel({
   return (
     <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
       <Card.Header display="flex" flexDirection="row" justifyContent="space-between" alignItems="center" gap="2">
-        <Heading size="sm" flex="0 0 auto">Attributes</Heading>
+        <Box display="flex" flexDirection="row" alignItems="baseline" gap="2">
+          <Heading size="sm" flex="0 0 auto">Attributes</Heading>
+          {hasChangedFields && (
+            <Text
+              fontSize="xs"
+              color="gray.600"
+              transition="opacity 0.3s"
+            >
+              Highlighted attributes have been modified from the original values
+            </Text>
+          )}
+        </Box>
         {headerAction}
       </Card.Header>
 
@@ -317,14 +331,14 @@ export default function AttributesPanel({
                           gap="1"
                           p="2"
                           borderRadius="md"
-                          bg={isChanged ? "green.100" : isEdited ? "red.50" : "transparent"}
+                          bg={isChanged ? "yellow.100" : isEdited ? "red.50" : "transparent"}
                           borderWidth={isChanged || isEdited ? "2px" : "0px"}
-                          borderColor={isChanged ? "green.500" : isEdited ? "red.200" : "transparent"}
+                          borderColor={isChanged ? "yellow.500" : isEdited ? "red.200" : "transparent"}
                           transition="all 0.2s"
                         >
                           <Text
                             fontSize="xs"
-                            color={isChanged ? { base: "green.900", _dark: "green.900" } : "gray.600"}
+                            color={isChanged ? { base: "yellow.900", _dark: "yellow.900" } : "gray.600"}
                             fontWeight={isChanged ? "bold" : "semibold"}
                           >
                             {k}
@@ -365,15 +379,28 @@ export default function AttributesPanel({
                                   color: isChanged ? "gray.900" : undefined,
                                 }}
                               >
-                                {/* Preserve unknown code if present */}
-                                {!dict[strVal] && strVal !== "" && (
+                                {/* Preserve unknown code if present (except for Road speed limit) */}
+                                {k !== "Road speed limit" && !dict[strVal] && strVal !== "" && (
                                   <option value={strVal}>{`(Unknown) ${strVal}`}</option>
                                 )}
-                                {Object.entries(dict).map(([code, label]) => (
-                                  <option key={code} value={code}>
-                                    {label}
-                                  </option>
-                                ))}
+                                {
+                                  k === "Road speed limit" && dict
+                                    ? ['NA', '0', '10', '20', '30', '40', '50', '60', '70', '80', '90', '100', '110', '120']
+                                        .map(code => {
+                                          const label = dict[code];
+                                          return label ? (
+                                            <option key={code} value={code}>
+                                              {label}
+                                            </option>
+                                          ) : null;
+                                        })
+                                        .filter(Boolean)
+                                    : Object.entries(dict || {}).map(([code, label]) => (
+                                        <option key={code} value={code}>
+                                          {label}
+                                        </option>
+                                      ))
+                                }
                               </NativeSelect.Field>
                               <NativeSelect.Indicator />
                             </NativeSelect.Root>

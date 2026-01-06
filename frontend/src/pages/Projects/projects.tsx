@@ -60,6 +60,7 @@ export default function Home() {
 
   // Filter
   const [nameQuery, setNameQuery] = useState("");
+  const [nameQueryComboboxOpen, setNameQueryComboboxOpen] = useState(false);
   const [tagFilter, setTagFilter] = useState<string>("");
   const [tagFilterInputValue, setTagFilterInputValue] = useState("");
   const [tagFilterComboboxOpen, setTagFilterComboboxOpen] = useState(false);
@@ -290,8 +291,17 @@ export default function Home() {
               })}
               inputValue={nameQuery}
               onInputValueChange={({ inputValue }) => setNameQuery(inputValue)}
+              open={nameQueryComboboxOpen}
+              onOpenChange={(details) => {
+                // Keep dropdown open if there's text in the field
+                if (nameQuery.length > 0) {
+                  setNameQueryComboboxOpen(true);
+                } else {
+                  setNameQueryComboboxOpen(details.open);
+                }
+              }}
             >
-              <Combobox.Control>
+              <Combobox.Control onClick={() => setNameQueryComboboxOpen(true)}>
                 <Combobox.Input
                   id="nameQuery"
                   placeholder="Type project name…"
@@ -346,7 +356,14 @@ export default function Home() {
               inputValue={tagFilterInputValue}
               onInputValueChange={(e) => setTagFilterInputValue(e.inputValue)}
               open={tagFilterComboboxOpen}
-              onOpenChange={(details) => setTagFilterComboboxOpen(details.open)}
+              onOpenChange={(details) => {
+                // Keep dropdown open if there's text in the field
+                if (tagFilterInputValue.length > 0) {
+                  setTagFilterComboboxOpen(true);
+                } else {
+                  setTagFilterComboboxOpen(details.open);
+                }
+              }}
             >
               <Combobox.Control
                 onClick={() => setTagFilterComboboxOpen(true)}

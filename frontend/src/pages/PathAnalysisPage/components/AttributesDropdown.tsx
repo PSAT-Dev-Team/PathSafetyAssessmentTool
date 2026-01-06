@@ -530,9 +530,16 @@ export default function AttributesDropdown({
                       value={[currentValue]}
                       open={openComboboxes[index]}
                       onOpenChange={(details) => {
-                        const newOpenComboboxes = [...openComboboxes];
-                        newOpenComboboxes[index] = details.open;
-                        setOpenComboboxes(newOpenComboboxes);
+                        // Keep dropdown open if there's text in the field
+                        if (inputValue.length > 0) {
+                          const newOpenComboboxes = [...openComboboxes];
+                          newOpenComboboxes[index] = true;
+                          setOpenComboboxes(newOpenComboboxes);
+                        } else {
+                          const newOpenComboboxes = [...openComboboxes];
+                          newOpenComboboxes[index] = details.open;
+                          setOpenComboboxes(newOpenComboboxes);
+                        }
                       }}
                       onValueChange={(e) => {
                         // Only handle the change if a valid value is selected

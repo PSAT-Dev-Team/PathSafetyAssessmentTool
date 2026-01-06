@@ -217,7 +217,14 @@ export default function PathAnalysisPage() {
               multiple
               value={selectedProjects}
               open={projectComboboxOpen}
-              onOpenChange={(details) => setProjectComboboxOpen(details.open)}
+              onOpenChange={(details) => {
+                // Keep dropdown open if there's text in the field
+                if (projectInputValue.length > 0) {
+                  setProjectComboboxOpen(true);
+                } else {
+                  setProjectComboboxOpen(details.open);
+                }
+              }}
               onValueChange={(e) => {
                 if (e.value.includes("SELECT_ALL")) {
                   // If SELECT_ALL is in the value and all projects are already selected, deselect all
@@ -360,7 +367,14 @@ export default function PathAnalysisPage() {
               multiple
               value={tagsFilter}
               open={tagsComboboxOpen}
-              onOpenChange={(details) => setTagsComboboxOpen(details.open)}
+              onOpenChange={(details) => {
+                // Keep dropdown open if there's text in the field
+                if (tagsInputValue.length > 0) {
+                  setTagsComboboxOpen(true);
+                } else {
+                  setTagsComboboxOpen(details.open);
+                }
+              }}
               onValueChange={(e) => setTagsFilter(e.value)}
               inputValue={tagsInputValue}
               onInputValueChange={(e) => setTagsInputValue(e.inputValue)}

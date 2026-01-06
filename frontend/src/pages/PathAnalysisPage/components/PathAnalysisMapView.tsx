@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal } from "@chakra-ui/react";
+import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input } from "@chakra-ui/react";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import { Switch } from "../../../components/ui/switch";
 import L from "leaflet";
@@ -77,6 +77,11 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // Track which attribute is the primary focus for coloring
   const [primaryFocusAttribute, setPrimaryFocusAttribute] = useState<string | null>(null);
 
+  // Table filtering and sorting state
+  const [globalSearch, setGlobalSearch] = useState<string>("");
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [sortConfig, setSortConfig] = useState<Array<{ column: string; direction: 'asc' | 'desc' }>>([]);
+
   // Update primaryFocusAttribute when selected attributes change
   useEffect(() => {
     const activeAttrs = selectedAttributes.filter(attr => attr !== null);
@@ -128,6 +133,86 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // Get the attribute to show categories for
   const categoryFilterAttribute = activeFilters[categoryFilterAttributeIndex];
 
+  // Helper function to get Overall Risk Score for a segment
+  // Uses the "Overall Risk Level" field from the backend, which is the sum of BB + BP + SB + VB
+  const getOverallRiskScore = (projectDataIndex: number, segmentIndex: number): number => {
+    if (projectDataIndex >= projectsData.length || !projectsData[projectDataIndex].scores) {
+      return 0;
+    }
+    const segmentScores = projectsData[projectDataIndex].scores[segmentIndex];
+    if (!segmentScores) {
+      return 0;
+    }
+    // Use the "Overall Risk Level" field which is the actual CycleRAP composite score
+    const overallRiskLevel = segmentScores["Overall Risk Level"];
+    return typeof overallRiskLevel === 'number' ? overallRiskLevel : 0;
+  };
+
+  // Define table columns
+  const tableColumns = useMemo(() => {
+    const cols = [
+      { key: "Project", label: "Project" },
+      { key: "Segment #", label: "Segment #" },
+      { key: "Image Reference", label: "Image Reference" },
+      { key: "Coordinates", label: "Coordinates" },
+      ...activeFilters.map(attr => ({ key: attr, label: attr })),
+      { key: "Overall Risk Score", label: "Overall Risk Score" }
+    ];
+    return cols;
+  }, [activeFilters]);
+
+  // Helper function to get column value as string
+  const getColumnValue = (point: any, columnKey: string): string => {
+    if (columnKey === "Project") return point.projectName;
+    if (columnKey === "Segment #") return point.idx.toString();
+    if (columnKey === "Image Reference") return point.f.properties?.["Image Reference"] ?? "-";
+    if (columnKey === "Coordinates") return `${point.latlng[0].toFixed(6)}, ${point.latlng[1].toFixed(6)}`;
+    if (columnKey === "Overall Risk Score") {
+      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
+      const score = getOverallRiskScore(projectDataIndex, point.idx);
+      return score.toFixed(2);
+    }
+    if (columnKey === "Overall Risk Level") {
+      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
+      if (projectDataIndex < 0 || !projectsData[projectDataIndex].scores) {
+        return "Low";
+      }
+
+      const segmentScores = projectsData[projectDataIndex].scores[point.idx];
+      if (!segmentScores) {
+        return "Low";
+      }
+
+      // Overall Risk Level = maximum category from the individual crash type bands
+      // (same logic as Coding Page)
+      const bands = [
+        segmentScores["VB Band"] ?? 1,
+        segmentScores["BB Band"] ?? 1,
+        segmentScores["SB Band"] ?? 1,
+        segmentScores["BP Band"] ?? 1
+      ];
+
+      const maxBand = Math.max(...bands);
+
+      // Convert band to category: Band 1=Low, 2=Medium, 3=High, 4=Extreme
+      if (maxBand <= 1) return "Low";
+      else if (maxBand <= 2) return "Medium";
+      else if (maxBand <= 3) return "High";
+      else return "Extreme";
+    }
+    // Dynamic attribute columns
+    const attrValue = point.attributes[columnKey];
+    const result = getAttrText(columnKey, attrValue) || "-";
+
+    // DEBUG: Log if this is a numeric attribute that might not have mappings
+    if (!attrMappings[columnKey] && typeof attrValue === 'number') {
+      // This is a numeric attribute without mappings (e.g., Facility Width Per Direction)
+      // Just return the string representation
+    }
+
+    return result;
+  };
+
   // Helper function to convert numeric attribute value to text using mappings
   const getAttrText = (attrName: string, attrValue: any): string => {
     // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
@@ -164,9 +249,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       return "Extreme";
     }
 
-    // If we have a mapping for this attribute and the value is a number
-    if (attrMappings[attrName] && typeof attrValue === "number") {
-      return attrMappings[attrName][String(attrValue)] || String(attrValue);
+    // If we have a mapping for this attribute, apply it (handles both string and number values from CSV)
+    if (attrMappings[attrName]) {
+      const key = String(attrValue);
+      if (attrMappings[attrName][key]) {
+        return attrMappings[attrName][key];
+      }
+      // DEBUG: Log when mapping exists but key not found
+      console.warn(`[Filter Debug] Attribute "${attrName}" has mapping but no entry for key "${key}". Available keys: ${Object.keys(attrMappings[attrName]).join(", ")}`);
     }
     return String(attrValue);
   };
@@ -217,7 +307,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
             const scoresResponse = await calculateScore(projectName);
             scores = scoresResponse.result_rows || [];
           } catch (e) {
-            console.warn(`Failed to load scores for ${projectName}, continuing without scores`);
+            console.warn(`Failed to load scores for ${projectName}, continuing without scores`, e);
           }
 
           return {
@@ -486,15 +576,22 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               if (filterAttr === "Project") {
                 attrValueText = projectData.projectName;
               } else if (filterAttr === "Overall Risk Level") {
-                // Special handling for Overall Risk Level - calculate it from scores
+                // Special handling for Overall Risk Level - maximum category from the individual crash type bands
+                // (same logic as Coding Page)
                 if (projectData.scores && projectData.scores.length > i) {
                   const segmentScores = projectData.scores[i];
-                  const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
-                  const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+                  const bands = [
+                    segmentScores["VB Band"] ?? 1,
+                    segmentScores["BB Band"] ?? 1,
+                    segmentScores["SB Band"] ?? 1,
+                    segmentScores["BP Band"] ?? 1
+                  ];
 
-                  if (scoreValue < 10) attrValueText = "Low";
-                  else if (scoreValue <= 25) attrValueText = "Medium";
-                  else if (scoreValue <= 60) attrValueText = "High";
+                  const maxBand = Math.max(...bands);
+
+                  if (maxBand <= 1) attrValueText = "Low";
+                  else if (maxBand <= 2) attrValueText = "Medium";
+                  else if (maxBand <= 3) attrValueText = "High";
                   else attrValueText = "Extreme";
                 } else {
                   attrValueText = "Low"; // Default if no scores
@@ -535,12 +632,18 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               if (categoryFilterAttribute === "Overall Risk Level") {
                 if (projectData.scores && projectData.scores.length > i) {
                   const segmentScores = projectData.scores[i];
-                  const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
-                  const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+                  const bands = [
+                    segmentScores["VB Band"] ?? 1,
+                    segmentScores["BB Band"] ?? 1,
+                    segmentScores["SB Band"] ?? 1,
+                    segmentScores["BP Band"] ?? 1
+                  ];
 
-                  if (scoreValue < 10) categoryValueText = "Low";
-                  else if (scoreValue <= 25) categoryValueText = "Medium";
-                  else if (scoreValue <= 60) categoryValueText = "High";
+                  const maxBand = Math.max(...bands);
+
+                  if (maxBand <= 1) categoryValueText = "Low";
+                  else if (maxBand <= 2) categoryValueText = "Medium";
+                  else if (maxBand <= 3) categoryValueText = "High";
                   else categoryValueText = "Extreme";
                 }
               } else {
@@ -581,19 +684,49 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   const crashTypeKey = primaryFocusAttribute.replace(" Band", "");
                   scoreValue = segmentScores[crashTypeKey] || 0;
                 } else if (isCycleRAPScore) {
-                  // For Overall Risk Level, get the maximum score across all crash types
-                  const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
-                  scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+                  // For Overall Risk Level, get the maximum band and convert to a representative score
+                  // This ensures color matches the category label (max-band logic)
+                  const bands = [
+                    segmentScores["VB Band"] ?? 1,
+                    segmentScores["BB Band"] ?? 1,
+                    segmentScores["SB Band"] ?? 1,
+                    segmentScores["BP Band"] ?? 1
+                  ];
+
+                  const maxBand = Math.max(...bands);
+
+                  // Convert band to representative score for color: Band 1→5, 2→20, 3→50, 4→100
+                  if (maxBand <= 1) scoreValue = 5;
+                  else if (maxBand <= 2) scoreValue = 20;
+                  else if (maxBand <= 3) scoreValue = 50;
+                  else scoreValue = 100;
                 }
 
                 // Apply threshold to get color
                 pointColor = getScoreColor(scoreValue);
 
-                // Get category label based on the score
-                if (scoreValue < 10) attrValueText = "Low";
-                else if (scoreValue <= 25) attrValueText = "Medium";
-                else if (scoreValue <= 60) attrValueText = "High";
-                else attrValueText = "Extreme";
+                // Get category label based on maximum band (same logic as Coding Page)
+                if (isCycleRAPScore) {
+                  const bands = [
+                    segmentScores["VB Band"] ?? 1,
+                    segmentScores["BB Band"] ?? 1,
+                    segmentScores["SB Band"] ?? 1,
+                    segmentScores["BP Band"] ?? 1
+                  ];
+
+                  const maxBand = Math.max(...bands);
+
+                  if (maxBand <= 1) attrValueText = "Low";
+                  else if (maxBand <= 2) attrValueText = "Medium";
+                  else if (maxBand <= 3) attrValueText = "High";
+                  else attrValueText = "Extreme";
+                } else {
+                  // For safety band attributes, use the score value
+                  if (scoreValue < 10) attrValueText = "Low";
+                  else if (scoreValue <= 25) attrValueText = "Medium";
+                  else if (scoreValue <= 60) attrValueText = "High";
+                  else attrValueText = "Extreme";
+                }
               } else {
                 // Use attribute color for non-safety-band attributes
                 const attrValue = attributes[primaryFocusAttribute];
@@ -621,6 +754,91 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   const allLatLngs = useMemo(() => allPoints.map(p => p.latlng), [allPoints]);
 
+  // Filter data with global search and per-column filters
+  const filteredData = useMemo(() => {
+    let result = allPoints;
+
+    // DEBUG: Log filter state on each recalculation
+    if (Object.keys(columnFilters).length > 0) {
+      console.log("[Filter Debug] filteredData recalculation triggered. Filters:", columnFilters);
+      console.log("[Filter Debug] attrMappings loaded:", Object.keys(attrMappings).length > 0 ? `Yes, ${Object.keys(attrMappings).length} attributes` : "No");
+    }
+
+    // Apply global search (OR across all columns)
+    if (globalSearch.trim()) {
+      const searchLower = globalSearch.toLowerCase().trim();
+      result = result.filter(point => {
+        return tableColumns.some(col => {
+          const value = getColumnValue(point, col.key).toLowerCase();
+          return value.includes(searchLower);
+        });
+      });
+    }
+
+    // Apply per-column filters (AND logic)
+    Object.entries(columnFilters).forEach(([columnKey, filterValue]) => {
+      if (filterValue.trim()) {
+        const filterLower = filterValue.toLowerCase().trim();
+        const countBefore = result.length;
+
+        // Check if this is an enumerated attribute (has mappings)
+        const isEnumeratedAttr = attrMappings[columnKey] && Object.keys(attrMappings[columnKey]).length > 0;
+
+        // Sample first row to debug what values we're filtering
+        const sampleValue = result.length > 0 ? getColumnValue(result[0], columnKey) : "N/A";
+
+        result = result.filter(point => {
+          const value = getColumnValue(point, columnKey).toLowerCase();
+
+          if (isEnumeratedAttr) {
+            // For enumerated attributes, use exact matching (more useful for Present/Not Present)
+            return value === filterLower;
+          } else {
+            // For other attributes, use substring matching
+            return value.includes(filterLower);
+          }
+        });
+
+        const countAfter = result.length;
+        const attrType = isEnumeratedAttr ? 'enum' : 'text/numeric';
+        console.log(`[Filter Debug] Column "${columnKey}" (${attrType}) filter "${filterValue}" | Sample value: "${sampleValue}" | ${countBefore} -> ${countAfter} rows`);
+      }
+    });
+
+    return result;
+  }, [allPoints, globalSearch, columnFilters, tableColumns, projectsData, activeFilters, attrMappings]);
+
+  // Sort data with multi-column sorting
+  const sortedData = useMemo(() => {
+    if (sortConfig.length === 0) return filteredData;
+
+    return [...filteredData].sort((a, b) => {
+      // Iterate through sort config in priority order
+      for (const { column, direction } of sortConfig) {
+        const aVal = getColumnValue(a, column);
+        const bVal = getColumnValue(b, column);
+
+        // Numeric comparison for Segment # and Overall Risk Score
+        if (column === "Segment #" || column === "Overall Risk Score") {
+          const aNum = parseFloat(aVal);
+          const bNum = parseFloat(bVal);
+          const numCompare = aNum - bNum;
+          if (numCompare !== 0) {
+            return direction === 'asc' ? numCompare : -numCompare;
+          }
+        } else {
+          // String comparison for other columns
+          const strCompare = aVal.localeCompare(bVal);
+          if (strCompare !== 0) {
+            return direction === 'asc' ? strCompare : -strCompare;
+          }
+        }
+        // If equal, continue to next sort criterion
+      }
+      return 0; // All sort criteria equal
+    });
+  }, [filteredData, sortConfig]);
+
   // Get only the categories that exist in the data for the selected category filter attribute
   // Filters are INDEPENDENT - we show all categories that exist in the full dataset, not filtered by other filters
   const availableCategories = useMemo(() => {
@@ -641,13 +859,21 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         projectData.geoFeatures.forEach((_, i) => {
           if (projectData.scores && projectData.scores.length > i) {
             const segmentScores = projectData.scores[i];
-            const scores = [segmentScores.VB, segmentScores.BB, segmentScores.SB, segmentScores.BP].filter(s => s !== undefined);
-            const scoreValue = scores.length > 0 ? Math.max(...scores) : 0;
+            // Overall Risk Level = maximum category from the individual crash type bands
+            // (same logic as Coding Page)
+            const bands = [
+              segmentScores["VB Band"] ?? 1,
+              segmentScores["BB Band"] ?? 1,
+              segmentScores["SB Band"] ?? 1,
+              segmentScores["BP Band"] ?? 1
+            ];
+
+            const maxBand = Math.max(...bands);
 
             let category = "Low";
-            if (scoreValue < 10) category = "Low";
-            else if (scoreValue <= 25) category = "Medium";
-            else if (scoreValue <= 60) category = "High";
+            if (maxBand <= 1) category = "Low";
+            else if (maxBand <= 2) category = "Medium";
+            else if (maxBand <= 3) category = "High";
             else category = "Extreme";
 
             categoriesInData.add(category);
@@ -738,6 +964,31 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
   }, [categoryFilterAttribute, availableCategories]);
 
+  // Handle column header click for sorting
+  const handleHeaderClick = (columnKey: string) => {
+    setSortConfig(prevConfig => {
+      // Find if this column is already in sort config
+      const existingIndex = prevConfig.findIndex(s => s.column === columnKey);
+
+      if (existingIndex === 0) {
+        // If it's the primary sort, toggle direction
+        const currentDirection = prevConfig[0].direction;
+        return [
+          { column: columnKey, direction: currentDirection === 'asc' ? 'desc' : 'asc' },
+          ...prevConfig.slice(1) // Keep other sort criteria
+        ];
+      } else if (existingIndex > 0) {
+        // If it's a secondary sort, move it to primary and set to 'asc'
+        const updated = [...prevConfig];
+        updated.splice(existingIndex, 1);
+        return [{ column: columnKey, direction: 'asc' }, ...updated];
+      } else {
+        // Not in config, add as primary sort
+        return [{ column: columnKey, direction: 'asc' }, ...prevConfig];
+      }
+    });
+  };
+
   // Default center (Singapore)
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
 
@@ -782,27 +1033,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return value;
   };
 
-  // Generate CSV content from allPoints
+  // Generate CSV content from sorted and filtered data
   const generateCSV = (): string => {
-    const headers = ["Project", "Segment #", "Image Reference", "Latitude", "Longitude"];
-    // Add all active filter attributes to the headers
-    headers.push(...activeFilters);
+    const headers = tableColumns.map(col => col.label);
 
-    const rows = allPoints.map(point => {
-      const row = [
-        point.projectName,
-        point.idx.toString(),
-        point.f.properties?.["Image Reference"] ?? "-",
-        point.latlng[0].toFixed(6),
-        point.latlng[1].toFixed(6)
-      ];
-      // Add values for all active filter attributes
-      activeFilters.forEach(attr => {
-        const attrValue = point.attributes[attr];
-        const attrValueText = getAttrText(attr, attrValue);
-        row.push(attrValueText || "-");
+    const rows = sortedData.map(point => {
+      return tableColumns.map(col => {
+        return getColumnValue(point, col.key);
       });
-      return row;
     });
 
     const csvContent = [headers, ...rows]
@@ -1264,122 +1502,168 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
         {/* Table Tab Content */}
         <Tabs.Content value="table">
-          <Box p="6" h="650px" overflowY="auto">
+          <Box>
             {allPoints.length === 0 ? (
-              <Text color="gray.500">No data to display. Please select projects and load them.</Text>
+              <Box p="6">
+                <Text color="gray.500">No data to display. Please select projects and load them.</Text>
+              </Box>
             ) : (
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  border: "1px solid #e2e8f0",
-                }}
-              >
-                <thead>
-                  <tr style={{ backgroundColor: "var(--chakra-colors-bg-subtle)" }}>
-                    <th
-                      style={{
-                        padding: "12px",
-                        textAlign: "left",
-                        borderBottom: "2px solid var(--chakra-colors-border-subtle)",
-                        fontWeight: "600",
-                        color: "var(--chakra-colors-fg)",
+              <>
+                {/* Above-table controls */}
+                <Box p="4" borderBottom="1px solid" borderColor="gray.200" bg="gray.50" _dark={{ bg: "gray.700" }}>
+                  {/* Global Search */}
+                  <Flex gap="4" mb="3" align="flex-start">
+                    <Box flex="1" maxW="400px">
+                      <Text fontSize="sm" fontWeight="semibold" mb="1">Global Search:</Text>
+                      <Input
+                        placeholder="Search across all columns..."
+                        value={globalSearch}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGlobalSearch(e.target.value)}
+                        size="sm"
+                      />
+                    </Box>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      mt="6"
+                      onClick={() => {
+                        setGlobalSearch("");
+                        setColumnFilters({});
+                        setSortConfig([]);
                       }}
                     >
-                      Project
-                    </th>
-                    <th
-                      style={{
-                        padding: "12px",
-                        textAlign: "left",
-                        borderBottom: "2px solid var(--chakra-colors-border-subtle)",
-                        fontWeight: "600",
-                        color: "var(--chakra-colors-fg)",
-                      }}
-                    >
-                      Segment #
-                    </th>
-                    <th
-                      style={{
-                        padding: "12px",
-                        textAlign: "left",
-                        borderBottom: "2px solid var(--chakra-colors-border-subtle)",
-                        fontWeight: "600",
-                        color: "var(--chakra-colors-fg)",
-                      }}
-                    >
-                      Image Reference
-                    </th>
-                    <th
-                      style={{
-                        padding: "12px",
-                        textAlign: "left",
-                        borderBottom: "2px solid var(--chakra-colors-border-subtle)",
-                        fontWeight: "600",
-                        color: "var(--chakra-colors-fg)",
-                      }}
-                    >
-                      Coordinates
-                    </th>
-                    {activeFilters.map((attr) => (
-                      <th
-                        key={attr}
-                        style={{
-                          padding: "12px",
-                          textAlign: "left",
-                          borderBottom: "2px solid var(--chakra-colors-border-subtle)",
-                          fontWeight: "600",
-                          color: "var(--chakra-colors-fg)",
-                        }}
-                      >
-                        {attr}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {allPoints.map(({ idx, latlng, f, projectName, color, attributes }, globalIdx) => (
-                    <tr key={`${projectName}-${idx}-${globalIdx}`}>
-                      <td style={{ padding: "12px", borderBottom: "1px solid #e2e8f0" }}>
-                        <Flex align="center" gap="2">
-                          <Box
-                            w="8px"
-                            h="8px"
-                            borderRadius="full"
-                            bg={color}
-                          />
-                          <Text fontSize="sm">{projectName}</Text>
-                        </Flex>
-                      </td>
-                      <td style={{ padding: "12px", borderBottom: "1px solid #e2e8f0" }}>
-                        {idx}
-                      </td>
-                      <td style={{ padding: "12px", borderBottom: "1px solid #e2e8f0" }}>
-                        {f.properties?.["Image Reference"] ?? "-"}
-                      </td>
-                      <td style={{ padding: "12px", borderBottom: "1px solid #e2e8f0" }}>
-                        <Text fontSize="xs" fontFamily="mono">
-                          [{latlng[0].toFixed(6)}, {latlng[1].toFixed(6)}]
-                        </Text>
-                      </td>
-                      {activeFilters.map((attr) => {
-                        let attrValueText = "";
-                        if (attr === "Project") {
-                          attrValueText = projectName;
-                        } else {
-                          const attrValue = attributes[attr];
-                          attrValueText = getAttrText(attr, attrValue);
-                        }
-                        return (
-                          <td key={attr} style={{ padding: "12px", borderBottom: "1px solid #e2e8f0" }}>
-                            <Text fontSize="sm">{attrValueText || "-"}</Text>
+                      Clear All
+                    </Button>
+                  </Flex>
+
+                  {/* Sort Controls */}
+                  {sortConfig.length > 0 && (
+                    <Box>
+                      <Text fontSize="sm" fontWeight="semibold" mb="2">Active Sort Order:</Text>
+                      <Flex gap="2" flexWrap="wrap">
+                        {sortConfig.map((sort, index) => (
+                          <Flex key={sort.column} align="center" gap="2" px="3" py="1" bg="blue.50" borderRadius="md" _dark={{ bg: "blue.900" }}>
+                            <Text fontSize="sm" fontWeight="500">
+                              {index + 1}. {sort.column} {sort.direction === 'asc' ? '↑' : '↓'}
+                            </Text>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              onClick={() => {
+                                setSortConfig(prev => prev.filter((_, i) => i !== index));
+                              }}
+                            >
+                              ✕
+                            </Button>
+                          </Flex>
+                        ))}
+                      </Flex>
+                    </Box>
+                  )}
+
+                  {/* Filtered count display */}
+                  <Text fontSize="sm" color="gray.600" _dark={{ color: "gray.400" }} mt="3">
+                    Showing {sortedData.length} of {allPoints.length} segments
+                  </Text>
+                </Box>
+
+                {/* Table */}
+                <Box overflowX="auto">
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      border: "1px solid #e2e8f0",
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ backgroundColor: "var(--chakra-colors-bg-subtle)" }}>
+                        {tableColumns.map(col => {
+                          const sortIndex = sortConfig.findIndex(s => s.column === col.key);
+                          const sortDirection = sortIndex >= 0 ? sortConfig[sortIndex].direction : null;
+
+                          return (
+                            <th
+                              key={col.key}
+                              style={{
+                                padding: "8px 12px",
+                                textAlign: "left",
+                                borderBottom: "2px solid var(--chakra-colors-border-subtle)",
+                                cursor: "pointer",
+                                userSelect: "none",
+                              }}
+                              onClick={() => handleHeaderClick(col.key)}
+                            >
+                              <Flex align="center" gap="2" mb="1">
+                                <Text fontWeight="600" fontSize="sm">
+                                  {col.label}
+                                </Text>
+                                {sortDirection && (
+                                  <Text fontSize="xs" color="blue.600">
+                                    {sortDirection === 'asc' ? '↑' : '↓'}
+                                    {sortIndex > 0 && <sup>{sortIndex + 1}</sup>}
+                                  </Text>
+                                )}
+                              </Flex>
+                              {/* Per-column filter input */}
+                              <Input
+                                size="xs"
+                                placeholder={`Filter ${col.label}...`}
+                                value={columnFilters[col.key] || ""}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                  e.stopPropagation();
+                                  setColumnFilters(prev => ({
+                                    ...prev,
+                                    [col.key]: e.target.value
+                                  }));
+                                }}
+                                onClick={(e: React.MouseEvent<HTMLInputElement>) => e.stopPropagation()}
+                              />
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedData.length === 0 ? (
+                        <tr>
+                          <td colSpan={tableColumns.length} style={{ padding: "12px", textAlign: "center", borderBottom: "1px solid #e2e8f0" }}>
+                            <Text color="gray.500" fontSize="sm">No results found</Text>
                           </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        </tr>
+                      ) : (
+                        sortedData.map(({ idx, latlng, f, projectName, color, attributes }, globalIdx) => (
+                          <tr key={`${projectName}-${idx}-${globalIdx}`}>
+                            {tableColumns.map(col => {
+                              const value = getColumnValue(
+                                { idx, latlng, f, projectName, color, attributes },
+                                col.key
+                              );
+
+                              return (
+                                <td key={col.key} style={{ padding: "12px", borderBottom: "1px solid #e2e8f0" }}>
+                                  {col.key === "Project" ? (
+                                    <Flex align="center" gap="2">
+                                      <Box w="8px" h="8px" borderRadius="full" bg={color} />
+                                      <Text fontSize="sm">{value}</Text>
+                                    </Flex>
+                                  ) : col.key === "Coordinates" ? (
+                                    <Text fontSize="xs" fontFamily="mono">{value}</Text>
+                                  ) : col.key === "Overall Risk Score" ? (
+                                    <Text fontSize="sm" fontWeight="600">{value}</Text>
+                                  ) : (
+                                    <Text fontSize="sm">{value}</Text>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </Box>
+              </>
             )}
           </Box>
         </Tabs.Content>

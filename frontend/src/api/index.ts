@@ -369,6 +369,14 @@ export type ValidationResult = {
   }>;
 };
 
+export type ReplacementValidationResult = {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  info: Record<string, any>;
+  column_mapping: Record<string, string>;
+};
+
 /**
  * List all available shapefiles with metadata
  */
@@ -437,6 +445,30 @@ export async function validateShapefile(file: File): Promise<ValidationResult> {
   const res = await fetch("/api/shapefiles/validate", {
     method: "POST",
     body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Validate that a new shapefile is compatible with one being replaced
+ * @param newFilePath - Path to new uploaded shapefile (e.g., "temp_replace/new.shp")
+ * @param targetFilePath - Path to existing shapefile being replaced (e.g., "area_type/old.shp")
+ * @param layerName - Optional layer identifier (e.g., "cycling_path")
+ */
+export async function validateShapefileReplacement(
+  newFilePath: string,
+  targetFilePath: string,
+  layerName?: string
+): Promise<ReplacementValidationResult> {
+  const res = await fetch("/api/shapefiles/validate-replacement", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      new_file_path: newFilePath,
+      target_file_path: targetFilePath,
+      layer_name: layerName,
+    }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

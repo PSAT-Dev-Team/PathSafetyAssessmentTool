@@ -44,8 +44,10 @@ export default function CreateProjectPage() {
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
+  const [folderComboboxOpen, setFolderComboboxOpen] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
+  const [tagComboboxOpen, setTagComboboxOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
@@ -183,8 +185,17 @@ export default function CreateProjectPage() {
                       }
                     }
                   }}
+                  open={tagComboboxOpen}
+                  onOpenChange={(details) => {
+                    // Keep dropdown open if there's text in the field
+                    if (tagInput.length > 0) {
+                      setTagComboboxOpen(true);
+                    } else {
+                      setTagComboboxOpen(details.open);
+                    }
+                  }}
                 >
-                  <Combobox.Control>
+                  <Combobox.Control onClick={() => setTagComboboxOpen(true)}>
                     <Combobox.Input
                       placeholder="Type tag and press comma or enter"
                       className="tag-input-field"
@@ -229,8 +240,17 @@ export default function CreateProjectPage() {
                   inputValue={folder}
                   onInputValueChange={({ inputValue }) => setFolder(inputValue)}
                   disabled={loadingFolders}
+                  open={folderComboboxOpen}
+                  onOpenChange={(details) => {
+                    // Keep dropdown open if there's text in the field
+                    if (folder.length > 0) {
+                      setFolderComboboxOpen(true);
+                    } else {
+                      setFolderComboboxOpen(details.open);
+                    }
+                  }}
                 >
-                  <Combobox.Control>
+                  <Combobox.Control onClick={() => setFolderComboboxOpen(true)}>
                     <Combobox.Input
                       placeholder={loadingFolders ? "Loading..." : "Select a folder"}
                     />

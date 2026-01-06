@@ -593,7 +593,10 @@ def _convert_attribute_types(df: pd.DataFrame) -> pd.DataFrame:
             if col == 'Road AADT':
                 df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(5000)
             elif col == 'Road speed limit':
-                df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(50)
+                # Handle "NA" as a valid value; convert numeric strings to float, use "NA" as fallback for empty/null
+                df_copy[col] = df_copy[col].apply(
+                    lambda x: x if x == 'NA' else (pd.to_numeric(x, errors='coerce') if pd.notna(x) else 'NA')
+                ).fillna('NA')
             else:
                 df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(50)
 
