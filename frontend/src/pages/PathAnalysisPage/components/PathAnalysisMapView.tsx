@@ -107,7 +107,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       .then(mappings => {
         setAttrMappings(mappings);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // Get color for a specific crash type score based on thresholds
@@ -722,10 +722,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
           let matches = false;
 
+          // Special handling for Facility Width per Direction - strict prefix match
+          // This prevents "Very Narrow" from showing up when filtering for "Narrow" (starts with 'n')
+          if (columnKey === "Facility Width per Direction") {
+            matches = value.startsWith(filterLower);
+          }
           // Special handling for Present/Not Present attributes
-          const isEnumeratedType = value === "present" || value === "not present";
-
-          if (isEnumeratedType) {
+          else if (value === "present" || value === "not present") {
             // For Present/Not Present: use first-character matching
             if (!filterLower) {
               matches = true; // Empty filter shows all

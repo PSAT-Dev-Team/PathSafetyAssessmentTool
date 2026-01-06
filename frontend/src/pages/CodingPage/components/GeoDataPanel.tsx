@@ -174,7 +174,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   useEffect(() => {
     if (!decodedName || !current) return;
 
-    const anyLayerEnabled = showFootpath || showCycling || showShared;
+    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing;
     if (!anyLayerEnabled) {
       setGisLayers(null);
       return;
@@ -215,7 +215,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     footpath: "#1E90FF",    // Blue - rgb(30, 144, 255)
     cycling: "#00B400",     // Green - rgb(0, 180, 0)
     shared: "#E68C00",      // Orange - rgb(230, 140, 0)
-    roadcrossing: "#FF6B6B" // Red - rgb(255, 107, 107)
+    roadcrossing: "#E53E3E" // Red - rgb(229, 62, 62)
   };
 
   // Get segment color based on the crash type with the highest score
