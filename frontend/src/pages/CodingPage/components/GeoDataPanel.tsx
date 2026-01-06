@@ -66,6 +66,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [showFootpath, setShowFootpath] = useState(false);  // Blue
   const [showCycling, setShowCycling] = useState(false);     // Green
   const [showShared, setShowShared] = useState(false);       // Orange
+  const [showRoadcrossing, setShowRoadcrossing] = useState(false);  // Red
 
   // GIS Layer data
   type GISLayerFeature = {
@@ -76,6 +77,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     footpath: GISLayerFeature[];
     cycling: GISLayerFeature[];
     shared: GISLayerFeature[];
+    roadcrossing: GISLayerFeature[];
   };
   const [gisLayers, setGisLayers] = useState<GISLayers | null>(null);
 
@@ -191,7 +193,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
           body: JSON.stringify({
             point: [lon, lat],  // API expects [lon, lat]
             radius: 200,  // 200m radius around coding area (increased for better visibility)
-            layers: ['cycling', 'shared', 'footpath']
+            layers: ['cycling', 'shared', 'footpath', 'roadcrossing']
           })
         });
 
@@ -206,13 +208,14 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     })();
 
     return () => { aborted = true; };
-  }, [decodedName, current, showFootpath, showCycling, showShared]);
+  }, [decodedName, current, showFootpath, showCycling, showShared, showRoadcrossing]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
     footpath: "#1E90FF",    // Blue - rgb(30, 144, 255)
     cycling: "#00B400",     // Green - rgb(0, 180, 0)
-    shared: "#E68C00"       // Orange - rgb(230, 140, 0)
+    shared: "#E68C00",      // Orange - rgb(230, 140, 0)
+    roadcrossing: "#FF6B6B" // Red - rgb(255, 107, 107)
   };
 
   // Get segment color based on the crash type with the highest score
@@ -299,6 +302,18 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 onCheckedChange={(e) => setShowShared(e.checked)}
               />
             </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showRoadcrossing ? "red.600" : "gray.500"}>
+                Road Crossing
+              </Text>
+              <Switch
+                colorPalette="red"
+                size="sm"
+                checked={showRoadcrossing}
+                onCheckedChange={(e) => setShowRoadcrossing(e.checked)}
+              />
+            </Flex>
           </HStack>
         </Flex>
       </CardHeader>
@@ -362,6 +377,20 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.shared,
+                      weight: 3,
+                      opacity: 0.8
+                    }}
+                  />
+                ))
+              )}
+
+              {gisLayers && showRoadcrossing && gisLayers.roadcrossing && (
+                gisLayers.roadcrossing.map((feature, i) => (
+                  <Polyline
+                    key={`roadcrossing-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
+                    pathOptions={{
+                      color: layerColors.roadcrossing,
                       weight: 3,
                       opacity: 0.8
                     }}
