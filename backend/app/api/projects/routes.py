@@ -1683,6 +1683,11 @@ def autocode_gis(project_name: str):
             # overrides 3 → 2
             updates["Peak pedestrian flow along or across facility"] = 2
 
+        # Pedestrian Crossing Detection
+        # Set to Present (1) if within 5m of bus stop OR road crossing
+        if _gis.is_bus_stop(pt, dist=5) or _gis.is_road_crossing(pt, dist=5):
+            updates["Pedestrian Crossing"] = 1  # 1 = Present
+
         area = _gis.get_area_type(pt)
         updates["Area type"] = int(area)
 
@@ -1939,14 +1944,14 @@ def get_gis_layers(project_name: str):
     """
     Fetch GIS layer paths near a point for map visualization on the coding page.
 
-    This endpoint provides cycling paths, footpaths, and shared paths within
+    This endpoint provides cycling paths, footpaths, shared paths, and road crossings within
     a specified radius of a point to show GIS layer context on the coding map.
 
     Request body:
         {
             "point": [lon, lat],  // Center point (WGS84)
             "radius": 100,        // Search radius in meters (default: 100m)
-            "layers": ["cycling", "shared", "footpath"]  // Optional: which layers to fetch
+            "layers": ["cycling", "shared", "footpath", "roadcrossing"]  // Optional: which layers to fetch
         }
 
     Response:
@@ -1963,7 +1968,8 @@ def get_gis_layers(project_name: str):
                     ...
                 ],
                 "shared": [...],
-                "footpath": [...]
+                "footpath": [...],
+                "roadcrossing": [...]
             }
         }
     """
@@ -2006,7 +2012,8 @@ def get_gis_layers(project_name: str):
         layer_names = {
             "cycling": "cycling_path",
             "shared": "shared_path",
-            "footpath": "footpath"
+            "footpath": "footpath",
+            "roadcrossing": "roadcrossing"
         }
 
         result_layers = {}

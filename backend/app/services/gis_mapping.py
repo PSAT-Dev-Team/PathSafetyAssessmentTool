@@ -136,6 +136,8 @@ class LayerStore:
         store.add_path("cycling_path", base / "path" / "CyclingpathCentreline.shp")
         store.add_path("footpath", base / "path" / "Footpathcentreline.shp")
         store.add_path("shared_path", base / "path" / "Sharedpathcentreline.shp")
+        # Added for Road Crossing Layer
+        store.add_path("roadcrossing", base / "roadcrossinglayer" / "ROADCROSSING.shp")
 
         # Load speed CSV if it exists
         speed_csv_path = base / "LinkID_Shape_File" / "TSE_AdHocReq_ERP2AverageSpeedData_250425.csv"
@@ -210,7 +212,11 @@ class GIS:
     def is_bus_stop(self, point, dist=20):
         pt = self.store.to_metric_point(point)
         return self._near("bus_stop", pt, dist)
-    
+
+    def is_road_crossing(self, point, dist=5):
+        pt = self.store.to_metric_point(point)
+        return self._near("roadcrossing", pt, dist)
+
     def is_parking(self, point, dist=20):
         pt = self.store.to_metric_point(point)
         return self._near("parking", pt, dist)
