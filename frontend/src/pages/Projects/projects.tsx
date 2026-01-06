@@ -5,8 +5,6 @@ import {
   Dialog,
   Portal,
   CloseButton,
-  createListCollection,
-  Combobox,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { LuPencil } from "react-icons/lu";
@@ -60,10 +58,7 @@ export default function Home() {
 
   // Filter
   const [nameQuery, setNameQuery] = useState("");
-  const [nameQueryComboboxOpen, setNameQueryComboboxOpen] = useState(false);
   const [tagFilter, setTagFilter] = useState<string>("");
-  const [tagFilterInputValue, setTagFilterInputValue] = useState("");
-  const [tagFilterComboboxOpen, setTagFilterComboboxOpen] = useState(false);
 
   // Selected Projects (multiple selection)
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -177,7 +172,16 @@ export default function Home() {
   const filtered = useMemo(() => {
     const q = nameQuery.trim().toLowerCase();
     let list = projects;
-    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+
+    // Filter by name query - searches both project name and tags
+    if (q) {
+      list = list.filter((p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.tags && p.tags.some(tag => tag.toLowerCase().includes(q)))
+      );
+    }
+
+    // Filter by selected tag (exact match)
     if (tagFilter) list = list.filter((p) => p.tags?.includes(tagFilter));
 
     return list;
@@ -284,116 +288,31 @@ export default function Home() {
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
-            <label htmlFor="nameQuery">Search by project name</label>
-            <Combobox.Root
-              collection={createListCollection({
-                items: projects.map(p => ({ label: p.name, value: p.name }))
-              })}
-              inputValue={nameQuery}
-              onInputValueChange={({ inputValue }) => setNameQuery(inputValue)}
-              open={nameQueryComboboxOpen}
-              onOpenChange={(details) => {
-                // Keep dropdown open if there's text in the field
-                if (nameQuery.length > 0) {
-                  setNameQueryComboboxOpen(true);
-                } else {
-                  setNameQueryComboboxOpen(details.open);
-                }
-              }}
-            >
-              <Combobox.Control onClick={() => setNameQueryComboboxOpen(true)}>
-                <Combobox.Input
-                  id="nameQuery"
-                  placeholder="Type project name…"
-                />
-              </Combobox.Control>
-              <Portal>
-                <Combobox.Positioner>
-                  <Combobox.Content>
-                    {nameQuery.length > 0 && (
-                      <Combobox.Item
-                        key="select-all"
-                        item={{ label: "Select All", value: "SELECT_ALL" }}
-                        onClick={() => {
-                          const allNames = projects
-                            .filter(p => p.name.toLowerCase().includes(nameQuery.toLowerCase()))
-                            .map(p => p.name);
-                          // If all are already selected, deselect all; otherwise select all
-                          if (selected.size === allNames.length && allNames.every(name => selected.has(name))) {
-                            setSelected(new Set());
-                          } else {
-                            setSelected(new Set(allNames));
-                          }
-                          setNameQuery("");
-                        }}
-                      >
-                        <strong>Select All</strong>
-                      </Combobox.Item>
-                    )}
-                    {projects
-                      .filter(p => p.name.toLowerCase().includes(nameQuery.toLowerCase()))
-                      .map(p => (
-                        <Combobox.Item key={p.name} item={{ label: p.name, value: p.name }}>
-                          {p.name}
-                        </Combobox.Item>
-                      ))}
-                  </Combobox.Content>
-                </Combobox.Positioner>
-              </Portal>
-            </Combobox.Root>
+            <label htmlFor="nameQuery">Search by project name or tags</label>
+            <input
+              id="nameQuery"
+              type="text"
+              placeholder="Type project name or tag…"
+              value={nameQuery}
+              onChange={(e) => setNameQuery(e.target.value)}
+              className="search-input"
+            />
           </div>
           <div className="search-item">
             <label htmlFor="tagFilter">Filter by tag</label>
-            <Combobox.Root
-              collection={createListCollection({
-                items: [
-                  { label: "All tags", value: "" },
-                  ...allTags.map(tag => ({ label: tag, value: tag }))
-                ]
-              })}
-              value={tagFilter ? [tagFilter] : [""]}
-              onValueChange={({ value }) => setTagFilter(value[0] ?? "")}
-              inputValue={tagFilterInputValue}
-              onInputValueChange={(e) => setTagFilterInputValue(e.inputValue)}
-              open={tagFilterComboboxOpen}
-              onOpenChange={(details) => {
-                // Keep dropdown open if there's text in the field
-                if (tagFilterInputValue.length > 0) {
-                  setTagFilterComboboxOpen(true);
-                } else {
-                  setTagFilterComboboxOpen(details.open);
-                }
-              }}
+            <select
+              id="tagFilter"
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="search-input"
             >
-              <Combobox.Control
-                onClick={() => setTagFilterComboboxOpen(true)}
-              >
-                <Combobox.Input
-                  id="tagFilter"
-                  placeholder="All tags"
-                />
-                <Combobox.IndicatorGroup>
-                  <Combobox.ClearTrigger />
-                  <Combobox.Trigger />
-                </Combobox.IndicatorGroup>
-              </Combobox.Control>
-              <Portal>
-                <Combobox.Positioner>
-                  <Combobox.Content>
-                    <Combobox.Item item={{ label: "All tags", value: "" }} key="">
-                      All tags
-                    </Combobox.Item>
-                    {allTags
-                      .filter(tag => tag.toLowerCase().includes(tagFilterInputValue.toLowerCase()))
-                      .map((tag) => (
-                        <Combobox.Item item={{ label: tag, value: tag }} key={tag}>
-                          {tag}
-                        </Combobox.Item>
-                      ))}
-                  </Combobox.Content>
-                </Combobox.Positioner>
-              </Portal>
-            </Combobox.Root>
+              <option value="">All tags</option>
+              {allTags.map((tag) => (
+                <option key={tag} value={tag}>
+                  {tag}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="actions-buttons">
             <Button onClick={() => createProject(navigate)} colorPalette="black" variant="solid">
