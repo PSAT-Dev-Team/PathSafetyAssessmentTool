@@ -11,6 +11,7 @@ import { LuPencil } from "react-icons/lu";
 import EditProjectModal from "./components/EditProjectModal";
 
 import "./projects.css";
+import "./components/EditProjectModal.css";
 
 const createProject = (navigate: any) => {
   navigate(`/projects/create`);
@@ -313,13 +314,17 @@ export default function Home() {
           </div>
           <div className="search-item">
             <label htmlFor="tagFilterInput">Filter by tags</label>
-            <div className="tag-filter-container">
-              <div className="tag-filter-input-wrapper">
+            <div className="tag-input-container">
+              <div className="tag-input-wrapper">
                 {tagFilters.map((tag) => (
-                  <div key={tag} className="tag-filter-chip">
-                    <span className="tag-filter-text">{tag}</span>
+                  <div
+                    key={tag}
+                    className="tag-chip"
+                    style={{ backgroundColor: getTagColor(tag) }}
+                  >
+                    <span className="tag-chip-text">{tag}</span>
                     <button
-                      className="tag-filter-remove"
+                      className="tag-chip-remove"
                       onClick={() => removeTagFilter(tag)}
                       type="button"
                       aria-label={`Remove ${tag} filter`}
@@ -335,7 +340,7 @@ export default function Home() {
                   value={tagInputValue}
                   onChange={(e) => setTagInputValue(e.target.value)}
                   onKeyDown={handleTagInputKeyDown}
-                  className="tag-filter-input"
+                  className="tag-input-field"
                 />
               </div>
             </div>
