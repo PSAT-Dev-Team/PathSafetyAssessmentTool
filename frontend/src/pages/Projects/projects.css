@@ -91,15 +91,24 @@
 }
 
 /* Override tag-input-wrapper height in search panel context */
+.search-panel .tag-input-container {
+  width: 100%;
+}
+
 .search-panel .tag-input-wrapper {
-  min-height: 36px;
+  height: 36px;
   padding: 6px 10px;
   gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: center;
 }
 
 .search-panel .tag-chip {
   padding: 3px 8px;
   font-size: 12px;
+  flex-shrink: 0;
 }
 
 .search-panel .tag-chip-remove {
@@ -110,6 +119,7 @@
 
 .search-panel .tag-input-field {
   height: 20px;
+  flex: 1;
   min-width: 80px;
 }
 

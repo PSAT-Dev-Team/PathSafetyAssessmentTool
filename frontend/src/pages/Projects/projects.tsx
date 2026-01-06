@@ -63,6 +63,7 @@ export default function Home() {
   const [nameQuery, setNameQuery] = useState("");
   const [tagFilters, setTagFilters] = useState<string[]>([]);
   const [tagInputValue, setTagInputValue] = useState("");
+  const [tagComboboxOpen, setTagComboboxOpen] = useState(false);
 
   // Selected Projects (multiple selection)
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -325,9 +326,10 @@ export default function Home() {
                   setTagInputValue("");
                 }
               }}
-              open={tagInputValue.length > 0}
+              open={tagComboboxOpen}
+              onOpenChange={(details) => setTagComboboxOpen(details.open)}
             >
-              <Combobox.Control>
+              <Combobox.Control onClick={() => setTagComboboxOpen(true)}>
                 <div className="tag-input-container">
                   <div className="tag-input-wrapper">
                     {tagFilters.map((tag) => (
@@ -349,7 +351,7 @@ export default function Home() {
                     ))}
                     <Combobox.Input
                       id="tagFilterCombobox"
-                      placeholder={tagFilters.length === 0 ? "Type tag and press Enter..." : "Add more tags..."}
+                      placeholder={tagFilters.length === 0 ? "Type or click to select tags..." : "Add more tags..."}
                       className="tag-input-field"
                     />
                   </div>
