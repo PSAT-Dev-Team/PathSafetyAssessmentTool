@@ -5,6 +5,8 @@ import {
   Dialog,
   Portal,
   CloseButton,
+  Combobox,
+  createListCollection,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { LuPencil } from "react-icons/lu";
@@ -161,6 +163,15 @@ export default function Home() {
       });
   }, [Projectlist]);
 
+  // Get all unique tags across all projects
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    projects.forEach(p => {
+      p.tags?.forEach(tag => tagSet.add(tag));
+    });
+    return Array.from(tagSet).sort();
+  }, [projects]);
+
   // for Filters
   const filtered = useMemo(() => {
     const q = nameQuery.trim().toLowerCase();
@@ -280,18 +291,6 @@ export default function Home() {
     }
   };
 
-  // Handle tag input key down (Enter to add tag)
-  const handleTagInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const trimmedTag = tagInputValue.trim();
-      if (trimmedTag && !tagFilters.includes(trimmedTag)) {
-        setTagFilters([...tagFilters, trimmedTag]);
-        setTagInputValue("");
-      }
-    }
-  };
-
   // Remove tag from filter
   const removeTagFilter = (tagToRemove: string) => {
     setTagFilters(tagFilters.filter(tag => tag !== tagToRemove));
@@ -313,37 +312,66 @@ export default function Home() {
             />
           </div>
           <div className="search-item">
-            <label htmlFor="tagFilterInput">Filter by tags</label>
-            <div className="tag-input-container">
-              <div className="tag-input-wrapper">
-                {tagFilters.map((tag) => (
-                  <div
-                    key={tag}
-                    className="tag-chip"
-                    style={{ backgroundColor: getTagColor(tag) }}
-                  >
-                    <span className="tag-chip-text">{tag}</span>
-                    <button
-                      className="tag-chip-remove"
-                      onClick={() => removeTagFilter(tag)}
-                      type="button"
-                      aria-label={`Remove ${tag} filter`}
-                    >
-                      ×
-                    </button>
+            <label htmlFor="tagFilterCombobox">Filter by tags</label>
+            <Combobox.Root
+              collection={createListCollection({
+                items: allTags.map(tag => ({ label: tag, value: tag }))
+              })}
+              inputValue={tagInputValue}
+              onInputValueChange={({ inputValue }) => setTagInputValue(inputValue)}
+              onValueChange={({ value }) => {
+                if (value.length > 0 && !tagFilters.includes(value[0])) {
+                  setTagFilters([...tagFilters, value[0]]);
+                  setTagInputValue("");
+                }
+              }}
+              open={tagInputValue.length > 0}
+            >
+              <Combobox.Control>
+                <div className="tag-input-container">
+                  <div className="tag-input-wrapper">
+                    {tagFilters.map((tag) => (
+                      <div
+                        key={tag}
+                        className="tag-chip"
+                        style={{ backgroundColor: getTagColor(tag) }}
+                      >
+                        <span className="tag-chip-text">{tag}</span>
+                        <button
+                          className="tag-chip-remove"
+                          onClick={() => removeTagFilter(tag)}
+                          type="button"
+                          aria-label={`Remove ${tag} filter`}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <Combobox.Input
+                      id="tagFilterCombobox"
+                      placeholder={tagFilters.length === 0 ? "Type tag and press Enter..." : "Add more tags..."}
+                      className="tag-input-field"
+                    />
                   </div>
-                ))}
-                <input
-                  id="tagFilterInput"
-                  type="text"
-                  placeholder={tagFilters.length === 0 ? "Type tag and press Enter..." : "Add more tags..."}
-                  value={tagInputValue}
-                  onChange={(e) => setTagInputValue(e.target.value)}
-                  onKeyDown={handleTagInputKeyDown}
-                  className="tag-input-field"
-                />
-              </div>
-            </div>
+                </div>
+              </Combobox.Control>
+              <Portal>
+                <Combobox.Positioner>
+                  <Combobox.Content>
+                    {allTags
+                      .filter(tag =>
+                        tag.toLowerCase().includes(tagInputValue.toLowerCase()) &&
+                        !tagFilters.includes(tag)
+                      )
+                      .map((tag) => (
+                        <Combobox.Item key={tag} item={{ label: tag, value: tag }}>
+                          {tag}
+                        </Combobox.Item>
+                      ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
+              </Portal>
+            </Combobox.Root>
           </div>
           <div className="actions-buttons">
             <Button onClick={() => createProject(navigate)} colorPalette="black" variant="solid">

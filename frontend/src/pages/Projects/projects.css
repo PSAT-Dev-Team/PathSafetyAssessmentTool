@@ -90,6 +90,29 @@
   box-shadow: 0 0 0 3px rgba(37, 99, 235, .15);
 }
 
+/* Override tag-input-wrapper height in search panel context */
+.search-panel .tag-input-wrapper {
+  min-height: 36px;
+  padding: 6px 10px;
+  gap: 6px;
+}
+
+.search-panel .tag-chip {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.search-panel .tag-chip-remove {
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
+}
+
+.search-panel .tag-input-field {
+  height: 20px;
+  min-width: 80px;
+}
+
 .date-range {
   display: flex;
   align-items: center;
