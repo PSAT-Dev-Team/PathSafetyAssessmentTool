@@ -186,7 +186,6 @@ export default function CodingPage() {
         detail: { projectName, verifiedSegmentCount: clampedCount }
       }));
     } catch (e: any) {
-      console.error("Failed to update verified segment count:", e);
       toaster.create({
         title: "Failed to update",
         description: e?.message ?? "Failed to update verified segment count",
@@ -210,7 +209,6 @@ export default function CodingPage() {
         detail: { projectName, autocodedSegmentCount: clampedCount }
       }));
     } catch (e: any) {
-      console.error("Failed to update autocoded segment count:", e);
       toaster.create({
         title: "Failed to update",
         description: e?.message ?? "Failed to update autocoded segment count",
@@ -341,9 +339,8 @@ export default function CodingPage() {
           window.dispatchEvent(new CustomEvent("psat:baseline:updated", {
             detail: { projectName: currentProjectName }
           }));
-        }).catch(e => console.warn("Failed to update autocode baseline:", e));
+        });
       } catch (e) {
-        console.warn("Failed to normalize autocode baseline:", e);
       }
     },
     [currentProjectName]
@@ -421,7 +418,6 @@ export default function CodingPage() {
               )
             });
           } catch (e: any) {
-            console.warn("Failed to recalculate score after autocode:", e?.message);
           }
         }
 
@@ -530,7 +526,6 @@ export default function CodingPage() {
             }
           }
         } catch (e: any) {
-          console.warn("Failed to fetch updated attributes or recalculate scores:", e?.message);
         }
 
         setProgress(100);
@@ -550,9 +545,6 @@ export default function CodingPage() {
           type: totalFail > 0 ? "warning" : "success",
         });
 
-        if (totalFail > 0 && errors.length > 0) {
-          console.error("Auto-coding errors:", errors);
-        }
       } catch (e: any) {
         toaster.create({
           title: "Auto-code failed",
@@ -672,9 +664,8 @@ export default function CodingPage() {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ rows: a.rows })
-                  }).catch(e => console.warn("Failed to update baseline for:", projectName, e));
+                  });
                 } catch (e) {
-                  console.warn("Failed to update autocode baseline for project:", projectName, e);
                 }
 
                 // Recalculate scores
@@ -694,7 +685,6 @@ export default function CodingPage() {
                 }
               }
             } catch (e: any) {
-              console.warn("Failed to fetch updated attributes or recalculate scores for project", projectName, e?.message);
             }
 
             // Update autocoded segment count for this project if autocode was successful
@@ -706,7 +696,6 @@ export default function CodingPage() {
             totalSuccessful += projectOk;
             totalFailed += projectFail;
           } catch (e: any) {
-            console.error("Failed to autocode project", projectName, e?.message);
             totalFailed += projectAttrsLength;
             errors.push({ projectName, reason: e?.message });
           }
@@ -803,10 +792,9 @@ export default function CodingPage() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ rows: normalized })
-            }).catch(e => console.warn("Failed to store baseline:", e));
+            });
           }
         } catch {
-          console.warn("Failed to check or store baseline values");
         }
 
         updateProjectData(currentProjectName, {
@@ -854,7 +842,6 @@ export default function CodingPage() {
           setBaselineRows(data.rows || []);
         }
       } catch (e) {
-        console.warn("Failed to fetch baseline:", e);
         setBaselineRows([]);
       }
     })();
@@ -876,7 +863,6 @@ export default function CodingPage() {
         const data = await res.json();
         setBaselineRows(data.rows || []);
       } catch (e) {
-        console.warn("Failed to refetch baseline after autocode:", e);
       }
     };
 
@@ -911,7 +897,6 @@ export default function CodingPage() {
           let loadingToastId: string | undefined;
 
           if (isMounted) {
-            console.log("No scores found, auto-calculating scores for all segments...");
             loadingToastId = toaster.create({
               description: "Auto-calculating scores for all segments...",
               type: "loading",
@@ -928,7 +913,6 @@ export default function CodingPage() {
             updateProjectData(currentProjectName, {
               scores: result.result_rows as any,
             });
-            console.log("Scores auto-calculated:", result.result_rows.length, "segments");
             toaster.create({
               title: "Scores calculated",
               description: `Auto-calculated scores for ${result.result_rows.length} segments`,
@@ -943,12 +927,8 @@ export default function CodingPage() {
           updateProjectData(currentProjectName, {
             scores: data.result_rows as any,
           });
-          console.log("Scores loaded:", data.result_rows.length, "segments");
         }
       } catch (e: any) {
-        if (isMounted) {
-          console.warn("Failed to auto-calculate scores:", e?.message);
-        }
       }
     })();
 
@@ -991,15 +971,10 @@ export default function CodingPage() {
 
       Promise.all(savePromises)
         .then(() => {
-          console.log("Save completed successfully. Dispatching update events...");
           // Dispatch events to update Projects page for all projects
           projectList.forEach(projName => {
             const projData = projectData[projName];
             if (projData) {
-              console.log(`Dispatching events for ${projName}:`, {
-                verifiedSegmentCount: projData.verifiedSegmentCount ?? 0,
-                autocodedSegmentCount: projData.autocodedSegmentCount ?? 0
-              });
               // Dispatch verified status update
               window.dispatchEvent(new CustomEvent("psat:verified:updated", {
                 detail: { projectName: projName, verifiedSegmentCount: projData.verifiedSegmentCount ?? 0 }
@@ -1018,7 +993,6 @@ export default function CodingPage() {
           });
         })
         .catch((e) => {
-          console.error("Save failed:", e);
           toaster.create({
             title: "Save failed",
             description: String(e?.message ?? e),
@@ -1076,11 +1050,7 @@ export default function CodingPage() {
       if (!currentProjectName) return;
 
       try {
-        console.log("Calling calculateScoreForRow with updated row:", updatedRow);
-
         const newScore = await calculateScoreForRow(currentProjectName, updatedRow);
-
-        console.log("Received scores from API:", newScore);
 
         updateProjectData(currentProjectName, {
           scores: scores.map((score, i) =>
@@ -1092,7 +1062,6 @@ export default function CodingPage() {
 
         window.dispatchEvent(new CustomEvent("psat:scores:updated"));
       } catch (e: any) {
-        console.warn("Failed to recalculate score:", e?.message);
       }
     }, 500);
   };

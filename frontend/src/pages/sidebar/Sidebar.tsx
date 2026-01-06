@@ -79,7 +79,7 @@ export default function Sidebar() {
         });
       }
     } catch (error) {
-      console.error("Failed to apply all treatments:", error);
+      
       toaster.create({
         description: error instanceof Error ? error.message : "Failed to apply treatments",
         type: "error",
@@ -113,7 +113,7 @@ export default function Sidebar() {
         });
       }
     } catch (error) {
-      console.error("Failed to reset all treatments:", error);
+      
       toaster.create({
         description: error instanceof Error ? error.message : "Failed to reset treatments",
         type: "error",
@@ -210,7 +210,7 @@ export default function Sidebar() {
         });
       }
     } catch (error) {
-      console.error("Failed to save treatments:", error);
+      
       toaster.create({
         description: error instanceof Error ? error.message : "Failed to save treatments",
         type: "error",

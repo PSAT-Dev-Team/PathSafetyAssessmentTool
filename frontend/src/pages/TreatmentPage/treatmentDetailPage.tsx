@@ -585,7 +585,7 @@ export default function TreatmentDetailPage() {
           setSelectedTreatments(new Set());
         }
       } catch (e) {
-        console.error("Failed to load treatment state:", e);
+        
       }
     })();
 
@@ -623,10 +623,7 @@ export default function TreatmentDetailPage() {
         },
       }));
 
-      console.log("Treatments applied successfully:", result);
     } catch (e: any) {
-      console.error("Failed to apply treatments:", e);
-      alert(`Error: ${e.message}`);
     } finally {
       setApplyLoading(false);
     }
@@ -655,8 +652,6 @@ export default function TreatmentDetailPage() {
 
       setSelectedTreatments(new Set());
     } catch (e: any) {
-      console.error("Failed to reset treatments:", e);
-      alert(`Error: ${e.message}`);
     } finally {
       setApplyLoading(false);
     }

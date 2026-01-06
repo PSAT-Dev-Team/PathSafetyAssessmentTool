@@ -175,7 +175,6 @@ export function AggregatedScoreBandPanel({
       setErrors([e?.message ?? "Failed to load score distributions"]);
       setDistributions(null);
       setTotalSegments(0);
-      console.error("Error loading aggregated score distributions:", e);
     } finally {
       setLoading(false);
     }
@@ -189,7 +188,6 @@ export function AggregatedScoreBandPanel({
   // Listen for score updates
   useEffect(() => {
     const handleScoresUpdated = () => {
-      console.log("Scores updated, refreshing aggregated distributions...");
       fetchAndAggregateResults();
     };
 

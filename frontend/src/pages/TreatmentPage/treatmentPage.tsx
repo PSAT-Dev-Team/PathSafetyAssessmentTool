@@ -73,14 +73,14 @@ export default function TreatmentPage() {
   useEffect(() => {
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch((e) => console.error("Failed to fetch projects:", e));
+      .catch(() => {});
   }, []);
 
   // Listen for project verified status changes from coding page
   useEffect(() => {
     const handleVerificationUpdate = (event: CustomEvent) => {
       const { projectName, verified } = event.detail;
-      console.log("Verification update received:", projectName, verified);
+      
 
       // Update the project list directly
       setProjectList((prev) => {

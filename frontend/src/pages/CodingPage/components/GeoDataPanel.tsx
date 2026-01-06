@@ -106,31 +106,22 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     try {
       const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/results`);
       if (!res.ok) {
-        console.warn("Could not fetch Overall Risk Levels");
         return;
       }
       const data = await res.json();
       if (data.ok && Array.isArray(data.result_rows)) {
         setScores(data.result_rows);
-        console.log("Scores loaded:", data.result_rows.length, "segments");
       }
     } catch (e: any) {
-      console.warn("Failed to load Overall Risk Levels:", e?.message);
     }
   }, [decodedName]);
 
   // Use external scores if provided (real-time updates), otherwise fetch from API
   useEffect(() => {
     if (externalScores && externalScores.length > 0) {
-      console.log("GeoDataPanel: Updating scores from external source, count:", externalScores.length, "scores:", externalScores);
       setScores(externalScores);
     }
   }, [externalScores]);
-
-  // Debug: log when internal scores state changes
-  useEffect(() => {
-    console.log("GeoDataPanel: Internal scores state updated, count:", scores.length);
-  }, [scores]);
 
   // Fetch Overall Risk Levels for color coding on component mount (fallback if no external scores)
   useEffect(() => {
@@ -146,13 +137,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   // Only fetch from API if we're using the fallback mechanism (no external scores)
   useEffect(() => {
     const handleScoresUpdated = () => {
-      console.log("Scores updated event received");
       // Only refetch from API if we don't have external scores
       if (!externalScores || externalScores.length === 0) {
-        console.log("No external scores available, refetching from API...");
         fetchScores();
-      } else {
-        console.log("External scores available, not refetching from API");
       }
     };
 
@@ -198,7 +185,6 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
         const [lat, lon] = current.latlng;
 
         // Fetch GIS layers near the current coding point
-        console.log('Fetching GIS layers for point:', [lon, lat]);
         const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/gis/layers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -213,14 +199,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
         const data = await res.json();
 
         if (!aborted && data.ok) {
-          console.log('GIS layers loaded:', data.layers);
-          console.log('Footpath features:', data.layers.footpath?.length);
-          console.log('Cycling features:', data.layers.cycling?.length);
-          console.log('Shared features:', data.layers.shared?.length);
           setGisLayers(data.layers);
         }
       } catch (e: any) {
-        console.error('Failed to load GIS layers:', e);
       }
     })();
 
@@ -347,7 +328,6 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
 
               {/* GIS Layers - Render below the segment points */}
               {gisLayers && showFootpath && gisLayers.footpath && (
-                console.log('Rendering footpath layers:', gisLayers.footpath.length),
                 gisLayers.footpath.map((feature, i) => (
                   <Polyline
                     key={`footpath-${i}`}
@@ -362,7 +342,6 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
               )}
 
               {gisLayers && showCycling && gisLayers.cycling && (
-                console.log('Rendering cycling layers:', gisLayers.cycling.length),
                 gisLayers.cycling.map((feature, i) => (
                   <Polyline
                     key={`cycling-${i}`}
@@ -377,7 +356,6 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
               )}
 
               {gisLayers && showShared && gisLayers.shared && (
-                console.log('Rendering shared layers:', gisLayers.shared.length),
                 gisLayers.shared.map((feature, i) => (
                   <Polyline
                     key={`shared-${i}`}

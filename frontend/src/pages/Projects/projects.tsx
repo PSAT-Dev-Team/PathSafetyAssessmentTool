@@ -94,12 +94,6 @@ export default function Home() {
   useEffect(() => {
     const handleVerificationUpdate = (event: CustomEvent) => {
       const { projectName, verified, verifiedSegmentCount } = event.detail;
-      console.log("Verification update received:", {
-        projectName,
-        verified,
-        verifiedSegmentCount,
-        eventDetail: event.detail
-      });
 
       // Update the project list directly
       setProjectList((prev) => {
@@ -110,7 +104,6 @@ export default function Home() {
               const updates: any = {};
               if (verified !== undefined) updates.verified = verified;
               if (verifiedSegmentCount !== undefined) updates.verified_segment_count = verifiedSegmentCount;
-              console.log("Updating project:", projectName, "with:", updates);
               return { ...p, ...updates };
             }
             return p;
@@ -127,7 +120,6 @@ export default function Home() {
   useEffect(() => {
     const handleAutocodedUpdate = (event: CustomEvent) => {
       const { projectName, autocodedSegmentCount } = event.detail;
-      console.log("Received psat:autocoded:updated event:", { projectName, autocodedSegmentCount });
 
       // Update the project list directly
       setProjectList((prev) => {
@@ -136,7 +128,6 @@ export default function Home() {
           projects: prev.projects.map((p) => {
             if (p.name === projectName) {
               if (autocodedSegmentCount !== undefined) {
-                console.log("Updating autocoded count for", projectName, "to", autocodedSegmentCount);
                 return { ...p, autocoded_segment_count: autocodedSegmentCount };
               }
             }
@@ -153,7 +144,6 @@ export default function Home() {
   // UseMemo projects
   const projects: ProjectListItem[] = useMemo(() => {
     if (!Projectlist?.projects) return [];
-    console.log(Projectlist)
     return Projectlist.projects
       .slice()
       .sort((a, b) => {
@@ -286,7 +276,6 @@ export default function Home() {
       setSelected(new Set());
       setOpenDelete(false);
     } catch (e: any) {
-      console.error("Delete failed:", e);
     } finally {
       setDeleting(false);
     }

@@ -104,8 +104,10 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // Load attribute mappings on mount
   useEffect(() => {
     fetchAttributeMappings()
-      .then(setAttrMappings)
-      .catch(e => console.error("Failed to load attribute mappings:", e));
+      .then(mappings => {
+        setAttrMappings(mappings);
+      })
+      .catch(() => {});
   }, []);
 
   // Get color for a specific crash type score based on thresholds
@@ -204,12 +206,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     const attrValue = point.attributes[columnKey];
     const result = getAttrText(columnKey, attrValue) || "-";
 
-    // DEBUG: Log if this is a numeric attribute that might not have mappings
-    if (!attrMappings[columnKey] && typeof attrValue === 'number') {
-      // This is a numeric attribute without mappings (e.g., Facility Width Per Direction)
-      // Just return the string representation
-    }
-
     return result;
   };
 
@@ -255,9 +251,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       if (attrMappings[attrName][key]) {
         return attrMappings[attrName][key];
       }
-      // DEBUG: Log when mapping exists but key not found
-      console.warn(`[Filter Debug] Attribute "${attrName}" has mapping but no entry for key "${key}". Available keys: ${Object.keys(attrMappings[attrName]).join(", ")}`);
+      // Try numeric key if string key didn't work
+      const numKey = Number(attrValue);
+      if (!isNaN(numKey) && attrMappings[attrName][String(numKey)]) {
+        return attrMappings[attrName][String(numKey)];
+      }
+      // Fall through to return raw value
     }
+
     return String(attrValue);
   };
 
@@ -307,7 +308,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
             const scoresResponse = await calculateScore(projectName);
             scores = scoresResponse.result_rows || [];
           } catch (e) {
-            console.warn(`Failed to load scores for ${projectName}, continuing without scores`, e);
           }
 
           return {
@@ -565,19 +565,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           const attributes = projectData.attributes[i];
 
           if (attributes) {
-            // Check if segment matches all active filters AND category toggles
+            // Simple check: Does this segment have all active filter attributes with values?
             let matchesAllFilters = true;
-
-            // First, check all active filters (top tabs)
             for (const filterAttr of activeFilters) {
               let attrValueText = "";
 
-              // Special handling for "Project" filter
               if (filterAttr === "Project") {
                 attrValueText = projectData.projectName;
               } else if (filterAttr === "Overall Risk Level") {
-                // Special handling for Overall Risk Level - maximum category from the individual crash type bands
-                // (same logic as Coding Page)
                 if (projectData.scores && projectData.scores.length > i) {
                   const segmentScores = projectData.scores[i];
                   const bands = [
@@ -586,79 +581,27 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                     segmentScores["SB Band"] ?? 1,
                     segmentScores["BP Band"] ?? 1
                   ];
-
                   const maxBand = Math.max(...bands);
-
                   if (maxBand <= 1) attrValueText = "Low";
                   else if (maxBand <= 2) attrValueText = "Medium";
                   else if (maxBand <= 3) attrValueText = "High";
                   else attrValueText = "Extreme";
                 } else {
-                  attrValueText = "Low"; // Default if no scores
+                  attrValueText = "Low";
                 }
               } else {
                 const attrValue = attributes[filterAttr];
                 attrValueText = getAttrText(filterAttr, attrValue);
               }
 
-              // Skip if this filter attribute has no value
               if (!attrValueText || attrValueText === "Not Selected") {
                 matchesAllFilters = false;
                 break;
               }
-
-              // Check if this filter attribute's category toggle is enabled
-              // Use ?? true to default to true when toggle is not set (all categories visible by default)
-              const filterToggles = categoryToggles[filterAttr];
-              if (filterToggles && Object.keys(filterToggles).length > 0) {
-                // If toggles exist for this attribute, check if the current value is enabled
-                const isToggled = filterToggles[attrValueText] ?? true;
-                if (!isToggled) {
-                  matchesAllFilters = false;
-                  break;
-                }
-              }
             }
 
             if (!matchesAllFilters) {
-              return; // Skip segment - doesn't match active filters or their toggles
-            }
-
-            // Also check the category filter attribute's toggles (even if not in activeFilters)
-            // This allows filtering by the selected tab's categories
-            if (categoryFilterAttribute && categoryFilterAttribute !== "Project") {
-              let categoryValueText = "";
-
-              if (categoryFilterAttribute === "Overall Risk Level") {
-                if (projectData.scores && projectData.scores.length > i) {
-                  const segmentScores = projectData.scores[i];
-                  const bands = [
-                    segmentScores["VB Band"] ?? 1,
-                    segmentScores["BB Band"] ?? 1,
-                    segmentScores["SB Band"] ?? 1,
-                    segmentScores["BP Band"] ?? 1
-                  ];
-
-                  const maxBand = Math.max(...bands);
-
-                  if (maxBand <= 1) categoryValueText = "Low";
-                  else if (maxBand <= 2) categoryValueText = "Medium";
-                  else if (maxBand <= 3) categoryValueText = "High";
-                  else categoryValueText = "Extreme";
-                }
-              } else {
-                const attrValue = attributes[categoryFilterAttribute];
-                categoryValueText = getAttrText(categoryFilterAttribute, attrValue);
-              }
-
-              // Apply category toggles
-              const categoryTogglesForAttr = categoryToggles[categoryFilterAttribute];
-              if (categoryTogglesForAttr && Object.keys(categoryTogglesForAttr).length > 0 && categoryValueText) {
-                const isToggled = categoryTogglesForAttr[categoryValueText];
-                if (isToggled === false) {
-                  return; // Skip segment - this category is toggled off
-                }
-              }
+              return;
             }
 
             // Determine color based on primary focus attribute or project
@@ -758,12 +701,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   const filteredData = useMemo(() => {
     let result = allPoints;
 
-    // DEBUG: Log filter state on each recalculation
-    if (Object.keys(columnFilters).length > 0) {
-      console.log("[Filter Debug] filteredData recalculation triggered. Filters:", columnFilters);
-      console.log("[Filter Debug] attrMappings loaded:", Object.keys(attrMappings).length > 0 ? `Yes, ${Object.keys(attrMappings).length} attributes` : "No");
-    }
-
     // Apply global search (OR across all columns)
     if (globalSearch.trim()) {
       const searchLower = globalSearch.toLowerCase().trim();
@@ -779,29 +716,39 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     Object.entries(columnFilters).forEach(([columnKey, filterValue]) => {
       if (filterValue.trim()) {
         const filterLower = filterValue.toLowerCase().trim();
-        const countBefore = result.length;
-
-        // Check if this is an enumerated attribute (has mappings)
-        const isEnumeratedAttr = attrMappings[columnKey] && Object.keys(attrMappings[columnKey]).length > 0;
-
-        // Sample first row to debug what values we're filtering
-        const sampleValue = result.length > 0 ? getColumnValue(result[0], columnKey) : "N/A";
 
         result = result.filter(point => {
           const value = getColumnValue(point, columnKey).toLowerCase();
 
-          if (isEnumeratedAttr) {
-            // For enumerated attributes, use exact matching (more useful for Present/Not Present)
-            return value === filterLower;
-          } else {
-            // For other attributes, use substring matching
-            return value.includes(filterLower);
-          }
-        });
+          let matches = false;
 
-        const countAfter = result.length;
-        const attrType = isEnumeratedAttr ? 'enum' : 'text/numeric';
-        console.log(`[Filter Debug] Column "${columnKey}" (${attrType}) filter "${filterValue}" | Sample value: "${sampleValue}" | ${countBefore} -> ${countAfter} rows`);
+          // Special handling for Present/Not Present attributes
+          const isEnumeratedType = value === "present" || value === "not present";
+
+          if (isEnumeratedType) {
+            // For Present/Not Present: use first-character matching
+            if (!filterLower) {
+              matches = true; // Empty filter shows all
+            } else if (filterLower[0] === 'p') {
+              matches = value === "present"; // 'p' matches only "present"
+            } else if (filterLower[0] === 'n') {
+              matches = value === "not present"; // 'n' matches only "not present"
+            } else {
+              matches = false; // Other characters don't match
+            }
+          } else {
+            // For other attributes, use word-boundary matching
+            if (value === filterLower) {
+              matches = true; // Exact match
+            } else if (value.startsWith(filterLower)) {
+              matches = true; // Prefix match
+            } else if (value.includes(` ${filterLower}`) || value.includes(`-${filterLower}`)) {
+              matches = true; // Word boundary match
+            }
+          }
+
+          return matches;
+        });
       }
     });
 

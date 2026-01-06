@@ -53,7 +53,7 @@ export default function PathAnalysisPage() {
   useEffect(() => {
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch((e) => console.error("Failed to fetch projects:", e));
+      .catch(() => {});
   }, []);
 
   // Process projects
@@ -175,7 +175,6 @@ export default function PathAnalysisPage() {
   // Handle Load Selected Projects button click
   const handleLoadProjects = () => {
     if (selectedProjects.length === 0) {
-      alert("Please select at least one project");
       return;
     }
     // Trigger loading by updating the loadedProjects state

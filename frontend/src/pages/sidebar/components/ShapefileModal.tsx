@@ -45,7 +45,6 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
       const data = await api.listShapefileCategories();
       setCategories(data);
     } catch (error) {
-      console.error("Failed to load categories:", error);
     }
   }
 
@@ -54,7 +53,6 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
       const data = await api.listShapefiles();
       setAllShapefiles(data);
     } catch (error) {
-      console.error("Failed to load shapefiles:", error);
     }
   }
 
@@ -315,9 +313,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
       setReplacing(true);
 
       // Step 1: Upload all files to temp category
-      console.log('[Replace] Step 1: Uploading files to temp_replace:', replaceFiles.map(f => f.name));
       const uploadResult = await api.uploadShapefiles(replaceFiles, "temp_replace");
-      console.log('[Replace] Upload result:', uploadResult);
 
       if (uploadResult.errors.length > 0 || uploadResult.count === 0) {
         toaster.create({
@@ -329,7 +325,6 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
 
       // Step 2: Validate compatibility before replacement
       const uploadedPath = uploadResult.uploaded[0].path;
-      console.log('[Replace] Step 2: Validating compatibility');
 
       // Extract layer name from target path if possible (e.g., "area_type/file.shp" -> "area_type")
       const layerName = selectedTargetShapefile.split('/')[0];
@@ -339,8 +334,6 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
         selectedTargetShapefile,
         layerName
       );
-
-      console.log('[Replace] Validation result:', validationResult);
 
       // Check for fatal errors
       if (validationResult.errors.length > 0) {
@@ -359,21 +352,17 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
           `Warnings found:\n\n${validationResult.warnings.join("\n\n")}\n\nContinue with replacement?`
         );
         if (!confirmed) {
-          console.log('[Replace] User cancelled due to warnings');
           return;
         }
       }
 
       // Step 3: Replace the target (now safe)
-      console.log('[Replace] Step 3: Replacing', selectedTargetShapefile, 'with', uploadedPath);
-
       const replaceResult = await api.replaceShapefiles([
         {
           uploaded_path: uploadedPath,
           target_path: selectedTargetShapefile,
         },
       ]);
-      console.log('[Replace] Replace result:', replaceResult);
 
       if (replaceResult.errors.length > 0) {
         toaster.create({

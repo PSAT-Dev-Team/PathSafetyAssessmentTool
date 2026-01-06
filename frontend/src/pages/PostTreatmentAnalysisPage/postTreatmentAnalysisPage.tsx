@@ -56,7 +56,7 @@ export default function PostTreatmentAnalysisPage() {
   useEffect(() => {
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch((e) => console.error("Failed to fetch post-treatment projects:", e));
+      .catch(() => {});
   }, []);
 
   // Process projects - filter for those with "Post" tag
@@ -80,16 +80,12 @@ export default function PostTreatmentAnalysisPage() {
 
   const analyzeProject = async () => {
     if (!selected) return;
-    console.log(`Analyzing post-treatment project:`, selected);
     // TODO: Navigate to analysis view or show analysis dashboard
-    alert(`Analyzing post-treatment project: ${selected}`);
   };
 
   const compareProjects = async () => {
     if (!selected) return;
-    console.log(`Comparing project:`, selected);
     // TODO: Open comparison view
-    alert(`Feature coming soon: Compare pre/post treatment for ${selected}`);
   };
 
   return (

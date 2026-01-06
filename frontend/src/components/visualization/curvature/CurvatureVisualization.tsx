@@ -83,7 +83,7 @@ export function CurvatureVisualization({ data }: CurvatureVisualizationProps) {
         return [lat, lon] as [number, number];
       });
     } catch (error) {
-      console.error('Error converting triplet points:', error);
+      
       return null;
     }
   }, [diagnostics]);

@@ -381,7 +381,6 @@ export default function AttributesDropdown({
       );
 
       if (isDuplicate) {
-        console.warn(`Attribute "${value}" is already selected in another filter`);
         return; // Don't allow duplicate
       }
 
@@ -389,7 +388,6 @@ export default function AttributesDropdown({
     }
 
     onAttributeChange(newAttributes);
-    console.log(`Filter ${index + 1} changed to:`, value);
   };
 
   const handleAddFilter = () => {
@@ -434,6 +432,24 @@ export default function AttributesDropdown({
 
   // Filter attributes based on input value for each filter
   // Also exclude already-selected attributes to prevent duplicates
+  // Fuzzy matching for robust search
+  const fuzzyMatch = (query: string, text: string): number => {
+    query = query.toLowerCase();
+    text = text.toLowerCase();
+
+    let queryIndex = 0;
+    let score = 0;
+
+    for (let i = 0; i < text.length && queryIndex < query.length; i++) {
+      if (text[i] === query[queryIndex]) {
+        score += 1;
+        queryIndex++;
+      }
+    }
+
+    return queryIndex === query.length ? score : -1; // -1 if no match
+  };
+
   const getFilteredAttributes = (inputValue: string, currentIndex: number) => {
     let filtered = allAttributes;
 
@@ -455,13 +471,42 @@ export default function AttributesDropdown({
         !selectedAttributeNames.includes(attr.value)
     );
 
-    // Apply search filter
+    // Apply search filter with smart sorting
     if (!inputValue) return filtered;
 
     const lowerInput = inputValue.toLowerCase();
-    return filtered.filter((attr) =>
-      attr.label.toLowerCase().includes(lowerInput)
-    );
+
+    // Score each attribute for relevance
+    const scored = filtered
+      .map((attr) => {
+        const lowerLabel = attr.label.toLowerCase();
+
+        // Exact match = highest priority
+        if (lowerLabel === lowerInput) return { attr, score: 1000 };
+
+        // Starts with input = very high priority
+        if (lowerLabel.startsWith(lowerInput)) return { attr, score: 900 };
+
+        // Contains input as a word = high priority
+        if (lowerLabel.includes(` ${lowerInput}`) || lowerLabel.includes(`-${lowerInput}`)) {
+          return { attr, score: 800 };
+        }
+
+        // Contains input substring = medium priority
+        if (lowerLabel.includes(lowerInput)) return { attr, score: 700 };
+
+        // Fuzzy match = low priority
+        const fuzzyScore = fuzzyMatch(lowerInput, lowerLabel);
+        if (fuzzyScore >= 0) return { attr, score: 100 + fuzzyScore };
+
+        // No match
+        return { attr, score: -1 };
+      })
+      .filter((item) => item.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.attr);
+
+    return scored;
   };
 
   // Create collections with filtered attributes for each filter
@@ -545,6 +590,11 @@ export default function AttributesDropdown({
                         // Only handle the change if a valid value is selected
                         if (e.value[0]) {
                           handleAttributeChange(index, e.value[0]);
+                          // Close dropdown and clear input after selection
+                          const newOpenComboboxes = [...openComboboxes];
+                          newOpenComboboxes[index] = false;
+                          setOpenComboboxes(newOpenComboboxes);
+                          setInputValues(inputValues.map((v, i) => i === index ? "" : v));
                         }
                       }}
                       inputValue={inputValue}

@@ -198,11 +198,9 @@ export default function AutocodeValidation({
           });
           setBaselineRows(normalized);
         } catch {
-          console.warn("Failed to create baseline");
         }
       }
     } catch {
-      console.warn("Failed to fetch baseline");
       setBaselineRows([]);
     }
   }, [projectName, attributes]);

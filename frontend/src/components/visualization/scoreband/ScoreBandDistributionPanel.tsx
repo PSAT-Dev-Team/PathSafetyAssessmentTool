@@ -107,7 +107,7 @@ export function ScoreBandDistributionPanel({
       }
     } catch (e: any) {
       setError(e?.message ?? "Failed to load score distributions");
-      console.error("Error loading score distributions:", e);
+      
     } finally {
       setLoading(false);
     }
@@ -121,7 +121,7 @@ export function ScoreBandDistributionPanel({
   // Listen for score updates
   useEffect(() => {
     const handleScoresUpdated = () => {
-      console.log("Scores updated, refreshing distributions...");
+      
       fetchResults();
     };
 

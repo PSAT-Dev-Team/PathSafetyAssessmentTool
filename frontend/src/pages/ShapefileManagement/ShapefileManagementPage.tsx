@@ -38,7 +38,6 @@ export default function ShapefileManagementPage() {
       const data = await api.listShapefileCategories();
       setCategories(data);
     } catch (error) {
-      console.error("Failed to load categories:", error);
     }
   }
 

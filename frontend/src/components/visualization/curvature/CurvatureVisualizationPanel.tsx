@@ -28,7 +28,7 @@ export function CurvatureVisualizationPanel({
         setData(result);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load visualization');
-        console.error('Error loading curvature visualization:', err);
+        
       } finally {
         setLoading(false);
       }

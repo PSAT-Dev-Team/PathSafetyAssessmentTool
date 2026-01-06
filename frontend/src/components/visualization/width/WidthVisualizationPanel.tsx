@@ -24,18 +24,10 @@ export function WidthVisualizationPanel({
         setLoading(true);
         setError(null);
         const result = await fetchWidthVisualization(projectName, coordinates, segmentIndex);
-        console.log('Width Visualization Data:', {
-          width: result.width,
-          category: result.width_category,
-          foundAt: result.search_info.found_at_radius,
-          layer: result.search_info.layer_used,
-          pathsCount: result.paths.length,
-          ringsCount: result.search_rings.length
-        });
         setData(result);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load visualization');
-        console.error('Error loading width visualization:', err);
+        
       } finally {
         setLoading(false);
       }

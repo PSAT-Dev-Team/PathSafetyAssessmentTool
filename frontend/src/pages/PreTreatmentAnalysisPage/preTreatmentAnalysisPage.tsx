@@ -20,7 +20,7 @@ export default function PreTreatmentAnalysisPage() {
   useEffect(() => {
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch((e) => console.error("Failed to fetch pre-treatment projects:", e));
+      .catch(() => {});
   }, []);
 
   // Process projects - filter for those with "Pre" tag
@@ -44,16 +44,12 @@ export default function PreTreatmentAnalysisPage() {
 
   const analyzeProject = async () => {
     if (!selected) return;
-    console.log(`Analyzing pre-treatment project:`, selected);
     // TODO: Navigate to analysis view or show analysis dashboard
-    alert(`Analyzing pre-treatment project: ${selected}`);
   };
 
   const compareProjects = async () => {
     if (!selected) return;
-    console.log(`Comparing project:`, selected);
     // TODO: Open comparison view
-    alert(`Feature coming soon: Compare pre/post treatment for ${selected}`);
   };
 
   return (
