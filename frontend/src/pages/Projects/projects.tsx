@@ -58,7 +58,8 @@ export default function Home() {
 
   // Filter
   const [nameQuery, setNameQuery] = useState("");
-  const [tagFilter, setTagFilter] = useState<string>("");
+  const [tagFilters, setTagFilters] = useState<string[]>([]);
+  const [tagInputValue, setTagInputValue] = useState("");
 
   // Selected Projects (multiple selection)
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -159,15 +160,6 @@ export default function Home() {
       });
   }, [Projectlist]);
 
-  // Get all unique tags across all projects
-  const allTags = useMemo(() => {
-    const tagSet = new Set<string>();
-    projects.forEach(p => {
-      p.tags?.forEach(tag => tagSet.add(tag));
-    });
-    return Array.from(tagSet).sort();
-  }, [projects]);
-
   // for Filters
   const filtered = useMemo(() => {
     const q = nameQuery.trim().toLowerCase();
@@ -181,11 +173,15 @@ export default function Home() {
       );
     }
 
-    // Filter by selected tag (exact match)
-    if (tagFilter) list = list.filter((p) => p.tags?.includes(tagFilter));
+    // Filter by selected tags - project must have ALL selected tags
+    if (tagFilters.length > 0) {
+      list = list.filter((p) =>
+        tagFilters.every(selectedTag => p.tags?.includes(selectedTag))
+      );
+    }
 
     return list;
-  }, [projects, nameQuery, tagFilter]);
+  }, [projects, nameQuery, tagFilters]);
 
   // Toggle project selection
   const onRowClick = (name: string) => {
@@ -283,6 +279,23 @@ export default function Home() {
     }
   };
 
+  // Handle tag input key down (Enter to add tag)
+  const handleTagInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const trimmedTag = tagInputValue.trim();
+      if (trimmedTag && !tagFilters.includes(trimmedTag)) {
+        setTagFilters([...tagFilters, trimmedTag]);
+        setTagInputValue("");
+      }
+    }
+  };
+
+  // Remove tag from filter
+  const removeTagFilter = (tagToRemove: string) => {
+    setTagFilters(tagFilters.filter(tag => tag !== tagToRemove));
+  };
+
   return (
     <div className="projects-root">
       <div className="search-panel">
@@ -299,20 +312,33 @@ export default function Home() {
             />
           </div>
           <div className="search-item">
-            <label htmlFor="tagFilter">Filter by tag</label>
-            <select
-              id="tagFilter"
-              value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
-              className="search-input"
-            >
-              <option value="">All tags</option>
-              {allTags.map((tag) => (
-                <option key={tag} value={tag}>
-                  {tag}
-                </option>
-              ))}
-            </select>
+            <label htmlFor="tagFilterInput">Filter by tags</label>
+            <div className="tag-filter-container">
+              <div className="tag-filter-input-wrapper">
+                {tagFilters.map((tag) => (
+                  <div key={tag} className="tag-filter-chip">
+                    <span className="tag-filter-text">{tag}</span>
+                    <button
+                      className="tag-filter-remove"
+                      onClick={() => removeTagFilter(tag)}
+                      type="button"
+                      aria-label={`Remove ${tag} filter`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <input
+                  id="tagFilterInput"
+                  type="text"
+                  placeholder={tagFilters.length === 0 ? "Type tag and press Enter..." : "Add more tags..."}
+                  value={tagInputValue}
+                  onChange={(e) => setTagInputValue(e.target.value)}
+                  onKeyDown={handleTagInputKeyDown}
+                  className="tag-filter-input"
+                />
+              </div>
+            </div>
           </div>
           <div className="actions-buttons">
             <Button onClick={() => createProject(navigate)} colorPalette="black" variant="solid">
