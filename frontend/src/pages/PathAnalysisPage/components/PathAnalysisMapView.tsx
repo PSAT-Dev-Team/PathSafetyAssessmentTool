@@ -598,6 +598,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 matchesAllFilters = false;
                 break;
               }
+
+              // NEW: Check if this value is toggled ON in the category filters
+              // If there are toggles defined for this attribute, and this specific value is toggled OFF, exclude it
+              if (categoryToggles[filterAttr] && categoryToggles[filterAttr][attrValueText] === false) {
+                matchesAllFilters = false;
+                break;
+              }
             }
 
             if (!matchesAllFilters) {
