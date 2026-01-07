@@ -255,7 +255,7 @@ dataframe_default_values = {
     OBSERVED_PROPORTION_STR:        1,
     BICYCLE_SPD_AVG_STR:            1,
     BICYCLE_SPD_DIFF_STR:           1,
-    ROAD_AADT_STR:                  50,
+    ROAD_AADT_STR:                  6000,
     HEAVY_VHCL_FLOW_STR:            1,
     SPD_LIMIT_STR:                  10,
     ROAD_OPR_SPEED_AVG_STR:         30,

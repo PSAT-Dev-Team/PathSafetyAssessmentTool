@@ -49,28 +49,58 @@ const CRASH_TYPES = [
   },
 ];
 
-const getBandColor = (score: number): string => {
+const getBandColor = (score: number, type: string): string => {
+  // BB, BP, SB use stricter thresholds
+  if (['BB', 'BP', 'SB'].includes(type)) {
+    if (score < 5) return RISK_BAND_COLORS.LOW;
+    if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
+    if (score <= 20) return RISK_BAND_COLORS.HIGH;
+    return RISK_BAND_COLORS.EXTREME;
+  }
+
+  // VB and others (default)
   if (score < 10) return RISK_BAND_COLORS.LOW;
   if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
   if (score <= 60) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 };
 
-const getLightBgColor = (score: number): string => {
+const getLightBgColor = (score: number, type: string): string => {
+  if (['BB', 'BP', 'SB'].includes(type)) {
+    if (score < 5) return RISK_BAND_COLORS.LOW;
+    if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
+    if (score <= 20) return RISK_BAND_COLORS.HIGH;
+    return RISK_BAND_COLORS.EXTREME;
+  }
+
   if (score < 10) return RISK_BAND_COLORS.LOW;
   if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
   if (score <= 60) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 };
 
-const getDarkBgColor = (score: number): string => {
+const getDarkBgColor = (score: number, type: string): string => {
+  if (['BB', 'BP', 'SB'].includes(type)) {
+    if (score < 5) return RISK_BAND_COLORS.LOW;
+    if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
+    if (score <= 20) return RISK_BAND_COLORS.HIGH;
+    return RISK_BAND_COLORS.EXTREME;
+  }
+
   if (score < 10) return RISK_BAND_COLORS.LOW;
   if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
   if (score <= 60) return RISK_BAND_COLORS.HIGH;
   return RISK_BAND_COLORS.EXTREME;
 };
 
-const getBandLabel = (score: number): string => {
+const getBandLabel = (score: number, type: string): string => {
+  if (['BB', 'BP', 'SB'].includes(type)) {
+    if (score < 5) return "Low";
+    if (score <= 10) return "Medium";
+    if (score <= 20) return "High";
+    return "Extreme";
+  }
+
   if (score < 10) return "Low";
   if (score <= 25) return "Medium";
   if (score <= 60) return "High";
@@ -85,8 +115,8 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
       return {
         ...type,
         score,
-        color: getBandColor(score),
-        band: getBandLabel(score),
+        color: getBandColor(score, type.key),
+        band: getBandLabel(score, type.key),
       };
     });
   }, [scores]);
@@ -106,7 +136,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
 
       if (score > highestScore) {
         highestScore = score;
-        highestScoreColor = getBandColor(score);
+        highestScoreColor = getBandColor(score, type.key);
       }
     });
 
@@ -160,100 +190,100 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
         </Flex>
 
         <Flex gap="2" align="flex-end">
-        {/* 5-column grid with crash type scores + total */}
-        <Box flex="1">
-          <Grid
-            templateColumns="repeat(5, 1fr)"
-            gap="1"
-          >
-            {crashTypeScores.map((type) => {
-              const beforeScore = beforeScores ? (beforeScores[type.key as keyof typeof beforeScores] || 0) : null;
-              const reduction = beforeScore !== null ? beforeScore - type.score : null;
-              const improved = reduction !== null && reduction > 0;
-
-              return (
-                <GridItem key={type.key}>
-                  <Flex
-                    direction="column"
-                    align="center"
-                    justify="center"
-                    bg={improved && showPreviewBackground ? "gray.50" : getLightBgColor(type.score)}
-                    _dark={{ bg: improved && showPreviewBackground ? "gray.900" : getDarkBgColor(type.score) }}
-                    borderRadius="sm"
-                    p="1"
-                    textAlign="center"
-                    h={reduction !== null ? "65px" : "50px"}
-                    color="black"
-                  >
-                    {/* Label */}
-                    <Text fontSize="xs" fontWeight="bold" lineHeight="1">
-                      {type.shortLabel}
-                    </Text>
-
-                    {/* Score Value */}
-                    <Text
-                      fontSize="sm"
-                      fontWeight="bold"
-                    >
-                      {type.score.toFixed(1)}
-                    </Text>
-
-                    {/* Reduction indicator */}
-                    {reduction !== null && improved && (
-                      <Text fontSize="2xs" color={improved ? "green.600" : "gray.600"} _dark={{ color: improved ? "green.300" : "gray.400" }} lineHeight="1" mt="0.5">
-                        ↓ {reduction.toFixed(2)}
-                      </Text>
-                    )}
-                  </Flex>
-                </GridItem>
-              );
-            })}
-
-            {/* Total Score */}
-            <GridItem>
-              {(() => {
-                const beforeTotal = beforeScores ? (beforeScores["Overall Risk Level"] ?? beforeScores["CycleRAP score"] ?? 0) : null;
-                const totalReduction = beforeTotal !== null ? beforeTotal - totalScore : null;
-                const totalImproved = totalReduction !== null && totalReduction > 0;
+          {/* 5-column grid with crash type scores + total */}
+          <Box flex="1">
+            <Grid
+              templateColumns="repeat(5, 1fr)"
+              gap="1"
+            >
+              {crashTypeScores.map((type) => {
+                const beforeScore = beforeScores ? (beforeScores[type.key as keyof typeof beforeScores] || 0) : null;
+                const reduction = beforeScore !== null ? beforeScore - type.score : null;
+                const improved = reduction !== null && reduction > 0;
 
                 return (
-                  <Flex
-                    direction="column"
-                    align="center"
-                    justify="center"
-                    bg={totalImproved && showPreviewBackground ? "gray.50" : getCycleRAPScoreColor}
-                    _dark={{ bg: totalImproved && showPreviewBackground ? "gray.900" : undefined }}
-                    borderRadius="sm"
-                    p="1"
-                    textAlign="center"
-                    h={totalReduction !== null ? "65px" : "50px"}
-                    color="black"
-                  >
-                    {/* Total label */}
-                    <Text fontSize="xs" fontWeight="bold" lineHeight="1">
-                      CycleRAP Score
-                    </Text>
-
-                    {/* Total score value */}
-                    <Text
-                      fontSize="sm"
-                      fontWeight="bold"
+                  <GridItem key={type.key}>
+                    <Flex
+                      direction="column"
+                      align="center"
+                      justify="center"
+                      bg={improved && showPreviewBackground ? "gray.50" : getLightBgColor(type.score, type.key)}
+                      _dark={{ bg: improved && showPreviewBackground ? "gray.900" : getDarkBgColor(type.score, type.key) }}
+                      borderRadius="sm"
+                      p="1"
+                      textAlign="center"
+                      h={reduction !== null ? "65px" : "50px"}
+                      color="black"
                     >
-                      {totalScore.toFixed(1)}
-                    </Text>
-
-                    {/* Reduction indicator */}
-                    {totalReduction !== null && totalImproved && (
-                      <Text fontSize="2xs" color={totalImproved ? "green.600" : "gray.600"} _dark={{ color: totalImproved ? "green.300" : "gray.400" }} lineHeight="1" mt="0.5">
-                        ↓ {totalReduction.toFixed(2)}
+                      {/* Label */}
+                      <Text fontSize="xs" fontWeight="bold" lineHeight="1">
+                        {type.shortLabel}
                       </Text>
-                    )}
-                  </Flex>
+
+                      {/* Score Value */}
+                      <Text
+                        fontSize="sm"
+                        fontWeight="bold"
+                      >
+                        {type.score.toFixed(1)}
+                      </Text>
+
+                      {/* Reduction indicator */}
+                      {reduction !== null && improved && (
+                        <Text fontSize="2xs" color={improved ? "green.600" : "gray.600"} _dark={{ color: improved ? "green.300" : "gray.400" }} lineHeight="1" mt="0.5">
+                          ↓ {reduction.toFixed(2)}
+                        </Text>
+                      )}
+                    </Flex>
+                  </GridItem>
                 );
-              })()}
-            </GridItem>
-          </Grid>
-        </Box>
+              })}
+
+              {/* Total Score */}
+              <GridItem>
+                {(() => {
+                  const beforeTotal = beforeScores ? (beforeScores["Overall Risk Level"] ?? beforeScores["CycleRAP score"] ?? 0) : null;
+                  const totalReduction = beforeTotal !== null ? beforeTotal - totalScore : null;
+                  const totalImproved = totalReduction !== null && totalReduction > 0;
+
+                  return (
+                    <Flex
+                      direction="column"
+                      align="center"
+                      justify="center"
+                      bg={totalImproved && showPreviewBackground ? "gray.50" : getCycleRAPScoreColor}
+                      _dark={{ bg: totalImproved && showPreviewBackground ? "gray.900" : undefined }}
+                      borderRadius="sm"
+                      p="1"
+                      textAlign="center"
+                      h={totalReduction !== null ? "65px" : "50px"}
+                      color="black"
+                    >
+                      {/* Total label */}
+                      <Text fontSize="xs" fontWeight="bold" lineHeight="1">
+                        CycleRAP Score
+                      </Text>
+
+                      {/* Total score value */}
+                      <Text
+                        fontSize="sm"
+                        fontWeight="bold"
+                      >
+                        {totalScore.toFixed(1)}
+                      </Text>
+
+                      {/* Reduction indicator */}
+                      {totalReduction !== null && totalImproved && (
+                        <Text fontSize="2xs" color={totalImproved ? "green.600" : "gray.600"} _dark={{ color: totalImproved ? "green.300" : "gray.400" }} lineHeight="1" mt="0.5">
+                          ↓ {totalReduction.toFixed(2)}
+                        </Text>
+                      )}
+                    </Flex>
+                  );
+                })()}
+              </GridItem>
+            </Grid>
+          </Box>
         </Flex>
       </Box>
     </Box>

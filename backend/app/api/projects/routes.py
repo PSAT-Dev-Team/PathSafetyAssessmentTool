@@ -591,7 +591,7 @@ def _convert_attribute_types(df: pd.DataFrame) -> pd.DataFrame:
         elif col in float_attrs:
             # Convert string to float, handling None/NaN values
             if col == 'Road AADT':
-                df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(5000)
+                df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(6000)
             elif col == 'Road speed limit':
                 # Handle "NA" as a valid value; convert numeric strings to float, use "NA" as fallback for empty/null
                 df_copy[col] = df_copy[col].apply(
@@ -1691,7 +1691,7 @@ def autocode_gis(project_name: str):
         area = _gis.get_area_type(pt)
         updates["Area type"] = int(area)
 
-        updates["Road AADT"] = 5000
+        updates["Road AADT"] = 6000
 
         res = _gis.get_peak_pedestrian_flow(pt, dist=10)
         bpks = (res or {}).get("before_peaks")

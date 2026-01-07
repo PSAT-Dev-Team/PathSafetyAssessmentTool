@@ -213,9 +213,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   // Layer colors matching curvature analysis
   const layerColors = {
     footpath: "#1E90FF",    // Blue - rgb(30, 144, 255)
-    cycling: "#00B400",     // Green - rgb(0, 180, 0)
-    shared: "#E68C00",      // Orange - rgb(230, 140, 0)
-    roadcrossing: "#E53E3E" // Red - rgb(229, 62, 62)
+    cycling: "#B84A39",     // Darker Terracotta Red
+    shared: "#9333EA",      // Purple - rgb(147, 51, 234)
+    roadcrossing: "#00B400" // Green - rgb(0, 180, 0)
   };
 
   // Get segment color based on the crash type with the highest score
@@ -280,11 +280,11 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
             </Flex>
 
             <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showCycling ? "green.600" : "gray.500"}>
+              <Text fontSize="sm" fontWeight="medium" color={showCycling ? "orange.600" : "gray.500"}>
                 Cycling Path
               </Text>
               <Switch
-                colorPalette="green"
+                colorPalette="orange"
                 size="sm"
                 checked={showCycling}
                 onCheckedChange={(e) => setShowCycling(e.checked)}
@@ -292,11 +292,11 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
             </Flex>
 
             <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showShared ? "orange.600" : "gray.500"}>
+              <Text fontSize="sm" fontWeight="medium" color={showShared ? "purple.600" : "gray.500"}>
                 Shared Path
               </Text>
               <Switch
-                colorPalette="orange"
+                colorPalette="purple"
                 size="sm"
                 checked={showShared}
                 onCheckedChange={(e) => setShowShared(e.checked)}
@@ -304,11 +304,11 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
             </Flex>
 
             <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showRoadcrossing ? "red.600" : "gray.500"}>
+              <Text fontSize="sm" fontWeight="medium" color={showRoadcrossing ? "green.600" : "gray.500"}>
                 Road Crossing
               </Text>
               <Switch
-                colorPalette="red"
+                colorPalette="green"
                 size="sm"
                 checked={showRoadcrossing}
                 onCheckedChange={(e) => setShowRoadcrossing(e.checked)}

@@ -298,7 +298,7 @@ class cycleRAP_interface:
             Attributes.Fields.OBSERVED_PROPORTION_STR           : 1,
             Attributes.Fields.BICYCLE_SPD_AVG_STR               : 1,
             Attributes.Fields.BICYCLE_SPD_DIFF_STR              : 1,
-            Attributes.Fields.ROAD_AADT_STR                     : 50,
+            Attributes.Fields.ROAD_AADT_STR                     : 6000,
             Attributes.Fields.HEAVY_VHCL_FLOW_STR               : 1,
             Attributes.Fields.SPD_LIMIT_STR                     : 10,
             Attributes.Fields.ROAD_OPR_SPEED_AVG_STR            : 30,
