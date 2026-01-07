@@ -399,6 +399,14 @@ export default function AttributesDropdown({
   };
 
   const handleRemoveFilter = (index: number) => {
+    // If there's only one filter and we're removing it, reset it to empty/null state
+    if (selectedAttributes.length === 1) {
+      onAttributeChange([null]);
+      setInputValues([""]);
+      setOpenComboboxes([false]);
+      return;
+    }
+
     const newAttributes = selectedAttributes.filter((_, i) => i !== index);
     const newInputValues = inputValues.filter((_, i) => i !== index);
     const newOpenComboboxes = openComboboxes.filter((_, i) => i !== index);
@@ -631,7 +639,7 @@ export default function AttributesDropdown({
                   {/* Add/Remove Filter Buttons */}
                   {index === 0 && canAddMoreFilters && (
                     <Button
-                      size="sm"
+                      size="md"
                       variant="outline"
                       colorPalette="blue"
                       onClick={handleAddFilter}
@@ -640,9 +648,10 @@ export default function AttributesDropdown({
                       Add Filter
                     </Button>
                   )}
-                  {index > 0 && (
+                  {/* Show X button if it's not the first item OR if it is the first item but has a value selected */}
+                  {(index > 0 || (index === 0 && selectedAttribute !== null)) && (
                     <Button
-                      size="sm"
+                      size="md"
                       variant="outline"
                       colorPalette="red"
                       onClick={() => handleRemoveFilter(index)}
