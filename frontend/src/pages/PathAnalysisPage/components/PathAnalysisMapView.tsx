@@ -101,6 +101,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return selectedAttributes.filter(attr => attr !== null);
   }, [selectedAttributes]);
 
+  // Reset category filter index if it's out of bounds (e.g. when a filter is removed)
+  useEffect(() => {
+    if (categoryFilterAttributeIndex >= activeFilters.length) {
+      setCategoryFilterAttributeIndex(0);
+    }
+  }, [activeFilters.length, categoryFilterAttributeIndex]);
+
   // Load attribute mappings on mount
   useEffect(() => {
     fetchAttributeMappings()

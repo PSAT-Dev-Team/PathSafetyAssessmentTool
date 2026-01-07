@@ -362,6 +362,8 @@ export default function AttributesDropdown({
 }: AttributesDropdownProps) {
   const [inputValues, setInputValues] = useState<string[]>(selectedAttributes.map(() => ""));
   const [openComboboxes, setOpenComboboxes] = useState<boolean[]>(selectedAttributes.map(() => false));
+  // Generate stable IDs for each filter slot to use as React keys
+  const [filterIds, setFilterIds] = useState<string[]>(() => selectedAttributes.map(() => Math.random().toString(36).substr(2, 9)));
 
   const getFilterLabel = (index: number): string => {
     const labels = ["1st", "2nd", "3rd", "4th", "5th"];
@@ -395,6 +397,7 @@ export default function AttributesDropdown({
       onAttributeChange([...selectedAttributes, null]);
       setInputValues([...inputValues, ""]);
       setOpenComboboxes([...openComboboxes, false]);
+      setFilterIds([...filterIds, Math.random().toString(36).substr(2, 9)]);
     }
   };
 
@@ -404,15 +407,21 @@ export default function AttributesDropdown({
       onAttributeChange([null]);
       setInputValues([""]);
       setOpenComboboxes([false]);
+      // Keep changes minimal, no need to regen ID for the single remaining slot, 
+      // but conceptually it's a reset. Let's keep the existing ID or regen? 
+      // Existing logic implies clearing value.
       return;
     }
 
     const newAttributes = selectedAttributes.filter((_, i) => i !== index);
     const newInputValues = inputValues.filter((_, i) => i !== index);
     const newOpenComboboxes = openComboboxes.filter((_, i) => i !== index);
+    const newFilterIds = filterIds.filter((_, i) => i !== index);
+
     onAttributeChange(newAttributes);
     setInputValues(newInputValues);
     setOpenComboboxes(newOpenComboboxes);
+    setFilterIds(newFilterIds);
   };
 
   // Reset all filters
@@ -420,6 +429,7 @@ export default function AttributesDropdown({
     onAttributeChange([null]);
     setInputValues([""]);
     setOpenComboboxes([false]);
+    setFilterIds([Math.random().toString(36).substr(2, 9)]);
   };
 
   // All attribute names including "Not Selected" and "Project"
@@ -570,9 +580,11 @@ export default function AttributesDropdown({
             const currentValue = selectedAttribute || "Not Selected";
             const inputValue = inputValues[index] || "";
             const attributeCollection = getAttributeCollection(inputValue, index);
+            // Use the stable ID as the key
+            const key = filterIds[index] || `fallback-${index}`;
 
             return (
-              <Box key={index} minW="280px">
+              <Box key={key} minW="280px">
                 <Text fontSize="sm" fontWeight="semibold" mb="2">
                   {getFilterLabel(index)} Filter
                 </Text>
