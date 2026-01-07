@@ -445,7 +445,7 @@ def get_latest_attributes(project_name: str):
     # If results exist, merge the band values into attributes for filtering capability
     if ver.results and ver.results.df is not None and len(ver.results.df) > 0:
         results_df = ver.results.df
-        band_columns = ["VB Band", "BB Band", "SB Band", "BP Band"]
+        band_columns = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level Band"]
 
         # Only include band columns that exist in results
         available_bands = [col for col in band_columns if col in results_df.columns]
@@ -1278,9 +1278,38 @@ def update_attributes(name: str):
     if not isinstance(rows, list):
         return fail("Invalid payload", 400)
 
+    # Convert incoming rows to DataFrame
+    new_attrs_df = pd.DataFrame(rows)
+
+    # --- INJECTED LOGIC: Calculate Scores & Persist Bands ---
+    try:
+        # 1. Convert types for scoring
+        scoring_df = _convert_attribute_types(new_attrs_df)
+        
+        # 2. Calculate scores (native Python implementation)
+        results_df = calculate_cyclerap_score_native(scoring_df)
+
+        # 3. Extract Band columns
+        # We want to keep "Overall Risk Level Band" and individual bands like "BB Band", "VB Band", etc.
+        band_cols = [col for col in results_df.columns if col.endswith(" Band")]
+        
+        # 4. Merge/Overwrite bands in the main attributes DataFrame
+        # We assume strict row alignment index-by-index (0 to N-1)
+        if len(results_df) == len(new_attrs_df):
+            for col in band_cols:
+                new_attrs_df[col] = results_df[col].values
+        else:
+            print(f"[Warning] Score calculation returned {len(results_df)} rows, expected {len(new_attrs_df)}. Skipping band persistence.")
+            
+    except Exception as e:
+        print(f"[Error] Failed to calculate/persist bands during save: {e}")
+        traceback.print_exc()
+        # Non-blocking: proceed to save attributes even if scoring fails
+    # --------------------------------------------------------
+
     # Write to the latest version
     ver = proj.latest()
-    ver.attributes.df = pd.DataFrame(rows)
+    ver.attributes.df = new_attrs_df
     ver.attributes.df_dirty = True
     proj.save_all()  # If a day rolls over, a new version may be created
 

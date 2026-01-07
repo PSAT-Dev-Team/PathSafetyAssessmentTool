@@ -118,7 +118,16 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   }, []);
 
   // Get color for a specific crash type score based on thresholds
-  const getScoreColor = (score: number): string => {
+  const getScoreColor = (score: number, type: string = "VB"): string => {
+    // BB, BP, SB use stricter thresholds
+    if (['BB', 'BP', 'SB'].includes(type)) {
+      if (score < 5) return RISK_BAND_COLORS.LOW;
+      if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
+      if (score <= 20) return RISK_BAND_COLORS.HIGH;
+      return RISK_BAND_COLORS.EXTREME;
+    }
+
+    // VB and others (default)
     if (score < 10) return RISK_BAND_COLORS.LOW;
     if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
     if (score <= 60) return RISK_BAND_COLORS.HIGH;
@@ -170,51 +179,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return cols;
   }, [activeFilters]);
 
-  // Helper function to get column value as string
-  const getColumnValue = (point: any, columnKey: string): string => {
-    if (columnKey === "Project") return point.projectName;
-    if (columnKey === "Segment #") return point.idx.toString();
-    if (columnKey === "Image Reference") return point.f.properties?.["Image Reference"] ?? "-";
-    if (columnKey === "Coordinates") return `${point.latlng[0].toFixed(6)}, ${point.latlng[1].toFixed(6)}`;
-    if (columnKey === "Overall Risk Score") {
-      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
-      const score = getOverallRiskScore(projectDataIndex, point.idx);
-      return score.toFixed(2);
-    }
-    if (columnKey === "Overall Risk Level") {
-      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
-      if (projectDataIndex < 0 || !projectsData[projectDataIndex].scores) {
-        return "Low";
-      }
-
-      const segmentScores = projectsData[projectDataIndex].scores[point.idx];
-      if (!segmentScores) {
-        return "Low";
-      }
-
-      // Overall Risk Level = maximum category from the individual crash type bands
-      // (same logic as Coding Page)
-      const bands = [
-        segmentScores["VB Band"] ?? 1,
-        segmentScores["BB Band"] ?? 1,
-        segmentScores["SB Band"] ?? 1,
-        segmentScores["BP Band"] ?? 1
-      ];
-
-      const maxBand = Math.max(...bands);
-
-      // Convert band to category: Band 1=Low, 2=Medium, 3=High, 4=Extreme
-      if (maxBand <= 1) return "Low";
-      else if (maxBand <= 2) return "Medium";
-      else if (maxBand <= 3) return "High";
-      else return "Extreme";
-    }
-    // Dynamic attribute columns
-    const attrValue = point.attributes[columnKey];
-    const result = getAttrText(columnKey, attrValue) || "-";
-
-    return result;
-  };
 
   // Helper function to convert numeric attribute value to text using mappings
   const getAttrText = (attrName: string, attrValue: any): string => {
@@ -552,6 +516,52 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return "#6B7280"; // Default gray
   };
 
+  // Helper function to get column value as string
+  function getColumnValue(point: any, columnKey: string): string {
+    if (columnKey === "Project") return point.projectName;
+    if (columnKey === "Segment #") return point.idx.toString();
+    if (columnKey === "Image Reference") return point.f.properties?.["Image Reference"] ?? "-";
+    if (columnKey === "Coordinates") return `${point.latlng[0].toFixed(6)}, ${point.latlng[1].toFixed(6)}`;
+    if (columnKey === "Overall Risk Score") {
+      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
+      const score = getOverallRiskScore(projectDataIndex, point.idx);
+      return score.toFixed(2);
+    }
+    if (columnKey === "Overall Risk Level") {
+      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
+      if (projectDataIndex < 0 || !projectsData[projectDataIndex].scores) {
+        return "Low";
+      }
+
+      const segmentScores = projectsData[projectDataIndex].scores[point.idx];
+      if (!segmentScores) {
+        return "Low";
+      }
+
+      // Overall Risk Level = maximum category from the individual crash type bands
+      // (same logic as Coding Page)
+      let maxRiskLevel = 0; // 0: Low, 1: Med, 2: High, 3: Extreme
+
+      // Optimize: If backend sends "Overall Risk Level Band", use it directly (1-4)
+      if (segmentScores["Overall Risk Level Band"] !== undefined) {
+        // Backend 1=Low (0), 2=Med (1), 3=High (2), 4=Extreme (3)
+        maxRiskLevel = (segmentScores["Overall Risk Level Band"] as number) - 1;
+      }
+
+      if (maxRiskLevel === 3) return "Extreme";
+      else if (maxRiskLevel === 2) return "High";
+      else if (maxRiskLevel === 1) return "Medium";
+      else return "Low";
+    }
+
+    // Dynamic attribute columns
+    if (!point.attributes) return "-";
+    const attrValue = point.attributes[columnKey];
+    const result = getAttrText(columnKey, attrValue) || "-";
+
+    return result;
+  }
+
   // Extract all points from all projects with their metadata
   const allPoints = useMemo(() => {
     const pts: {
@@ -582,21 +592,24 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               } else if (filterAttr === "Overall Risk Level") {
                 if (projectData.scores && projectData.scores.length > i) {
                   const segmentScores = projectData.scores[i];
-                  const bands = [
-                    segmentScores["VB Band"] ?? 1,
-                    segmentScores["BB Band"] ?? 1,
-                    segmentScores["SB Band"] ?? 1,
-                    segmentScores["BP Band"] ?? 1
-                  ];
-                  const maxBand = Math.max(...bands);
-                  if (maxBand <= 1) attrValueText = "Low";
-                  else if (maxBand <= 2) attrValueText = "Medium";
-                  else if (maxBand <= 3) attrValueText = "High";
-                  else attrValueText = "Extreme";
+                  let maxRiskLevel = 0; // 0: Low, 1: Med, 2: High, 3: Extreme
+
+                  // Optimize: If backend sends "Overall Risk Level Band", use it directly (1-4)
+                  if (segmentScores["Overall Risk Level Band"] !== undefined) {
+                    // Backend 1=Low (0), 2=Med (1), 3=High (2), 4=Extreme (3)
+                    maxRiskLevel = (segmentScores["Overall Risk Level Band"] as number) - 1;
+                  }
+
+                  if (maxRiskLevel === 3) attrValueText = "Extreme";
+                  else if (maxRiskLevel === 2) attrValueText = "High";
+                  else if (maxRiskLevel === 1) attrValueText = "Medium";
+                  else attrValueText = "Low";
                 } else {
+                  // Overall Risk Level selected but no scores available -> Low
                   attrValueText = "Low";
                 }
               } else {
+                // Generic attribute
                 const attrValue = attributes[filterAttr];
                 attrValueText = getAttrText(filterAttr, attrValue);
               }
@@ -606,8 +619,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 break;
               }
 
-              // NEW: Check if this value is toggled ON in the category filters
-              // If there are toggles defined for this attribute, and this specific value is toggled OFF, exclude it
+              // Check category toggles
               if (categoryToggles[filterAttr] && categoryToggles[filterAttr][attrValueText] === false) {
                 matchesAllFilters = false;
                 break;
@@ -638,51 +650,64 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 let scoreValue = 0;
                 if (isSafetyBand) {
                   // Map band name to crash type key (e.g., "SB Band" -> "SB")
-                  const crashTypeKey = primaryFocusAttribute.replace(" Band", "");
+                  let crashTypeKey = primaryFocusAttribute.replace(" Band", "");
                   scoreValue = segmentScores[crashTypeKey] || 0;
+
+                  // Apply threshold to get color
+                  pointColor = getScoreColor(scoreValue, crashTypeKey);
+
+                  // Get text label
+                  if (['BB', 'BP', 'SB'].includes(crashTypeKey)) {
+                    if (scoreValue < 5) attrValueText = "Low";
+                    else if (scoreValue <= 10) attrValueText = "Medium";
+                    else if (scoreValue <= 20) attrValueText = "High";
+                    else attrValueText = "Extreme";
+                  } else {
+                    if (scoreValue < 10) attrValueText = "Low";
+                    else if (scoreValue <= 25) attrValueText = "Medium";
+                    else if (scoreValue <= 60) attrValueText = "High";
+                    else attrValueText = "Extreme";
+                  }
                 } else if (isCycleRAPScore) {
-                  // For Overall Risk Level, get the maximum band and convert to a representative score
-                  // This ensures color matches the category label (max-band logic)
-                  const bands = [
-                    segmentScores["VB Band"] ?? 1,
-                    segmentScores["BB Band"] ?? 1,
-                    segmentScores["SB Band"] ?? 1,
-                    segmentScores["BP Band"] ?? 1
-                  ];
+                  // For Overall Risk Level, calculate based on the highest risk category
+                  let maxRiskLevel = 0; // 0: Low, 1: Med, 2: High, 3: Extreme
 
-                  const maxBand = Math.max(...bands);
+                  if (segmentScores["Overall Risk Level Band"] !== undefined) {
+                    maxRiskLevel = (segmentScores["Overall Risk Level Band"] as number) - 1;
+                  } else {
+                    // Fallback
+                    const crashTypes = ["BB", "BP", "SB", "VB"];
+                    crashTypes.forEach((type) => {
+                      const s = segmentScores[type] || 0;
+                      let r = 0;
+                      if (['BB', 'BP', 'SB'].includes(type)) {
+                        if (s > 20) r = 3; else if (s > 10) r = 2; else if (s >= 5) r = 1; else r = 0;
+                      } else {
+                        if (s > 60) r = 3; else if (s > 25) r = 2; else if (s >= 10) r = 1; else r = 0;
+                      }
+                      if (r > maxRiskLevel) maxRiskLevel = r;
+                    });
+                  }
 
-                  // Convert band to representative score for color: Band 1→5, 2→20, 3→50, 4→100
-                  if (maxBand <= 1) scoreValue = 5;
-                  else if (maxBand <= 2) scoreValue = 20;
-                  else if (maxBand <= 3) scoreValue = 50;
-                  else scoreValue = 100;
-                }
-
-                // Apply threshold to get color
-                pointColor = getScoreColor(scoreValue);
-
-                // Get category label based on maximum band (same logic as Coding Page)
-                if (isCycleRAPScore) {
-                  const bands = [
-                    segmentScores["VB Band"] ?? 1,
-                    segmentScores["BB Band"] ?? 1,
-                    segmentScores["SB Band"] ?? 1,
-                    segmentScores["BP Band"] ?? 1
-                  ];
-
-                  const maxBand = Math.max(...bands);
-
-                  if (maxBand <= 1) attrValueText = "Low";
-                  else if (maxBand <= 2) attrValueText = "Medium";
-                  else if (maxBand <= 3) attrValueText = "High";
-                  else attrValueText = "Extreme";
-                } else {
-                  // For safety band attributes, use the score value
-                  if (scoreValue < 10) attrValueText = "Low";
-                  else if (scoreValue <= 25) attrValueText = "Medium";
-                  else if (scoreValue <= 60) attrValueText = "High";
-                  else attrValueText = "Extreme";
+                  // Set color and text based on max risk level
+                  switch (maxRiskLevel) {
+                    case 3:
+                      pointColor = RISK_BAND_COLORS.EXTREME;
+                      attrValueText = "Extreme";
+                      break;
+                    case 2:
+                      pointColor = RISK_BAND_COLORS.HIGH;
+                      attrValueText = "High";
+                      break;
+                    case 1:
+                      pointColor = RISK_BAND_COLORS.MEDIUM;
+                      attrValueText = "Medium";
+                      break;
+                    default:
+                      pointColor = RISK_BAND_COLORS.LOW;
+                      attrValueText = "Low";
+                      break;
+                  }
                 }
               } else {
                 // Use attribute color for non-safety-band attributes
