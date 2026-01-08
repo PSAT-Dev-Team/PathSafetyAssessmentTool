@@ -3,20 +3,25 @@
 .aggregated-score-band-grid {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
-  gap: 30px;
-  justify-content: space-around;
+  flex-wrap: nowrap;
+  /* Force single row */
+  gap: 20px;
+  justify-content: space-between;
   align-items: flex-start;
   padding: 0;
   width: 100%;
+  overflow-x: auto;
+  /* Allow horizontal scroll if needed on small screens */
 }
 
 .aggregated-score-band-grid-item {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  flex: 0 0 calc(50% - 15px);
-  min-width: 0;
+  flex: 1;
+  /* Distribute space evenly */
+  min-width: 250px;
+  /* Minimum width before scrolling/wrapping kicks in */
   overflow: visible;
 }
 

@@ -128,19 +128,37 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
   const getCycleRAPScoreColor = useMemo(() => {
     if (!scores) return RISK_BAND_COLORS.LOW;
 
-    let highestScore = 0;
-    let highestScoreColor: string = RISK_BAND_COLORS.LOW;
+    let maxRiskLevel = 0; // 0: Low, 1: Med, 2: High, 3: Extreme
 
     CRASH_TYPES.forEach((type) => {
       const score = scores[type.key as keyof typeof scores] || 0;
+      let riskLevel = 0;
 
-      if (score > highestScore) {
-        highestScore = score;
-        highestScoreColor = getBandColor(score, type.key);
+      // Determine risk level based on crash type thresholds
+      if (['BB', 'BP', 'SB'].includes(type.key)) {
+        if (score > 20) riskLevel = 3;       // Extreme
+        else if (score > 10) riskLevel = 2;  // High
+        else if (score >= 5) riskLevel = 1;  // Medium
+        else riskLevel = 0;                  // Low
+      } else {
+        // VB and others (default)
+        if (score > 60) riskLevel = 3;       // Extreme
+        else if (score > 25) riskLevel = 2;  // High
+        else if (score >= 10) riskLevel = 1; // Medium
+        else riskLevel = 0;                  // Low
+      }
+
+      if (riskLevel > maxRiskLevel) {
+        maxRiskLevel = riskLevel;
       }
     });
 
-    return highestScoreColor;
+    switch (maxRiskLevel) {
+      case 3: return RISK_BAND_COLORS.EXTREME;
+      case 2: return RISK_BAND_COLORS.HIGH;
+      case 1: return RISK_BAND_COLORS.MEDIUM;
+      default: return RISK_BAND_COLORS.LOW;
+    }
   }, [scores]);
 
   if (!scores) {

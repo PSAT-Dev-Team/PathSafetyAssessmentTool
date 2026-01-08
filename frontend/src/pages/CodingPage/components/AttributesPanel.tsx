@@ -331,19 +331,19 @@ export default function AttributesPanel({
                           gap="1"
                           p="2"
                           borderRadius="md"
-                          bg={isChanged ? "yellow.100" : isEdited ? "red.50" : "transparent"}
-                          borderWidth={isChanged || isEdited ? "2px" : "0px"}
-                          borderColor={isChanged ? "yellow.500" : isEdited ? "red.200" : "transparent"}
+                          bg={isEdited ? "red.50" : isChanged ? "yellow.100" : "transparent"}
+                          borderWidth={isEdited || isChanged ? "2px" : "0px"}
+                          borderColor={isEdited ? "red.200" : isChanged ? "yellow.500" : "transparent"}
                           transition="all 0.2s"
                         >
                           <Text
                             fontSize="xs"
-                            color={isChanged ? { base: "yellow.900", _dark: "yellow.900" } : "gray.600"}
-                            fontWeight={isChanged ? "bold" : "semibold"}
+                            color={isEdited ? "red.800" : isChanged ? { base: "yellow.900", _dark: "yellow.900" } : "gray.600"}
+                            fontWeight={isEdited || isChanged ? "bold" : "semibold"}
                           >
                             {k}
                             {isChanged && source && ` ✨ (${source})`}
-                            {isEdited && !isChanged && (
+                            {isEdited && (
                               <Text as="span" color="red.600" fontWeight="bold" ml="1">
                                 (Manual Edit Done)
                               </Text>
@@ -370,13 +370,13 @@ export default function AttributesPanel({
                                   onEdit?.(k, val);
                                 }}
                                 style={{
-                                  borderColor: isChanged ? "#D69E2E" : undefined,
-                                  borderWidth: isChanged ? "2px" : undefined,
-                                  backgroundColor: isChanged ? "#FEFCBF" : undefined,
+                                  borderColor: isEdited ? "#E53E3E" : isChanged ? "#D69E2E" : undefined,
+                                  borderWidth: isEdited || isChanged ? "2px" : undefined,
+                                  backgroundColor: isEdited ? "#FFF5F5" : isChanged ? "#FEFCBF" : undefined,
                                 }}
-                                color={isChanged ? "gray.900" : undefined}
+                                color={isEdited || isChanged ? "gray.900" : undefined}
                                 _dark={{
-                                  color: isChanged ? "gray.900" : undefined,
+                                  color: isEdited || isChanged ? "gray.900" : undefined,
                                 }}
                               >
                                 {/* Preserve unknown code if present (except for Road speed limit) */}
@@ -386,20 +386,20 @@ export default function AttributesPanel({
                                 {
                                   k === "Road speed limit" && dict
                                     ? ['NA', '0', '10', '20', '30', '40', '50', '60', '70', '80', '90', '100', '110', '120']
-                                        .map(code => {
-                                          const label = dict[code];
-                                          return label ? (
-                                            <option key={code} value={code}>
-                                              {label}
-                                            </option>
-                                          ) : null;
-                                        })
-                                        .filter(Boolean)
+                                      .map(code => {
+                                        const label = dict[code];
+                                        return label ? (
+                                          <option key={code} value={code}>
+                                            {label}
+                                          </option>
+                                        ) : null;
+                                      })
+                                      .filter(Boolean)
                                     : Object.entries(dict || {}).map(([code, label]) => (
-                                        <option key={code} value={code}>
-                                          {label}
-                                        </option>
-                                      ))
+                                      <option key={code} value={code}>
+                                        {label}
+                                      </option>
+                                    ))
                                 }
                               </NativeSelect.Field>
                               <NativeSelect.Indicator />
@@ -414,25 +414,25 @@ export default function AttributesPanel({
                                 const num = Number(raw);
                                 const val =
                                   raw !== "" &&
-                                  Number.isFinite(num) &&
-                                  /^\d+(\.\d+)?$/.test(raw)
+                                    Number.isFinite(num) &&
+                                    /^\d+(\.\d+)?$/.test(raw)
                                     ? num
                                     : raw === ""
-                                    ? null
-                                    : raw;
+                                      ? null
+                                      : raw;
                                 onChange?.(k, val);
                                 onEdit?.(k, val);
                               }}
-                              borderColor={isChanged ? "yellow.500" : undefined}
-                              borderWidth={isChanged ? "2px" : undefined}
-                              bg={isChanged ? "yellow.50" : undefined}
-                              color={isChanged ? "gray.900" : undefined}
+                              borderColor={isEdited ? "red.500" : isChanged ? "yellow.500" : undefined}
+                              borderWidth={isEdited || isChanged ? "2px" : undefined}
+                              bg={isEdited ? "red.50" : isChanged ? "yellow.50" : undefined}
+                              color={isEdited || isChanged ? "gray.900" : undefined}
                               _dark={{
-                                color: isChanged ? "gray.900" : undefined,
+                                color: isEdited || isChanged ? "gray.900" : undefined,
                               }}
                               _focus={{
-                                borderColor: isChanged ? "yellow.600" : "blue.500",
-                                boxShadow: isChanged ? "0 0 0 1px var(--chakra-colors-yellow-600)" : undefined,
+                                borderColor: isEdited ? "red.600" : isChanged ? "yellow.600" : "blue.500",
+                                boxShadow: isEdited ? "0 0 0 1px var(--chakra-colors-red-600)" : isChanged ? "0 0 0 1px var(--chakra-colors-yellow-600)" : undefined,
                               }}
                             />
                           )}

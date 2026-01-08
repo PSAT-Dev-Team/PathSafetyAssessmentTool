@@ -391,8 +391,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       // Facility Types
       "Facility Type": {
         "Sidewalk": "#2563EB",
-        "Multi-Use Path": "#16A34A",
-        "Off-Road Bicycle Path": "#10B981",
+        "Multi-Use Path": "#9333EA", // Purple
+        "Off-Road Bicycle Path": "#16A34A", // Green
         "On-road Bicycle Lane": "#CA8A04",
         "Road Shoulder": "#F59E0B",
         "Mixed Traffic Road Lane": "#DC2626",
@@ -484,8 +484,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       "Flow Direction": { "One Way": "#2563EB", "Two Way": "#9333EA" },
       "Facility Type": {
         "Sidewalk": "#2563EB",
-        "Multi-Use Path": "#16A34A",
-        "Off-Road Bicycle Path": "#10B981",
+        "Multi-Use Path": "#9333EA",
+        "Off-Road Bicycle Path": "#16A34A",
         "On-road Bicycle Lane": "#CA8A04",
         "Road Shoulder": "#F59E0B",
         "Mixed Traffic Road Lane": "#DC2626",

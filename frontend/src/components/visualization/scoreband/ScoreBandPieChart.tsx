@@ -12,6 +12,7 @@ import { RISK_BAND_COLORS } from "./colorConstants";
 interface ScoreBandPieChartProps {
   crashType: string;
   bandCounts: Record<number, number>;
+  children?: React.ReactNode;
 }
 
 const BAND_INFO: Record<number, { label: string; color: string }> = {
@@ -32,6 +33,7 @@ interface ChartDataPoint {
 export default function ScoreBandPieChart({
   crashType,
   bandCounts,
+  children,
 }: ScoreBandPieChartProps) {
   // Transform band counts to chart data
   const chartData: ChartDataPoint[] = useMemo(() => {
@@ -106,8 +108,7 @@ export default function ScoreBandPieChart({
       <Text
         fontSize="md"
         fontWeight="bold"
-        textAlign="left"
-        pl="125px"
+        textAlign="center"
         mb="2"
         color="gray.900"
         _dark={{ color: "white" }}
@@ -118,26 +119,25 @@ export default function ScoreBandPieChart({
         fontSize="sm"
         color="gray.600"
         _dark={{ color: "gray.400" }}
-        textAlign="left"
-        pl="130px"
+        textAlign="center"
         mb="4"
       >
         Total: {total} segments
       </Text>
 
-      {/* Pie Chart Container with Legend on the Side */}
-      <Box display="flex" gap="4" alignItems="center">
+      {/* Pie Chart Container with Legend (Stacked Vertically) */}
+      <Flex direction="column" align="center" width="100%">
         {/* Chart */}
-        <Box h="400px" w="400px" display="flex" justifyContent="center" alignItems="center" flexShrink={0}>
+        <Box h="250px" w="100%" maxW="300px" display="flex" justifyContent="center" alignItems="center">
           <ResponsiveContainer width="100%" height="100%">
-            <PieChart data={chartData} margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+            <PieChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
               <Pie
                 cx="50%"
                 cy="50%"
                 labelLine={false}
                 label={renderLabel}
-                outerRadius={120}
-                innerRadius={50}
+                outerRadius="90%"
+                innerRadius="40%"
                 dataKey="count"
                 animationDuration={800}
               >
@@ -188,8 +188,8 @@ export default function ScoreBandPieChart({
           </ResponsiveContainer>
         </Box>
 
-        {/* Legend on the Right */}
-        <Box display="flex" flexDirection="column" gap="2" minW="120px">
+        {/* Legend Below Chart */}
+        <Flex gap="3" flexWrap="wrap" justify="center" mt="2">
           {chartData.map((item, index) => (
             <Flex
               key={`legend-${index}`}
@@ -203,8 +203,11 @@ export default function ScoreBandPieChart({
               <Text fontSize="xs" fontWeight="bold">{item.label} {item.percentage.toFixed(0)}%</Text>
             </Flex>
           ))}
-        </Box>
-      </Box>
+        </Flex>
+
+        {/* Optional children (e.g., helper text) */}
+        {children}
+      </Flex>
     </Box>
   );
 }

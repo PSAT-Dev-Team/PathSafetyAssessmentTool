@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { Box, Flex, Text } from "@chakra-ui/react";
 import ScoreBandPieChart from "../../../components/visualization/scoreband/ScoreBandPieChart";
+import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 import "../../../components/visualization/scoreband/ScoreBandDistributionPanel.css";
 import "./AggregatedScoreBandPanel.css";
 
@@ -300,10 +302,46 @@ export function AggregatedScoreBandPanel({
                   <ScoreBandPieChart
                     crashType={CRASH_TYPE_LABELS.Overall}
                     bandCounts={distributions.Overall}
-                  />
+                  >
+                    <p style={{
+                      fontSize: "12px",
+                      color: "var(--chakra-colors-gray-500)",
+                      textAlign: "center",
+                      marginTop: "4px",
+                      maxWidth: "400px"
+                    }}>
+                      *The overall risk score is the sum of the crash type scores. The risk level assigned is the
+                      highest of the individual crash types.
+                    </p>
+                  </ScoreBandPieChart>
                 </div>
 
-                {/* 4 Crash Types in Grid */}
+                {/* 4 Crash Types in Grid (Single Row) */}
+                <div style={{ marginTop: "40px", marginBottom: "20px", textAlign: "center" }}>
+                  <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
+                    Risk Level by Crash Type
+                  </h3>
+
+                  {/* Risk Level Legend */}
+                  <Flex justify="center" gap="8" mt="4" fontSize="sm" textAlign="left">
+                    {/* VB Legend */}
+                    <Box>
+                      <Text fontWeight="bold" mb="1">VB crashes:</Text>
+                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.LOW} borderRadius="sm" /> Low Risk: &lt;10</Flex>
+                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.MEDIUM} borderRadius="sm" /> Medium Risk: 10-25</Flex>
+                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.HIGH} borderRadius="sm" /> High Risk: 25-60</Flex>
+                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.EXTREME} borderRadius="sm" /> Extreme Risk: &gt;60</Flex>
+                    </Box>
+                    {/* Others Legend */}
+                    <Box>
+                      <Text fontWeight="bold" mb="1">BB, BP, SB crashes:</Text>
+                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.LOW} borderRadius="sm" /> Low Risk: &lt;5</Flex>
+                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.MEDIUM} borderRadius="sm" /> Medium Risk: 5-10</Flex>
+                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.HIGH} borderRadius="sm" /> High Risk: 10-20</Flex>
+                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.EXTREME} borderRadius="sm" /> Extreme Risk: &gt;20</Flex>
+                    </Box>
+                  </Flex>
+                </div>
                 <div className="aggregated-score-band-grid">
                   <div className="aggregated-score-band-grid-item">
                     <ScoreBandPieChart

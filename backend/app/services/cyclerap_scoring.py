@@ -414,24 +414,43 @@ def calculate_cyclerap_score(row: pd.Series, cm3: float, cm16: float, cm25: floa
     return bb, bp, sb, vb, total
 
 
-def calculate_risk_band(score: float) -> int:
-    """
-    Convert a risk score to a risk band category (1-4 scale).
 
-    Band Thresholds (4 categories only):
+def calculate_risk_band_for_type(score: float, crash_type: str = "VB") -> int:
+    """
+    Convert a risk score to a risk band category (1-4 scale) based on crash type.
+    
+    Thresholds:
+    BB, BP, SB:
+    - 1: Low (<5)
+    - 2: Medium (5-10)
+    - 3: High (10-20)
+    - 4: Extreme (>20)
+    
+    VB (and default):
     - 1: Low (<10)
     - 2: Medium (10-25)
     - 3: High (25-60)
     - 4: Extreme (>60)
     """
-    if score < 10:
-        return 1
-    elif score <= 25:
-        return 2
-    elif score <= 60:
-        return 3
+    if crash_type in ['BB', 'BP', 'SB']:
+        if score < 5:
+            return 1
+        elif score <= 10:
+            return 2
+        elif score <= 20:
+            return 3
+        else:
+            return 4
     else:
-        return 4
+        # VB and others
+        if score < 10:
+            return 1
+        elif score <= 25:
+            return 2
+        elif score <= 60:
+            return 3
+        else:
+            return 4
 
 
 def calculate_cyclerap_score_native(attributes_df: pd.DataFrame) -> pd.DataFrame:
@@ -463,12 +482,15 @@ def calculate_cyclerap_score_native(attributes_df: pd.DataFrame) -> pd.DataFrame
             row, cm3, cm16, cm25, cm40
         )
 
-        # Calculate risk bands
-        bb_band = calculate_risk_band(bb_score)
-        bp_band = calculate_risk_band(bp_score)
-        sb_band = calculate_risk_band(sb_score)
-        vb_band = calculate_risk_band(vb_score)
-        total_band = calculate_risk_band(total_score)
+        # Calculate risk bands using specific thresholds
+        bb_band = calculate_risk_band_for_type(bb_score, 'BB')
+        bp_band = calculate_risk_band_for_type(bp_score, 'BP')
+        sb_band = calculate_risk_band_for_type(sb_score, 'SB')
+        vb_band = calculate_risk_band_for_type(vb_score, 'VB')
+        
+        # Overall Risk Level Band is now determined by the MAXIMUM band among the components
+        # This aligns with the "Highest Risk Category" logic used in the frontend
+        total_band = max(bb_band, bp_band, sb_band, vb_band)
 
         results.append({
             'BB': round(bb_score, 4),
