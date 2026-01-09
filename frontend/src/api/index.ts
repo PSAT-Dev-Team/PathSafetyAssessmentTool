@@ -2,9 +2,9 @@ import type { FeatureCollection } from "geojson";
 
 // Health
 export async function ping(): Promise<{ status: string }> {
-    const res = await fetch('/api/ping')
-    if (!res.ok) throw new Error('Failed /api/ping')
-    return res.json()
+  const res = await fetch('/api/ping')
+  if (!res.ok) throw new Error('Failed /api/ping')
+  return res.json()
 }
 
 // Project list
@@ -24,9 +24,9 @@ export interface FileResponse {
 }
 
 export async function fetchProjectList(): Promise<FileResponse> {
-    const res = await fetch('/api/projects')
-    if (!res.ok) throw new Error('Failed /api/projects')
-    return res.json()
+  const res = await fetch('/api/projects')
+  if (!res.ok) throw new Error('Failed /api/projects')
+  return res.json()
 }
 
 // Project detail
@@ -583,6 +583,60 @@ export async function getSegmentTreatments(
  * @param payload - Segment index and treatment IDs
  * @returns Export result with filename and path
  */
+
+/**
+ * Payload for previewing treatments on a segment
+ */
+export type PreviewTreatmentsPayload = {
+  segment_index: number;
+  treatment_ids: number[];
+};
+
+/**
+ * Result of previewing treatments
+ */
+export type PreviewTreatmentsResult = {
+  ok: boolean;
+  segment_index: number;
+  modified_attributes: Record<string, number>;
+  before_scores: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "Overall Risk Level": number;
+  };
+  after_scores: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "Overall Risk Level": number;
+  };
+};
+
+/**
+ * Preview treatments for a specific segment without saving
+ * @param project - Project name
+ * @param payload - Preview payload
+ * @returns Preview result with before/after scores
+ */
+export async function previewTreatments(
+  project: string,
+  payload: PreviewTreatmentsPayload
+): Promise<PreviewTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/preview`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 /**
  * Apply all applicable recommended treatments to all segments in a project
  * @param project - Project name

@@ -233,22 +233,21 @@ export default function CreateProjectPage() {
 
             <Box display="flex" gap={2} alignItems="flex-end">
               <Box flex={1}>
-                    <Combobox.Root
+                <Combobox.Root
                   collection={createListCollection({
                     items: folders.map(f => ({ label: f, value: f }))
                   })}
                   inputValue={folder}
                   onInputValueChange={({ inputValue }) => setFolder(inputValue)}
-                  disabled={loadingFolders}
-                  open={folderComboboxOpen}
-                  onOpenChange={(details) => {
-                    // Keep dropdown open if there's text in the field
-                    if (folder.length > 0) {
-                      setFolderComboboxOpen(true);
-                    } else {
-                      setFolderComboboxOpen(details.open);
+                  onValueChange={({ value }) => {
+                    if (value.length > 0) {
+                      setFolder(value[0]);
+                      setFolderComboboxOpen(false);
                     }
                   }}
+                  disabled={loadingFolders}
+                  open={folderComboboxOpen}
+                  onOpenChange={(details) => setFolderComboboxOpen(details.open)}
                 >
                   <Combobox.Control onClick={() => setFolderComboboxOpen(true)}>
                     <Combobox.Input

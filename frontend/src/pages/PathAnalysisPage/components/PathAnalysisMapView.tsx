@@ -44,7 +44,11 @@ function FitBounds({ points, shouldFit }: { points: [number, number][]; shouldFi
 interface AttributeAnalysisMapViewProps {
   selectedProjects: string[];
   selectedAttributes: (string | null)[];
-  onChartDataUpdate?: (data: { categoryDistributionData: { category: string; count: number; color: string }[]; primaryFocusAttribute: string | null }) => void;
+  onChartDataUpdate?: (data: {
+    categoryDistributionData: { category: string; count: number; color: string }[];
+    primaryFocusAttribute: string | null;
+    categoryStatus: { attribute: string; categories: { category: string; isActive: boolean; color: string }[] }[];
+  }) => void;
 }
 
 
@@ -1121,15 +1125,151 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     }
   }, [allPoints, primaryFocusAttribute, attributeCategoryColors, projectColors]);
 
+  // Calculate status of all selected attributes (Active/Inactive)
+  const categoryStatus = useMemo(() => {
+    // Filter valid attributes
+    const attributesToCheck = selectedAttributes.filter(attr => attr !== null) as string[];
+
+    // Also include Primary Focus Attribute if not in selectedAttributes (e.g. Project)
+    if (primaryFocusAttribute === "Project" && !attributesToCheck.includes("Project")) {
+      attributesToCheck.push("Project");
+    }
+
+    // Sort attributes to match dropdown order or keep selection order? 
+    // Usually safe to keep selection order, but "Project" usually comes first or last.
+    // Let's just map them.
+
+    return attributesToCheck.map(attr => {
+      // 1. Get available categories for this attribute
+      const categoriesSet = new Set<string>();
+
+      if (attr === "Project") {
+        selectedProjects.forEach(p => categoriesSet.add(p));
+      } else {
+        // Iterate through all data to find unique values for this attribute
+        projectsData.forEach(projectData => {
+          // Skip projects not selected
+          if (!selectedProjects.includes(projectData.projectName)) return;
+
+          if (!projectData.attributes) return;
+
+          const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(attr);
+
+          if (attr === "Overall Risk Level") {
+            projectData.geoFeatures.forEach((_, i) => {
+              if (projectData.scores && projectData.scores.length > i) {
+                const segmentScores = projectData.scores[i];
+                const bands = [
+                  segmentScores["VB Band"] ?? 1,
+                  segmentScores["BB Band"] ?? 1,
+                  segmentScores["SB Band"] ?? 1,
+                  segmentScores["BP Band"] ?? 1
+                ];
+                const maxBand = Math.max(...bands);
+                let category = "Low"; // Default
+                if (maxBand <= 1) category = "Low";
+                else if (maxBand <= 2) category = "Medium";
+                else if (maxBand <= 3) category = "High";
+                else category = "Extreme";
+                categoriesSet.add(category);
+              }
+            });
+          } else if (isSafetyScore) {
+            // For specific bands
+            const crashTypeKey = attr.replace(" Band", "");
+            projectData.geoFeatures.forEach((_, i) => {
+              if (projectData.scores && projectData.scores.length > i) {
+                const segmentScores = projectData.scores[i];
+                const scoreValue = segmentScores?.[crashTypeKey] !== undefined ? segmentScores[crashTypeKey] : 0;
+                let attrValueText = "Low";
+                if (['BB', 'BP', 'SB'].includes(crashTypeKey)) {
+                  if (scoreValue < 5) attrValueText = "Low";
+                  else if (scoreValue <= 10) attrValueText = "Medium";
+                  else if (scoreValue <= 20) attrValueText = "High";
+                  else attrValueText = "Extreme";
+                } else {
+                  if (scoreValue < 10) attrValueText = "Low";
+                  else if (scoreValue <= 25) attrValueText = "Medium";
+                  else if (scoreValue <= 60) attrValueText = "High";
+                  else attrValueText = "Extreme";
+                }
+                categoriesSet.add(attrValueText);
+              }
+            });
+          } else {
+            // Standard attributes
+            projectData.geoFeatures.forEach((_, i) => {
+              const attributes = projectData.attributes[i];
+              if (attributes) {
+                const attrValue = attributes[attr];
+                if (attrValue !== undefined && attrValue !== null) {
+                  // Use getAttrText if available, otherwise raw value
+                  // Since getAttrText is defined in this file (based on usage at line 883), we can use it.
+                  const text = getAttrText(attr, attrValue);
+                  if (text) categoriesSet.add(text);
+                }
+              }
+            });
+          }
+        });
+      }
+
+      // 2. Sort categories
+      const categories = Array.from(categoriesSet);
+      if (["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(attr)) {
+        const riskOrder = ["Low", "Medium", "High", "Extreme"];
+        categories.sort((a, b) => {
+          const aIndex = riskOrder.indexOf(a);
+          const bIndex = riskOrder.indexOf(b);
+          if (aIndex === -1 && bIndex === -1) return 0;
+          if (aIndex === -1) return 1;
+          if (bIndex === -1) return -1;
+          return aIndex - bIndex;
+        });
+      } else if (attr === "Facility Width per Direction") {
+        const widthOrder = ["Very Narrow", "Narrow", "Wide"];
+        categories.sort((a, b) => {
+          const aIndex = widthOrder.indexOf(a);
+          const bIndex = widthOrder.indexOf(b);
+          if (aIndex === -1 && bIndex === -1) return 0;
+          if (aIndex === -1) return 1;
+          if (bIndex === -1) return -1;
+          return aIndex - bIndex;
+        });
+      } else {
+        categories.sort();
+      }
+
+      // 3. Map to status objects
+      const currentToggles = categoryToggles[attr] || {};
+      const categoryStatusItems = categories.map(cat => {
+        const isActive = currentToggles[cat] !== false;
+        let color = "#6B7280";
+        if (attr === "Project") {
+          color = projectColors[cat] || color;
+        } else {
+          color = getCategoryColor(attr, cat);
+        }
+        return { category: cat, isActive, color };
+      });
+
+      return {
+        attribute: attr,
+        categories: categoryStatusItems
+      };
+    });
+  }, [selectedAttributes, primaryFocusAttribute, selectedProjects, projectsData, categoryToggles, projectColors]);
+
   // Notify parent when chart data updates
   useEffect(() => {
     if (onChartDataUpdate) {
       onChartDataUpdate({
         categoryDistributionData,
         primaryFocusAttribute,
+        categoryStatus,
       });
     }
-  }, [categoryDistributionData, primaryFocusAttribute, onChartDataUpdate]);
+  }, [categoryDistributionData, primaryFocusAttribute, categoryStatus, onChartDataUpdate]);
 
   return (
     <Box

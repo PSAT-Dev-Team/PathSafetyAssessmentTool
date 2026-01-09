@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
-import { Box, Flex, Text } from "@chakra-ui/react";
+import {
+  Box,
+  Flex,
+  Text,
+  Accordion,
+} from "@chakra-ui/react";
 import {
   PieChart,
   Pie,
@@ -18,11 +23,15 @@ import { ChartTypeToggle } from "../../../components/ui/ChartTypeToggle";
 interface AttributeDistributionChartProps {
   categoryData: { category: string; count: number; color: string }[];
   selectedAttribute: string | null;
+  selectedAttributes: (string | null)[];
+  categoryStatus?: { attribute: string; categories: { category: string; isActive: boolean; color: string }[] }[];
 }
 
 export default function AttributeDistributionChart({
   categoryData,
   selectedAttribute,
+  selectedAttributes,
+  categoryStatus = [],
 }: AttributeDistributionChartProps) {
   const [chartType, setChartType] = useState<"pie" | "bar">("pie");
 
@@ -82,6 +91,12 @@ export default function AttributeDistributionChart({
     );
   };
 
+  const totalActiveCount = categoryStatus.reduce((acc, group) =>
+    acc + group.categories.filter(c => c.isActive).length, 0);
+
+  const totalCount = categoryStatus.reduce((acc, group) =>
+    acc + group.categories.length, 0);
+
   return (
     <Box>
       {/* Header with Toggle */}
@@ -93,6 +108,63 @@ export default function AttributeDistributionChart({
           <Text fontSize="sm" color="gray.600" _dark={{ color: "gray.300" }}>
             Total Segments: {total}
           </Text>
+
+          {/* Category Status Accordion */}
+          {categoryStatus && categoryStatus.length > 0 && (
+            <Box mt="2" position="relative" zIndex={10}>
+              <Accordion.Root collapsible>
+                <Accordion.Item value="filters" border="none">
+                  <Accordion.ItemTrigger py="1" fontSize="sm" color="blue.500">
+                    Active Filters ({totalActiveCount}/{totalCount})
+                  </Accordion.ItemTrigger>
+                  <Accordion.ItemContent
+                    position="absolute"
+                    bg="white"
+                    _dark={{ bg: "gray.800" }}
+                    boxShadow="xl"
+                    borderRadius="md"
+                    p="4"
+                    mt="1"
+                    minW="320px"
+                    maxH="400px"
+                    overflowY="auto"
+                    borderWidth="1px"
+                  >
+                    <Flex direction="column" gap="3">
+                      {categoryStatus.map((group, groupIndex) => (
+                        <Box key={groupIndex}>
+                          <Text fontSize="xs" fontWeight="bold" color="gray.500" mb="1" textTransform="uppercase">
+                            {group.attribute}
+                          </Text>
+                          <Flex gap="2" flexWrap="wrap">
+                            {group.categories.map((item, index) => (
+                              <Box
+                                key={index}
+                                px="2"
+                                py="0.5"
+                                borderRadius="full"
+                                bg={item.isActive ? "blue.subtle" : "gray.100"}
+                                _dark={{ bg: item.isActive ? "blue.subtle" : "gray.700" }}
+                                fontSize="xs"
+                                fontWeight={item.isActive ? "semibold" : "normal"}
+                                color={item.isActive ? "blue.fg" : "gray.500"}
+                                borderWidth="1px"
+                                borderColor={item.isActive ? item.color : "transparent"}
+                                opacity={item.isActive ? 1 : 0.7}
+                                textDecoration={item.isActive ? "none" : "line-through"}
+                              >
+                                {item.category}
+                              </Box>
+                            ))}
+                          </Flex>
+                        </Box>
+                      ))}
+                    </Flex>
+                  </Accordion.ItemContent>
+                </Accordion.Item>
+              </Accordion.Root>
+            </Box>
+          )}
         </Box>
         <ChartTypeToggle chartType={chartType} onToggle={setChartType} />
       </Flex>

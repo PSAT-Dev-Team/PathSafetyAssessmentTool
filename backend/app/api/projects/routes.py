@@ -896,6 +896,107 @@ def apply_treatments(project_name: str):
         return fail(f"Error applying treatments: {str(e)}", 500)
 
 
+@bp.post("/<project_name>/treatments/preview")
+def preview_treatments(project_name: str):
+    """
+    Preview selected treatments for a specific segment without saving.
+    
+    Request body:
+        {
+            "segment_index": 5,
+            "treatment_ids": [1, 9, 14]
+        }
+
+    Response:
+        {
+            "ok": true,
+            "segment_index": 5,
+            "modified_attributes": { "Facility Type": 4, ... },
+            "before_scores": { "BB": 2.5, ... },
+            "after_scores": { "BB": 1.8, ... }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        data = request.get_json(silent=True) or {}
+        segment_index = data.get("segment_index")
+        treatment_ids = data.get("treatment_ids", [])
+
+        if segment_index is None:
+            return fail("Missing segment_index", 400)
+
+        if not isinstance(treatment_ids, list):
+            return fail("treatment_ids must be a list", 400)
+
+        # Load original attributes
+        attrs_df = ver.attributes.df
+        if segment_index >= len(attrs_df):
+            return fail(f"Segment index {segment_index} out of range", 400)
+
+        original_row = dict(attrs_df.iloc[segment_index])
+
+        # Apply treatment effects
+        modified_row = original_row.copy()
+        for treatment_id in treatment_ids:
+            if not (1 <= treatment_id <= 25):
+                return fail(f"Invalid treatment ID: {treatment_id}", 400)
+            treatment = TREATMENTS[treatment_id - 1]  # Convert 1-based to 0-based
+            for attr_name, new_value in treatment['effects'].items():
+                modified_row[attr_name] = new_value
+
+        # Calculate before scores (from original attributes)
+        original_df = pd.DataFrame([original_row])
+        before_scores_df = calculate_cyclerap_score_native(original_df)
+        before_scores = {
+            "BB": float(before_scores_df["BB"].iloc[0]),
+            "BP": float(before_scores_df["BP"].iloc[0]),
+            "SB": float(before_scores_df["SB"].iloc[0]),
+            "VB": float(before_scores_df["VB"].iloc[0]),
+            "Overall Risk Level": float(before_scores_df["Overall Risk Level"].iloc[0])
+        }
+
+        # Calculate after scores (from modified attributes)
+        modified_df = pd.DataFrame([modified_row])
+        after_scores_df = calculate_cyclerap_score_native(modified_df)
+        after_scores = {
+            "BB": float(after_scores_df["BB"].iloc[0]),
+            "BP": float(after_scores_df["BP"].iloc[0]),
+            "SB": float(after_scores_df["SB"].iloc[0]),
+            "VB": float(after_scores_df["VB"].iloc[0]),
+            "Overall Risk Level": float(after_scores_df["Overall Risk Level"].iloc[0])
+        }
+
+        # Convert modified_row values to JSON-serializable types
+        serializable_modified_row = {}
+        for col, val in modified_row.items():
+            if pd.notna(val):
+                try:
+                    if hasattr(val, 'item'):  # numpy/pandas scalar
+                        serializable_modified_row[col] = val.item()
+                    else:
+                        serializable_modified_row[col] = val
+                except (ValueError, TypeError):
+                    serializable_modified_row[col] = None
+            else:
+                serializable_modified_row[col] = None
+
+        return jsonify({
+            "ok": True,
+            "segment_index": segment_index,
+            "modified_attributes": serializable_modified_row,
+            "before_scores": before_scores,
+            "after_scores": after_scores
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error previewing treatments: {str(e)}", 500)
+
+
 @bp.get("/<project_name>/treatments/segment/<int:segment_index>")
 def get_segment_treatments(project_name: str, segment_index: int):
     """

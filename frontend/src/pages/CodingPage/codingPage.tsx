@@ -12,7 +12,7 @@ import {
   Portal,
   Progress,
   Card,
-  CardBody
+  CardBody,
 } from "@chakra-ui/react";
 
 import type { Feature, FeatureCollection, LineString } from "geojson";
@@ -132,6 +132,10 @@ export default function CodingPage() {
   const [progress, setProgress] = useState<number>(0);
   const [projectProgress, setProjectProgress] = useState<Record<string, { processed: number; total: number }>>({});
   const [attrMappings, setAttrMappings] = useState<AttrMappings>({});
+
+  // Image preloading state
+  const [imagesLoaded, setImagesLoaded] = useState(false);
+  const [imageLoadingProgress, setImageLoadingProgress] = useState(0);
 
 
   // Refs for cleanup
@@ -284,6 +288,44 @@ export default function CodingPage() {
 
     return (fromAttr ?? fromFeature) || undefined;
   }, [attrs, currentIndex, currentFeature]);
+
+  // Preload next images to improve user experience
+  useEffect(() => {
+    if (!currentProjectName || !attrs.length) return;
+
+    const PRELOAD_COUNT = 5;
+    const indicesToPreload = [];
+    for (let i = 1; i <= PRELOAD_COUNT; i++) {
+      if (currentIndex + i < attrs.length) {
+        indicesToPreload.push(currentIndex + i);
+      }
+    }
+
+    indicesToPreload.forEach(idx => {
+      const row = attrs[idx];
+      const feat = geoFeatures[idx] ?? null;
+
+      const fromAttr =
+        (row as any)?.["Image Reference"] ??
+        (row as any)?.["image"] ??
+        (row as any)?.["img"];
+
+      const p = (feat?.properties as any) || {};
+      const fromFeature =
+        p?.["Image Reference"] ??
+        p?.["Image_Reference"] ??
+        p?.["image"] ??
+        p?.["img"];
+
+      const nextImgRef = (fromAttr ?? fromFeature) || undefined;
+
+      if (nextImgRef) {
+        const url = `/api/projects/${encodeURIComponent(currentProjectName)}/images/${encodeURIComponent(nextImgRef)}`;
+        const img = new Image();
+        img.src = url;
+      }
+    });
+  }, [currentIndex, currentProjectName, attrs, geoFeatures]);
 
   const applyUpdatesToCurrentRow = useCallback(
     (updates: Record<string, number | string | boolean | null>) => {
@@ -761,6 +803,7 @@ export default function CodingPage() {
 
         if (cancelled) return;
 
+
         const attributes = a?.rows ?? [];
 
         // Store original autocode values (baseline) for validation tracking
@@ -795,6 +838,48 @@ export default function CodingPage() {
             });
           }
         } catch {
+        }
+
+        // Start image preloading
+        const uniqueRefs = new Set<string>();
+        attributes.forEach(row => {
+          const r = row as any;
+          const ref = r["Image Reference"] ?? r["image"] ?? r["img"];
+          if (ref) uniqueRefs.add(ref);
+        });
+
+        // Also check geoFeatures for image refs if not in attributes
+        const features = gjson?.features || [];
+        features.forEach((f: any) => {
+          const p = f.properties || {};
+          const ref = p["Image Reference"] ?? p["Image_Reference"] ?? p["image"] ?? p["img"];
+          if (ref) uniqueRefs.add(ref);
+        });
+
+        const refList = Array.from(uniqueRefs);
+
+        if (refList.length === 0) {
+          setImagesLoaded(true);
+        } else {
+          let loadedCount = 0;
+          // Cap concurrent requests if needed, but browser handles queueing.
+          // Loop and fetch
+          refList.forEach(ref => {
+            const img = new Image();
+            img.src = `/api/projects/${encodeURIComponent(currentProjectName)}/images/${encodeURIComponent(ref)}`;
+
+            const onFinish = () => {
+              loadedCount++;
+              const pct = Math.round((loadedCount / refList.length) * 100);
+              setImageLoadingProgress(pct);
+              if (loadedCount >= refList.length) {
+                setImagesLoaded(true);
+              }
+            };
+
+            img.onload = onFinish;
+            img.onerror = onFinish; // Don't block on error
+          });
         }
 
         updateProjectData(currentProjectName, {
@@ -1144,10 +1229,28 @@ export default function CodingPage() {
     return <Box p="4"><Text color="red.500">No projects selected.</Text></Box>;
   }
 
-  if (!isShowingCodingGuide && loading) {
+  if (!isShowingCodingGuide && (loading || !imagesLoaded)) {
     return (
-      <Flex align="center" justify="center" h="60vh">
-        <Spinner size="lg" />
+      <Flex align="center" justify="center" h="60vh" direction="column" gap={4}>
+        {loading ? (
+          <>
+            <Spinner size="lg" />
+            <Text>Loading project data...</Text>
+          </>
+        ) : (
+          <>
+            <Text fontWeight="bold">Preloading Images...</Text>
+            <Progress.Root value={imageLoadingProgress} maxW="300px" w="100%" colorPalette="blue">
+              <Progress.Track>
+                <Progress.Range />
+              </Progress.Track>
+              <Progress.ValueText>{imageLoadingProgress}%</Progress.ValueText>
+            </Progress.Root>
+            <Text fontSize="sm" color="gray.500">
+              Please wait while we cache images for smooth navigation.
+            </Text>
+          </>
+        )}
       </Flex>
     );
   }

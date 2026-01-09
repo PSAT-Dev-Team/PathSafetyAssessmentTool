@@ -51,10 +51,9 @@ export default function OverallTreatmentAnalysis({
         Overall Treatment Analysis
       </Text>
 
-      {/* Two-column layout: Before and After */}
-      <Grid templateColumns={{ base: "1fr", lg: "1fr 1fr" }} gap="8">
-        {/* Column 1: Before Treatment */}
-        <GridItem>
+      <Flex direction="column" gap="10">
+        {/* Row 1: Before Treatment */}
+        <Box>
           <Text
             fontSize="md"
             fontWeight="bold"
@@ -64,20 +63,20 @@ export default function OverallTreatmentAnalysis({
           >
             Before Treatment
           </Text>
-          <Flex direction="column" gap="6">
+          <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }} gap="6">
             {CRASH_TYPES.map((crashType) => (
-              <Box key={`before-${crashType}`}>
+              <GridItem key={`before-${crashType}`}>
                 <ScoreBandPieChart
                   crashType={CRASH_TYPE_LABELS[crashType]}
                   bandCounts={beforeBandCounts[crashType]}
                 />
-              </Box>
+              </GridItem>
             ))}
-          </Flex>
-        </GridItem>
+          </Grid>
+        </Box>
 
-        {/* Column 2: After Treatment */}
-        <GridItem>
+        {/* Row 2: After Treatment */}
+        <Box>
           <Text
             fontSize="md"
             fontWeight="bold"
@@ -87,18 +86,18 @@ export default function OverallTreatmentAnalysis({
           >
             After Treatment
           </Text>
-          <Flex direction="column" gap="6">
+          <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }} gap="6">
             {CRASH_TYPES.map((crashType) => (
-              <Box key={`after-${crashType}`}>
+              <GridItem key={`after-${crashType}`}>
                 <ScoreBandPieChart
                   crashType={CRASH_TYPE_LABELS[crashType]}
                   bandCounts={afterBandCounts[crashType]}
                 />
-              </Box>
+              </GridItem>
             ))}
-          </Flex>
-        </GridItem>
-      </Grid>
+          </Grid>
+        </Box>
+      </Flex>
     </Box>
   );
 }

@@ -44,16 +44,18 @@ export default function PathAnalysisPage() {
   const [chartData, setChartData] = useState<{
     categoryDistributionData: { category: string; count: number; color: string }[];
     primaryFocusAttribute: string | null;
+    categoryStatus: { attribute: string; categories: { category: string; isActive: boolean; color: string }[] }[];
   }>({
     categoryDistributionData: [],
     primaryFocusAttribute: null,
+    categoryStatus: [],
   });
 
   // Fetch projects on mount
   useEffect(() => {
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // Process projects
@@ -229,7 +231,7 @@ export default function PathAnalysisPage() {
                   // If SELECT_ALL is in the value and all projects are already selected, deselect all
                   const allProjectNames = filteredProjects.map(p => p.name);
                   if (selectedProjects.length === allProjectNames.length &&
-                      allProjectNames.every(name => selectedProjects.includes(name))) {
+                    allProjectNames.every(name => selectedProjects.includes(name))) {
                     setSelectedProjects([]);
                   } else {
                     // Otherwise, select all filtered projects (excluding the SELECT_ALL option itself)
@@ -485,6 +487,8 @@ export default function PathAnalysisPage() {
           <AttributeDistributionChart
             categoryData={chartData.categoryDistributionData}
             selectedAttribute={chartData.primaryFocusAttribute}
+            selectedAttributes={selectedAttributes}
+            categoryStatus={chartData.categoryStatus}
           />
         </Box>
       )}

@@ -8,12 +8,12 @@ type Props = {
   panelHeight?: number; // px
 };
 
-export default function ImagePanel({ projectName, imageRef, panelHeight = 500 }: Props) {
+export default function ImagePanel({ projectName, imageRef }: Props) {
   const [brightness, setBrightness] = useState(100);
 
   return (
     <Card.Root
-      h={`${panelHeight}px`}
+      h="100%"
       display="flex"
       flexDirection="column"
     >
@@ -31,16 +31,17 @@ export default function ImagePanel({ projectName, imageRef, panelHeight = 500 }:
         </HStack>
       </Card.Header>
 
-      <Card.Body minH={0} >
+      <Card.Body minH={0} p={0}>
         {imageRef ? (
           <Box
             h="100%"
             w="100%"
             display="flex"
-            alignItems="center"
+            alignItems="flex-end"
             justifyContent="center"
           >
             <Image
+              key={imageRef}
               as="img"
               src={`/api/projects/${encodeURIComponent(projectName ?? "")}/images/${encodeURIComponent(imageRef ?? "")}`}
               alt={imageRef ?? "image"}
