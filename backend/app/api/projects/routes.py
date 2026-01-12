@@ -695,7 +695,7 @@ def calculate_score(project_name: str):
         print(f"\n\n\n\n[calculate_score] Results saved to disk for project '{project_name}'")
 
         # Update last_updated
-        proj.metadata.last_updated = datetime.date.today()
+        proj.metadata.last_updated = datetime.datetime.now()
         proj.metadata.serialize(proj.project_path)
     else:
         print(f"\n\n\n\n[calculate_score] Single-row calculation - not saving to disk")
@@ -878,7 +878,7 @@ def apply_treatments(project_name: str):
         proj.save_all()
 
         # Update last_updated
-        proj.metadata.last_updated = datetime.date.today()
+        proj.metadata.last_updated = datetime.datetime.now()
         proj.metadata.serialize(proj.project_path)
 
         return jsonify({
@@ -1297,6 +1297,23 @@ def reset_all_treatments(project_name: str):
             new_rows = [{}] * (len(attrs_df) - len(treatment_df))
             treatment_df = pd.concat([treatment_df, pd.DataFrame(new_rows)], ignore_index=True)
 
+        # Count how many segments had treatments
+        # DEBUG: Print column info to backend logs
+        print(f"[reset_all_treatments] Columns: {treatment_df.columns.tolist()}")
+        if "Treatments Applied" in treatment_df.columns:
+            # fillna("") ensures NaNs become empty strings. astype(str) ensures everything is string.
+            # str.strip() removes distinct whitespace.
+            # Then we check if length > 0.
+            # This handles: NaN, None, "", "   ".
+            # It counts ANY row that has non-empty treatment string.
+            applied_col = treatment_df["Treatments Applied"].fillna("").astype(str).str.strip()
+            segments_reset = int((applied_col != "").sum())
+            print(f"[reset_all_treatments] Count calculated: {segments_reset}")
+            print(f"[reset_all_treatments] Sample head: {applied_col.head().tolist()}")
+        else:
+            print("[reset_all_treatments] 'Treatments Applied' column missing")
+            segments_reset = 0
+
         # Clear "Treatments Applied" column for all rows
         if "Treatments Applied" in treatment_df.columns:
             treatment_df["Treatments Applied"] = ""
@@ -1315,9 +1332,6 @@ def reset_all_treatments(project_name: str):
         # This sets df_dirty=True via the property setter
         ver.treatment.df = treatment_df
         # NOTE: NOT calling proj.save_all() here - changes will be saved only when user clicks Save
-
-        # Count how many segments had treatments (convert to int to avoid pandas int64 serialization issue)
-        segments_reset = int((treatment_df["Treatments Applied"] != "").sum()) if "Treatments Applied" in treatment_df.columns else 0
 
         return jsonify({
             "ok": True,
@@ -1352,7 +1366,7 @@ def save_treatments(project_name: str):
         proj.save_all()
 
         # Update last_updated
-        proj.metadata.last_updated = datetime.date.today()
+        proj.metadata.last_updated = datetime.datetime.now()
         proj.metadata.serialize(proj.project_path)
 
         return jsonify({
@@ -1415,7 +1429,7 @@ def update_attributes(name: str):
     proj.save_all()  # If a day rolls over, a new version may be created
 
     # Update last_updated
-    proj.metadata.last_updated = datetime.date.today()
+    proj.metadata.last_updated = datetime.datetime.now()
     proj.metadata.serialize(proj.project_path)
 
     return ok({"ok": True})
@@ -1699,7 +1713,7 @@ def update_project_metadata(project_name: str):
 
         # Serialize once after all metadata updates
         if metadata_updated:
-            proj.metadata.last_updated = datetime.date.today()
+            proj.metadata.last_updated = datetime.datetime.now()
             proj.metadata.serialize(proj.project_path)
 
         # Update name if provided (requires renaming directory)
@@ -1721,7 +1735,7 @@ def update_project_metadata(project_name: str):
                 # Update metadata
                 proj.project_path = new_path
                 proj.metadata.project_name = new_name
-                proj.metadata.last_updated = datetime.date.today()
+                proj.metadata.last_updated = datetime.datetime.now()
                 proj.metadata.serialize(new_path)
 
                 # Reload the project list to reflect the changes
@@ -2554,7 +2568,7 @@ def autocode_all(project_name: str):
             ver.save_all()
 
             # Update last_updated
-            proj.metadata.last_updated = datetime.date.today()
+            proj.metadata.last_updated = datetime.datetime.now()
             proj.metadata.serialize(proj.project_path)
 
         # Return the updated attributes DataFrame so frontend can update UI without refetching

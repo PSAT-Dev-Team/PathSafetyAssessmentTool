@@ -9,7 +9,7 @@ import {
   createListCollection,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
-import { LuPencil } from "react-icons/lu";
+import { LuPencil, LuArrowUpDown, LuArrowUp, LuArrowDown } from "react-icons/lu";
 import EditProjectModal from "./components/EditProjectModal";
 
 import "./projects.css";
@@ -58,6 +58,12 @@ export default function Home() {
 
   // Project List
   const [Projectlist, setProjectList] = useState<FileListResponse | null>(null);
+
+  // Sorting
+  type SortCriterion = { key: string; direction: 'asc' | 'desc' };
+  const [sortConfig, setSortConfig] = useState<SortCriterion[]>([
+    { key: 'last_updated', direction: 'desc' }, // Default to newest first
+  ]);
 
   // Filter
   const [nameQuery, setNameQuery] = useState("");
@@ -144,15 +150,32 @@ export default function Home() {
   // UseMemo projects
   const projects: ProjectListItem[] = useMemo(() => {
     if (!Projectlist?.projects) return [];
-    return Projectlist.projects
-      .slice()
-      .sort((a, b) => {
-        // Sort by last_updated descending (most recent first)
-        const dateA = new Date(a.last_updated || 0).getTime();
-        const dateB = new Date(b.last_updated || 0).getTime();
-        return dateB - dateA;
-      });
-  }, [Projectlist]);
+
+    return Projectlist.projects.slice().sort((a, b) => {
+      for (const criterion of sortConfig) {
+        let result = 0;
+
+        if (criterion.key === 'last_updated') {
+          const dateA = new Date(a.last_updated || 0).getTime();
+          const dateB = new Date(b.last_updated || 0).getTime();
+          result = dateA - dateB;
+        } else if (criterion.key === 'verification_status') {
+          const pctA = (a.total_segments || 0) > 0 ? (a.verified_segment_count || 0) / a.total_segments! : 0;
+          const pctB = (b.total_segments || 0) > 0 ? (b.verified_segment_count || 0) / b.total_segments! : 0;
+          result = pctA - pctB;
+        } else if (criterion.key === 'autocode_status') {
+          const pctA = (a.total_segments || 0) > 0 ? (a.autocoded_segment_count || 0) / a.total_segments! : 0;
+          const pctB = (b.total_segments || 0) > 0 ? (b.autocoded_segment_count || 0) / b.total_segments! : 0;
+          result = pctA - pctB;
+        }
+
+        if (result !== 0) {
+          return criterion.direction === 'asc' ? result : -result;
+        }
+      }
+      return 0;
+    });
+  }, [Projectlist, sortConfig]);
 
   // Get all unique tags across all projects
   const allTags = useMemo(() => {
@@ -286,6 +309,76 @@ export default function Home() {
     setTagFilters(tagFilters.filter(tag => tag !== tagToRemove));
   };
 
+
+  // Handle column header click for sorting
+  const handleSort = (key: string, event: React.MouseEvent) => {
+    setSortConfig(current => {
+      const isShift = event.shiftKey;
+      const existingIndex = current.findIndex(c => c.key === key);
+
+      // If user holds Shift, we are doing multi-column sort
+      if (isShift) {
+        // If sorting by this key already exists
+        if (existingIndex !== -1) {
+          // Toggle direction
+          const newConfig = [...current];
+          newConfig[existingIndex] = {
+            ...newConfig[existingIndex],
+            direction: newConfig[existingIndex].direction === 'asc' ? 'desc' : 'asc'
+          };
+          return newConfig;
+        } else {
+          // Add new sort criterion to the end
+          return [...current, { key, direction: 'desc' }];
+        }
+      } else {
+        // Single column sort (replace everything)
+        // If clicking the same column that is currently primary, toggle it
+        if (current.length > 0 && current[0].key === key) {
+          return [{ key, direction: current[0].direction === 'asc' ? 'desc' : 'asc' }];
+        }
+        // Otherwise start fresh with this column descending
+        return [{ key, direction: 'desc' }];
+      }
+    });
+  };
+
+  // Helper to get sort status for a column
+  const getSortMeta = (key: string) => {
+    const index = sortConfig.findIndex(c => c.key === key);
+    if (index === -1) return null;
+    return {
+      direction: sortConfig[index].direction,
+      priority: index + 1 // 1-based priority
+    };
+  };
+
+  const renderHeader = (label: string, key: string, width: number) => {
+    const meta = getSortMeta(key);
+    return (
+      <th
+        style={{ width, cursor: "pointer", userSelect: "none" }}
+        onClick={(e) => handleSort(key, e)}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+          {label}
+          {meta ? (
+            <div style={{ display: "flex", alignItems: "center" }}>
+              {meta.direction === 'asc' ? <LuArrowUp size={14} /> : <LuArrowDown size={14} />}
+              {sortConfig.length > 1 && (
+                <span style={{ fontSize: "10px", marginLeft: "2px", fontWeight: "bold" }}>
+                  {meta.priority}
+                </span>
+              )}
+            </div>
+          ) : (
+            <LuArrowUpDown size={14} style={{ opacity: 0.3 }} />
+          )}
+        </div>
+      </th>
+    );
+  };
+
   return (
     <div className="projects-root">
       <div className="search-panel">
@@ -388,8 +481,9 @@ export default function Home() {
               <tr>
                 <th style={{ width: 48 }}></th>
                 <th>Project Name</th>
-                <th style={{ width: 120 }}>Verification Status</th>
-                <th style={{ width: 120 }}>Autocode Status</th>
+                {renderHeader("Verification Status", "verification_status", 140)}
+                {renderHeader("Autocode Status", "autocode_status", 140)}
+                {renderHeader("Time Modified", "last_updated", 180)}
                 <th>Tags</th>
                 <th style={{ width: 180 }}>Actions</th>
               </tr>
@@ -397,7 +491,7 @@ export default function Home() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="empty">
+                  <td colSpan={7} className="empty">
                     No projects found
                   </td>
                 </tr>
@@ -412,85 +506,99 @@ export default function Home() {
                         aria-label="Select all projects"
                       />
                     </td>
-                    <td colSpan={4}>
+                    <td colSpan={5}>
                       <strong>Select All</strong>
                     </td>
                   </tr>
                   {filtered.map((p) => {
-                  const isSelected = selected.has(p.name);
+                    const isSelected = selected.has(p.name);
 
-                  return (
-                    <tr
-                      key={p.name}
-                      className={isSelected ? "row selected" : "row"}
-                      onClick={() => onRowClick(p.name)}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => onRowClick(p.name)}
-                          aria-label={`Select ${p.name}`}
-                        />
-                      </td>
-                      <td title={p.name}>{p.name}</td>
-                      <td>
-                        <span style={{ fontSize: "14px", fontWeight: "500" }}>
-                          {typeof p.total_segments === 'number' && p.total_segments > 0
-                            ? `${((p.verified_segment_count ?? 0) / p.total_segments * 100).toFixed(1)}%`
-                            : typeof p.total_segments === 'number'
-                            ? "0%"
-                            : "—"}
-                        </span>
-                        {/* Debug: Show raw values if needed */}
-                        {/* (segments: {p.verified_segment_count}/{p.total_segments}) */}
-                      </td>
-                      <td>
-                        <span style={{ fontSize: "14px", fontWeight: "500" }}>
-                          {typeof p.total_segments === 'number' && p.total_segments > 0
-                            ? `${((p.autocoded_segment_count ?? 0) / p.total_segments * 100).toFixed(1)}%`
-                            : typeof p.total_segments === 'number'
-                            ? "0%"
-                            : "—"}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="tags-container">
-                          {p.tags && p.tags.length > 0 ? (
-                            p.tags.map((tag) => (
-                              <span
-                                key={tag}
-                                className="tag-badge"
-                                style={{
-                                  backgroundColor: getTagColor(tag),
-                                  borderWidth: "1px",
-                                  borderStyle: "solid",
-                                }}
-                              >
-                                {tag}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="no-tags">—</span>
-                          )}
-                        </div>
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => {
-                            setEditingProject(p);
-                            setOpenEdit(true);
-                          }}
-                          className="row-edit-btn"
-                          aria-label="Edit project"
-                        >
-                          <LuPencil className="row-edit-icon" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                    return (
+                      <tr
+                        key={p.name}
+                        className={isSelected ? "row selected" : "row"}
+                        onClick={() => onRowClick(p.name)}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => onRowClick(p.name)}
+                            aria-label={`Select ${p.name}`}
+                          />
+                        </td>
+                        <td title={p.name}>{p.name}</td>
+                        <td>
+                          <span style={{ fontSize: "14px", fontWeight: "500" }}>
+                            {typeof p.total_segments === 'number' && p.total_segments > 0
+                              ? `${((p.verified_segment_count ?? 0) / p.total_segments * 100).toFixed(1)}%`
+                              : typeof p.total_segments === 'number'
+                                ? "0%"
+                                : "—"}
+                          </span>
+                          {/* Debug: Show raw values if needed */}
+                          {/* (segments: {p.verified_segment_count}/{p.total_segments}) */}
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "14px", fontWeight: "500" }}>
+                            {typeof p.total_segments === 'number' && p.total_segments > 0
+                              ? `${((p.autocoded_segment_count ?? 0) / p.total_segments * 100).toFixed(1)}%`
+                              : typeof p.total_segments === 'number'
+                                ? "0%"
+                                : "—"}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "14px", color: "#666" }}>
+                            {p.last_updated ? new Date(p.last_updated).toLocaleString('en-GB', {
+                              year: 'numeric',
+                              month: 'numeric',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            }) : "—"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="tags-container">
+                            {p.tags && p.tags.length > 0 ? (
+                              p.tags
+                                .slice()
+                                .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+                                .map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="tag-badge"
+                                    style={{
+                                      backgroundColor: getTagColor(tag),
+                                      borderWidth: "1px",
+                                      borderStyle: "solid",
+                                    }}
+                                  >
+                                    {tag}
+                                  </span>
+                                ))
+                            ) : (
+                              <span className="no-tags">—</span>
+                            )}
+                          </div>
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => {
+                              setEditingProject(p);
+                              setOpenEdit(true);
+                            }}
+                            className="row-edit-btn"
+                            aria-label="Edit project"
+                          >
+                            <LuPencil className="row-edit-icon" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </>
               )}
             </tbody>

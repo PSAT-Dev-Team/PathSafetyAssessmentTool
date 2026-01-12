@@ -59,8 +59,13 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Overall Risk Levels for color coding - use external scores if provided, otherwise fetch from API
-  const [scores, setScores] = useState<ScoreRow[]>([]);
+  // Internal scores state (fallback if externalScores not provided)
+  const [internalScores, setInternalScores] = useState<ScoreRow[]>([]);
+
+  // Derived active scores - prioritize external props for real-time updates
+  const activeScores = useMemo(() => {
+    return (externalScores && externalScores.length > 0) ? externalScores : internalScores;
+  }, [externalScores, internalScores]);
 
   // GIS Layer toggles (matching curvature analysis colors)
   const [showFootpath, setShowFootpath] = useState(false);  // Blue
@@ -112,18 +117,11 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
       }
       const data = await res.json();
       if (data.ok && Array.isArray(data.result_rows)) {
-        setScores(data.result_rows);
+        setInternalScores(data.result_rows);
       }
     } catch (e: any) {
     }
   }, [decodedName]);
-
-  // Use external scores if provided (real-time updates), otherwise fetch from API
-  useEffect(() => {
-    if (externalScores && externalScores.length > 0) {
-      setScores(externalScores);
-    }
-  }, [externalScores]);
 
   // Fetch Overall Risk Levels for color coding on component mount (fallback if no external scores)
   useEffect(() => {
@@ -220,11 +218,11 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
 
   // Get segment color based on the crash type with the highest score
   const getSegmentColor = (segmentIndex: number): string => {
-    if (!scores || segmentIndex >= scores.length) {
+    if (!activeScores || segmentIndex >= activeScores.length) {
       return "#2563EB"; // Default blue if no scores
     }
 
-    const segmentScores = scores[segmentIndex];
+    const segmentScores = activeScores[segmentIndex];
     if (!segmentScores) {
       return "#2563EB"; // Default blue if no score data for this segment
     }
@@ -417,7 +415,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
                 const radius = isActive ? 8 : 5;
                 // Handle both new and old column names for backward compatibility
-                const scoreValue = scores[idx]?.["Overall Risk Level"] ?? scores[idx]?.["CycleRAP score"];
+                const scoreValue = activeScores[idx]?.["Overall Risk Level"] ?? activeScores[idx]?.["CycleRAP score"];
                 const label = `#${idx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
                 // Include score in key to force re-render when score changes
                 const keyWithScore = `${idx}-${scoreValue?.toFixed(2) ?? "loading"}`;

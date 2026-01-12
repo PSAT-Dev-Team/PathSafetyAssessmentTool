@@ -365,6 +365,8 @@ export default function TreatmentDetailPage() {
   const [selectedTreatments, setSelectedTreatments] = useState<Set<number>>(new Set());
   const [attrMappings, setAttrMappings] = useState<Record<string, Record<string, string>>>({});
   const [showPostTreatment, setShowPostTreatment] = useState<boolean>(false);
+  // Trigger to force refresh of segment treatments
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Treatment application state
   const [treatmentState, setTreatmentState] = useState<Record<number, {
@@ -473,37 +475,84 @@ export default function TreatmentDetailPage() {
   }, [attrs, currentIndex, currentFeature]);
 
   // Fetch project data
-  useEffect(() => {
+  // Fetch project data
+  const fetchData = useCallback(async () => {
     if (!name) return;
-    let cancelled = false;
     setLoading(true);
     setError(null);
-    (async () => {
-      try {
-        const [d, a, gjson, resultsRes] = await Promise.all([
-          fetchProjectDetail(name),
-          fetchProjectAttributes(name) as Promise<AttributesResponse>,
-          fetchProjectGeoJSON(name) as Promise<FeatureCollection>,
-          fetch(`/api/projects/${encodeURIComponent(name)}/results`).then(res =>
-            res.ok ? res.json() : { result_rows: [] }
-          ).catch(() => ({ result_rows: [] })),
-        ]);
-        if (cancelled) return;
-        setDetail(d ?? null);
-        setAttrs(a?.rows ?? []);
-        setGeoFeatures(gjson?.features ?? []);
-        setScores(resultsRes?.result_rows ?? []);
-        setCurrentPage(1);
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "Unknown error");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const [d, a, gjson, resultsRes] = await Promise.all([
+        fetchProjectDetail(name),
+        fetchProjectAttributes(name) as Promise<AttributesResponse>,
+        fetchProjectGeoJSON(name) as Promise<FeatureCollection>,
+        fetch(`/api/projects/${encodeURIComponent(name)}/results`).then(res =>
+          res.ok ? res.json() : { result_rows: [] }
+        ).catch(() => ({ result_rows: [] })),
+      ]);
+      setDetail(d ?? null);
+      setAttrs(a?.rows ?? []);
+      setGeoFeatures(gjson?.features ?? []);
+      setScores(resultsRes?.result_rows ?? []);
+      // Maintain current page if possible, otherwise reset? 
+      // Actually, maintaining current page is better for Treat All workflow
+      // setCurrentPage(1); 
+    } catch (e: any) {
+      setError(e?.message ?? "Unknown error");
+    } finally {
+      setLoading(false);
+    }
   }, [name]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Listen for Treat All completion event
+  useEffect(() => {
+    const handleTreatAllCompleted = (event: Event) => {
+      fetchData();
+
+      const customEvent = event as CustomEvent;
+      const details = customEvent.detail; // Array of treatment details
+
+      if (details && Array.isArray(details)) {
+        const newStates: Record<number, any> = {};
+        details.forEach((d: any) => {
+          newStates[d.segment_index] = {
+            applied: true,
+            treatment_ids: d.treatment_ids,
+            after_scores: d.after_scores ? {
+              BB: d.after_scores.BB,
+              BP: d.after_scores.BP,
+              SB: d.after_scores.SB,
+              VB: d.after_scores.VB,
+              total: d.after_scores["Overall Risk Level"],
+            } : null
+          };
+        });
+        setTreatmentState(newStates);
+      } else {
+        setRefreshTrigger(prev => prev + 1);
+        setTreatmentState({});
+      }
+    };
+
+    const handleResetAllCompleted = () => {
+      fetchData();
+      setRefreshTrigger(prev => prev + 1);
+      setTreatmentState({}); // Clear all local treatment states
+      setSelectedTreatments(new Set()); // Clear selection
+      setPreviewScores(null); // Clear preview
+    };
+
+    window.addEventListener("psat:treat:all:completed", handleTreatAllCompleted);
+    window.addEventListener("psat:reset:all:completed", handleResetAllCompleted);
+
+    return () => {
+      window.removeEventListener("psat:treat:all:completed", handleTreatAllCompleted);
+      window.removeEventListener("psat:reset:all:completed", handleResetAllCompleted);
+    };
+  }, [fetchData]);
 
   // Fetch attribute mappings (global, not per-project)
   useEffect(() => {
@@ -561,7 +610,7 @@ export default function TreatmentDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [name, currentIndex]);
+  }, [name, currentIndex, refreshTrigger]);
 
   // Handle applying treatments
   const handleApplyTreatments = useCallback(async () => {

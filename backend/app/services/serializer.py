@@ -347,8 +347,8 @@ class ProjectMetadata:
 
     def __init__(self):
         self.project_name : str             = None
-        self.date_created : datetime.date   = None
-        self.last_updated : datetime.date   = None
+        self.date_created : datetime        = None
+        self.last_updated : datetime        = None
         self.created_by   : str             = None
         self.dataset      : str             = None
         self.progress     : int             = None
@@ -364,14 +364,18 @@ class ProjectMetadata:
         with open(file_path, 'r') as f:
             data = json.load(f)
             self.project_name = data.get("project_name")
-            self.date_created = (
-                datetime.fromisoformat(data.get("date_created")).date()
-                if data.get("date_created") else None
-            )
-            self.last_updated = (
-                datetime.fromisoformat(data.get("last_updated")).date()
-                if data.get("last_updated") else None
-            )
+            
+            # Helper to safely parse datetime or date
+            def parse_datetime(s):
+                if not s: return None
+                try:
+                    return datetime.fromisoformat(s)
+                except ValueError:
+                    # Fallback for old date-only strings or other formats if needed
+                    return None
+
+            self.date_created = parse_datetime(data.get("date_created"))
+            self.last_updated = parse_datetime(data.get("last_updated"))
             self.created_by = data.get("created_by")
             self.dataset    = data.get("dataset")
             self.progress   = data.get("progress")

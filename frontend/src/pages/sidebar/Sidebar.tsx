@@ -6,6 +6,7 @@ import { applyAllTreatments, resetAllTreatments, saveTreatments } from "../../ap
 
 import CodingSidebar from "./components/CodingSidebar";
 import TreatmentSidebar from "./components/TreatmentSidebar";
+import ResetConfirmationDialog from "./components/ResetConfirmationDialog";
 import ShapefileModal from "./components/ShapefileModal";
 import ExitConfirmationDialog from "./components/ExitConfirmationDialog";
 import "./sidebar.css";
@@ -21,6 +22,8 @@ export default function Sidebar() {
   const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [treatmentExitDialogOpen, setTreatmentExitDialogOpen] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   const openShapefileModal = () => {
@@ -77,9 +80,12 @@ export default function Sidebar() {
           description: `Successfully applied treatments to ${result.segments_treated} segments. ${result.segments_skipped} segments had no applicable treatments.`,
           type: "success",
         });
+
+        // Notify other components (e.g., TreatmentDetailPage) to refresh using the full details
+        window.dispatchEvent(new CustomEvent("psat:treat:all:completed", { detail: result.details }));
       }
     } catch (error) {
-      
+
       toaster.create({
         description: error instanceof Error ? error.message : "Failed to apply treatments",
         type: "error",
@@ -87,7 +93,7 @@ export default function Sidebar() {
     }
   }, [projectName]);
 
-  const handleResetAllSegments = useCallback(async () => {
+  const handleResetClick = useCallback(() => {
     if (!projectName) {
       toaster.create({
         description: "No project selected",
@@ -95,14 +101,14 @@ export default function Sidebar() {
       });
       return;
     }
+    setResetDialogOpen(true);
+  }, [projectName]);
 
-    const confirmed = confirm(
-      "Are you sure you want to reset all applied treatments for all segments? This action cannot be undone."
-    );
-
-    if (!confirmed) return;
+  const handleConfirmReset = useCallback(async () => {
+    if (!projectName) return;
 
     try {
+      setIsResetting(true);
       const result = await resetAllTreatments(projectName);
 
       if (result.ok) {
@@ -111,13 +117,17 @@ export default function Sidebar() {
           description: `${result.message} Reset ${result.segments_reset} segments.`,
           type: "success",
         });
+
+        window.dispatchEvent(new CustomEvent("psat:reset:all:completed"));
+        setResetDialogOpen(false);
       }
     } catch (error) {
-      
       toaster.create({
         description: error instanceof Error ? error.message : "Failed to reset treatments",
         type: "error",
       });
+    } finally {
+      setIsResetting(false);
     }
   }, [projectName]);
 
@@ -210,7 +220,7 @@ export default function Sidebar() {
         });
       }
     } catch (error) {
-      
+
       toaster.create({
         description: error instanceof Error ? error.message : "Failed to save treatments",
         type: "error",
@@ -303,7 +313,7 @@ export default function Sidebar() {
         <div className="psat-side-bottom">
           <TreatmentSidebar
             onTreatAll={handleTreatAllSegments}
-            onResetAll={handleResetAllSegments}
+            onResetAll={handleResetClick}
             onSave={onTreatmentSave}
             onExit={onTreatmentExit}
           />
@@ -339,6 +349,13 @@ export default function Sidebar() {
         onDiscardAndExit={handleTreatmentDiscardAndExit}
         onCancel={handleTreatmentExitCancel}
         isSaving={isSaving}
+      />
+
+      <ResetConfirmationDialog
+        open={resetDialogOpen}
+        onConfirm={handleConfirmReset}
+        onCancel={() => setResetDialogOpen(false)}
+        isResetting={isResetting}
       />
     </aside>
   );

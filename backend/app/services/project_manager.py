@@ -456,11 +456,11 @@ class project_manager:
         size = len(image_ref)
 
         # Craft project metadata
-        now = datetime.datetime.now().date()
+        now_dt = datetime.datetime.now()
         project_metadata = serializer.ProjectMetadata()
         project_metadata.project_name   = project_title
-        project_metadata.date_created   = now
-        project_metadata.last_updated   = now
+        project_metadata.date_created   = now_dt
+        project_metadata.last_updated   = now_dt
         project_metadata.created_by     = "default"
         project_metadata.dataset        = dataset_name
         project_metadata.progress       = []
