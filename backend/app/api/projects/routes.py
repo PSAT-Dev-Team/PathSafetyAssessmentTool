@@ -5,9 +5,12 @@ from flask import (
     request,
     send_from_directory,
     abort,
+    send_file,
     make_response,
     current_app,     # ✅ 一次性在顶层导入
 )
+import zipfile
+import io
 from pathlib import Path
 import traceback
 from . import bp
@@ -505,6 +508,81 @@ def get_project_image(project_name: str, filename: str):
     # Optional: add Cache-Control (adjust as needed for your deployment)
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
+
+@bp.post("/download-images")
+def download_images():
+    """
+    Generate a ZIP file containing filtered images for multiple projects.
+    
+    Request body:
+        {
+            "projects": {
+                "ProjectName1": ["img1.jpg", "img2.jpg", ...],
+                "ProjectName2": ["imgA.jpg", "imgB.jpg", ...],
+                ...
+            }
+        }
+    """
+    data = request.get_json() or {}
+    projects_images = data.get("projects", {})
+
+    if not projects_images:
+        return fail("No images specified", 400)
+    
+    if not isinstance(projects_images, dict):
+        return fail("projects must be a dictionary of project_name -> image_list", 400)
+
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    
+    # Create in-memory zip file
+    memory_file = io.BytesIO()
+    
+    try:
+        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for project_name, image_files in projects_images.items():
+                if not image_files or not isinstance(image_files, list):
+                    continue
+                
+                # Check dir path without calling pm.project() which might be slow or fail if race
+                # But safer to just construct path if we trust pm.des_path
+                # project_manager usually ensures des_path is valid
+                
+                try:
+                    images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
+                    
+                    if not images_dir.exists() or not images_dir.is_dir():
+                        continue
+                        
+                    # Add requested images to zip
+                    for img_filename in image_files:
+                        img_filename = str(img_filename) # Ensure string
+                        # Basic security check - prevent traversal
+                        if ".." in img_filename or "/" in img_filename or "\\" in img_filename:
+                            continue
+                            
+                        img_path = images_dir / img_filename
+                        # Verify file exists
+                        if img_path.exists() and img_path.is_file():
+                            # Path inside zip: "{project_name} images/{img_filename}"
+                            zip_path = f"{project_name} images/{img_filename}"
+                            zf.write(str(img_path), zip_path)
+                            
+                except Exception as e:
+                    print(f"Error filtering images for project {project_name}: {e}")
+                    continue
+                    
+    except Exception as e:
+        return fail(f"Failed to create zip file: {str(e)}", 500)
+        
+    memory_file.seek(0)
+    
+    return send_file(
+        memory_file,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"filtered_images_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    )
 
 @bp.get("/attribute-mappings")
 def get_attribute_mappings():
@@ -1396,6 +1474,9 @@ def update_attributes(name: str):
     # Convert incoming rows to DataFrame
     new_attrs_df = pd.DataFrame(rows)
 
+    # Get latest version for updating
+    ver = proj.latest()
+
     # --- INJECTED LOGIC: Calculate Scores & Persist Bands ---
     try:
         # 1. Convert types for scoring
@@ -1403,6 +1484,16 @@ def update_attributes(name: str):
         
         # 2. Calculate scores (native Python implementation)
         results_df = calculate_cyclerap_score_native(scoring_df)
+
+        # --- FIX: Persist numeric scores to results.csv ---
+        # The previous code calculated scores but only used them to update "Bands" in attributes.csv.
+        # It failed to save the actual numeric scores to results.csv, causing the frontend to show old data.
+        if ver._results is None:
+            ver._results = serializer.Results()
+        
+        ver.results.df = results_df
+             
+        # --------------------------------------------------
 
         # 3. Extract Band columns
         # We want to keep "Overall Risk Level Band" and individual bands like "BB Band", "VB Band", etc.
@@ -1423,7 +1514,6 @@ def update_attributes(name: str):
     # --------------------------------------------------------
 
     # Write to the latest version
-    ver = proj.latest()
     ver.attributes.df = new_attrs_df
     ver.attributes.df_dirty = True
     proj.save_all()  # If a day rolls over, a new version may be created
@@ -1731,6 +1821,23 @@ def update_project_metadata(project_name: str):
 
             try:
                 old_path.rename(new_path)
+
+                # Rename images inside the project folder
+                try:
+                    import re
+                    images_dir = new_path / global_var.PROJECT_IMAGES_FOLDER
+                    if images_dir.exists() and images_dir.is_dir():
+                        for img_file in images_dir.iterdir():
+                            if img_file.is_file():
+                                match = re.search(r"(?:^|_)(Cam\d+.*)", img_file.name, re.IGNORECASE)
+                                if match:
+                                    suffix = match.group(1)
+                                    new_filename = f"{new_name}_{suffix}"
+                                    
+                                    if new_filename != img_file.name:
+                                        img_file.rename(images_dir / new_filename)
+                except Exception as e:
+                    print(f"Warning: Failed to rename some images: {e}")
 
                 # Update metadata
                 proj.project_path = new_path

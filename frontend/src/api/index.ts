@@ -739,3 +739,22 @@ export async function uploadImagesToSourceFolder(
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
+
+/**
+ * Download filtered images as a ZIP file
+ * @param payload - Map of project names to list of image references
+ */
+export async function downloadFilteredImages(payload: { projects: Record<string, string[]> }) {
+  const res = await fetch("/api/projects/download-images", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorText = await readError(res);
+    throw new Error(errorText || "Download failed");
+  }
+
+  return res.blob();
+}

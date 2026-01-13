@@ -6,7 +6,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
-import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, type AttributeRow } from "../../../api";
+import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, downloadFilteredImages, type AttributeRow } from "../../../api";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 // --- EPSG:3414 (SVY21 / Singapore TM) definition -> EPSG:4326 ---
@@ -1086,6 +1086,53 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     URL.revokeObjectURL(url);
   };
 
+  // Download Filtered Images
+  const handleDownloadImages = async () => {
+    try {
+      // 1. Collect images from sortedData (filtered)
+      const projectImages: Record<string, string[]> = {};
+
+      sortedData.forEach(point => {
+        const projectName = point.projectName;
+        const imageRef = point.f.properties?.["Image Reference"];
+
+        // Skip if no image reference or placeholder
+        if (projectName && imageRef && imageRef !== "-" && imageRef !== "None" && imageRef !== "") {
+          if (!projectImages[projectName]) {
+            projectImages[projectName] = [];
+          }
+          projectImages[projectName].push(imageRef);
+        }
+      });
+
+      // Check if we have any images
+      const totalImages = Object.values(projectImages).reduce((acc, list) => acc + list.length, 0);
+      if (totalImages === 0) {
+        alert("No images found in the current filtered selection.");
+        return;
+      }
+
+      // 2. Call API
+      // Show loading indicator usually, but for now just await
+      // You might want to set loading=true if you have a global loading state or local one
+      const blob = await downloadFilteredImages({ projects: projectImages });
+
+      // 3. Trigger Download
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `filtered_images_${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+    } catch (e: any) {
+      console.error("Failed to download images", e);
+      alert(`Failed to download images: ${e.message}`);
+    }
+  };
+
   // Calculate category distribution data for the chart
   const categoryDistributionData = useMemo(() => {
     if (!primaryFocusAttribute) return [];
@@ -1318,13 +1365,23 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
             <Tabs.Trigger value="table">Table View</Tabs.Trigger>
           </Tabs.List>
           {allPoints.length > 0 && (
-            <Button
-              colorPalette="blue"
-              size="sm"
-              onClick={handleDownloadCSV}
-            >
-              Download Table
-            </Button>
+            <HStack gap="2">
+              <Button
+                colorPalette="blue"
+                size="sm"
+                onClick={handleDownloadCSV}
+              >
+                Download Table
+              </Button>
+              <Button
+                colorPalette="teal"
+                size="sm"
+                variant="outline"
+                onClick={handleDownloadImages}
+              >
+                Download Images
+              </Button>
+            </HStack>
           )}
         </Flex>
 

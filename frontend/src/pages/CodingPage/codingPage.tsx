@@ -1055,7 +1055,22 @@ export default function CodingPage() {
       });
 
       Promise.all(savePromises)
-        .then(() => {
+        .then(async () => {
+          // Re-fetch scores for all saved projects to reflect backend updates
+          for (const projName of projectList) {
+            try {
+              const res = await fetch(`/api/projects/${encodeURIComponent(projName)}/results`);
+              if (res.ok) {
+                const result = await res.json();
+                if (result.ok && result.result_rows) {
+                  updateProjectData(projName, { scores: result.result_rows });
+                }
+              }
+            } catch (e) {
+              // Ignore fetch error, user just won't see updated scores immediately
+            }
+          }
+
           // Dispatch events to update Projects page for all projects
           projectList.forEach(projName => {
             const projData = projectData[projName];
