@@ -1,6 +1,13 @@
 import { useMemo } from "react";
-import { Box, Flex, Grid, GridItem, Text } from "@chakra-ui/react";
+import { Box, Flex, Grid, GridItem, Text, Image } from "@chakra-ui/react";
 import { RISK_BAND_COLORS } from "./colorConstants";
+
+// Import Crash Type Icons
+import iconBB from "../../../../CycleRAP Assets/BB.png";
+import iconBP from "../../../../CycleRAP Assets/BP.png";
+import iconSB from "../../../../CycleRAP Assets/SB.png";
+import iconVB from "../../../../CycleRAP Assets/VB.png";
+
 
 interface SegmentScoresCardProps {
   scores: {
@@ -26,25 +33,25 @@ const CRASH_TYPES = [
   {
     key: "BB",
     label: "Bicycle-Bicycle",
-    icon: "BB",
+    icon: iconBB,
     shortLabel: "BB",
   },
   {
     key: "BP",
     label: "Bicycle-Pedestrian",
-    icon: "BP",
+    icon: iconBP,
     shortLabel: "BP",
   },
   {
     key: "SB",
     label: "Single-Bicycle",
-    icon: "SB",
+    icon: iconSB,
     shortLabel: "SB",
   },
   {
     key: "VB",
     label: "Vehicle-Bicycle",
-    icon: "VB",
+    icon: iconVB,
     shortLabel: "VB",
   },
 ];
@@ -222,36 +229,48 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                 return (
                   <GridItem key={type.key}>
                     <Flex
-                      direction="column"
+                      direction="row"
                       align="center"
                       justify="center"
                       bg={improved && showPreviewBackground ? "gray.50" : getLightBgColor(type.score, type.key)}
                       _dark={{ bg: improved && showPreviewBackground ? "gray.900" : getDarkBgColor(type.score, type.key) }}
                       borderRadius="sm"
                       p="1"
+                      gap="4" // Controls spacing between logo and crash type scores
                       textAlign="center"
-                      h={reduction !== null ? "65px" : "50px"}
+                      h={reduction !== null ? "80px" : "60px"}
                       color="black"
                     >
-                      {/* Label */}
-                      <Text fontSize="xs" fontWeight="bold" lineHeight="1">
-                        {type.shortLabel}
-                      </Text>
+                      {/* Icon */}
+                      <Image
+                        src={type.icon}
+                        alt={type.shortLabel}
+                        h="32px"
+                        objectFit="contain"
+                      />
 
-                      {/* Score Value */}
-                      <Text
-                        fontSize="sm"
-                        fontWeight="bold"
-                      >
-                        {type.score.toFixed(1)}
-                      </Text>
-
-                      {/* Reduction indicator */}
-                      {reduction !== null && improved && (
-                        <Text fontSize="2xs" color={improved ? "green.600" : "gray.600"} _dark={{ color: improved ? "green.300" : "gray.400" }} lineHeight="1" mt="0.5">
-                          ↓ {reduction.toFixed(2)}
+                      <Flex direction="column" align="center" justify="center">
+                        {/* Label */}
+                        <Text fontSize="md" fontWeight="bold" lineHeight="1">
+                          {type.shortLabel}
                         </Text>
-                      )}
+
+                        {/* Score Value */}
+                        <Text
+                          fontSize="xl"
+                          fontWeight="bold"
+                          lineHeight="1.2"
+                        >
+                          {type.score.toFixed(1)}
+                        </Text>
+
+                        {/* Reduction indicator */}
+                        {reduction !== null && improved && (
+                          <Text fontSize="xs" color={improved ? "green.600" : "gray.600"} _dark={{ color: improved ? "green.300" : "gray.400" }} lineHeight="1">
+                            ↓ {reduction.toFixed(2)}
+                          </Text>
+                        )}
+                      </Flex>
                     </Flex>
                   </GridItem>
                 );
@@ -273,26 +292,28 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                       _dark={{ bg: totalImproved && showPreviewBackground ? "gray.900" : undefined }}
                       borderRadius="sm"
                       p="1"
+                      gap="0"
                       textAlign="center"
-                      h={totalReduction !== null ? "65px" : "50px"}
+                      h={totalReduction !== null ? "80px" : "60px"}
                       color="black"
                     >
                       {/* Total label */}
-                      <Text fontSize="xs" fontWeight="bold" lineHeight="1">
+                      <Text fontSize="md" fontWeight="bold" lineHeight="1">
                         CycleRAP Score
                       </Text>
 
                       {/* Total score value */}
                       <Text
-                        fontSize="sm"
+                        fontSize="xl"
                         fontWeight="bold"
+                        lineHeight="1.2"
                       >
                         {totalScore.toFixed(1)}
                       </Text>
 
                       {/* Reduction indicator */}
                       {totalReduction !== null && totalImproved && (
-                        <Text fontSize="2xs" color={totalImproved ? "green.600" : "gray.600"} _dark={{ color: totalImproved ? "green.300" : "gray.400" }} lineHeight="1" mt="0.5">
+                        <Text fontSize="xs" color={totalImproved ? "green.600" : "gray.600"} _dark={{ color: totalImproved ? "green.300" : "gray.400" }} lineHeight="1">
                           ↓ {totalReduction.toFixed(2)}
                         </Text>
                       )}

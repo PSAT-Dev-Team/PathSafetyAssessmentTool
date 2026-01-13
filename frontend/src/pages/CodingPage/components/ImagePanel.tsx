@@ -37,7 +37,7 @@ export default function ImagePanel({ projectName, imageRef }: Props) {
             h="100%"
             w="100%"
             display="flex"
-            alignItems="flex-end"
+            alignItems="center"
             justifyContent="center"
           >
             <Image

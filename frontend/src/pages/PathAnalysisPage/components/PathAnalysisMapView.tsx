@@ -819,7 +819,38 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           if (numCompare !== 0) {
             return direction === 'asc' ? numCompare : -numCompare;
           }
-        } else {
+        }
+        // Semantic comparison for Risk Levels (Low < Medium < High < Extreme)
+        else if (column === "Overall Risk Level" || ["VB Band", "BB Band", "SB Band", "BP Band"].includes(column)) {
+          const riskOrder = ["Low", "Medium", "High", "Extreme"];
+          const aIndex = riskOrder.indexOf(aVal);
+          const bIndex = riskOrder.indexOf(bVal);
+
+          // If value not found (e.g. "-"), treat as lowest or handle separately
+          // Here we treat unknown values as smaller than "Low"
+          const aRank = aIndex === -1 ? -1 : aIndex;
+          const bRank = bIndex === -1 ? -1 : bIndex;
+
+          const rankCompare = aRank - bRank;
+          if (rankCompare !== 0) {
+            return direction === 'asc' ? rankCompare : -rankCompare;
+          }
+        }
+        // Semantic comparison for Facility Width (Very Narrow < Narrow < Wide)
+        else if (column === "Facility Width per Direction") {
+          const widthOrder = ["Very Narrow", "Narrow", "Wide"];
+          const aIndex = widthOrder.indexOf(aVal);
+          const bIndex = widthOrder.indexOf(bVal);
+
+          const aRank = aIndex === -1 ? -1 : aIndex;
+          const bRank = bIndex === -1 ? -1 : bIndex;
+
+          const rankCompare = aRank - bRank;
+          if (rankCompare !== 0) {
+            return direction === 'asc' ? rankCompare : -rankCompare;
+          }
+        }
+        else {
           // String comparison for other columns
           const strCompare = aVal.localeCompare(bVal);
           if (strCompare !== 0) {
@@ -1697,7 +1728,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 </Box>
 
                 {/* Table */}
-                <Box overflowX="auto">
+                <Box overflowX="auto" overflowY="auto" maxH="650px">
                   <table
                     style={{
                       width: "100%",
@@ -1720,6 +1751,10 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                                 borderBottom: "2px solid var(--chakra-colors-border-subtle)",
                                 cursor: "pointer",
                                 userSelect: "none",
+                                position: "sticky",
+                                top: 0,
+                                zIndex: 1,
+                                backgroundColor: "var(--chakra-colors-bg-subtle)",
                               }}
                               onClick={() => handleHeaderClick(col.key)}
                             >

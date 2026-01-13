@@ -24,6 +24,7 @@ type Props = {
   fieldSources?: Record<string, string>; // Field name -> "CV" | "GIS"
   readOnly?: boolean; // If true, disable editing (display-only mode)
   headerAction?: React.ReactNode; // Optional action/toggle to display next to "Attributes" heading
+  highlightMessage?: string; // Custom message for changed attributes
 };
 
 /** ====== Group ordering (tab order) ====== */
@@ -207,6 +208,7 @@ export default function AttributesPanel({
   fieldSources = {},
   readOnly = false,
   headerAction,
+  highlightMessage = "*Highlighted attributes have been modified from the original values",
 }: Props) {
   const grouped = useMemo(() => (row ? groupEntries(row) : null), [row]);
 
@@ -276,7 +278,7 @@ export default function AttributesPanel({
   }
 
   return (
-    <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
+    <Card.Root minH={`${panelHeight}px`} display="flex" flexDirection="column">
       <Card.Header display="flex" flexDirection="row" justifyContent="space-between" alignItems="center" gap="2">
         <Box display="flex" flexDirection="row" alignItems="baseline" gap="2">
           <Heading size="sm" flex="0 0 auto">Attributes</Heading>
@@ -286,7 +288,7 @@ export default function AttributesPanel({
               color="gray.600"
               transition="opacity 0.3s"
             >
-              Highlighted attributes have been modified from the original values
+              {highlightMessage}
             </Text>
           )}
         </Box>
@@ -296,7 +298,7 @@ export default function AttributesPanel({
       {/* Tabs occupy the body; content area scrolls independently */}
       <Card.Body display="flex" flexDir="column" minH={0} p="0">
         <Tabs.Root defaultValue={defaultTab}>
-          <Tabs.List px="2" py="2" overflowX="auto" gap="1">
+          <Tabs.List px="2" py="2" flexWrap="wrap" gap="1">
             {groupsWithFields.map((g) => (
               <Tabs.Trigger key={g} value={g}>
                 {g}
@@ -311,8 +313,8 @@ export default function AttributesPanel({
             const fields = grouped![groupName] ?? [];
             return (
               <Tabs.Content key={groupName} value={groupName}>
-                {/* Scrollable area for this tab */}
-                <Box minH={0} h={`${panelHeight - 150}px`} overflowY="auto" px="4" py="3">
+                {/* Content area expands naturally */}
+                <Box px="4" py="3">
 
                   {/* Responsive grid: 1 col on small, 2 cols on md+ */}
                   <SimpleGrid columns={{ base: 1, md: 2 }} gap="4">
@@ -331,14 +333,14 @@ export default function AttributesPanel({
                           gap="1"
                           p="2"
                           borderRadius="md"
-                          bg={isEdited ? "red.50" : isChanged ? "yellow.100" : "transparent"}
+                          bg={isEdited ? "red.50" : isChanged ? "green.100" : "transparent"}
                           borderWidth={isEdited || isChanged ? "2px" : "0px"}
-                          borderColor={isEdited ? "red.200" : isChanged ? "yellow.500" : "transparent"}
+                          borderColor={isEdited ? "red.200" : isChanged ? "green.500" : "transparent"}
                           transition="all 0.2s"
                         >
                           <Text
                             fontSize="xs"
-                            color={isEdited ? "red.800" : isChanged ? { base: "yellow.900", _dark: "yellow.900" } : "gray.600"}
+                            color={isEdited ? "red.800" : isChanged ? { base: "green.900", _dark: "green.900" } : "gray.600"}
                             fontWeight={isEdited || isChanged ? "bold" : "semibold"}
                           >
                             {k}
@@ -370,9 +372,9 @@ export default function AttributesPanel({
                                   onEdit?.(k, val);
                                 }}
                                 style={{
-                                  borderColor: isEdited ? "#E53E3E" : isChanged ? "#D69E2E" : undefined,
+                                  borderColor: isEdited ? "#E53E3E" : isChanged ? "#38A169" : undefined, // green.500
                                   borderWidth: isEdited || isChanged ? "2px" : undefined,
-                                  backgroundColor: isEdited ? "#FFF5F5" : isChanged ? "#FEFCBF" : undefined,
+                                  backgroundColor: isEdited ? "#FFF5F5" : isChanged ? "#F0FFF4" : undefined, // green.50
                                 }}
                                 color={isEdited || isChanged ? "gray.900" : undefined}
                                 _dark={{

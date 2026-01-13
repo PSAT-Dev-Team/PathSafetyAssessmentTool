@@ -649,7 +649,7 @@ export default function AttributesDropdown({
                   </Box>
 
                   {/* Add/Remove Filter Buttons */}
-                  {index === 0 && canAddMoreFilters && (
+                  {index === selectedAttributes.length - 1 && canAddMoreFilters && (
                     <Button
                       size="md"
                       variant="outline"

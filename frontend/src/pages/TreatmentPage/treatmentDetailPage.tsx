@@ -846,7 +846,7 @@ export default function TreatmentDetailPage() {
       </Grid>
 
       {/* Main layout: 3 Columns - Image | Treatments | Scores+Attributes */}
-      <Grid templateColumns={{ base: "1fr", lg: "1fr 1.5fr 1fr" }} gap="16px" mb="6">
+      <Grid templateColumns={{ base: "1fr", lg: "0.5fr 1.5fr 1.5fr" }} gap="16px" mb="6">
         {/* Left: Recommended Treatments (Vertical, Scrollable) */}
         <GridItem
           display="flex"
@@ -1147,6 +1147,7 @@ export default function TreatmentDetailPage() {
 
           <Box flex="1 1 auto" minH={0}>
             <AttributesPanel
+              highlightMessage="*Attributes highlighted in green are modified post treatment"
               row={showPostTreatment && treatmentState[currentIndex]?.applied
                 ? modifiedAttrs
                 : attrs[currentIndex] ?? null}

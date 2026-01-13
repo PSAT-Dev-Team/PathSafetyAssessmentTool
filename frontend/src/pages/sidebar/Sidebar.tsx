@@ -9,6 +9,7 @@ import TreatmentSidebar from "./components/TreatmentSidebar";
 import ResetConfirmationDialog from "./components/ResetConfirmationDialog";
 import ShapefileModal from "./components/ShapefileModal";
 import ExitConfirmationDialog from "./components/ExitConfirmationDialog";
+import psatLogo from "../LandingPage/assets/PSAT Logo 2.png";
 import "./sidebar.css";
 
 const LINKS = [
@@ -261,7 +262,8 @@ export default function Sidebar() {
     <aside className="psat-sidebar" aria-label="PSAT sidebar">
       {/* Top: PSAT + buttons */}
       <div className="psat-side-top">
-        <div className="psat-brand">PSAT</div>
+        <img src={psatLogo} alt="PSAT" className="psat-brand-logo" />
+        <h1 className="psat-sidebar-title">Path Safety Assessment Tool</h1>
 
         <div className="psat-actions">
           {LINKS.map(({ to, label }) => {
