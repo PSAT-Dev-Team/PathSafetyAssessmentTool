@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input } from "@chakra-ui/react";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import { Switch } from "../../../components/ui/switch";
@@ -61,6 +62,7 @@ type ProjectData = {
 };
 
 export default function AttributeAnalysisMapView({ selectedProjects, selectedAttributes, onChartDataUpdate }: AttributeAnalysisMapViewProps) {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string>("map");
   const [projectsData, setProjectsData] = useState<ProjectData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -523,7 +525,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // Helper function to get column value as string
   function getColumnValue(point: any, columnKey: string): string {
     if (columnKey === "Project") return point.projectName;
-    if (columnKey === "Segment #") return point.idx.toString();
+    if (columnKey === "Segment #") return (point.idx + 1).toString();
     if (columnKey === "Image Reference") return point.f.properties?.["Image Reference"] ?? "-";
     if (columnKey === "Coordinates") return `${point.latlng[0].toFixed(6)}, ${point.latlng[1].toFixed(6)}`;
     if (columnKey === "Overall Risk Score") {
@@ -1693,7 +1695,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 {/* Render all points as markers */}
                 {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
                   const radius = 5;
-                  let label = `${projectName} - #${idx}`;
+                  let label = `${projectName} - #${idx + 1}`;
                   if (f.properties?.["Image Reference"]) {
                     label += ` ${f.properties["Image Reference"]}`;
                   }
@@ -1707,6 +1709,15 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                       center={latlng}
                       radius={radius}
                       pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
+                      eventHandlers={{
+                        click: () => {
+                          // Navigate to coding page for this project and segment
+                          const segmentIdx = idx + 1; // 1-based index for UI
+                          navigate(`/coding/${encodeURIComponent(projectName)}?segment=${segmentIdx}`, {
+                            state: { returnToAnalysis: true }
+                          });
+                        }
+                      }}
                     >
                       <Tooltip>{label}</Tooltip>
                     </CircleMarker>

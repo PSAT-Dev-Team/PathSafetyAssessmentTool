@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import {
   Box,
   Flex,
@@ -17,6 +17,7 @@ import {
 
 import type { Feature, FeatureCollection, LineString } from "geojson";
 import { toaster } from "../../components/ui/toaster";
+import ExitConfirmationDialog from "../sidebar/components/ExitConfirmationDialog";
 
 
 import {
@@ -142,6 +143,30 @@ export default function CodingPage() {
   const cleanupTimeoutRef = useRef<number | null>(null);
   const scoreDebounceRef = useRef<Record<number, number>>({});
   const autoCodingRef = useRef(false);
+
+  // Handle query params for deep linking (e.g. ?segment=5)
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const initialSegment = queryParams.get("segment");
+  const hasInitializedSegmentRef = useRef(false);
+
+  // Save confirmation dialog state
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!initialSegment || !currentProjectName || hasInitializedSegmentRef.current) return;
+
+    const segmentIdx = parseInt(initialSegment, 10);
+    if (!isNaN(segmentIdx) && segmentIdx > 0) {
+      // We can only set the page if we know the total length, or at least we trust the input.
+      // The actual clamping happens in updateProjectData or valid rendering,
+      // but here we just blindly set the currentPage if it seems valid.
+      // We'll trust the component to clamp it if it's out of bounds once data is loaded.
+      updateProjectData(currentProjectName, { currentPage: segmentIdx });
+      hasInitializedSegmentRef.current = true;
+    }
+  }, [initialSegment, currentProjectName]);
 
   // Get current project data with defaults
   const currentData = useMemo<ProjectDataState>(() => {
@@ -388,6 +413,15 @@ export default function CodingPage() {
     [currentProjectName]
   );
 
+  // Helper to save autocode metadata
+  const saveAutocodeMetadata = useCallback((projName: string, changedFields: any, fieldSources: any) => {
+    fetch(`/api/projects/${encodeURIComponent(projName)}/autocode-metadata`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changedFieldsByRow: changedFields, fieldSourcesByRow: fieldSources })
+    }).catch(e => console.error("Failed to save autocode metadata", e));
+  }, []);
+
   // Auto-code one segment
   useEffect(() => {
     if (!currentProjectName) return;
@@ -438,6 +472,15 @@ export default function CodingPage() {
             ...fieldSourcesByRow,
             [currentIndex]: fieldSources
           }
+        });
+
+        // Save metadata immediately
+        saveAutocodeMetadata(currentProjectName, {
+          ...changedFieldsByRow,
+          [currentIndex]: allChanged
+        }, {
+          ...fieldSourcesByRow,
+          [currentIndex]: fieldSources
         });
 
         applyUpdatesToCurrentRow(merged);
@@ -547,6 +590,9 @@ export default function CodingPage() {
               changedFieldsByRow: allChangedFieldsByRow,
               fieldSourcesByRow: allSourcesByRow,
             });
+
+            // Save metadata
+            saveAutocodeMetadata(currentProjectName, allChangedFieldsByRow, allSourcesByRow);
 
             // Update autocode baseline with new values from all segments
             updateAutocodeBaseline(a.rows);
@@ -700,6 +746,10 @@ export default function CodingPage() {
                   fieldSourcesByRow: projectSourcesByRow,
                 });
 
+                // Save metadata
+                saveAutocodeMetadata(projectName, projectChangedFieldsByRow, projectSourcesByRow);
+
+
                 // Update autocode baseline for this project
                 try {
                   fetch(`/api/projects/${encodeURIComponent(projectName)}/baseline`, {
@@ -794,11 +844,12 @@ export default function CodingPage() {
       try {
         updateProjectData(currentProjectName, { loading: true, error: null });
 
-        const [d, a, gjson, metadata] = await Promise.all([
+        const [d, a, gjson, metadata, autoMeta] = await Promise.all([
           fetchProjectDetail(currentProjectName),
           fetchProjectAttributes(currentProjectName) as Promise<AttributesResponse>,
           fetchProjectGeoJSON(currentProjectName) as Promise<FeatureCollection>,
           fetchProjectMetadata(currentProjectName).catch(() => null),
+          fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/autocode-metadata`).then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
 
         if (cancelled) return;
@@ -886,11 +937,12 @@ export default function CodingPage() {
           detail: d ?? null,
           attrs: attributes,
           geoFeatures: gjson?.features ?? [],
-          currentPage: 1,
           editedRow: null,
           verified: metadata?.verified ?? false,
           verifiedSegmentCount: metadata?.verified_segment_count ?? 0,
           autocodedSegmentCount: metadata?.autocoded_segment_count ?? 0,
+          changedFieldsByRow: autoMeta?.changedFieldsByRow || {},
+          fieldSourcesByRow: autoMeta?.fieldSourcesByRow || {},
           loading: false,
         });
       } catch (e: any) {
@@ -1034,11 +1086,11 @@ export default function CodingPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Save handler - saves all loaded projects (attributes + metadata)
-  useEffect(() => {
-    function handleSave() {
-      if (projectList.length === 0) return;
+  // Reusable save function
+  const saveAllProjects = useCallback(async (): Promise<boolean> => {
+    if (projectList.length === 0) return true;
 
+    try {
       // Create save promises for all loaded projects
       const savePromises = projectList.map(projName => {
         const projData = projectData[projName];
@@ -1054,56 +1106,64 @@ export default function CodingPage() {
         ]);
       });
 
-      Promise.all(savePromises)
-        .then(async () => {
-          // Re-fetch scores for all saved projects to reflect backend updates
-          for (const projName of projectList) {
-            try {
-              const res = await fetch(`/api/projects/${encodeURIComponent(projName)}/results`);
-              if (res.ok) {
-                const result = await res.json();
-                if (result.ok && result.result_rows) {
-                  updateProjectData(projName, { scores: result.result_rows });
-                }
-              }
-            } catch (e) {
-              // Ignore fetch error, user just won't see updated scores immediately
+      await Promise.all(savePromises);
+
+      // Re-fetch scores for all saved projects to reflect backend updates
+      for (const projName of projectList) {
+        try {
+          const res = await fetch(`/api/projects/${encodeURIComponent(projName)}/results`);
+          if (res.ok) {
+            const result = await res.json();
+            if (result.ok && result.result_rows) {
+              updateProjectData(projName, { scores: result.result_rows });
             }
           }
+        } catch (e) {
+          // Ignore fetch error, user just won't see updated scores immediately
+        }
+      }
 
-          // Dispatch events to update Projects page for all projects
-          projectList.forEach(projName => {
-            const projData = projectData[projName];
-            if (projData) {
-              // Dispatch verified status update
-              window.dispatchEvent(new CustomEvent("psat:verified:updated", {
-                detail: { projectName: projName, verifiedSegmentCount: projData.verifiedSegmentCount ?? 0 }
-              }));
-              // Dispatch autocoded status update
-              window.dispatchEvent(new CustomEvent("psat:autocoded:updated", {
-                detail: { projectName: projName, autocodedSegmentCount: projData.autocodedSegmentCount ?? 0 }
-              }));
-            }
-          });
+      // Dispatch events to update Projects page for all projects
+      projectList.forEach(projName => {
+        const projData = projectData[projName];
+        if (projData) {
+          // Dispatch verified status update
+          window.dispatchEvent(new CustomEvent("psat:verified:updated", {
+            detail: { projectName: projName, verifiedSegmentCount: projData.verifiedSegmentCount ?? 0 }
+          }));
+          // Dispatch autocoded status update
+          window.dispatchEvent(new CustomEvent("psat:autocoded:updated", {
+            detail: { projectName: projName, autocodedSegmentCount: projData.autocodedSegmentCount ?? 0 }
+          }));
+        }
+      });
 
-          toaster.create({
-            title: "Saved",
-            description: `All ${projectList.length} project(s) saved successfully.`,
-            type: "success"
-          });
-        })
-        .catch((e) => {
-          toaster.create({
-            title: "Save failed",
-            description: String(e?.message ?? e),
-            type: "error"
-          });
-        });
+      toaster.create({
+        title: "Saved",
+        description: `All ${projectList.length} project(s) saved successfully.`,
+        type: "success"
+      });
+      return true;
+
+    } catch (e: any) {
+      toaster.create({
+        title: "Save failed",
+        description: String(e?.message ?? e),
+        type: "error"
+      });
+      return false;
+    }
+  }, [projectList, projectData]);
+
+  // Save handler - saves all loaded projects (attributes + metadata)
+  useEffect(() => {
+    function handleSaveEvent() {
+      saveAllProjects();
     }
 
-    window.addEventListener("psat:save", handleSave);
-    return () => window.removeEventListener("psat:save", handleSave);
-  }, [projectList, projectData, updateProject]);
+    window.addEventListener("psat:save", handleSaveEvent);
+    return () => window.removeEventListener("psat:save", handleSaveEvent);
+  }, [saveAllProjects]);
 
   // Update edited row when current row changes
   useEffect(() => {
@@ -1430,6 +1490,40 @@ export default function CodingPage() {
         >
           Coding Guide
         </Button>
+
+        {location.state?.returnToAnalysis && (
+          <Button
+            ml="auto"
+            variant="ghost"
+            colorPalette="blue"
+            size="sm"
+            onClick={() => {
+              // Open save confirmation dialog instead of navigating immediately
+              setIsSaveDialogOpen(true);
+            }}
+          >
+            ← Back to Path Analysis
+          </Button>
+        )}
+
+        <ExitConfirmationDialog
+          open={isSaveDialogOpen}
+          onCancel={() => setIsSaveDialogOpen(false)}
+          onDiscardAndExit={() => {
+            setIsSaveDialogOpen(false);
+            window.history.back();
+          }}
+          onSaveAndExit={async () => {
+            setIsSaving(true);
+            const success = await saveAllProjects();
+            setIsSaving(false);
+            if (success) {
+              setIsSaveDialogOpen(false);
+              window.history.back();
+            }
+          }}
+          isSaving={isSaving}
+        />
       </Flex>
 
       <Flex justify="space-between" align="center" mb="3">
@@ -1586,6 +1680,7 @@ export default function CodingPage() {
               onEdit={editCurrentAttr}
               changedFields={changedFieldsByRow[currentIndex] || []}
               fieldSources={fieldSourcesByRow[currentIndex] || {}}
+              highlightColor="yellow"
             />
           </Box>
 

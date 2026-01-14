@@ -8,6 +8,7 @@ interface OverallTreatmentAnalysisProps {
     BB: Record<number, number>;
     SB: Record<number, number>;
     BP: Record<number, number>;
+    Overall: Record<number, number>;
   };
   /** Band counts for after treatment (calculated from treated segments) */
   afterBandCounts: {
@@ -15,11 +16,13 @@ interface OverallTreatmentAnalysisProps {
     BB: Record<number, number>;
     SB: Record<number, number>;
     BP: Record<number, number>;
+    Overall: Record<number, number>;
   };
 }
 
-const CRASH_TYPES = ["BB", "SB", "BP", "VB"] as const;
+const CRASH_TYPES = ["Overall", "BB", "SB", "BP", "VB"] as const;
 const CRASH_TYPE_LABELS: Record<string, string> = {
+  Overall: "Overall Risk Level",
   BB: "Bicycle-Bicycle (BB)",
   SB: "Single-Bicycle (SB)",
   BP: "Bicycle-Pedestrian (BP)",
@@ -63,7 +66,7 @@ export default function OverallTreatmentAnalysis({
           >
             Before Treatment
           </Text>
-          <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }} gap="6">
+          <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", xl: "repeat(5, 1fr)" }} gap="6">
             {CRASH_TYPES.map((crashType) => (
               <GridItem key={`before-${crashType}`}>
                 <ScoreBandPieChart
@@ -86,7 +89,7 @@ export default function OverallTreatmentAnalysis({
           >
             After Treatment
           </Text>
-          <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }} gap="6">
+          <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", xl: "repeat(5, 1fr)" }} gap="6">
             {CRASH_TYPES.map((crashType) => (
               <GridItem key={`after-${crashType}`}>
                 <ScoreBandPieChart

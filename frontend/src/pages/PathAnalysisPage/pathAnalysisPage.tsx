@@ -16,21 +16,32 @@ import AttributeDistributionChart from "./components/AttributeDistributionChart"
 import AggregatedScoreBandPanel from "./components/AggregatedScoreBandPanel";
 import "./pathAnalysisPage.css";
 
+const SESSION_KEY_PREFIX = "pathAnalysis_";
+
+const loadState = <T,>(key: string, defaultVal: T): T => {
+  try {
+    const stored = sessionStorage.getItem(SESSION_KEY_PREFIX + key);
+    return stored ? JSON.parse(stored) : defaultVal;
+  } catch {
+    return defaultVal;
+  }
+};
+
 export default function PathAnalysisPage() {
   // Project list state
   const [projectList, setProjectList] = useState<FileResponse | null>(null);
-  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
-  const [loadedProjects, setLoadedProjects] = useState<string[]>([]);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>(() => loadState("selectedProjects", []));
+  const [loadedProjects, setLoadedProjects] = useState<string[]>(() => loadState("loadedProjects", []));
 
   // Filter states
-  const [dateCreatedFrom, setDateCreatedFrom] = useState("");
-  const [dateCreatedTo, setDateCreatedTo] = useState("");
-  const [lastUpdatedFrom, setLastUpdatedFrom] = useState("");
-  const [lastUpdatedTo, setLastUpdatedTo] = useState("");
-  const [tagsFilter, setTagsFilter] = useState<string[]>([]);
+  const [dateCreatedFrom, setDateCreatedFrom] = useState(() => loadState("dateCreatedFrom", ""));
+  const [dateCreatedTo, setDateCreatedTo] = useState(() => loadState("dateCreatedTo", ""));
+  const [lastUpdatedFrom, setLastUpdatedFrom] = useState(() => loadState("lastUpdatedFrom", ""));
+  const [lastUpdatedTo, setLastUpdatedTo] = useState(() => loadState("lastUpdatedTo", ""));
+  const [tagsFilter, setTagsFilter] = useState<string[]>(() => loadState("tagsFilter", []));
 
   // Selected attributes for visualization (up to 5)
-  const [selectedAttributes, setSelectedAttributes] = useState<(string | null)[]>([null]);
+  const [selectedAttributes, setSelectedAttributes] = useState<(string | null)[]>(() => loadState("selectedAttributes", [null]));
 
   // Combobox input states for filtering
   const [projectInputValue, setProjectInputValue] = useState("");
@@ -57,6 +68,30 @@ export default function PathAnalysisPage() {
       .then((data) => setProjectList(data))
       .catch(() => { });
   }, []);
+
+  // Save state to session storage
+  useEffect(() => {
+    const saveState = (key: string, val: any) => {
+      sessionStorage.setItem(SESSION_KEY_PREFIX + key, JSON.stringify(val));
+    };
+    saveState("selectedProjects", selectedProjects);
+    saveState("loadedProjects", loadedProjects);
+    saveState("dateCreatedFrom", dateCreatedFrom);
+    saveState("dateCreatedTo", dateCreatedTo);
+    saveState("lastUpdatedFrom", lastUpdatedFrom);
+    saveState("lastUpdatedTo", lastUpdatedTo);
+    saveState("tagsFilter", tagsFilter);
+    saveState("selectedAttributes", selectedAttributes);
+  }, [
+    selectedProjects,
+    loadedProjects,
+    dateCreatedFrom,
+    dateCreatedTo,
+    lastUpdatedFrom,
+    lastUpdatedTo,
+    tagsFilter,
+    selectedAttributes
+  ]);
 
   // Process projects
   const projects = useMemo(() => {
@@ -191,9 +226,11 @@ export default function PathAnalysisPage() {
           Path Analysis
         </Text>
         <Text fontSize="sm" color="fg.muted">
-          Select one or more projects to analyze attributes across multiple projects
+          Select one or more projects to analyze
         </Text>
       </Box>
+
+
 
       {/* Filter Panel */}
       <Box
@@ -300,9 +337,10 @@ export default function PathAnalysisPage() {
                     <Button
                       size="xs"
                       variant="ghost"
-                      onClick={() =>
-                        setSelectedProjects(selectedProjects.filter((p) => p !== proj))
-                      }
+                      onClick={() => {
+                        setSelectedProjects(selectedProjects.filter((p) => p !== proj));
+                        setLoadedProjects(loadedProjects.filter((p) => p !== proj));
+                      }}
                       px="1"
                     >
                       ×
@@ -458,6 +496,13 @@ export default function PathAnalysisPage() {
         </Flex>
       </Box>
 
+      {/* Aggregated Score Band Distribution Panel */}
+      {loadedProjects.length > 0 && (
+        <Box mb="6">
+          <AggregatedScoreBandPanel selectedProjects={loadedProjects} />
+        </Box>
+      )}
+
       {/* Attributes Dropdown Section */}
       <Box mb="6">
         <AttributesDropdown
@@ -493,12 +538,7 @@ export default function PathAnalysisPage() {
         </Box>
       )}
 
-      {/* Aggregated Score Band Distribution Panel */}
-      {loadedProjects.length > 0 && (
-        <Box mt="6">
-          <AggregatedScoreBandPanel selectedProjects={loadedProjects} />
-        </Box>
-      )}
+
     </Box>
   );
 }

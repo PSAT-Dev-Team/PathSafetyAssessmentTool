@@ -36,7 +36,7 @@ export default function TreatmentSidebar({
           onClick={onResetAll}
           w="100%"
           size="sm"
-          variant="outline"
+          variant="solid"
           colorPalette="red"
         >
           Reset All

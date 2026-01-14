@@ -18,6 +18,8 @@ type Props = {
   containerHeight?: number;                  // 容器总高度（包括header）
   scores?: ScoreRow[];                       // Optional scores passed from parent for real-time updates
   subtitle?: string;                         // Optional subtitle to display next to "Map Preview"
+  geoFeatures?: Feature<LineString, any>[];  // Optional pre-loaded geofeatures (for multi-project display)
+  startIndex?: number;                       // Start index in global segments array (used with geoFeatures for multi-project)
 };
 
 type GJ = FeatureCollection<LineString, any>;
@@ -49,7 +51,7 @@ function FitBounds({ points }: { points: [number, number][] }) {
   return null;
 }
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0 }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
@@ -58,6 +60,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [fc, setFc] = useState<GJ | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Use external geofeatures if provided (for multi-project display), otherwise use fetched data
+  const hasExternalGeoFeatures = externalGeoFeatures && externalGeoFeatures.length > 0;
 
   // Internal scores state (fallback if externalScores not provided)
   const [internalScores, setInternalScores] = useState<ScoreRow[]>([]);
@@ -86,8 +91,15 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   };
   const [gisLayers, setGisLayers] = useState<GISLayers | null>(null);
 
-  // 拉取整条 geodata（不改其它文件）
+  // 拉取整条 geodata（如果没有 external geofeatures）
   useEffect(() => {
+    // Skip if we have external geofeatures provided by parent
+    if (hasExternalGeoFeatures) {
+      setFc({ type: "FeatureCollection", features: externalGeoFeatures });
+      setLoading(false);
+      return;
+    }
+
     if (!decodedName) return;
     let aborted = false;
     (async () => {
@@ -105,7 +117,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
       }
     })();
     return () => { aborted = true; };
-  }, [decodedName]);
+  }, [decodedName, hasExternalGeoFeatures, externalGeoFeatures]);
 
   // Helper function to fetch scores
   const fetchScores = useCallback(async () => {
@@ -148,28 +160,37 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   }, [fetchScores, externalScores]);
 
   // 取每条 LineString 的首点（转 4326），并保留原 feature
+  // For multi-project display, localIdx is the index within geoFeatures,
+  // and globalIdx is the index within the aggregated scores array
   const points = useMemo(() => {
-    if (!fc) return [] as { idx: number; latlng: [number, number]; f: Feature<LineString, any> }[];
-    const arr: { idx: number; latlng: [number, number]; f: Feature<LineString, any> }[] = [];
+    if (!fc) return [] as { localIdx: number; globalIdx: number; latlng: [number, number]; f: Feature<LineString, any> }[];
+    const arr: { localIdx: number; globalIdx: number; latlng: [number, number]; f: Feature<LineString, any> }[] = [];
     fc.features.forEach((f, i) => {
       const g = f.geometry;
       if (g?.type === "LineString" && Array.isArray(g.coordinates) && g.coordinates.length > 0) {
-        arr.push({ idx: i, latlng: to4326(g.coordinates[0]), f });
+        arr.push({ localIdx: i, globalIdx: startIndex + i, latlng: to4326(g.coordinates[0]), f });
       }
     });
     return arr;
-  }, [fc]);
+  }, [fc, startIndex]);
 
   const allLatLngs = useMemo(() => points.map(p => p.latlng), [points]);
 
-  // 当前高亮点
-  const current = useMemo(() => points.find(p => p.idx === index) ?? null, [points, index]);
+  // 当前高亮点 - use globalIdx to match the index prop (global index)
+  const current = useMemo(() => points.find(p => p.globalIdx === index) ?? null, [points, index]);
 
   // 初始中心（无数据时默认新加坡中心点）
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
 
   // Fetch GIS layers when any toggle is turned on and we have a current point
+  // Skip GIS layers when using external geofeatures from multiple projects
   useEffect(() => {
+    // Don't fetch GIS layers for multi-project display
+    // if (hasExternalGeoFeatures) {
+    //   setGisLayers(null);
+    //   return;
+    // }
+
     if (!decodedName || !current) return;
 
     const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing;
@@ -206,7 +227,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     })();
 
     return () => { aborted = true; };
-  }, [decodedName, current, showFootpath, showCycling, showShared, showRoadcrossing]);
+  }, [decodedName, current, showFootpath, showCycling, showShared, showRoadcrossing, hasExternalGeoFeatures]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
@@ -409,16 +430,16 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
               )}
 
               {/* 所有起点 */}
-              {points.map(({ idx, latlng, f }) => {
-                const isActive = idx === index;
-                const baseColor = getSegmentColor(idx);
+              {points.map(({ globalIdx, latlng, f }) => {
+                const isActive = globalIdx === index;
+                const baseColor = getSegmentColor(globalIdx);
                 const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
                 const radius = isActive ? 8 : 5;
                 // Handle both new and old column names for backward compatibility
-                const scoreValue = activeScores[idx]?.["Overall Risk Level"] ?? activeScores[idx]?.["CycleRAP score"];
-                const label = `#${idx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
+                const scoreValue = activeScores[globalIdx]?.["Overall Risk Level"] ?? activeScores[globalIdx]?.["CycleRAP score"];
+                const label = `#${globalIdx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
                 // Include score in key to force re-render when score changes
-                const keyWithScore = `${idx}-${scoreValue?.toFixed(2) ?? "loading"}`;
+                const keyWithScore = `${globalIdx}-${scoreValue?.toFixed(2) ?? "loading"}`;
 
                 return (
                   <CircleMarker
@@ -426,7 +447,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                     center={latlng}
                     radius={radius}
                     pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
-                    eventHandlers={{ click: () => onJump?.(idx) }}   // ← 点击跳页
+                    eventHandlers={{ click: () => onJump?.(globalIdx) }}   // ← 跳转到全局索引
                   >
                     <Tooltip>{label}</Tooltip>
                   </CircleMarker>

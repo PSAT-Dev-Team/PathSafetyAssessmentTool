@@ -155,11 +155,7 @@ class Project:
         merged.latest().path = temp_path
         merged.latest()._attributes = serializer.Attributes()
         
-        st.write(f"Merging {self.metadata.project_name} and {rhs.metadata.project_name}")
-        st.write(f"{self.metadata.project_name}: {self.latest().attributes.df}")
-        st.write(f"{rhs.metadata.project_name}: {rhs.latest().attributes.df}")
         merged.latest()._attributes._df = pd.concat([self.latest().attributes.df, rhs.latest().attributes.df], ignore_index=True)
-        st.write(merged.latest()._attributes._df)
 
         return merged
 
@@ -726,4 +722,3 @@ def rename_files_with_prefix(directory: str, prefix: str):
             new_name = prefix + file.name
             new_path = file.with_name(new_name)
             file.rename(new_path)
-            print(f"Renamed: {file.name} -> {new_name}")

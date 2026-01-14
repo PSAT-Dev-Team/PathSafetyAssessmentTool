@@ -25,6 +25,7 @@ type Props = {
   readOnly?: boolean; // If true, disable editing (display-only mode)
   headerAction?: React.ReactNode; // Optional action/toggle to display next to "Attributes" heading
   highlightMessage?: string; // Custom message for changed attributes
+  highlightColor?: "green" | "yellow";
 };
 
 /** ====== Group ordering (tab order) ====== */
@@ -209,7 +210,15 @@ export default function AttributesPanel({
   readOnly = false,
   headerAction,
   highlightMessage = "*Highlighted attributes have been modified from the original values",
+  highlightColor = "green",
 }: Props) {
+  const isYellow = highlightColor === "yellow";
+  const changedBg = isYellow ? "yellow.50" : "green.100";
+  const changedBorder = isYellow ? "yellow.500" : "green.500";
+  const changedText = isYellow ? { base: "yellow.900", _dark: "yellow.200" } : { base: "green.900", _dark: "green.900" };
+  const changedInputBg = isYellow ? "#FFFFF0" : "#F0FFF4"; // yellow.50 vs green.50 (approx)
+  const changedInputBorder = isYellow ? "#D69E2E" : "#38A169"; // yellow.500 vs green.500
+
   const grouped = useMemo(() => (row ? groupEntries(row) : null), [row]);
 
   // Create a Set for fast lookup of changed fields
@@ -333,14 +342,14 @@ export default function AttributesPanel({
                           gap="1"
                           p="2"
                           borderRadius="md"
-                          bg={isEdited ? "red.50" : isChanged ? "green.100" : "transparent"}
+                          bg={isEdited ? "red.50" : isChanged ? changedBg : "transparent"}
                           borderWidth={isEdited || isChanged ? "2px" : "0px"}
-                          borderColor={isEdited ? "red.200" : isChanged ? "green.500" : "transparent"}
+                          borderColor={isEdited ? "red.200" : isChanged ? changedBorder : "transparent"}
                           transition="all 0.2s"
                         >
                           <Text
                             fontSize="xs"
-                            color={isEdited ? "red.800" : isChanged ? { base: "green.900", _dark: "green.900" } : "gray.600"}
+                            color={isEdited ? "red.800" : isChanged ? changedText : "gray.600"}
                             fontWeight={isEdited || isChanged ? "bold" : "semibold"}
                           >
                             {k}
@@ -372,9 +381,9 @@ export default function AttributesPanel({
                                   onEdit?.(k, val);
                                 }}
                                 style={{
-                                  borderColor: isEdited ? "#E53E3E" : isChanged ? "#38A169" : undefined, // green.500
+                                  borderColor: isEdited ? "#E53E3E" : isChanged ? changedInputBorder : undefined,
                                   borderWidth: isEdited || isChanged ? "2px" : undefined,
-                                  backgroundColor: isEdited ? "#FFF5F5" : isChanged ? "#F0FFF4" : undefined, // green.50
+                                  backgroundColor: isEdited ? "#FFF5F5" : isChanged ? changedInputBg : undefined,
                                 }}
                                 color={isEdited || isChanged ? "gray.900" : undefined}
                                 _dark={{
@@ -425,9 +434,9 @@ export default function AttributesPanel({
                                 onChange?.(k, val);
                                 onEdit?.(k, val);
                               }}
-                              borderColor={isEdited ? "red.500" : isChanged ? "yellow.500" : undefined}
+                              borderColor={isEdited ? "red.500" : isChanged ? changedBorder : undefined}
                               borderWidth={isEdited || isChanged ? "2px" : undefined}
-                              bg={isEdited ? "red.50" : isChanged ? "yellow.50" : undefined}
+                              bg={isEdited ? "red.50" : isChanged ? changedBg : undefined}
                               color={isEdited || isChanged ? "gray.900" : undefined}
                               _dark={{
                                 color: isEdited || isChanged ? "gray.900" : undefined,

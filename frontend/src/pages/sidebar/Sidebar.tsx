@@ -72,24 +72,40 @@ export default function Sidebar() {
       return;
     }
 
-    try {
-      const result = await applyAllTreatments(projectName);
+    const projects = projectName.split(',').filter(Boolean);
+    const allDetails: any[] = [];
+    let totalTreated = 0;
+    let totalSkipped = 0;
+    let errors: string[] = [];
 
-      if (result.ok) {
-        toaster.create({
-          title: "Treatments Applied",
-          description: `Successfully applied treatments to ${result.segments_treated} segments. ${result.segments_skipped} segments had no applicable treatments.`,
-          type: "success",
-        });
-
-        // Notify other components (e.g., TreatmentDetailPage) to refresh using the full details
-        window.dispatchEvent(new CustomEvent("psat:treat:all:completed", { detail: result.details }));
+    for (const proj of projects) {
+      try {
+        const result = await applyAllTreatments(proj);
+        if (result.ok) {
+          totalTreated += result.segments_treated;
+          totalSkipped += result.segments_skipped;
+          const enrichedDetails = result.details.map((d: any) => ({ ...d, projectName: proj }));
+          allDetails.push(...enrichedDetails);
+        }
+      } catch (error) {
+        errors.push(`${proj}: ${error instanceof Error ? error.message : "Failed"}`);
       }
-    } catch (error) {
+    }
 
+    if (totalTreated > 0 || totalSkipped > 0) {
       toaster.create({
-        description: error instanceof Error ? error.message : "Failed to apply treatments",
-        type: "error",
+        title: "Treatments Applied",
+        description: `Applied to ${totalTreated} segments across ${projects.length} project(s). ${totalSkipped} skipped.`,
+        type: "success",
+      });
+      // Notify using all details
+      window.dispatchEvent(new CustomEvent("psat:treat:all:completed", { detail: allDetails }));
+    }
+
+    if (errors.length > 0) {
+      toaster.create({
+        description: `Some errors occurred: ${errors.join("; ")}`,
+        type: "error"
       });
     }
   }, [projectName]);
@@ -110,18 +126,34 @@ export default function Sidebar() {
 
     try {
       setIsResetting(true);
-      const result = await resetAllTreatments(projectName);
+      const projects = projectName.split(',').filter(Boolean);
+      let totalReset = 0;
+      let errors: string[] = [];
 
-      if (result.ok) {
-        toaster.create({
-          title: "Treatments Reset",
-          description: `${result.message} Reset ${result.segments_reset} segments.`,
-          type: "success",
-        });
-
-        window.dispatchEvent(new CustomEvent("psat:reset:all:completed"));
-        setResetDialogOpen(false);
+      for (const proj of projects) {
+        try {
+          const result = await resetAllTreatments(proj);
+          if (result.ok) {
+            totalReset += result.segments_reset;
+          }
+        } catch (e) {
+          errors.push(`${proj}: Failed`);
+        }
       }
+
+      toaster.create({
+        title: "Treatments Reset",
+        description: `Reset ${totalReset} segments across ${projects.length} project(s).`,
+        type: "success",
+      });
+
+      window.dispatchEvent(new CustomEvent("psat:reset:all:completed"));
+      setResetDialogOpen(false);
+
+      if (errors.length > 0) {
+        toaster.create({ description: `Errors: ${errors.join("; ")}`, type: "error" });
+      }
+
     } catch (error) {
       toaster.create({
         description: error instanceof Error ? error.message : "Failed to reset treatments",
@@ -211,13 +243,27 @@ export default function Sidebar() {
     }
 
     try {
-      const result = await saveTreatments(projectName);
+      const projects = projectName.split(',').filter(Boolean);
+      let errors: string[] = [];
 
-      if (result.ok) {
+      for (const proj of projects) {
+        try {
+          await saveTreatments(proj);
+        } catch (e) {
+          errors.push(`${proj}: Failed`);
+        }
+      }
+
+      if (errors.length === 0) {
         toaster.create({
           title: "Treatments Saved",
-          description: result.message,
+          description: `Saved all changes for ${projects.length} project(s).`,
           type: "success",
+        });
+      } else {
+        toaster.create({
+          description: `Saved with some errors: ${errors.join("; ")}`,
+          type: "error"
         });
       }
     } catch (error) {

@@ -266,7 +266,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
 
                         {/* Reduction indicator */}
                         {reduction !== null && improved && (
-                          <Text fontSize="xs" color={improved ? "green.600" : "gray.600"} _dark={{ color: improved ? "green.300" : "gray.400" }} lineHeight="1">
+                          <Text fontSize="xs" color="inherit" _dark={{ color: "inherit" }} lineHeight="1">
                             ↓ {reduction.toFixed(2)}
                           </Text>
                         )}
@@ -313,7 +313,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
 
                       {/* Reduction indicator */}
                       {totalReduction !== null && totalImproved && (
-                        <Text fontSize="xs" color={totalImproved ? "green.600" : "gray.600"} _dark={{ color: totalImproved ? "green.300" : "gray.400" }} lineHeight="1">
+                        <Text fontSize="xs" color="inherit" _dark={{ color: "inherit" }} lineHeight="1">
                           ↓ {totalReduction.toFixed(2)}
                         </Text>
                       )}

@@ -73,14 +73,14 @@ export default function TreatmentPage() {
   useEffect(() => {
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // Listen for project verified status changes from coding page
   useEffect(() => {
     const handleVerificationUpdate = (event: CustomEvent) => {
       const { projectName, verified } = event.detail;
-      
+
 
       // Update the project list directly
       setProjectList((prev) => {
@@ -132,6 +132,7 @@ export default function TreatmentPage() {
       } else {
         newSet.add(name);
       }
+
       return newSet;
     });
   };
@@ -148,10 +149,14 @@ export default function TreatmentPage() {
   };
 
   const loadProject = async () => {
-    if (selected.size === 0) return;
+    if (selected.size === 0) {
+      return;
+    }
     const projectNames = Array.from(selected);
-    const encodedNames = projectNames.map(name => encodeURIComponent(name));
-    navigate(`/treatment/${encodedNames[0]}`);
+    // Encode each name, then join with ','
+    // Since encodeURIComponent encodes ',' as '%2C', using ',' as separator is safe
+    const joinedNames = projectNames.map(name => encodeURIComponent(name)).join(",");
+    navigate(`/treatment/${joinedNames}`);
   };
 
   const handleEditSuccess = (newName: string, newTags: string[]) => {
@@ -324,10 +329,14 @@ export default function TreatmentPage() {
                       <tr
                         key={p.name}
                         className={isSelected ? "row selected" : "row"}
-                        onClick={() => onRowClick(p.name)}
+                        onClick={(e) => {
+                          // Prevent double-toggle if clicking checkbox directly
+                          if ((e.target as HTMLElement).tagName === "INPUT") return;
+                          onRowClick(p.name);
+                        }}
                         style={{ cursor: "pointer" }}
                       >
-                        <td onClick={(e) => e.stopPropagation()}>
+                        <td>
                           <input
                             type="checkbox"
                             checked={isSelected}

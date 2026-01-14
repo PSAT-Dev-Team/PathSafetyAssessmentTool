@@ -743,11 +743,7 @@ def calculate_score(project_name: str):
         # Check if this is a single row calculation (for real-time score updates)
         is_single_row_calculation = len(payload["attributes"]) == 1
 
-    # Log input for debugging
-    print(f"\n\n\n\n[calculate_score] Processing {len(attrs_df)} rows for project '{project_name}'")
-    print(f"\n\n\n\n[calculate_score] Single row calculation: {is_single_row_calculation}")
-    print(f"\n\n\n\n[calculate_score] Attribute columns: {list(attrs_df.columns)}")
-    print(f"\n\n\n\n[calculate_score] Sample input (first row):\n{attrs_df.iloc[0].to_dict() if len(attrs_df) > 0 else 'No data'}")
+
 
     # ==========================================
     # MAIN CALCULATION: Native Python scoring
@@ -757,10 +753,7 @@ def calculate_score(project_name: str):
     # NEW: Cross-platform native Python implementation
     results_df = calculate_cyclerap_score_native(attrs_df)
 
-    # Log output for debugging
-    print(f"\n\n\n\n[calculate_score] Calculation complete. Generated {len(results_df)} result rows")
-    print(f"\n\n\n\n[calculate_score] Result columns: {list(results_df.columns)}")
-    print(f"\n\n\n\n[calculate_score] Sample output (first row):\n{results_df.iloc[0].to_dict() if len(results_df) > 0 else 'No data'}")
+
 
     # ==========================================
     # PERSIST RESULTS: Save to disk (only if full calculation)
@@ -770,14 +763,11 @@ def calculate_score(project_name: str):
         ver._results = serializer.Results()
         ver.results.df = results_df
         proj.save_all()
-        print(f"\n\n\n\n[calculate_score] Results saved to disk for project '{project_name}'")
+
 
         # Update last_updated
         proj.metadata.last_updated = datetime.datetime.now()
         proj.metadata.serialize(proj.project_path)
-    else:
-        print(f"\n\n\n\n[calculate_score] Single-row calculation - not saving to disk")
-
     # Return results to frontend
     return jsonify({"ok": True, "result_rows": results_df.to_dict(orient="records")})
 
@@ -1842,6 +1832,58 @@ def update_project_metadata(project_name: str):
                 # Update metadata
                 proj.project_path = new_path
                 proj.metadata.project_name = new_name
+
+                # --- Update Internal Paths & Image References ---
+                # 1. Update paths for all versions so they point to the new directory
+                if proj.versions:
+                    for v in proj.versions:
+                        # v.path is absolute, so we must rebase it to the new project path
+                        # Current v.path: .../OldName/versions/YYYYMMDD
+                        # New v.path:     .../NewName/versions/YYYYMMDD
+                        v.path = new_path / "versions" / v.path.name
+
+                # 2. Update Image References in DataFrames to match new filenames
+                def update_image_ref_in_df(df, col_name):
+                    if col_name not in df.columns:
+                        return False
+                    
+                    def _update_ref(ref):
+                        if not isinstance(ref, str): return ref
+                        # Use same regex as file renaming
+                        match = re.search(r"(?:^|_)(Cam\d+.*)", ref, re.IGNORECASE)
+                        if match:
+                            suffix = match.group(1)
+                            new_ref = f"{new_name}_{suffix}"
+                            return new_ref
+                        return ref
+                    
+                    # Check if any change is needed to avoid unnecessary writes
+                    # But easiest is just to apply
+                    df[col_name] = df[col_name].apply(_update_ref)
+                    return True
+
+                try:
+                    # A. Attributes (Latest Version)
+                    latest_ver = proj.latest()
+                    if update_image_ref_in_df(latest_ver.attributes.df, "Image reference"):
+                         latest_ver.attributes.df_dirty = True
+                    
+                    # B. Treatment (Latest Version)
+                    if update_image_ref_in_df(latest_ver.treatment.df, "Image Reference"):
+                        latest_ver.treatment.df_dirty = True
+                    
+                    # C. Geo Data (Project Level)
+                    # Force load geo_data from the new path
+                    if update_image_ref_in_df(proj.geo_data.df, "Image Reference"):
+                        proj.geo_data.df_dirty = True
+                        
+                    # Save all changes
+                    proj.save_all()
+                    
+                except Exception as data_e:
+                    print(f"Warning: Failed to update image references in data files: {data_e}")
+                    traceback.print_exc()
+
                 proj.metadata.last_updated = datetime.datetime.now()
                 proj.metadata.serialize(new_path)
 
@@ -2804,3 +2846,80 @@ def save_baseline(project_name: str):
     except Exception as e:
         traceback.print_exc()
         return fail(f"Error saving baseline: {e}", 500)
+
+# ===== Autocode Metadata Management Endpoints =====
+
+@bp.get("/<project_name>/autocode-metadata")
+def get_autocode_metadata(project_name: str):
+    """
+    Get autocode metadata (changed fields and sources) as JSON.
+    
+    Response:
+        {
+            "ok": true,
+            "changedFieldsByRow": { "0": ["Field1"], ... },
+            "fieldSourcesByRow": { "0": {"Field1": "GIS"}, ... }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        proj = pm.project(project_name)
+        
+        # Use 'autocode' directory for metadata
+        autocode_dir = proj.project_path / "autocode"
+        metadata_path = autocode_dir / f"{project_name}_metadata.json"
+        
+        if not metadata_path.exists():
+            return ok({
+                "changedFieldsByRow": {},
+                "fieldSourcesByRow": {}
+            })
+            
+        import json
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        return ok(data)
+
+    except KeyError:
+        return fail("Project not found", 404)
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"Error reading autocode metadata: {e}", 500)
+
+@bp.post("/<project_name>/autocode-metadata")
+def save_autocode_metadata(project_name: str):
+    """
+    Save autocode metadata (changed fields and sources) as JSON.
+    
+    Body:
+        {
+            "changedFieldsByRow": { ... },
+            "fieldSourcesByRow": { ... }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        proj = pm.project(project_name)
+        
+        data = request.get_json(force=True, silent=True) or {}
+        
+        # Create autocode directory if not exists
+        autocode_dir = proj.project_path / "autocode"
+        autocode_dir.mkdir(parents=True, exist_ok=True)
+        
+        metadata_path = autocode_dir / f"{project_name}_metadata.json"
+            
+        import json
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            
+        return ok({"message": "Autocode metadata saved successfully"})
+
+    except KeyError:
+        return fail("Project not found", 404)
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"Error saving autocode metadata: {e}", 500)

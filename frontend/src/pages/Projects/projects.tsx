@@ -242,12 +242,13 @@ export default function Home() {
     navigate(`/coding/${encodedNames.join(',')}`);
   };
 
-  // Load treatment application for selected project
+  // Load treatment application for selected projects
   const loadTreatment = async () => {
     if (selected.size === 0) return;
-    // Get the first selected project (only one should be selected for treatment)
-    const projectName = Array.from(selected)[0];
-    navigate(`/treatment/${encodeURIComponent(projectName)}`);
+    // Pass all selected projects as comma-separated encoded names
+    const projectNames = Array.from(selected);
+    const encodedNames = projectNames.map(name => encodeURIComponent(name));
+    navigate(`/treatment/${encodedNames.join(',')}`);
   };
 
   // Edit success callback
