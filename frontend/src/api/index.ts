@@ -140,6 +140,26 @@ export async function updateProject(
   return (await res.json()) as { ok?: boolean; name?: string; tags?: string[]; verified?: boolean; verified_segment_count?: number; autocoded_segment_count?: number };
 }
 
+// Delete single segment
+export async function deleteSegment(project: string, index: number) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/segments/${index}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+// Batch delete segments
+export async function deleteSegmentsBatch(project: string, indices: number[]) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/segments/delete-batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ indices }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function autocodeImage(project: string, imageRef: string) {
   const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/image`, {
     method: "POST",

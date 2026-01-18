@@ -385,23 +385,26 @@ class ProjectMetadata:
             self.verified_segment_count = data.get("verified_segment_count", 0)
             self.autocoded_segment_count = data.get("autocoded_segment_count", 0)
 
+    def to_dict(self):
+        return {
+            "project_name": self.project_name,
+            "date_created": self.date_created.isoformat() if self.date_created else None,
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+            "created_by": self.created_by,
+            "dataset": self.dataset,
+            "progress": self.progress,
+            "size": self.size,
+            "tags": self.tags,
+            "verified": self.verified,
+            "verified_segment_count": self.verified_segment_count,
+            "autocoded_segment_count": self.autocoded_segment_count
+        }
+
     def serialize(self, to_dir: Path):
         to_dir.mkdir(parents=True, exist_ok=True)
         file_path = to_dir / "project_metadata.json"
         with open(file_path, 'w') as f:
-            json.dump({
-                "project_name": self.project_name,
-                "date_created": self.date_created.isoformat() if self.date_created else None,
-                "last_updated": self.last_updated.isoformat() if self.last_updated else None,
-                "created_by": self.created_by,
-                "dataset": self.dataset,
-                "progress": self.progress,
-                "size": self.size,
-                "tags": self.tags,
-                "verified": self.verified,
-                "verified_segment_count": self.verified_segment_count,
-                "autocoded_segment_count": self.autocoded_segment_count
-            }, f, indent=4)
+            json.dump(self.to_dict(), f, indent=4)
             
 
 # to load APIs

@@ -1,13 +1,15 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input } from "@chakra-ui/react";
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
+import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
+import { toaster } from "../../../components/ui/toaster";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline } from "react-leaflet";
+import { FaDrawPolygon, FaMousePointer } from "react-icons/fa";
 import { Switch } from "../../../components/ui/switch";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
-import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, downloadFilteredImages, type AttributeRow } from "../../../api";
+import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, downloadFilteredImages, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 // --- EPSG:3414 (SVY21 / Singapore TM) definition -> EPSG:4326 ---
@@ -40,6 +42,62 @@ function FitBounds({ points, shouldFit }: { points: [number, number][]; shouldFi
     map.fitBounds(bounds, { padding: [24, 24] });
   }, [points, map, shouldFit]);
   return null;
+}
+
+// Helper: Point in Polygon Algorithm (Ray Casting)
+function isPointInPolygon(point: [number, number], vs: [number, number][]) {
+  // point: [lat, lon], vs: [[lat, lon], ...]
+  const x = point[0], y = point[1];
+  let inside = false;
+  for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+    const xi = vs[i][0], yi = vs[i][1];
+    const xj = vs[j][0], yj = vs[j][1];
+    const intersect = ((yi > y) !== (yj > y))
+      && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+interface PolygonDrawingToolProps {
+  isPolygonMode: boolean;
+  onPolygonPoint: (latlng: L.LatLng) => void;
+  polygonPoints: [number, number][];
+}
+
+function PolygonDrawingTool({ isPolygonMode, onPolygonPoint, polygonPoints }: PolygonDrawingToolProps) {
+  const modeRef = useRef(isPolygonMode);
+
+  useEffect(() => {
+    modeRef.current = isPolygonMode;
+  }, [isPolygonMode]);
+
+  useMapEvents({
+    click(e) {
+      if (modeRef.current) {
+        onPolygonPoint(e.latlng);
+      }
+    },
+  });
+
+  if (polygonPoints.length === 0) return null; // Only hide if no points
+
+  return (
+    <>
+      {polygonPoints.map((pt, idx) => (
+        <CircleMarker
+          key={idx}
+          center={pt}
+          radius={4}
+          pathOptions={{ color: "red", fillOpacity: 1 }}
+        />
+      ))}
+      <LeafletPolyline positions={polygonPoints} pathOptions={{ color: "red", dashArray: "5, 5" }} />
+      {polygonPoints.length >= 3 && (
+        <LeafletPolygon positions={polygonPoints} pathOptions={{ color: "red", fillOpacity: 0.2 }} />
+      )}
+    </>
+  );
 }
 
 interface AttributeAnalysisMapViewProps {
@@ -87,6 +145,121 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   const [globalSearch, setGlobalSearch] = useState<string>("");
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [sortConfig, setSortConfig] = useState<Array<{ column: string; direction: 'asc' | 'desc' }>>([]);
+
+  // --- Deletion State ---
+  const [isDeleteMode, setIsDeleteMode] = useState(false); // Single point delete mode
+  const [isPolygonMode, setIsPolygonMode] = useState(false); // Polygon batch delete mode
+  const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
+  const [segmentsToDelete, setSegmentsToDelete] = useState<{ projectName: string; index: number }[]>([]);
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [segmentToDelete, setSegmentToDelete] = useState<{ projectName: string; index: number } | null>(null); // For single delete
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Handlers for Polygon Tool
+  const handlePolygonPoint = (latlng: L.LatLng) => {
+    setPolygonPoints((prev) => [...prev, [latlng.lat, latlng.lng]]);
+  };
+
+  const finishPolygonSelection = () => {
+    console.log("finishPolygonSelection called");
+    if (polygonPoints.length < 3) {
+      toaster.create({ title: "Invalid Polygon", description: "Please select at least 3 points.", type: "error" });
+      return;
+    }
+
+    // Identify points inside polygon
+    const toDelete: { projectName: string; index: number }[] = [];
+
+    // Iterate through all visible points (allPoints)
+    // Note: This operates on the *filtered* view if we use filteredData, or all loaded points if we use allPoints.
+    // Usually, users expect to delete what they see. Let's use allPoints to be safe, or filteredData? 
+    // Given the visual nature, 'allPoints' corresponds to what's loaded. 
+    // But if 'filteredData' is used for display, we should probably stick to visible points?
+    // Let's us 'allPoints' but check if they are visible? Or simplified: just check all loaded points.
+    // The user draws on the map, so they select geographically. 
+
+    allPoints.forEach((pt) => {
+      // pt.latlng is [lat, lon]
+      if (isPointInPolygon(pt.latlng, polygonPoints)) {
+        toDelete.push({ projectName: pt.projectName, index: pt.idx });
+      }
+    });
+
+    if (toDelete.length === 0) {
+      toaster.create({ title: "No points selected", description: "No points found inside the drawn polygon.", type: "info" });
+      setPolygonPoints([]); // Reset
+      return;
+    }
+
+    setSegmentsToDelete(toDelete);
+    setDeleteConfirmationOpen(true);
+  };
+
+  const handleBatchDelete = async () => {
+    if (segmentsToDelete.length === 0) return;
+    setIsDeleting(true);
+
+    try {
+      // Group by project
+      const byProject: Record<string, number[]> = {};
+      segmentsToDelete.forEach(({ projectName, index }) => {
+        if (!byProject[projectName]) byProject[projectName] = [];
+        byProject[projectName].push(index);
+      });
+
+      // Execute batch delete for each project
+      await Promise.all(
+        Object.entries(byProject).map(async ([project, indices]) => {
+          await deleteSegmentsBatch(project, indices);
+        })
+      );
+
+      toaster.create({ title: "Batch Delete Successful", description: `Deleted ${segmentsToDelete.length} segments.`, type: "success" });
+
+      // Cleanup UI
+      setSegmentsToDelete([]);
+      setPolygonPoints([]);
+      setDeleteConfirmationOpen(false);
+      setIsPolygonMode(false); // Optimize: exit mode or stay? Usually exit.
+
+      // Refresh data
+      // For simplicity, re-trigger the data fetch by toggling a dependency or calling a refresh function.
+      // Since 'selectedProjects' is a dependency of the main useEffect, we can just force a re-run?
+      // Or better: clear projectsData and it will reload because selectedProjects hasn't changed? 
+      // Actually, if we just setProjectsData([]) it might show empty. 
+      // We can create a refresh trigger state.
+      setRefreshTrigger(prev => prev + 1);
+
+      // Dispatch event to update charts (AggregatedScoreBandPanel)
+      window.dispatchEvent(new Event("psat:scores:updated"));
+
+    } catch (e: any) {
+      toaster.create({ title: "Deletion Failed", description: e.message, type: "error" });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteSegment = async () => {
+    if (!segmentToDelete) return;
+    setIsDeleting(true);
+    try {
+      await deleteSegment(segmentToDelete.projectName, segmentToDelete.index);
+      toaster.create({ title: "Segment Deleted", type: "success" });
+      setSegmentToDelete(null);
+      setDeleteConfirmationOpen(false);
+      setRefreshTrigger(prev => prev + 1);
+
+      // Dispatch event to update charts (AggregatedScoreBandPanel)
+      window.dispatchEvent(new Event("psat:scores:updated"));
+    } catch (e: any) {
+      toaster.create({ title: "Deletion Failed", description: e.message, type: "error" });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Update primaryFocusAttribute when selected attributes change
   useEffect(() => {
@@ -312,7 +485,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     })();
 
     return () => { aborted = true; };
-  }, [selectedProjects, projectColors]);
+  }, [selectedProjects, projectColors, refreshTrigger]);
 
   // Generate colors for attribute categories based on safety implications
   const attributeCategoryColors = useMemo(() => {
@@ -1351,6 +1524,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     }
   }, [categoryDistributionData, primaryFocusAttribute, categoryStatus, onChartDataUpdate]);
 
+  // Clear polygon points and close dialog when toggling polygon mode
+  useEffect(() => {
+    console.log("isPolygonMode changed:", isPolygonMode);
+    setPolygonPoints([]);
+    setDeleteConfirmationOpen(false);
+    setSegmentsToDelete([]);
+  }, [isPolygonMode]);
+
   return (
     <Box
       borderWidth="1px"
@@ -1362,10 +1543,65 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       {/* Tabs */}
       <Tabs.Root value={activeTab} onValueChange={(e) => setActiveTab(e.value)}>
         <Flex justify="space-between" align="center" borderBottom="1px solid" borderColor="gray.200" bg="white" _dark={{ bg: "gray.800" }} py="3" px="4">
-          <Tabs.List>
-            <Tabs.Trigger value="map">Map View</Tabs.Trigger>
-            <Tabs.Trigger value="table">Table View</Tabs.Trigger>
-          </Tabs.List>
+          <HStack gap="4">
+            <Tabs.List>
+              <Tabs.Trigger value="map">Map View</Tabs.Trigger>
+              <Tabs.Trigger value="table">Table View</Tabs.Trigger>
+            </Tabs.List>
+
+            {allPoints.length > 0 && (
+              <>
+                <HStack gap="0" mr="2">
+                  <IconButton
+                    aria-label="Single Delete"
+                    size="sm"
+                    variant={isDeleteMode ? "solid" : "outline"}
+                    colorPalette={isDeleteMode ? "red" : "gray"}
+                    onClick={() => {
+                      setIsDeleteMode(!isDeleteMode);
+                      setIsPolygonMode(false);
+                      setPolygonPoints([]);
+                    }}
+                    borderTopRightRadius={0}
+                    borderBottomRightRadius={0}
+                  >
+                    <FaMousePointer />
+                  </IconButton>
+                  <IconButton
+                    aria-label="Polygon Delete"
+                    size="sm"
+                    variant={isPolygonMode ? "solid" : "outline"}
+                    colorPalette={isPolygonMode ? "red" : "gray"}
+                    onClick={() => {
+                      console.log("Polygon Button Clicked - Turning OFF/ON");
+                      setIsPolygonMode(prev => !prev);
+                      setIsDeleteMode(false);
+                      setDeleteConfirmationOpen(false); // Force close dialog
+                    }}
+                    borderTopLeftRadius={0}
+                    borderBottomLeftRadius={0}
+                    borderLeft="none"
+                  >
+                    <FaDrawPolygon />
+                  </IconButton>
+                </HStack>
+
+                {polygonPoints.length >= 3 && (
+                  <Button
+                    size="sm"
+                    colorPalette="red"
+                    onClick={finishPolygonSelection}
+                  >
+                    Delete Selected ({
+                      // Preview count
+                      allPoints.filter(pt => isPointInPolygon(pt.latlng, polygonPoints)).length
+                    } pts)
+                  </Button>
+                )}
+              </>
+            )}
+          </HStack>
+
           {allPoints.length > 0 && (
             <HStack gap="2">
               <Button
@@ -1679,6 +1915,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 style={{ width: "100%", height: "100%" }}
                 scrollWheelZoom
               >
+                {/* Render Polygon Tool */}
+                <PolygonDrawingTool
+                  isPolygonMode={isPolygonMode}
+                  onPolygonPoint={handlePolygonPoint}
+                  polygonPoints={polygonPoints}
+                />
+
                 {/* Tile Layer */}
                 <TileLayer
                   url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -1711,6 +1954,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                       pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
                       eventHandlers={{
                         click: () => {
+                          // Check delete modes first
+                          if (isDeleteMode) {
+                            setSegmentToDelete({ projectName: projectName, index: idx });
+                            setDeleteConfirmationOpen(true);
+                            return;
+                          }
+                          if (isPolygonMode) return; // Do nothing on click in polygon mode (handled by map click)
+
                           // Navigate to coding page for this project and segment
                           const segmentIdx = idx + 1; // 1-based index for UI
                           navigate(`/coding/${encodeURIComponent(projectName)}?segment=${segmentIdx}`, {
@@ -1900,6 +2151,37 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           </Box>
         </Tabs.Content>
       </Tabs.Root>
-    </Box>
+      <Dialog.Root open={deleteConfirmationOpen} onOpenChange={(e) => setDeleteConfirmationOpen(e.open)}>
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Confirm Deletion</Dialog.Title>
+              </Dialog.Header>
+              <Dialog.Body>
+                {segmentToDelete
+                  ? `Are you sure you want to delete segment #${segmentToDelete.index + 1} from project "${segmentToDelete.projectName}"?`
+                  : `Are you sure you want to delete ${segmentsToDelete.length} segments across ${new Set(segmentsToDelete.map(s => s.projectName)).size} projects?`
+                }
+                <Text color="red.500" mt="2" fontSize="sm">This action cannot be undone. Associated images will also be deleted.</Text>
+              </Dialog.Body>
+              <Dialog.Footer>
+                <Dialog.ActionTrigger asChild>
+                  <Button variant="outline">Cancel</Button>
+                </Dialog.ActionTrigger>
+                <Button
+                  colorPalette="red"
+                  onClick={segmentToDelete ? handleDeleteSegment : handleBatchDelete}
+                  loading={isDeleting}
+                >
+                  Delete
+                </Button>
+              </Dialog.Footer>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+    </Box >
   );
 }

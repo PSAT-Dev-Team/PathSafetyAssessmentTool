@@ -405,6 +405,71 @@ def list_projects():
 
     return jsonify({"projects": projects})
 
+@bp.post("/<project_name>/segments/delete-batch")
+def delete_segments_batch(project_name):
+    """
+    Batch delete segments from a project at user-specified indices.
+    POST body: { "indices": [0, 1, 5] }
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    project = pm.project(project_name)
+    if project is None:
+        abort(404, description="Project not found")
+
+    data = request.get_json()
+    if not data or "indices" not in data:
+        abort(400, description="Missing 'indices' in request body")
+
+    indices = data["indices"]
+    if not isinstance(indices, list):
+        abort(400, description="'indices' must be a list of integers")
+
+    # Sort indices in descending order to avoid index shifting issues if we were doing iterative deletion
+    # But for batch drop it doesn't matter as much, still good practice
+    # Actuallly, df.drop handles list of indices regardless of order.
+    # However, for consistency and logging:
+    indices = sorted(indices, reverse=True)
+
+    try:
+        project.delete_segments(indices)
+    except Exception as e:
+        traceback.print_exc()
+        abort(500, description=f"Failed to delete segments: {e}")
+
+    # Return updated metadata
+    meta = project.metadata.to_dict() if project.metadata else {}
+    return jsonify(meta)
+
+
+@bp.delete("/<project_name>/segments/<int:segment_index>")
+def delete_segment(project_name: str, segment_index: int):
+    """
+    Delete a specific segment (point) from the project.
+    """
+    try:
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        proj = pm.project(project_name)
+        
+        # Verify index is within bounds
+        # Check latest attributes for size
+        current_size = len(proj.latest().attributes.df)
+        if segment_index < 0 or segment_index >= current_size:
+            return fail(f"Segment index {segment_index} out of bounds (0-{current_size-1})", 400)
+
+        proj.delete_segment(segment_index)
+        
+        return jsonify({
+            "ok": True,
+            "message": f"Segment {segment_index} deleted successfully",
+            "remaining_segments": current_size - 1
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error deleting segment: {str(e)}", 500)
+
 @bp.get("/<project_name>")
 def get_project(project_name: str):
     """Read project metadata and available versions (read-only)."""

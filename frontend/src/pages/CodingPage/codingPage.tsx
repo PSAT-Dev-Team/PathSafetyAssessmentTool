@@ -199,6 +199,43 @@ export default function CodingPage() {
     }));
   };
 
+  const refreshCurrentProject = useCallback(async () => {
+    if (!currentProjectName) return;
+
+    updateProjectData(currentProjectName, { loading: true, error: null });
+
+    try {
+      const [d, a, gjson, metadata, autoMeta] = await Promise.all([
+        fetchProjectDetail(currentProjectName),
+        fetchProjectAttributes(currentProjectName) as Promise<AttributesResponse>,
+        fetchProjectGeoJSON(currentProjectName) as Promise<FeatureCollection>,
+        fetchProjectMetadata(currentProjectName).catch(() => null),
+        fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/autocode-metadata`).then(r => r.ok ? r.json() : null).catch(() => null),
+      ]);
+
+      const attributes = a?.rows ?? [];
+
+      updateProjectData(currentProjectName, {
+        detail: d ?? null,
+        attrs: attributes,
+        geoFeatures: gjson?.features ?? [],
+        editedRow: null,
+        verified: metadata?.verified ?? false,
+        verifiedSegmentCount: metadata?.verified_segment_count ?? 0,
+        autocodedSegmentCount: metadata?.autocoded_segment_count ?? 0,
+        changedFieldsByRow: autoMeta?.changedFieldsByRow || {},
+        fieldSourcesByRow: autoMeta?.fieldSourcesByRow || {},
+        loading: false,
+      });
+
+    } catch (e: any) {
+      updateProjectData(currentProjectName, {
+        error: e?.message ?? "Unknown error",
+        loading: false,
+      });
+    }
+  }, [currentProjectName]);
+
 
   // Update verified segment count for a project
   const updateVerifiedSegmentCount = async (projectName: string | null, count: number) => {
@@ -1709,6 +1746,7 @@ export default function CodingPage() {
             index={currentIndex}
             onJump={(i) => gotoPage(i + 1)}
             scores={scores}
+            onDataChange={refreshCurrentProject}
           />
         </GridItem>
 

@@ -127,6 +127,60 @@ class ProjectVersion:
         if self.treatment.df_dirty is True:
             self.treatment.serialize(self.path / self.STR_TREATMENT)
 
+
+
+    def delete_segment(self, index: int):
+        # 1. Delete from Snapshot Metadata
+        if self.snapshot_metadata.df is not None and index < len(self.snapshot_metadata.df):
+            self.snapshot_metadata.df = self.snapshot_metadata.df.drop(index).reset_index(drop=True)
+            self.snapshot_metadata.df_dirty = True
+
+        # 2. Delete from Attributes
+        if self.attributes.df is not None and index < len(self.attributes.df):
+            self.attributes.df = self.attributes.df.drop(index).reset_index(drop=True)
+            self.attributes.df_dirty = True
+
+        # 3. Delete from Results
+        if self.results.df is not None and len(self.results.df) > index:
+            self.results.df = self.results.df.drop(index).reset_index(drop=True)
+            self.results.df_dirty = True
+
+        # 4. Delete from Treatment
+        if self.treatment.df is not None and len(self.treatment.df) > index:
+            self.treatment.df = self.treatment.df.drop(index).reset_index(drop=True)
+            self.treatment.df_dirty = True
+    def delete_segments(self, indices: list[int]):
+        # Batch delete from all dataframes
+        # Filter indices to ensure they are valid for each dataframe if sizes differ (though they shouldn't)
+        
+        # 1. Snapshot Metadata
+        if self.snapshot_metadata.df is not None:
+            valid_indices = [i for i in indices if i < len(self.snapshot_metadata.df)]
+            if valid_indices:
+                self.snapshot_metadata.df = self.snapshot_metadata.df.drop(valid_indices).reset_index(drop=True)
+                self.snapshot_metadata.df_dirty = True
+
+        # 2. Attributes
+        if self.attributes.df is not None:
+            valid_indices = [i for i in indices if i < len(self.attributes.df)]
+            if valid_indices:
+                self.attributes.df = self.attributes.df.drop(valid_indices).reset_index(drop=True)
+                self.attributes.df_dirty = True
+
+        # 3. Results
+        if self.results.df is not None:
+            valid_indices = [i for i in indices if i < len(self.results.df)]
+            if valid_indices:
+                self.results.df = self.results.df.drop(valid_indices).reset_index(drop=True)
+                self.results.df_dirty = True
+
+        # 4. Treatment
+        if self.treatment.df is not None:
+            valid_indices = [i for i in indices if i < len(self.treatment.df)]
+            if valid_indices:
+                self.treatment.df = self.treatment.df.drop(valid_indices).reset_index(drop=True)
+                self.treatment.df_dirty = True
+
 # In charge of the selection of project versions and project metadata
 class Project:
     def __init__(self, project_path: Path = None):
@@ -239,6 +293,97 @@ class Project:
     def _delete(self):
         # Delete project directory
         shutil.rmtree(self.project_path, ignore_errors=True)
+
+    def delete_segment(self, index: int):
+        # 0. Delete Associated Image (from Geo Data info)
+        try:
+            if self.geo_data.df is not None and index < len(self.geo_data.df):
+                row = self.geo_data.df.iloc[index]
+                # Try common column names for image reference
+                img_ref = None
+                for col in ["Image Reference", "image", "img"]:
+                    if col in row:
+                        img_ref = row[col]
+                        break
+                
+                if img_ref and isinstance(img_ref, str):
+                    image_path = self.project_path / global_var.PROJECT_IMAGES_FOLDER / img_ref
+                    if image_path.exists() and image_path.is_file():
+                        os.remove(image_path)
+        except Exception as e:
+            print(f"Error deleting image for segment {index}: {e}")
+
+        # Delete from Geo Data
+        # Delete from Geo Data
+        if self.geo_data.df is not None and index < len(self.geo_data.df):
+            self.geo_data.df = self.geo_data.df.drop(index).reset_index(drop=True)
+            self.geo_data.df_dirty = True
+        
+        # Delete from latest version data
+        self.latest().delete_segment(index)
+
+        # Update Metadata
+        if self.metadata.size is not None and self.metadata.size > 0:
+            self.metadata.size -= 1
+        
+        # We can't easily know if the deleted segment was verified or autocoded without checking previous state
+        # But we can re-calculate verified count if needed, or just decrement if we tracked indices
+        # For now, let's just save.
+        
+        self.save_all()
+
+    def delete_segments(self, indices: list[int]):
+        # 0. Delete Associated Images (from Geo Data info)
+        try:
+            if self.geo_data.df is not None:
+                # Filter valid indices
+                valid_indices = [i for i in indices if i < len(self.geo_data.df)]
+                
+                # Identify image paths to delete
+                images_to_delete = []
+                for idx in valid_indices:
+                    row = self.geo_data.df.iloc[idx]
+                    img_ref = None
+                    for col in ["Image Reference", "image", "img"]:
+                        if col in row:
+                            img_ref = row[col]
+                            break
+                    
+                    if img_ref and isinstance(img_ref, str):
+                        image_path = self.project_path / global_var.PROJECT_IMAGES_FOLDER / img_ref
+                        images_to_delete.append(image_path)
+                
+                # Delete images
+                for img_path in images_to_delete:
+                    try:
+                        if img_path.exists() and img_path.is_file():
+                            os.remove(img_path)
+                    except Exception as e:
+                        # Continue deleting others even if one fails
+                        print(f"Error deleting image {img_path}: {e}")
+
+        except Exception as e:
+            print(f"Error in batch image deletion: {e}")
+
+        # Delete from Geo Data
+        if self.geo_data.df is not None:
+            valid_indices = [i for i in indices if i < len(self.geo_data.df)]
+            if valid_indices:
+                self.geo_data.df = self.geo_data.df.drop(valid_indices).reset_index(drop=True)
+                self.geo_data.df_dirty = True
+        
+        # Delete from latest version data
+        self.latest().delete_segments(indices)
+
+        # Update Metadata
+        if self.metadata.size is not None:
+            # We removed len(valid_indices), but safe to just recount or subtract
+            # Recounting is safer if possible, but indices logic above assumes alignment
+            # Subtracting the actual number of dropped rows
+            count_removed = len(valid_indices) if 'valid_indices' in locals() else len(indices)
+            self.metadata.size = max(0, self.metadata.size - count_removed)
+        
+        self.save_all()
         
     def search(self, filter_attributes: dict, filter_treatment: dict, filter_results: dict) -> Project:
         # ================================

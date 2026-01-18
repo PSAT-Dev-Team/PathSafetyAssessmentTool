@@ -1,10 +1,15 @@
-import { Card, CardHeader, CardBody, Heading, Text, Box, Flex, HStack } from "@chakra-ui/react";
+import {
+  Card, CardHeader, CardBody, Heading, Text, Box, Flex, HStack, IconButton, Button,
+  Dialog, Portal
+} from "@chakra-ui/react";
+import { FaMousePointer, FaDrawPolygon } from "react-icons/fa";
+import { toaster } from "../../../components/ui/toaster";
 import { Switch } from "../../../components/ui/switch";
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
-import { MapContainer, TileLayer, CircleMarker, Polyline, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -20,6 +25,7 @@ type Props = {
   subtitle?: string;                         // Optional subtitle to display next to "Map Preview"
   geoFeatures?: Feature<LineString, any>[];  // Optional pre-loaded geofeatures (for multi-project display)
   startIndex?: number;                       // Start index in global segments array (used with geoFeatures for multi-project)
+  onDataChange?: () => void;                 // Callback when data is modified (e.g. deleted)
 };
 
 type GJ = FeatureCollection<LineString, any>;
@@ -51,7 +57,56 @@ function FitBounds({ points }: { points: [number, number][] }) {
   return null;
 }
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0 }: Props) {
+// Polygon Drawing Tool Component
+function PolygonDrawingTool({ active, points, onAddPoint }: { active: boolean, points: [number, number][], onAddPoint: (latlng: [number, number]) => void }) {
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  useMapEvents({
+    click(e) {
+      if (activeRef.current) {
+        onAddPoint([e.latlng.lat, e.latlng.lng]);
+      }
+    },
+  });
+
+  if (!active || points.length === 0) return null;
+
+  // Show incomplete polygon line
+  return (
+    <>
+      {points.map((p, i) => (
+        <CircleMarker key={i} center={p} radius={3} pathOptions={{ color: "orange", fillColor: "orange", fillOpacity: 1 }} />
+      ))}
+      <Polyline positions={points} pathOptions={{ color: "orange", dashArray: "5, 5" }} />
+      {points.length >= 3 && (
+        <Polygon positions={points} pathOptions={{ color: "orange", fillOpacity: 0.2, stroke: false }} />
+      )}
+    </>
+  );
+}
+
+// PIP Algorithm (Ray Casting)
+const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
+  // point: [lat, lon], vs: [[lat, lon], ...]
+  // x = lon, y = lat
+  const x = point[1], y = point[0];
+
+  let inside = false;
+  for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+    const xi = vs[i][1], yi = vs[i][0];
+    const xj = vs[j][1], yj = vs[j][0];
+
+    const intersect = ((yi > y) !== (yj > y))
+      && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
+
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
@@ -77,6 +132,24 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [showCycling, setShowCycling] = useState(false);     // Green
   const [showShared, setShowShared] = useState(false);       // Orange
   const [showRoadcrossing, setShowRoadcrossing] = useState(false);  // Red
+
+  // Delete Mode State
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [segmentToDelete, setSegmentToDelete] = useState<number | null>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Polygon Selection State
+  const [isPolygonMode, setIsPolygonMode] = useState(false);
+  const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
+  const [segmentsToDelete, setSegmentsToDelete] = useState<number[]>([]); // For batch delete
+
+  // Clear polygon points and close dialog when toggling polygon mode
+  useEffect(() => {
+    setPolygonPoints([]);
+    setDeleteConfirmationOpen(false);
+    setSegmentsToDelete([]);
+  }, [isPolygonMode]);
 
   // GIS Layer data
   type GISLayerFeature = {
@@ -283,6 +356,130 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     }
   };
 
+  const handleDeleteSegment = useCallback(async () => {
+    if (segmentToDelete === null || !decodedName) return;
+
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/segments/${segmentToDelete}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text().catch(() => res.statusText));
+      }
+
+      toaster.create({
+        title: "Point Deleted",
+        description: `Segment #${segmentToDelete + 1} deleted successfully.`,
+        type: "success",
+      });
+
+      // Clear selection and close dialog
+      setSegmentToDelete(null);
+      setDeleteConfirmationOpen(false);
+      setIsDeleteMode(false);
+
+      // Trigger data refresh if callback provided
+      if (onDataChange) {
+        onDataChange();
+      } else {
+        // Fallback: reload page? Or maybe just re-fetch Geodata? 
+        // Re-fetching geodata isn't enough as indices shift globally.
+        // Ideally parent should handle this.
+        window.location.reload();
+      }
+
+    } catch (e: any) {
+      toaster.create({
+        title: "Delete Failed",
+        description: e?.message ?? "Failed to delete segment",
+        type: "error",
+      });
+    }
+  }, [segmentToDelete, decodedName, onDataChange]);
+
+  // Handle adding points to polygon
+  const handlePolygonPoint = useCallback((latlng: [number, number]) => {
+    setPolygonPoints(prev => {
+      // Double click logic is hard with simple click handler, using a Close button instead usually better
+      // But let's check if clicked near first point to close?
+      // Or just let user click a "Finish" button.
+      // Let's rely on a "Finish Selection" button in the header instead of complex map interaction.
+      return [...prev, latlng];
+    });
+  }, []);
+
+  // Finish Polygon Selection: Find points inside and confirm
+  const finishPolygonSelection = useCallback(() => {
+    if (polygonPoints.length < 3) {
+      toaster.create({ title: "Invalid Polygon", description: "Need at least 3 points.", type: "warning" });
+      return;
+    }
+
+    // Find all points inside
+    const indicesInside: number[] = [];
+    points.forEach(p => {
+      if (isPointInPolygon(p.latlng, polygonPoints)) {
+        indicesInside.push(p.globalIdx);
+      }
+    });
+
+    if (indicesInside.length === 0) {
+      toaster.create({ title: "No Points Selected", description: "No points found inside the polygon.", type: "info" });
+      setPolygonPoints([]);
+      setIsPolygonMode(false);
+      return;
+    }
+
+    setSegmentsToDelete(indicesInside);
+    setDeleteConfirmationOpen(true);
+  }, [polygonPoints, points]);
+
+  // Handle Batch Deletion
+  const handleBatchDelete = useCallback(async () => {
+    if (segmentsToDelete.length === 0 || !decodedName) return;
+
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/segments/delete-batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ indices: segmentsToDelete })
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text().catch(() => res.statusText));
+      }
+
+      toaster.create({
+        title: "Batch Delete Successful",
+        description: `Deleted ${segmentsToDelete.length} segments.`,
+        type: "success",
+      });
+
+      // Reset states
+      setSegmentsToDelete([]);
+      setPolygonPoints([]);
+      setDeleteConfirmationOpen(false);
+      setIsPolygonMode(false);
+      setIsDeleteMode(false); // also turn off single delete mode if on
+
+      // Refresh
+      if (onDataChange) {
+        onDataChange();
+      } else {
+        window.location.reload();
+      }
+
+    } catch (e: any) {
+      toaster.create({
+        title: "Delete Failed",
+        description: e?.message ?? "Failed to delete segments",
+        type: "error",
+      });
+    }
+  }, [segmentsToDelete, decodedName, onDataChange]);
+
+
   return (
     <Card.Root display="flex" flexDirection="column" h={`${containerHeight}px`}>
       <CardHeader py="2" px="4">
@@ -294,6 +491,50 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 - {subtitle}
               </Text>
             )}
+            {/* Delete Mode Toggle */}
+            <IconButton
+              aria-label="Toggle Delete Mode"
+              variant={isDeleteMode ? "solid" : "ghost"}
+              size="xs"
+              colorPalette={isDeleteMode ? "red" : "gray"}
+              onClick={() => {
+                setIsDeleteMode(!isDeleteMode);
+                setIsPolygonMode(false); // Exclusive modes
+                setPolygonPoints([]);
+              }}
+              title={isDeleteMode ? "Cancel Delete Mode" : "Enable Point Deletion"}
+            >
+              <FaMousePointer />
+            </IconButton>
+
+            {/* Polygon Mode Toggle */}
+            <IconButton
+              aria-label="Toggle Polygon Selection"
+              variant={isPolygonMode ? "solid" : "ghost"}
+              size="xs"
+              colorPalette={isPolygonMode ? "orange" : "gray"}
+              onClick={() => {
+                setIsPolygonMode(prev => !prev);
+                setIsDeleteMode(false); // Exclusive modes
+                setDeleteConfirmationOpen(false);
+              }}
+              title={isPolygonMode ? "Cancel Polygon Mode" : "Polygon Selection Deletion"}
+            >
+              <FaDrawPolygon />
+            </IconButton>
+
+            {isPolygonMode && (
+              <Button
+                size="xs"
+                variant="outline"
+                colorPalette="orange"
+                disabled={polygonPoints.length < 3}
+                onClick={finishPolygonSelection}
+              >
+                Delete Selected ({polygonPoints.length} pts)
+              </Button>
+            )}
+
           </Flex>
 
           {/* GIS Layer Toggles */}
@@ -447,12 +688,35 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                     center={latlng}
                     radius={radius}
                     pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
-                    eventHandlers={{ click: () => onJump?.(globalIdx) }}   // ← 跳转到全局索引
+                    eventHandlers={{
+                      click: () => {
+                        if (isDeleteMode) {
+                          setSegmentToDelete(globalIdx);
+                          setDeleteConfirmationOpen(true);
+                        } else {
+                          onJump?.(globalIdx);
+                        }
+                      },
+                      mouseover: (e) => {
+                        if (isDeleteMode) {
+                          e.target.setStyle({ color: "red", weight: 4 });
+                          const target = e.originalEvent.target as HTMLElement;
+                          if (target) target.style.cursor = "pointer";
+                        }
+                      },
+                      mouseout: (e) => {
+                        if (isDeleteMode) {
+                          e.target.setStyle({ color: color, weight: isActive ? 3 : 1 });
+                        }
+                      }
+                    }}   // ← 跳转到全局索引
                   >
-                    <Tooltip>{label}</Tooltip>
+                    <Tooltip>{isDeleteMode ? "Click to Delete" : label}</Tooltip>
                   </CircleMarker>
                 );
               })}
+
+              <PolygonDrawingTool active={isPolygonMode} points={polygonPoints} onAddPoint={handlePolygonPoint} />
 
             </MapContainer>
           </Box>
@@ -462,6 +726,38 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
           <Text color="gray.500" mt="2">No geodata to show.</Text>
         )}
       </CardBody>
-    </Card.Root>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog.Root open={deleteConfirmationOpen} onOpenChange={(e) => setDeleteConfirmationOpen(e.open)}>
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Confirm Deletion</Dialog.Title>
+                <Dialog.CloseTrigger />
+              </Dialog.Header>
+              <Dialog.Body>
+                {segmentsToDelete.length > 0
+                  ? `Are you sure you want to delete ${segmentsToDelete.length} selected segments?`
+                  : `Are you sure you want to delete segment #${segmentToDelete !== null ? segmentToDelete + 1 : "?"}?`
+                }
+                <br />
+                This action cannot be undone.
+              </Dialog.Body>
+              <Dialog.Footer>
+                <Button variant="outline" ref={cancelRef} onClick={() => setDeleteConfirmationOpen(false)}>
+                  Cancel
+                </Button>
+                <Button colorPalette="red" onClick={segmentsToDelete.length > 0 ? handleBatchDelete : handleDeleteSegment}>
+                  Delete {segmentsToDelete.length > 0 ? `(${segmentsToDelete.length})` : ""}
+                </Button>
+              </Dialog.Footer>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+
+    </Card.Root >
   );
 }
