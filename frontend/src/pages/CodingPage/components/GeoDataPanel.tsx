@@ -1,13 +1,17 @@
 import {
   Card, CardHeader, CardBody, Heading, Text, Box, Flex, HStack, IconButton, Button,
-  Dialog, Portal
+  Dialog, Portal, Menu
 } from "@chakra-ui/react";
-import { FaMousePointer, FaDrawPolygon } from "react-icons/fa";
+import { FaMousePointer, FaDrawPolygon, FaPlus, FaTrash } from "react-icons/fa";
 import { toaster } from "../../../components/ui/toaster";
 import { Switch } from "../../../components/ui/switch";
+import { AddSegmentsDialog } from "../../PathAnalysisPage/components/AddSegmentsDialog";
+import { MapCursorController } from "../../../components/common/MapCursorController";
+// import { copySegments } from "../../../api"; // Removed unused import
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
+
 
 import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
@@ -58,7 +62,8 @@ function FitBounds({ points }: { points: [number, number][] }) {
 }
 
 // Polygon Drawing Tool Component
-function PolygonDrawingTool({ active, points, onAddPoint }: { active: boolean, points: [number, number][], onAddPoint: (latlng: [number, number]) => void }) {
+// Polygon Drawing Tool Component
+function PolygonDrawingTool({ active, points, onAddPoint, color = "orange" }: { active: boolean, points: [number, number][], onAddPoint: (latlng: [number, number]) => void, color?: string }) {
   const activeRef = useRef(active);
   useEffect(() => {
     activeRef.current = active;
@@ -78,11 +83,11 @@ function PolygonDrawingTool({ active, points, onAddPoint }: { active: boolean, p
   return (
     <>
       {points.map((p, i) => (
-        <CircleMarker key={i} center={p} radius={3} pathOptions={{ color: "orange", fillColor: "orange", fillOpacity: 1 }} />
+        <CircleMarker key={i} center={p} radius={3} pathOptions={{ color: color, fillColor: color, fillOpacity: 1 }} />
       ))}
-      <Polyline positions={points} pathOptions={{ color: "orange", dashArray: "5, 5" }} />
+      <Polyline positions={points} pathOptions={{ color: color, dashArray: "5, 5" }} />
       {points.length >= 3 && (
-        <Polygon positions={points} pathOptions={{ color: "orange", fillOpacity: 0.2, stroke: false }} />
+        <Polygon positions={points} pathOptions={{ color: color, fillOpacity: 0.2, stroke: false }} />
       )}
     </>
   );
@@ -135,14 +140,24 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
 
   // Delete Mode State
   const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [isPointAddMode, setIsPointAddMode] = useState(false);
+  const [isPolygonMode, setIsPolygonMode] = useState(false); // Polygon batch delete mode
+  const [isPolygonAddMode, setIsPolygonAddMode] = useState(false); // Polygon batch copy mode
+  const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [isAddSegmentsDialogOpen, setIsAddSegmentsDialogOpen] = useState(false);
   const [segmentToDelete, setSegmentToDelete] = useState<number | null>(null);
+  const [segmentToAdd, setSegmentToAdd] = useState<number | null>(null);
+  const [segmentsToDelete, setSegmentsToDelete] = useState<number[]>([]); // For batch delete
   const cancelRef = useRef<HTMLButtonElement>(null);
 
-  // Polygon Selection State
-  const [isPolygonMode, setIsPolygonMode] = useState(false);
-  const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
-  const [segmentsToDelete, setSegmentsToDelete] = useState<number[]>([]); // For batch delete
+  // Clear single selections when toggling point modes
+  useEffect(() => {
+    if (!isDeleteMode && !isPointAddMode) {
+      setSegmentToDelete(null);
+      setSegmentToAdd(null);
+    }
+  }, [isDeleteMode, isPointAddMode]);
 
   // Clear polygon points and close dialog when toggling polygon mode
   useEffect(() => {
@@ -479,6 +494,23 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     }
   }, [segmentsToDelete, decodedName, onDataChange]);
 
+  const finishAddSegmentsSelection = useCallback(() => {
+    if (polygonPoints.length < 3) {
+      toaster.create({ title: "Invalid Polygon", description: "Need at least 3 points.", type: "warning" });
+      return;
+    }
+    const indices = points
+      .filter(p => isPointInPolygon(p.latlng, polygonPoints))
+      .map(p => p.globalIdx);
+
+    if (indices.length === 0) {
+      toaster.create({ title: "No Segments", description: "No segments selected.", type: "warning" });
+      return;
+    }
+
+    setIsAddSegmentsDialogOpen(true);
+  }, [polygonPoints, points]);
+
 
   return (
     <Card.Root display="flex" flexDirection="column" h={`${containerHeight}px`}>
@@ -492,36 +524,115 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
               </Text>
             )}
             {/* Delete Mode Toggle */}
-            <IconButton
-              aria-label="Toggle Delete Mode"
-              variant={isDeleteMode ? "solid" : "ghost"}
-              size="xs"
-              colorPalette={isDeleteMode ? "red" : "gray"}
-              onClick={() => {
-                setIsDeleteMode(!isDeleteMode);
-                setIsPolygonMode(false); // Exclusive modes
-                setPolygonPoints([]);
-              }}
-              title={isDeleteMode ? "Cancel Delete Mode" : "Enable Point Deletion"}
-            >
-              <FaMousePointer />
-            </IconButton>
+            {/* Single Point Modes */}
+            <Menu.Root positioning={{ placement: "bottom-end", strategy: "fixed" }}>
+              <Menu.Trigger asChild>
+                <IconButton
+                  aria-label="Single Point Tools"
+                  size="xs"
+                  variant={(isDeleteMode || isPointAddMode) ? "solid" : "ghost"}
+                  colorPalette={(isDeleteMode || isPointAddMode) ? (isDeleteMode ? "red" : "blue") : "gray"}
+                  onClick={(e) => {
+                    if (isDeleteMode || isPointAddMode) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDeleteMode(false);
+                      setIsPointAddMode(false);
+                      setIsPolygonMode(false);
+                      setIsPolygonAddMode(false);
+                      setPolygonPoints([]);
+                    }
+                  }}
+                  title="Single Point Tools"
+                >
+                  {isPointAddMode ? <FaPlus /> : (isDeleteMode ? <FaTrash /> : <FaMousePointer />)}
+                </IconButton>
+              </Menu.Trigger>
+              <Menu.Positioner>
+                <Menu.Content zIndex={1500}>
+                  <Menu.Item
+                    value="delete"
+                    onClick={() => {
+                      setIsDeleteMode(true);
+                      setIsPointAddMode(false);
+                      setIsPolygonMode(false);
+                      setIsPolygonAddMode(false);
+                      setPolygonPoints([]);
+                    }}
+                  >
+                    <FaMousePointer /> Single Point Delete
+                  </Menu.Item>
+                  <Menu.Item
+                    value="add"
+                    onClick={() => {
+                      setIsDeleteMode(false);
+                      setIsPointAddMode(true);
+                      setIsPolygonMode(false);
+                      setIsPolygonAddMode(false);
+                      setPolygonPoints([]);
+                    }}
+                  >
+                    <FaPlus /> Single Point Copy
+                  </Menu.Item>
+                </Menu.Content>
+              </Menu.Positioner>
+            </Menu.Root>
 
             {/* Polygon Mode Toggle */}
-            <IconButton
-              aria-label="Toggle Polygon Selection"
-              variant={isPolygonMode ? "solid" : "ghost"}
-              size="xs"
-              colorPalette={isPolygonMode ? "orange" : "gray"}
-              onClick={() => {
-                setIsPolygonMode(prev => !prev);
-                setIsDeleteMode(false); // Exclusive modes
-                setDeleteConfirmationOpen(false);
-              }}
-              title={isPolygonMode ? "Cancel Polygon Mode" : "Polygon Selection Deletion"}
-            >
-              <FaDrawPolygon />
-            </IconButton>
+            <Menu.Root positioning={{ placement: "bottom-start", strategy: "fixed" }}>
+              <Menu.Trigger asChild>
+                <IconButton
+                  aria-label="Polygon Tools"
+                  variant={(isPolygonMode || isPolygonAddMode) ? "solid" : "ghost"}
+                  size="xs"
+                  colorPalette={(isPolygonMode || isPolygonAddMode) ? (isPolygonMode ? "orange" : "blue") : "gray"}
+                  title="Polygon Tools"
+                  onClick={(e) => {
+                    if (isPolygonMode || isPolygonAddMode) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsPolygonMode(false);
+                      setIsPolygonAddMode(false);
+                      setIsDeleteMode(false);
+                      setIsPointAddMode(false);
+                      setPolygonPoints([]);
+                    }
+                  }}
+                >
+                  {isPolygonAddMode ? <FaPlus /> : (isPolygonMode ? <FaTrash /> : <FaDrawPolygon />)}
+                </IconButton>
+              </Menu.Trigger>
+              <Menu.Positioner>
+                <Menu.Content zIndex={1500}>
+                  <Menu.Item
+                    value="delete"
+                    onClick={() => {
+                      setIsPolygonMode(true);
+                      setIsPolygonAddMode(false);
+                      setIsDeleteMode(false);
+                      setIsPointAddMode(false);
+                      setPolygonPoints([]);
+                      setDeleteConfirmationOpen(false);
+                    }}
+                  >
+                    <FaTrash /> Delete Segments
+                  </Menu.Item>
+                  <Menu.Item
+                    value="add"
+                    onClick={() => {
+                      setIsPolygonMode(false);
+                      setIsPolygonAddMode(true);
+                      setIsDeleteMode(false);
+                      setIsPointAddMode(false);
+                      setPolygonPoints([]);
+                      setDeleteConfirmationOpen(false);
+                    }}
+                  >
+                    <FaPlus /> Copy/Add Segments
+                  </Menu.Item>
+                </Menu.Content>
+              </Menu.Positioner>
+            </Menu.Root>
 
             {isPolygonMode && (
               <Button
@@ -531,7 +642,23 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 disabled={polygonPoints.length < 3}
                 onClick={finishPolygonSelection}
               >
-                Delete Selected ({polygonPoints.length} pts)
+                Delete Selected ({
+                  points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
+                } segments)
+              </Button>
+            )}
+
+            {isPolygonAddMode && (
+              <Button
+                size="xs"
+                variant="outline"
+                colorPalette="blue"
+                disabled={polygonPoints.length < 3}
+                onClick={finishAddSegmentsSelection}
+              >
+                Copy Selected ({
+                  points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
+                } segments)
               </Button>
             )}
 
@@ -603,6 +730,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
               style={{ width: "100%", height: "100%" }}
               scrollWheelZoom
             >
+              <MapCursorController
+                mode={(isDeleteMode || isPolygonMode) ? 'delete' : (isPointAddMode || isPolygonAddMode) ? 'add' : 'default'}
+              />
               {/* CartoDB Light basemap - same as Curvature Analysis */}
               <TileLayer
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -693,6 +823,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                         if (isDeleteMode) {
                           setSegmentToDelete(globalIdx);
                           setDeleteConfirmationOpen(true);
+                        } else if (isPointAddMode) {
+                          setSegmentToAdd(globalIdx);
+                          setIsAddSegmentsDialogOpen(true);
                         } else {
                           onJump?.(globalIdx);
                         }
@@ -711,12 +844,17 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                       }
                     }}   // ← 跳转到全局索引
                   >
-                    <Tooltip>{isDeleteMode ? "Click to Delete" : label}</Tooltip>
+                    <Tooltip>{isDeleteMode ? "Click to Delete" : (isPointAddMode ? "Click to Copy" : label)}</Tooltip>
                   </CircleMarker>
                 );
               })}
 
-              <PolygonDrawingTool active={isPolygonMode} points={polygonPoints} onAddPoint={handlePolygonPoint} />
+              <PolygonDrawingTool
+                active={isPolygonMode || isPolygonAddMode}
+                points={polygonPoints}
+                onAddPoint={handlePolygonPoint}
+                color={isPolygonAddMode ? "blue" : "red"}
+              />
 
             </MapContainer>
           </Box>
@@ -757,6 +895,37 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
           </Dialog.Positioner>
         </Portal>
       </Dialog.Root>
+
+      <AddSegmentsDialog
+        isOpen={isAddSegmentsDialogOpen}
+        onClose={() => {
+          setIsAddSegmentsDialogOpen(false);
+          setSegmentToAdd(null);
+        }}
+        sourceProject={decodedName || ""}
+        indices={
+          segmentToAdd !== null
+            ? [segmentToAdd]
+            : points
+              .filter(p => isPointInPolygon(p.latlng, polygonPoints))
+              .map(p => p.globalIdx)
+        }
+        onSuccess={() => {
+          setIsPolygonAddMode(false);
+          setPolygonPoints([]);
+          setSegmentToAdd(null);
+          // Note: isPointAddMode stays active for continuous adding if desired, 
+          // or we can turn it off. Let's keep it active for consistency with delete mode?
+          // Actually user might want to copy multiple single points. 
+          // But usually dialog closes after success.
+          // Let's reset mode if it was polygon, but for single point maybe keep it?
+          // Actually matching PathAnalysisMapView behavior where it clears.
+          // But wait, in PathAnalysisMapView we reset polygon add mode.
+          // For single point, let's reset it too to avoid confusion.
+          setIsPointAddMode(false); // Reset single point mode
+          if (onDataChange) onDataChange();
+        }}
+      />
 
     </Card.Root >
   );

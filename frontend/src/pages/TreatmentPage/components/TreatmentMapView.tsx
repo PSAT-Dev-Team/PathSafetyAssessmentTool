@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Box, Text, Tabs } from "@chakra-ui/react";
+
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -97,6 +98,7 @@ export default function TreatmentMapView() {
                 style={{ width: "100%", height: "100%" }}
                 scrollWheelZoom
               >
+
                 {/* Tile Layer */}
                 <TileLayer
                   url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"

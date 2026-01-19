@@ -12,6 +12,7 @@ from flask import (
 import zipfile
 import io
 from pathlib import Path
+import urllib.parse
 import traceback
 from . import bp
 from werkzeug.utils import safe_join
@@ -440,6 +441,142 @@ def delete_segments_batch(project_name):
     # Return updated metadata
     meta = project.metadata.to_dict() if project.metadata else {}
     return jsonify(meta)
+
+
+    # Return updated metadata
+    meta = project.metadata.to_dict() if project.metadata else {}
+    return jsonify(meta)
+
+@bp.post("/check-collisions")
+def check_collisions():
+    try:
+        data = request.json
+        source_name = urllib.parse.unquote(data.get("sourceProject"))
+        target_name = data.get("targetProject")
+        indices = data.get("indices", [])
+        
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        
+        source_proj = pm.project(source_name)
+        
+        # Check if target exists
+        exists = any(p.metadata.project_name == target_name for p in pm.projects)
+        
+        if not exists:
+            # New project, no collisions possible
+            return jsonify({"ok": True, "collisions": []})
+            
+        target_proj = pm.project(target_name)
+        collisions = source_proj.check_collisions(indices, target_proj)
+        
+        return jsonify({
+            "ok": True,
+            "collisions": collisions
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"Check collisions failed: {str(e)}", 500)
+
+
+@bp.post("/copy-segments")
+def copy_segments():
+    """
+    Copy segments from a source project to a target project.
+    
+    POST body:
+    {
+        "sourceProject": "Project A",
+        "targetProject": "Project B",
+        "indices": [0, 1, 2],
+        "createTarget": boolean  # If true, create Project B if it doesn't exist (using template)
+    }
+    """
+    try:
+        data = request.json
+        if not data:
+            return fail("Missing request body", 400)
+            
+        source_name = urllib.parse.unquote(data.get("sourceProject"))
+        target_name = data.get("targetProject") 
+        # targetProject coming from frontend is just the name string (new or existing)
+        
+        indices = data.get("indices", [])
+        create_target = data.get("createTarget", False)
+        replace = data.get("replace", False)
+        tags = data.get("tags", [])
+        
+        if not source_name or not target_name:
+            return fail("Missing sourceProject or targetProject", 400)
+            
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        
+        # Get Source Project
+        try:
+            source_proj = pm.project(source_name)
+        except KeyError:
+            return fail(f"Source project '{source_name}' not found", 404)
+            
+        # Get or Create Target Project
+        target_proj = None
+        try:
+            target_proj = pm.project(target_name)
+        except KeyError:
+            if create_target:
+                # Create rudimentary/empty project
+                # We can reuse create_project but we need geodataframe... 
+                # Actually, copy_segments will populate it.
+                # So we can create an empty structure manually or use create_project with empty data
+                
+                # Let's try to use pm.create_project with dummy data and then clear it?
+                # Or better: just instantiate Project at new path and initialize empty
+                
+                target_path = pm.des_path / target_name
+                if target_path.exists():
+                     return fail(f"Target path {target_path} already exists but project not loaded? Restart server.", 500)
+                
+                # Initialize empty structure
+                target_path.mkdir(parents=True)
+                (target_path / global_var.PROJECT_IMAGES_FOLDER).mkdir()
+                
+                new_proj = Project(target_path)
+                # Manually initialize metadata to avoid trying to read from non-existent file
+                new_proj._metadata = serializer.ProjectMetadata()
+                
+                # Set basic metadata
+                new_proj.metadata.project_name = target_name
+                new_proj.metadata.date_created = datetime.datetime.now()
+                new_proj.metadata.last_updated = datetime.datetime.now()
+                new_proj.metadata.created_by = "copy_segments"
+                new_proj.metadata.tags = tags
+                new_proj.metadata.dataset = source_proj.metadata.dataset # Inherit dataset type?
+                new_proj.metadata.size = 0
+                
+                # Initialize empty tables
+                new_proj.geo_data = serializer.ProjectGeoData(0)
+                new_proj.create_new_version() # Creates subfolder and empty tables
+                
+                # Save just to register it
+                new_proj.save_all()
+                pm.projects.append(new_proj)
+                target_proj = new_proj
+            else:
+                 return fail(f"Target project '{target_name}' not found", 404)
+        
+        # Perform Copy
+        count = source_proj.copy_segments(indices, target_proj, replace=replace)
+        
+        return jsonify({
+            "ok": True, 
+            "message": f"Copied {count} segments to {target_name}",
+            "targetProject": target_name,
+            "count": count
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"Copy segments failed: {str(e)}", 500)
 
 
 @bp.delete("/<project_name>/segments/<int:segment_index>")

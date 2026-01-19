@@ -384,8 +384,249 @@ class Project:
             self.metadata.size = max(0, self.metadata.size - count_removed)
         
         self.save_all()
+
+        self.save_all()
+
+    def check_collisions(self, indices: list[int], target_project: 'Project') -> list[str]:
+        """
+        Check if segments specified by indices already exist in target_project based on Image Reference.
+        Returns a list of colliding Image References.
+        """
+        source_geo = self.geo_data.df
+        valid_indices = [i for i in indices if i < len(source_geo)]
+        if not valid_indices:
+            return []
         
-    def search(self, filter_attributes: dict, filter_treatment: dict, filter_results: dict) -> Project:
+        subset_geo = source_geo.iloc[valid_indices]
+        
+        target_geo = target_project.geo_data.df
+        if target_geo is None or target_geo.empty:
+            return []
+            
+        collisions = []
+        # optimization: get set of target image refs
+        if "Image Reference" in target_geo.columns:
+            # Drop NAs and ensure we ignore empty strings or "nan"
+            # astype(str) converts NaN to "nan" if we are not careful with dropna first
+            target_series = target_geo["Image Reference"].dropna()
+            # Filter out empty or whitespace only strings, and literal "nan"
+            target_imgs = {str(x) for x in target_series if str(x).strip() and str(x).lower() != 'nan'}
+            
+            source_name = self.metadata.project_name
+            target_name = target_project.metadata.project_name
+
+            for _, row in subset_geo.iterrows():
+                img_ref = row.get("Image Reference")
+                # Check for validity before string conversion to be safe
+                if pd.notna(img_ref):
+                    s_ref = str(img_ref).strip()
+                    if s_ref and s_ref.lower() != 'nan':
+                        # PREDICT renaming
+                        check_ref = s_ref
+                        if s_ref.startswith(source_name):
+                             check_ref = s_ref.replace(source_name, target_name, 1)
+                        
+                        if check_ref in target_imgs:
+                            collisions.append(check_ref)
+        
+        if collisions:
+            print(f"DEBUG: Found {len(collisions)} collisions. Examples: {collisions[:3]}")
+                
+        return collisions
+
+    def copy_segments(self, indices: list[int], target_project: 'Project', replace: bool = False):
+        """
+        Copy segments (and their images) specified by indices from self (source) to target_project.
+        """
+        # 1. Get filtered data from source (latest version + geo_data)
+        # We can reuse the logic from search/create_temporary_project but specific to indices
+        
+        source_geo = self.geo_data.df
+        source_attr = self.latest().attributes.df
+        source_res = self.latest().results.df
+        source_treat = self.latest().treatment.df
+        source_imgs = []
+
+        # Validate indices
+        valid_indices = [i for i in indices if i < len(source_geo)]
+        if not valid_indices:
+            return 0
+
+        # Extract rows
+        # Extract rows
+        # Use reindex instead of iloc to handle cases where other DFs might be shorter than geo_df
+        # This aligns everything to valid_indices (based on geo_df), filling missing with NaN
+        subset_geo = source_geo.iloc[valid_indices].copy().reset_index(drop=True)
+        subset_attr = source_attr.reindex(valid_indices).copy().reset_index(drop=True)
+        subset_res = source_res.reindex(valid_indices).copy().reset_index(drop=True)
+        
+        subset_treat = pd.DataFrame()
+        if not source_treat.empty:
+             subset_treat = source_treat.reindex(valid_indices).copy().reset_index(drop=True)
+
+        # 1.5 Handle Replacement
+        if replace and target_project.geo_data.df is not None and not target_project.geo_data.df.empty:
+            target_geo = target_project.geo_data.df
+            target_geo = target_project.geo_data.df
+            # Update: We need to predict the new image names FIRST because we are going to rename them.
+            # Logic: If source image matches "SourceProject_...", rename to "TargetProject_..."
+            # Then check if THAT new name exists in target.
+
+            source_name = self.metadata.project_name
+            target_name = target_project.metadata.project_name
+            
+            # Helper to predict name
+            def predict_name(img_ref):
+                if pd.isna(img_ref): return None
+                s_ref = str(img_ref).strip()
+                if not s_ref or s_ref.lower() == 'nan': return None
+                
+                # If starts with source project name (case-insensitive check), replace it
+                # Otherwise, PREPEND target project name to enforce convention
+                
+                # Check 1: Exact match start
+                if s_ref.startswith(source_name):
+                    return s_ref.replace(source_name, target_name, 1)
+                
+                # Check 2: Case-insensitive match start
+                if s_ref.lower().startswith(source_name.lower()):
+                    # Retrieve the actual prefix length and slice
+                    old_len = len(source_name)
+                    suffix = s_ref[old_len:]
+                    # If there was a separator (e.g. _) make sure we don't double it or lose it
+                    # But simple concatenation is safest: TargetName + suffix
+                    return f"{target_name}{suffix}"
+
+                # Check 3: Force Prepend (if not already starting with target name)
+                # If the image doesn't have the source prefix, the user wants it renamed to the new project.
+                # e.g. "Cam1.jpg" -> "TargetProject_Cam1.jpg"
+                if not s_ref.startswith(target_name):
+                     return f"{target_name}_{s_ref}"
+
+                return s_ref
+
+
+            if "Image Reference" in target_geo.columns:
+                # Identify images to replace (using PREDICTED names)
+                img_refs_to_replace = set()
+                for _, row in subset_geo.iterrows():
+                    ref = row.get("Image Reference")
+                    predicted = predict_name(ref)
+                    if predicted:
+                        img_refs_to_replace.add(predicted)
+                
+                if img_refs_to_replace:
+                    # Find indices in target that match these images
+                    # We iterate to find indices. 
+                    # Note: target_geo index should be RangeIndex 0..N usually
+                    # Safe boolean mask: convert target column to string, but handle NaNs carefully
+                    # We only care about rows where Image Ref is in our set. 
+                    
+                    # 1. Ensure target column is treated as string for comparison, but keep index alignment
+                    target_refs = target_geo["Image Reference"].astype(str)
+                    
+                    # 2. Check membership
+                    mask = target_refs.isin(img_refs_to_replace)
+                    indices_to_delete = target_geo[mask].index.tolist()
+                    
+                    if indices_to_delete:
+                        # Batch delete them from target
+                        target_project.delete_segments(indices_to_delete)
+                        # Reload target_geo as it has changed
+                        # Actually delete_segments modifies df in place (or reassigns it)
+                        # But we should rely on the object state update.
+
+        # 2. Copy Images
+        # Target Image Directory
+        target_img_dir = target_project.project_path / global_var.PROJECT_IMAGES_FOLDER
+        if not target_img_dir.exists():
+            target_img_dir.mkdir(parents=True, exist_ok=True)
+
+        source_name = self.metadata.project_name
+        target_name = target_project.metadata.project_name
+
+        for idx, row in subset_geo.iterrows():
+            img_ref = None
+            col_name_found = None
+            for col in ["Image Reference", "image", "img"]:
+                if col in row and pd.notna(row[col]):
+                    val = str(row[col]).strip()
+                    if val and val.lower() != 'nan':
+                        img_ref = val
+                        col_name_found = col
+                        break
+            
+            if img_ref:
+                # Calculate new name using robust logic
+                new_img_ref = img_ref
+                
+                # Check 1: Exact
+                if img_ref.startswith(source_name):
+                    new_img_ref = img_ref.replace(source_name, target_name, 1)
+                # Check 2: Case insensitive
+                elif img_ref.lower().startswith(source_name.lower()):
+                    old_len = len(source_name)
+                    suffix = img_ref[old_len:]
+                    new_img_ref = f"{target_name}{suffix}"
+                # Check 3: Force Prepend (if not already starting with target name)
+                elif not img_ref.startswith(target_name):
+                     new_img_ref = f"{target_name}_{img_ref}"
+
+                # Update the dataframe (subset_geo) with the new name
+                # This ensures when we append below, it has the correct reference
+                subset_geo.at[idx, col_name_found] = new_img_ref
+                # Also update treatment/results if they have the column? 
+                # (Treatment has ImageReference, Results usually only lat/lon/scores)
+                
+                # Check treatment df
+                if not subset_treat.empty and idx < len(subset_treat) and "Image Reference" in subset_treat.columns:
+                     subset_treat.at[idx, "Image Reference"] = new_img_ref
+
+                source_img_path = self.project_path / global_var.PROJECT_IMAGES_FOLDER / img_ref
+                if source_img_path.exists():
+                    target_img_path = target_img_dir / new_img_ref
+                    shutil.copy2(source_img_path, target_img_path)
+
+
+        # 3. Append to Target Project
+        # Append GeoData
+        if target_project.geo_data.df is None or target_project.geo_data.df.empty:
+             target_project.geo_data.df = subset_geo
+        else:
+             target_project.geo_data.df = pd.concat([target_project.geo_data.df, subset_geo], ignore_index=True)
+        target_project.geo_data.df_dirty = True
+
+        # Append Attributes
+        if target_project.latest().attributes.df is None or target_project.latest().attributes.df.empty:
+            target_project.latest().attributes.df = subset_attr
+        else:
+            target_project.latest().attributes.df = pd.concat([target_project.latest().attributes.df, subset_attr], ignore_index=True)
+        target_project.latest().attributes.df_dirty = True
+
+        # Append Results
+        if target_project.latest().results.df is None or target_project.latest().results.df.empty:
+            target_project.latest().results.df = subset_res
+        else:
+            target_project.latest().results.df = pd.concat([target_project.latest().results.df, subset_res], ignore_index=True)
+        target_project.latest().results.df_dirty = True
+
+        # Append Treatment
+        if target_project.latest().treatment.df is None or target_project.latest().treatment.df.empty:
+            target_project.latest().treatment.df = subset_treat
+        else:
+            target_project.latest().treatment.df = pd.concat([target_project.latest().treatment.df, subset_treat], ignore_index=True)
+        target_project.latest().treatment.df_dirty = True
+
+        # 4. Update Target Metadata
+        count_added = len(valid_indices)
+        if target_project.metadata.size is None:
+             target_project.metadata.size = 0
+        target_project.metadata.size += count_added
+        target_project.metadata.last_updated = datetime.datetime.now()
+        
+        # Save Target
+        target_project.save_all()
+        return count_added
         # ================================
         # Get dataframes to filter
         # ================================
@@ -473,7 +714,12 @@ class Project:
     def metadata(self) -> serializer.ProjectMetadata:
         if self._metadata is None:
             meta = serializer.ProjectMetadata()
-            meta.parse(self.project_path / "project_metadata.json")
+            try:
+                meta.parse(self.project_path / "project_metadata.json")
+            except (FileNotFoundError, ValueError):
+                # Fallback for corrupt/incomplete projects
+                print(f"Warning: Could not read metadata for {self.project_path.name}")
+                meta.project_name = self.project_path.name
             self._metadata = meta
         return self._metadata
 

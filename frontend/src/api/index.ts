@@ -160,6 +160,39 @@ export async function deleteSegmentsBatch(project: string, indices: number[]) {
   return res.json();
 }
 
+// Check for segment collisions in target project
+export async function checkCollisions(
+  sourceProject: string,
+  targetProject: string,
+  indices: number[]
+): Promise<{ ok: boolean; collisions: string[] }> {
+  const res = await fetch("/api/projects/check-collisions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceProject, targetProject, indices }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+// Copy segments to another project
+export async function copySegments(
+  sourceProject: string,
+  targetProject: string,
+  indices: number[],
+  createTarget: boolean,
+  replace: boolean = false,
+  tags: string[] = []
+): Promise<{ ok: boolean; message: string; count: number; targetProject: string }> {
+  const res = await fetch("/api/projects/copy-segments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceProject, targetProject, indices, createTarget, replace, tags }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function autocodeImage(project: string, imageRef: string) {
   const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/image`, {
     method: "POST",

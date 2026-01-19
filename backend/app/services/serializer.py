@@ -302,12 +302,20 @@ class ProjectGeoData:
             self.parse(file_path)
             return
 
-        self.df = gpd.GeoDataFrame([{
-            self.Fields.IMAGE_REFERENCE_STR:    "",
-            self.Fields.ROAD_NAME_STR:          "",
-            self.Fields.DISTANCE_STR:           0,
-            self.Fields.LINESTRING_STR:         None
-        } for _ in range(size)], geometry=self.Fields.LINESTRING_STR, crs="EPSG:3414")
+        if size == 0:
+            self.df = gpd.GeoDataFrame(columns=[
+                self.Fields.IMAGE_REFERENCE_STR,
+                self.Fields.ROAD_NAME_STR,
+                self.Fields.DISTANCE_STR,
+                self.Fields.LINESTRING_STR
+            ], geometry=self.Fields.LINESTRING_STR, crs="EPSG:3414")
+        else:
+            self.df = gpd.GeoDataFrame([{
+                self.Fields.IMAGE_REFERENCE_STR:    "",
+                self.Fields.ROAD_NAME_STR:          "",
+                self.Fields.DISTANCE_STR:           0,
+                self.Fields.LINESTRING_STR:         None
+            } for _ in range(size)], geometry=self.Fields.LINESTRING_STR, crs="EPSG:3414")
 
     # === UTILITY ===
 

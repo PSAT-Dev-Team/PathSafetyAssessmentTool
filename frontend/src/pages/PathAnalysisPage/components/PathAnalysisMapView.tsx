@@ -3,9 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
 import { toaster } from "../../../components/ui/toaster";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline } from "react-leaflet";
-import { FaDrawPolygon, FaMousePointer } from "react-icons/fa";
+import { FaDrawPolygon, FaMousePointer, FaPlus, FaTrash } from "react-icons/fa";
 import { Switch } from "../../../components/ui/switch";
-import L from "leaflet";
+import { AddSegmentsDialog } from "./AddSegmentsDialog";
+import { Menu } from "@chakra-ui/react";
+import { MapCursorController } from "../../../components/common/MapCursorController";
+
 import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
@@ -17,6 +20,8 @@ proj4.defs(
   "EPSG:3414",
   "+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 +ellps=WGS84 +units=m +no_defs"
 );
+
+
 
 const to4326 = (p: Position): [number, number] => {
   const [lon, lat] = proj4("EPSG:3414", "EPSG:4326", p as [number, number]) as [number, number];
@@ -61,16 +66,17 @@ function isPointInPolygon(point: [number, number], vs: [number, number][]) {
 
 interface PolygonDrawingToolProps {
   isPolygonMode: boolean;
+  isPolygonAddMode: boolean;
   onPolygonPoint: (latlng: L.LatLng) => void;
   polygonPoints: [number, number][];
 }
 
-function PolygonDrawingTool({ isPolygonMode, onPolygonPoint, polygonPoints }: PolygonDrawingToolProps) {
-  const modeRef = useRef(isPolygonMode);
+function PolygonDrawingTool({ isPolygonMode, isPolygonAddMode, onPolygonPoint, polygonPoints }: PolygonDrawingToolProps) {
+  const modeRef = useRef(false);
 
   useEffect(() => {
-    modeRef.current = isPolygonMode;
-  }, [isPolygonMode]);
+    modeRef.current = isPolygonMode || isPolygonAddMode;
+  }, [isPolygonMode, isPolygonAddMode]);
 
   useMapEvents({
     click(e) {
@@ -79,6 +85,8 @@ function PolygonDrawingTool({ isPolygonMode, onPolygonPoint, polygonPoints }: Po
       }
     },
   });
+
+  const color = isPolygonAddMode ? "blue" : "red";
 
   if (polygonPoints.length === 0) return null; // Only hide if no points
 
@@ -89,12 +97,12 @@ function PolygonDrawingTool({ isPolygonMode, onPolygonPoint, polygonPoints }: Po
           key={idx}
           center={pt}
           radius={4}
-          pathOptions={{ color: "red", fillOpacity: 1 }}
+          pathOptions={{ color: color, fillOpacity: 1 }}
         />
       ))}
-      <LeafletPolyline positions={polygonPoints} pathOptions={{ color: "red", dashArray: "5, 5" }} />
+      <LeafletPolyline positions={polygonPoints} pathOptions={{ color: color, dashArray: "5, 5" }} />
       {polygonPoints.length >= 3 && (
-        <LeafletPolygon positions={polygonPoints} pathOptions={{ color: "red", fillOpacity: 0.2 }} />
+        <LeafletPolygon positions={polygonPoints} pathOptions={{ color: color, fillOpacity: 0.2 }} />
       )}
     </>
   );
@@ -141,19 +149,27 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // Track which attribute is the primary focus for coloring
   const [primaryFocusAttribute, setPrimaryFocusAttribute] = useState<string | null>(null);
 
+  // Mode states (Single Point & Polygon)
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [isPointAddMode, setIsPointAddMode] = useState(false);
+  const [isPolygonMode, setIsPolygonMode] = useState(false);
+  const [isPolygonAddMode, setIsPolygonAddMode] = useState(false);
+  const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
+
+  // Selection states
+  const [segmentToDelete, setSegmentToDelete] = useState<{ projectName: string; index: number } | null>(null);
+  const [segmentsToDelete, setSegmentsToDelete] = useState<{ projectName: string; index: number }[]>([]);
+  const [segmentToAdd, setSegmentToAdd] = useState<{ projectName: string; index: number } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Dialog states
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [isAddSegmentsDialogOpen, setIsAddSegmentsDialogOpen] = useState(false);
+
   // Table filtering and sorting state
   const [globalSearch, setGlobalSearch] = useState<string>("");
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [sortConfig, setSortConfig] = useState<Array<{ column: string; direction: 'asc' | 'desc' }>>([]);
-
-  // --- Deletion State ---
-  const [isDeleteMode, setIsDeleteMode] = useState(false); // Single point delete mode
-  const [isPolygonMode, setIsPolygonMode] = useState(false); // Polygon batch delete mode
-  const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
-  const [segmentsToDelete, setSegmentsToDelete] = useState<{ projectName: string; index: number }[]>([]);
-  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
-  const [segmentToDelete, setSegmentToDelete] = useState<{ projectName: string; index: number } | null>(null); // For single delete
-  const [isDeleting, setIsDeleting] = useState(false);
 
   // Handlers for Polygon Tool
   const handlePolygonPoint = (latlng: L.LatLng) => {
@@ -1526,17 +1542,51 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Clear polygon points and close dialog when toggling polygon mode
   useEffect(() => {
-    console.log("isPolygonMode changed:", isPolygonMode);
-    setPolygonPoints([]);
-    setDeleteConfirmationOpen(false);
-    setSegmentsToDelete([]);
-  }, [isPolygonMode]);
+    // Both modes share the same points state, so clear if both are inactive
+    if (!isPolygonMode && !isPolygonAddMode) {
+      setPolygonPoints([]);
+      setDeleteConfirmationOpen(false);
+      setSegmentsToDelete([]);
+    }
+  }, [isPolygonMode, isPolygonAddMode]);
+
+  // Clear single selections when toggling point modes
+  useEffect(() => {
+    if (!isDeleteMode && !isPointAddMode) {
+      setSegmentToDelete(null);
+      setSegmentToAdd(null);
+    }
+  }, [isDeleteMode, isPointAddMode]);
+
+  // Handler for finishing "Add Segments" selection
+  const finishAddSegmentsSelection = () => {
+    if (polygonPoints.length < 3) {
+      toaster.create({ title: "Invalid Polygon", description: "Need at least 3 points.", type: "warning" });
+      return;
+    }
+
+    // Ensure only one project is selected for simplicity
+    if (selectedProjects.length !== 1) {
+      toaster.create({ title: "Action Not Supported", description: "Please select exactly one project to copy segments from.", type: "error" });
+      return;
+    }
+
+    const indicesInside = allPoints
+      .filter(p => isPointInPolygon(p.latlng, polygonPoints))
+      .map(p => p.idx);
+
+    if (indicesInside.length === 0) {
+      toaster.create({ title: "No Segments", description: "No segments selected inside the polygon.", type: "warning" });
+      return;
+    }
+
+    setIsAddSegmentsDialogOpen(true);
+  };
 
   return (
     <Box
       borderWidth="1px"
       borderRadius="lg"
-      overflow="hidden"
       bg="white"
       _dark={{ bg: "gray.800" }}
     >
@@ -1552,41 +1602,118 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
             {allPoints.length > 0 && (
               <>
                 <HStack gap="0" mr="2">
-                  <IconButton
-                    aria-label="Single Delete"
-                    size="sm"
-                    variant={isDeleteMode ? "solid" : "outline"}
-                    colorPalette={isDeleteMode ? "red" : "gray"}
-                    onClick={() => {
-                      setIsDeleteMode(!isDeleteMode);
-                      setIsPolygonMode(false);
-                      setPolygonPoints([]);
-                    }}
-                    borderTopRightRadius={0}
-                    borderBottomRightRadius={0}
-                  >
-                    <FaMousePointer />
-                  </IconButton>
-                  <IconButton
-                    aria-label="Polygon Delete"
-                    size="sm"
-                    variant={isPolygonMode ? "solid" : "outline"}
-                    colorPalette={isPolygonMode ? "red" : "gray"}
-                    onClick={() => {
-                      console.log("Polygon Button Clicked - Turning OFF/ON");
-                      setIsPolygonMode(prev => !prev);
-                      setIsDeleteMode(false);
-                      setDeleteConfirmationOpen(false); // Force close dialog
-                    }}
-                    borderTopLeftRadius={0}
-                    borderBottomLeftRadius={0}
-                    borderLeft="none"
-                  >
-                    <FaDrawPolygon />
-                  </IconButton>
+                  <Menu.Root positioning={{ placement: "bottom-end", strategy: "fixed" }}>
+                    <Menu.Trigger asChild>
+                      <IconButton
+                        aria-label="Single Point Tools"
+                        size="sm"
+                        variant={(isDeleteMode || isPointAddMode) ? "solid" : "outline"}
+                        colorPalette={(isDeleteMode || isPointAddMode) ? (isDeleteMode ? "red" : "blue") : "gray"}
+                        onClick={(e) => {
+                          if (isDeleteMode || isPointAddMode) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDeleteMode(false);
+                            setIsPointAddMode(false);
+                            setIsPolygonMode(false);
+                            setIsPolygonAddMode(false);
+                            setPolygonPoints([]);
+                          }
+                        }}
+                        borderTopRightRadius={0}
+                        borderBottomRightRadius={0}
+                      >
+                        {isDeleteMode ? <FaTrash /> : isPointAddMode ? <FaPlus /> : <FaMousePointer />}
+                      </IconButton>
+                    </Menu.Trigger>
+                    <Menu.Positioner>
+                      <Menu.Content zIndex={2000}>
+                        <Menu.Item
+                          value="delete"
+                          onClick={() => {
+                            setIsDeleteMode(true);
+                            setIsPointAddMode(false);
+                            setIsPolygonMode(false);
+                            setIsPolygonAddMode(false);
+                            setPolygonPoints([]);
+                          }}
+                        >
+                          <FaMousePointer /> Single Point Delete
+                        </Menu.Item>
+                        <Menu.Item
+                          value="add"
+                          onClick={() => {
+                            setIsDeleteMode(false);
+                            setIsPointAddMode(true);
+                            setIsPolygonMode(false);
+                            setIsPolygonAddMode(false);
+                            setPolygonPoints([]);
+                          }}
+                        >
+                          <FaPlus /> Single Point Copy
+                        </Menu.Item>
+                      </Menu.Content>
+                    </Menu.Positioner>
+                  </Menu.Root>
+                  <Menu.Root positioning={{ placement: "bottom-start", strategy: "fixed" }}>
+                    <Menu.Trigger asChild>
+                      <IconButton
+                        aria-label="Polygon Tools"
+                        size="sm"
+                        variant={(isPolygonMode || isPolygonAddMode) ? "solid" : "outline"}
+                        colorPalette={(isPolygonMode || isPolygonAddMode) ? (isPolygonMode ? "red" : "blue") : "gray"}
+                        borderTopLeftRadius={0}
+                        borderBottomLeftRadius={0}
+                        borderLeft="none"
+                        onClick={(e) => {
+                          if (isPolygonMode || isPolygonAddMode) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsPolygonMode(false);
+                            setIsPolygonAddMode(false);
+                            setIsDeleteMode(false);
+                            setIsPointAddMode(false);
+                            setPolygonPoints([]);
+                          }
+                        }}
+                      >
+                        {isPolygonMode ? <FaTrash /> : isPolygonAddMode ? <FaPlus /> : <FaDrawPolygon />}
+                      </IconButton>
+                    </Menu.Trigger>
+                    <Menu.Positioner>
+                      <Menu.Content zIndex={2000}>
+                        <Menu.Item
+                          value="delete"
+                          onClick={() => {
+                            setIsPolygonMode(true);
+                            setIsPolygonAddMode(false);
+                            setIsDeleteMode(false);
+                            setIsPointAddMode(false);
+                            setPolygonPoints([]);
+                            setDeleteConfirmationOpen(false);
+                          }}
+                        >
+                          <FaTrash /> Delete Segments
+                        </Menu.Item>
+                        <Menu.Item
+                          value="add"
+                          onClick={() => {
+                            setIsPolygonMode(false);
+                            setIsPolygonAddMode(true);
+                            setIsDeleteMode(false);
+                            setIsPointAddMode(false);
+                            setPolygonPoints([]);
+                            setDeleteConfirmationOpen(false);
+                          }}
+                        >
+                          <FaPlus /> Copy/Add Segments
+                        </Menu.Item>
+                      </Menu.Content>
+                    </Menu.Positioner>
+                  </Menu.Root>
                 </HStack>
 
-                {polygonPoints.length >= 3 && (
+                {polygonPoints.length >= 3 && isPolygonMode && (
                   <Button
                     size="sm"
                     colorPalette="red"
@@ -1595,7 +1722,19 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                     Delete Selected ({
                       // Preview count
                       allPoints.filter(pt => isPointInPolygon(pt.latlng, polygonPoints)).length
-                    } pts)
+                    } segments)
+                  </Button>
+                )}
+
+                {polygonPoints.length >= 3 && isPolygonAddMode && (
+                  <Button
+                    size="sm"
+                    colorPalette="blue"
+                    onClick={finishAddSegmentsSelection}
+                  >
+                    Copy Selected ({
+                      allPoints.filter(pt => isPointInPolygon(pt.latlng, polygonPoints)).length
+                    } segments)
                   </Button>
                 )}
               </>
@@ -1908,73 +2047,84 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
             )}
 
             {!loading && !err && (
-              <MapContainer
-                center={initialCenter.current}
-                zoom={13}
-                maxZoom={22}
-                style={{ width: "100%", height: "100%" }}
-                scrollWheelZoom
-              >
-                {/* Render Polygon Tool */}
-                <PolygonDrawingTool
-                  isPolygonMode={isPolygonMode}
-                  onPolygonPoint={handlePolygonPoint}
-                  polygonPoints={polygonPoints}
-                />
-
-                {/* Tile Layer */}
-                <TileLayer
-                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                  attribution='&copy; OpenStreetMap contributors & CARTO'
+              <>
+                <MapContainer
+                  center={initialCenter.current}
+                  zoom={13}
                   maxZoom={22}
-                />
+                  style={{ width: "100%", height: "100%" }}
+                  scrollWheelZoom
+                >
+                  <MapCursorController
+                    mode={(isDeleteMode || isPolygonMode) ? 'delete' : (isPointAddMode || isPolygonAddMode) ? 'add' : 'default'}
+                  />
+                  {/* Render Polygon Tool */}
+                  <PolygonDrawingTool
+                    isPolygonMode={isPolygonMode}
+                    isPolygonAddMode={isPolygonAddMode}
+                    onPolygonPoint={handlePolygonPoint}
+                    polygonPoints={polygonPoints}
+                  />
 
-                {/* Auto-fit bounds if data is available and shouldAutoFit is true */}
-                {allLatLngs.length > 0 && <FitBounds points={allLatLngs} shouldFit={shouldAutoFit} />}
+                  {/* Tile Layer */}
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                    attribution='&copy; OpenStreetMap contributors & CARTO'
+                    maxZoom={22}
+                  />
 
-                {/* Pan to specific project bounds when button clicked */}
-                {panToBounds && <PanToBounds bounds={panToBounds} />}
+                  {/* Auto-fit bounds if data is available and shouldAutoFit is true */}
+                  {allLatLngs.length > 0 && <FitBounds points={allLatLngs} shouldFit={shouldAutoFit} />}
 
-                {/* Render all points as markers */}
-                {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
-                  const radius = 5;
-                  let label = `${projectName} - #${idx + 1}`;
-                  if (f.properties?.["Image Reference"]) {
-                    label += ` ${f.properties["Image Reference"]}`;
-                  }
-                  if (primaryFocusAttribute && attributeValue) {
-                    label += ` | ${primaryFocusAttribute}: ${attributeValue}`;
-                  }
+                  {/* Pan to specific project bounds when button clicked */}
+                  {panToBounds && <PanToBounds bounds={panToBounds} />}
 
-                  return (
-                    <CircleMarker
-                      key={`${projectName}-${idx}-${globalIdx}`}
-                      center={latlng}
-                      radius={radius}
-                      pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
-                      eventHandlers={{
-                        click: () => {
-                          // Check delete modes first
-                          if (isDeleteMode) {
-                            setSegmentToDelete({ projectName: projectName, index: idx });
-                            setDeleteConfirmationOpen(true);
-                            return;
+                  {/* Render all points as markers */}
+                  {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
+                    const radius = 5;
+                    let label = `${projectName} - #${idx + 1}`;
+                    if (f.properties?.["Image Reference"]) {
+                      label += ` ${f.properties["Image Reference"]}`;
+                    }
+                    if (primaryFocusAttribute && attributeValue) {
+                      label += ` | ${primaryFocusAttribute}: ${attributeValue}`;
+                    }
+
+                    return (
+                      <CircleMarker
+                        key={`${projectName}-${idx}-${globalIdx}`}
+                        center={latlng}
+                        radius={radius}
+                        pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
+                        eventHandlers={{
+                          click: () => {
+                            // Check delete modes first
+                            if (isDeleteMode) {
+                              setSegmentToDelete({ projectName: projectName, index: idx });
+                              setDeleteConfirmationOpen(true);
+                              return;
+                            }
+                            if (isPointAddMode) {
+                              setSegmentToAdd({ projectName: projectName, index: idx });
+                              setIsAddSegmentsDialogOpen(true);
+                              return;
+                            }
+                            if (isPolygonMode) return; // Do nothing on click in polygon mode (handled by map click)
+
+                            // Navigate to coding page for this project and segment
+                            const segmentIdx = idx + 1; // 1-based index for UI
+                            navigate(`/coding/${encodeURIComponent(projectName)}?segment=${segmentIdx}`, {
+                              state: { returnToAnalysis: true }
+                            });
                           }
-                          if (isPolygonMode) return; // Do nothing on click in polygon mode (handled by map click)
-
-                          // Navigate to coding page for this project and segment
-                          const segmentIdx = idx + 1; // 1-based index for UI
-                          navigate(`/coding/${encodeURIComponent(projectName)}?segment=${segmentIdx}`, {
-                            state: { returnToAnalysis: true }
-                          });
-                        }
-                      }}
-                    >
-                      <Tooltip>{label}</Tooltip>
-                    </CircleMarker>
-                  );
-                })}
-              </MapContainer>
+                        }}
+                      >
+                        <Tooltip>{label}</Tooltip>
+                      </CircleMarker>
+                    );
+                  })}
+                </MapContainer>
+              </>
             )}
           </Box>
         </Tabs.Content>
@@ -2182,6 +2332,28 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           </Dialog.Positioner>
         </Portal>
       </Dialog.Root>
+
+      <AddSegmentsDialog
+        isOpen={isAddSegmentsDialogOpen}
+        onClose={() => {
+          setIsAddSegmentsDialogOpen(false);
+          setSegmentToAdd(null);
+        }}
+        sourceProject={segmentToAdd ? segmentToAdd.projectName : (selectedProjects[0] || "")}
+        indices={
+          segmentToAdd
+            ? [segmentToAdd.index]
+            : allPoints
+              .filter(pt => isPointInPolygon(pt.latlng, polygonPoints))
+              .map(p => p.idx)
+        }
+        onSuccess={() => {
+          // Reset mode
+          setIsPolygonAddMode(false);
+          setPolygonPoints([]);
+          // Show success toast is inside the dialog
+        }}
+      />
     </Box >
   );
 }
