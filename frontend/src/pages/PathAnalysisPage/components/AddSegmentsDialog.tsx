@@ -35,19 +35,22 @@ function getTagColor(tag: string): string {
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
+interface SourceProjectData {
+    projectName: string;
+    indices: number[];
+}
+
 interface AddSegmentsDialogProps {
     isOpen: boolean;
     onClose: () => void;
-    sourceProject: string;
-    indices: number[];
+    sources: SourceProjectData[];
     onSuccess: () => void;
 }
 
 export function AddSegmentsDialog({
     isOpen,
     onClose,
-    sourceProject,
-    indices,
+    sources,
     onSuccess
 }: AddSegmentsDialogProps) {
     const [projectMode, setProjectMode] = useState<"existing" | "new">("existing");
@@ -69,6 +72,9 @@ export function AddSegmentsDialog({
     const [collisionConfirmOpen, setCollisionConfirmOpen] = useState(false);
     const [collisionCount, setCollisionCount] = useState(0);
 
+    const totalSegments = sources.reduce((sum, s) => sum + s.indices.length, 0);
+    const sourceProjectNames = sources.map(s => s.projectName);
+
     // Load available projects and tags
     useEffect(() => {
         if (isOpen) {
@@ -77,7 +83,7 @@ export function AddSegmentsDialog({
                     // Projects list
                     const available = res.projects
                         .map(p => p.name)
-                        .filter(n => n !== sourceProject);
+                        .filter(n => !sourceProjectNames.includes(n)); // Exclude source projects from target list? Actually maybe allowed to copy to self? Usually not.
                     setProjects(available);
                     if (available.length > 0) {
                         setExistingProject(available[0]);
@@ -95,7 +101,7 @@ export function AddSegmentsDialog({
                 })
                 .catch(console.error);
         }
-    }, [isOpen, sourceProject]);
+    }, [isOpen]);
 
     // Tag Handlers
     const handleTagInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -121,18 +127,22 @@ export function AddSegmentsDialog({
 
         try {
             setSubmitting(true);
-            await copySegments(
-                sourceProject,
-                target,
-                indices,
-                isNew,
-                replace,
-                isNew ? tags : [] // Pass tags only if new project
-            );
+
+            // Loop through sources and copy sequentially
+            for (const source of sources) {
+                await copySegments(
+                    source.projectName,
+                    target,
+                    source.indices,
+                    isNew && source === sources[0], // Only create new project for the first source, subsequent are appends
+                    replace,
+                    isNew ? tags : [] // Pass tags only if new project (only applied on creation)
+                );
+            }
 
             toaster.create({
                 title: "Success",
-                description: `Successfully copied ${indices.length} segments to ${target}.`,
+                description: `Successfully copied ${totalSegments} segments to ${target}.`,
                 type: "success"
             });
             onSuccess();
@@ -167,9 +177,18 @@ export function AddSegmentsDialog({
 
             // Check for collisions ONLY if copying to existing project
             if (projectMode === "existing") {
-                const checkRes = await checkCollisions(sourceProject, target, indices);
-                if (checkRes.collisions && checkRes.collisions.length > 0) {
-                    setCollisionCount(checkRes.collisions.length);
+                let totalCollisions = 0;
+
+                // Check collisions for each source
+                for (const source of sources) {
+                    const checkRes = await checkCollisions(source.projectName, target, source.indices);
+                    if (checkRes.collisions) {
+                        totalCollisions += checkRes.collisions.length;
+                    }
+                }
+
+                if (totalCollisions > 0) {
+                    setCollisionCount(totalCollisions);
                     setCollisionConfirmOpen(true);
                     setSubmitting(false); // Stop loading, wait for user confirmation
                     return;
@@ -212,8 +231,15 @@ export function AddSegmentsDialog({
                             <Dialog.Body>
                                 <VStack gap="4" align="stretch">
                                     <Text fontSize="sm" color="gray.600">
-                                        You are about to copy <b>{indices.length}</b> segments from <b>{sourceProject}</b>.
+                                        You are about to copy <b>{totalSegments}</b> segments from <b>{sources.length}</b> {sources.length === 1 ? 'project' : 'projects'}:
                                     </Text>
+                                    <Box maxH="100px" overflowY="auto" pl="2" borderLeft="2px solid" borderColor="gray.200">
+                                        {sources.map(s => (
+                                            <Text fontSize="xs" key={s.projectName}>
+                                                • <b>{s.projectName}</b>: {s.indices.length} segments
+                                            </Text>
+                                        ))}
+                                    </Box>
 
                                     <Tabs.Root
                                         value={projectMode}

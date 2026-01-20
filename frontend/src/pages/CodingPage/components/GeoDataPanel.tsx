@@ -13,8 +13,8 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 
-import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents } from "react-leaflet";
-import L from "leaflet";
+import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker } from "react-leaflet";
+import L, { divIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import proj4 from "proj4";
@@ -62,12 +62,85 @@ function FitBounds({ points }: { points: [number, number][] }) {
 }
 
 // Polygon Drawing Tool Component
+// Custom icon to mimic CircleMarker but allow dragging
+const createCustomIcon = (color: string) => {
+  return divIcon({
+    className: "custom-polygon-marker",
+    html: `<div style="
+      background-color: ${color};
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 2px solid white;
+      box-shadow: 0 0 4px rgba(0,0,0,0.4);
+      cursor: grab;
+    "></div>`,
+    iconSize: [20, 20], // Hit box size
+    iconAnchor: [10, 10], // Centered (half of 20)
+  });
+};
+
+interface DraggableMarkerProps {
+  position: [number, number];
+  index: number;
+  color: string;
+  icon: L.DivIcon;
+  onDrag: (index: number, latlng: L.LatLng) => void;
+  onDragEnd: (index: number, latlng: L.LatLng) => void;
+}
+
+function DraggableMarker({ position, index, color, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
+  const eventHandlers = useMemo(
+    () => ({
+      drag: (e: L.LeafletEvent) => {
+        const marker = e.target;
+        const pos = marker.getLatLng();
+        onDrag(index, pos);
+      },
+      dragend: (e: L.LeafletEvent) => {
+        const marker = e.target;
+        const pos = marker.getLatLng();
+        onDragEnd(index, pos);
+      },
+      click: (e: L.LeafletEvent) => {
+        L.DomEvent.stopPropagation(e as any);
+      },
+    }),
+    [index, onDrag, onDragEnd]
+  );
+
+  return (
+    <Marker
+      position={position}
+      draggable={true}
+      icon={icon}
+      eventHandlers={eventHandlers}
+    />
+  );
+}
+
 // Polygon Drawing Tool Component
-function PolygonDrawingTool({ active, points, onAddPoint, color = "orange" }: { active: boolean, points: [number, number][], onAddPoint: (latlng: [number, number]) => void, color?: string }) {
+function PolygonDrawingTool({ active, points, onAddPoint, onPointUpdate, color = "orange" }: {
+  active: boolean,
+  points: [number, number][],
+  onAddPoint: (latlng: [number, number]) => void,
+  onPointUpdate: (index: number, latlng: [number, number]) => void,
+  color?: string
+}) {
   const activeRef = useRef(active);
+  const polygonRef = useRef<L.Polygon>(null);
+  const polylineRef = useRef<L.Polyline>(null);
+  const pointsRef = useRef(points);
+
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  useEffect(() => {
+    pointsRef.current = points;
+  }, [points]);
+
+  const icon = useMemo(() => createCustomIcon(color), [color]);
 
   useMapEvents({
     click(e) {
@@ -77,17 +150,56 @@ function PolygonDrawingTool({ active, points, onAddPoint, color = "orange" }: { 
     },
   });
 
+  const handleDrag = useCallback((index: number, latlng: L.LatLng) => {
+    const currentPoints = pointsRef.current;
+    if (!currentPoints) return;
+
+    // Create new array with updated point
+    const newPoints = [...currentPoints];
+    newPoints[index] = [latlng.lat, latlng.lng];
+
+    // Convert to Leaflet LatLng objects
+    const latLngs = newPoints.map(p => L.latLng(p[0], p[1]));
+
+    // Update Leaflet layers directly
+    if (polygonRef.current) {
+      polygonRef.current.setLatLngs(latLngs);
+    }
+    if (polylineRef.current) {
+      polylineRef.current.setLatLngs(latLngs);
+    }
+  }, []);
+
+  const handleDragEnd = useCallback((index: number, latlng: L.LatLng) => {
+    onPointUpdate(index, [latlng.lat, latlng.lng]);
+  }, [onPointUpdate]);
+
   if (!active || points.length === 0) return null;
 
-  // Show incomplete polygon line
   return (
     <>
       {points.map((p, i) => (
-        <CircleMarker key={i} center={p} radius={3} pathOptions={{ color: color, fillColor: color, fillOpacity: 1 }} />
+        <DraggableMarker
+          key={`poly-point-${i}`}
+          position={p}
+          index={i}
+          color={color}
+          icon={icon}
+          onDrag={handleDrag}
+          onDragEnd={handleDragEnd}
+        />
       ))}
-      <Polyline positions={points} pathOptions={{ color: color, dashArray: "5, 5" }} />
+      <Polyline
+        ref={polylineRef}
+        positions={points}
+        pathOptions={{ color: color, dashArray: "5, 5" }}
+      />
       {points.length >= 3 && (
-        <Polygon positions={points} pathOptions={{ color: color, fillOpacity: 0.2, stroke: false }} />
+        <Polygon
+          ref={polygonRef}
+          positions={points}
+          pathOptions={{ color: color, fillOpacity: 0.2, stroke: false }}
+        />
       )}
     </>
   );
@@ -421,6 +533,15 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
       // Or just let user click a "Finish" button.
       // Let's rely on a "Finish Selection" button in the header instead of complex map interaction.
       return [...prev, latlng];
+    });
+  }, []);
+
+  // Handle updating points when dragged
+  const handlePointUpdate = useCallback((index: number, latlng: [number, number]) => {
+    setPolygonPoints(prev => {
+      const newPoints = [...prev];
+      newPoints[index] = latlng;
+      return newPoints;
     });
   }, []);
 
@@ -819,7 +940,14 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                     radius={radius}
                     pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
                     eventHandlers={{
-                      click: () => {
+                      click: (e) => {
+                        // If in polygon mode, add this point to the polygon and stop propagation
+                        if (isPolygonMode || isPolygonAddMode) {
+                          L.DomEvent.stopPropagation(e as any);
+                          handlePolygonPoint(latlng);
+                          return;
+                        }
+
                         if (isDeleteMode) {
                           setSegmentToDelete(globalIdx);
                           setDeleteConfirmationOpen(true);
@@ -853,6 +981,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 active={isPolygonMode || isPolygonAddMode}
                 points={polygonPoints}
                 onAddPoint={handlePolygonPoint}
+                onPointUpdate={handlePointUpdate}
                 color={isPolygonAddMode ? "blue" : "red"}
               />
 
@@ -902,26 +1031,18 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
           setIsAddSegmentsDialogOpen(false);
           setSegmentToAdd(null);
         }}
-        sourceProject={decodedName || ""}
-        indices={
-          segmentToAdd !== null
+        sources={[{
+          projectName: decodedName || "",
+          indices: segmentToAdd !== null
             ? [segmentToAdd]
             : points
               .filter(p => isPointInPolygon(p.latlng, polygonPoints))
               .map(p => p.globalIdx)
-        }
+        }]}
         onSuccess={() => {
           setIsPolygonAddMode(false);
           setPolygonPoints([]);
           setSegmentToAdd(null);
-          // Note: isPointAddMode stays active for continuous adding if desired, 
-          // or we can turn it off. Let's keep it active for consistency with delete mode?
-          // Actually user might want to copy multiple single points. 
-          // But usually dialog closes after success.
-          // Let's reset mode if it was polygon, but for single point maybe keep it?
-          // Actually matching PathAnalysisMapView behavior where it clears.
-          // But wait, in PathAnalysisMapView we reset polygon add mode.
-          // For single point, let's reset it too to avoid confusion.
           setIsPointAddMode(false); // Reset single point mode
           if (onDataChange) onDataChange();
         }}

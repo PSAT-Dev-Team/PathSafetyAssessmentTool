@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
 import { toaster } from "../../../components/ui/toaster";
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker } from "react-leaflet";
 import { FaDrawPolygon, FaMousePointer, FaPlus, FaTrash } from "react-icons/fa";
 import { Switch } from "../../../components/ui/switch";
 import { AddSegmentsDialog } from "./AddSegmentsDialog";
@@ -10,6 +10,7 @@ import { Menu } from "@chakra-ui/react";
 import { MapCursorController } from "../../../components/common/MapCursorController";
 
 import "leaflet/dist/leaflet.css";
+import L, { divIcon } from "leaflet";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
 import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, downloadFilteredImages, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
@@ -68,11 +69,59 @@ interface PolygonDrawingToolProps {
   isPolygonMode: boolean;
   isPolygonAddMode: boolean;
   onPolygonPoint: (latlng: L.LatLng) => void;
+  onPointUpdate: (index: number, latlng: L.LatLng) => void;
   polygonPoints: [number, number][];
 }
 
-function PolygonDrawingTool({ isPolygonMode, isPolygonAddMode, onPolygonPoint, polygonPoints }: PolygonDrawingToolProps) {
+interface DraggableMarkerProps {
+  position: [number, number];
+  index: number;
+  color: string;
+  icon: L.DivIcon;
+  onDrag: (index: number, latlng: L.LatLng) => void;
+  onDragEnd: (index: number, latlng: L.LatLng) => void;
+}
+
+function DraggableMarker({ position, index, color, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
+  const eventHandlers = useMemo(
+    () => ({
+      drag: (e: L.LeafletEvent) => {
+        const marker = e.target;
+        const pos = marker.getLatLng();
+        onDrag(index, pos);
+      },
+      dragend: (e: L.LeafletEvent) => {
+        const marker = e.target;
+        const pos = marker.getLatLng();
+        onDragEnd(index, pos);
+      },
+      click: (e: L.LeafletEvent) => {
+        L.DomEvent.stopPropagation(e as any);
+      },
+    }),
+    [index, onDrag, onDragEnd]
+  );
+
+  return (
+    <Marker
+      position={position}
+      draggable={true}
+      icon={icon}
+      eventHandlers={eventHandlers}
+    />
+  );
+}
+
+function PolygonDrawingTool({ isPolygonMode, isPolygonAddMode, onPolygonPoint, onPointUpdate, polygonPoints }: PolygonDrawingToolProps) {
   const modeRef = useRef(false);
+  const polygonRef = useRef<L.Polygon>(null);
+  const polylineRef = useRef<L.Polyline>(null);
+
+  // Keep latest points in a ref for access inside drag handler without re-binding
+  const pointsRef = useRef(polygonPoints);
+  useEffect(() => {
+    pointsRef.current = polygonPoints;
+  }, [polygonPoints]);
 
   useEffect(() => {
     modeRef.current = isPolygonMode || isPolygonAddMode;
@@ -86,23 +135,80 @@ function PolygonDrawingTool({ isPolygonMode, isPolygonAddMode, onPolygonPoint, p
     },
   });
 
+  const handleDrag = useCallback((index: number, latlng: L.LatLng) => {
+    // Imperatively update the polygon/polyline shape during drag for performance
+    const currentPoints = pointsRef.current;
+    if (!currentPoints) return;
+
+    // Create new array with updated point
+    const newPoints = [...currentPoints];
+    newPoints[index] = [latlng.lat, latlng.lng];
+
+    // Convert to Leaflet LatLng objects to be safe
+    const latLngs = newPoints.map(p => L.latLng(p[0], p[1]));
+
+    // Update Leaflet layers directly
+    if (polygonRef.current) {
+      polygonRef.current.setLatLngs(latLngs);
+    }
+    if (polylineRef.current) {
+      polylineRef.current.setLatLngs(latLngs);
+    }
+  }, []);
+
+  const handleDragEnd = useCallback((index: number, latlng: L.LatLng) => {
+    // Commit the change to state on drag end
+    onPointUpdate(index, latlng);
+  }, [onPointUpdate]);
+
   const color = isPolygonAddMode ? "blue" : "red";
 
-  if (polygonPoints.length === 0) return null; // Only hide if no points
+  // Custom icon to mimic CircleMarker but allow dragging
+  const createCustomIcon = (color: string) => {
+    return divIcon({
+      className: "custom-polygon-marker",
+      html: `<div style="
+        background-color: ${color};
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        border: 2px solid white;
+        box-shadow: 0 0 4px rgba(0,0,0,0.4);
+        cursor: grab;
+      "></div>`,
+      iconSize: [20, 20], // Hit box size
+      iconAnchor: [10, 10], // Centered (half of 20)
+    });
+  };
+
+  const icon = useMemo(() => createCustomIcon(color), [color]);
+
+  if (polygonPoints.length === 0) return null;
 
   return (
     <>
       {polygonPoints.map((pt, idx) => (
-        <CircleMarker
-          key={idx}
-          center={pt}
-          radius={4}
-          pathOptions={{ color: color, fillOpacity: 1 }}
+        <DraggableMarker
+          key={`poly-point-${idx}`}
+          position={pt}
+          index={idx}
+          color={color}
+          icon={icon}
+          onDrag={handleDrag}
+          onDragEnd={handleDragEnd}
         />
       ))}
-      <LeafletPolyline positions={polygonPoints} pathOptions={{ color: color, dashArray: "5, 5" }} />
+      <LeafletPolyline
+        ref={polylineRef}
+        positions={polygonPoints}
+        pathOptions={{ color: color, dashArray: "5, 5" }}
+      />
       {polygonPoints.length >= 3 && (
-        <LeafletPolygon positions={polygonPoints} pathOptions={{ color: color, fillOpacity: 0.2 }} />
+        <LeafletPolygon
+          ref={polygonRef}
+          positions={polygonPoints}
+          pathOptions={{ color: color, fillOpacity: 0.2 }}
+        />
       )}
     </>
   );
@@ -160,6 +266,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   const [segmentToDelete, setSegmentToDelete] = useState<{ projectName: string; index: number } | null>(null);
   const [segmentsToDelete, setSegmentsToDelete] = useState<{ projectName: string; index: number }[]>([]);
   const [segmentToAdd, setSegmentToAdd] = useState<{ projectName: string; index: number } | null>(null);
+  const [segmentsToAdd, setSegmentsToAdd] = useState<{ projectName: string; indices: number[] }[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Dialog states
@@ -175,6 +282,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   const handlePolygonPoint = (latlng: L.LatLng) => {
     setPolygonPoints((prev) => [...prev, [latlng.lat, latlng.lng]]);
   };
+
+  const handlePointUpdate = useCallback((index: number, latlng: L.LatLng) => {
+    setPolygonPoints((prev) => {
+      const newPoints = [...prev];
+      newPoints[index] = [latlng.lat, latlng.lng];
+      return newPoints;
+    });
+  }, []);
 
   const finishPolygonSelection = () => {
     console.log("finishPolygonSelection called");
@@ -1565,21 +1680,30 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       return;
     }
 
-    // Ensure only one project is selected for simplicity
-    if (selectedProjects.length !== 1) {
-      toaster.create({ title: "Action Not Supported", description: "Please select exactly one project to copy segments from.", type: "error" });
-      return;
-    }
+    // Collect all points inside the polygon, grouped by project
+    const selectedMap = new Map<string, number[]>();
 
-    const indicesInside = allPoints
-      .filter(p => isPointInPolygon(p.latlng, polygonPoints))
-      .map(p => p.idx);
+    allPoints.forEach(p => {
+      if (isPointInPolygon(p.latlng, polygonPoints)) {
+        if (!selectedMap.has(p.projectName)) {
+          selectedMap.set(p.projectName, []);
+        }
+        selectedMap.get(p.projectName)?.push(p.idx);
+      }
+    });
 
-    if (indicesInside.length === 0) {
+    if (selectedMap.size === 0) {
       toaster.create({ title: "No Segments", description: "No segments selected inside the polygon.", type: "warning" });
       return;
     }
 
+    // Convert map to array for dialog
+    const sources = Array.from(selectedMap.entries()).map(([projectName, indices]) => ({
+      projectName,
+      indices
+    }));
+
+    setSegmentsToAdd(sources);
     setIsAddSegmentsDialogOpen(true);
   };
 
@@ -2063,6 +2187,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                     isPolygonMode={isPolygonMode}
                     isPolygonAddMode={isPolygonAddMode}
                     onPolygonPoint={handlePolygonPoint}
+                    onPointUpdate={handlePointUpdate}
                     polygonPoints={polygonPoints}
                   />
 
@@ -2097,7 +2222,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                         radius={radius}
                         pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
                         eventHandlers={{
-                          click: () => {
+                          click: (e) => {
+                            // If in polygon mode, add this point to the polygon and stop propagation
+                            if (isPolygonMode || isPolygonAddMode) {
+                              L.DomEvent.stopPropagation(e as any);
+                              handlePolygonPoint(L.latLng(latlng[0], latlng[1]));
+                              return;
+                            }
+
                             // Check delete modes first
                             if (isDeleteMode) {
                               setSegmentToDelete({ projectName: projectName, index: idx });
@@ -2109,7 +2241,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                               setIsAddSegmentsDialogOpen(true);
                               return;
                             }
-                            if (isPolygonMode) return; // Do nothing on click in polygon mode (handled by map click)
 
                             // Navigate to coding page for this project and segment
                             const segmentIdx = idx + 1; // 1-based index for UI
@@ -2338,14 +2469,12 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         onClose={() => {
           setIsAddSegmentsDialogOpen(false);
           setSegmentToAdd(null);
+          setSegmentsToAdd([]);
         }}
-        sourceProject={segmentToAdd ? segmentToAdd.projectName : (selectedProjects[0] || "")}
-        indices={
+        sources={
           segmentToAdd
-            ? [segmentToAdd.index]
-            : allPoints
-              .filter(pt => isPointInPolygon(pt.latlng, polygonPoints))
-              .map(p => p.idx)
+            ? [{ projectName: segmentToAdd.projectName, indices: [segmentToAdd.index] }]
+            : segmentsToAdd
         }
         onSuccess={() => {
           // Reset mode
@@ -2357,3 +2486,4 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     </Box >
   );
 }
+
