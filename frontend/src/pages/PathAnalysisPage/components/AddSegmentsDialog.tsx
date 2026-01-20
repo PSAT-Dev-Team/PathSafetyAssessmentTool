@@ -4,7 +4,6 @@ import {
     VStack,
     Input,
     Text,
-    Select,
     Field,
     Portal,
     createListCollection,
@@ -62,6 +61,10 @@ export function AddSegmentsDialog({
     const [tagInput, setTagInput] = useState("");
     const [existingTags, setExistingTags] = useState<string[]>([]);
     const [tagComboboxOpen, setTagComboboxOpen] = useState(false);
+
+    // Project Combobox State
+    const [existingProjectInput, setExistingProjectInput] = useState("");
+    const [projectComboboxOpen, setProjectComboboxOpen] = useState(false);
 
     const [collisionConfirmOpen, setCollisionConfirmOpen] = useState(false);
     const [collisionCount, setCollisionCount] = useState(0);
@@ -190,7 +193,10 @@ export function AddSegmentsDialog({
         await performCopy(true);
     };
 
-    const projectCollection = createListCollection({ items: projects.map(p => ({ label: p, value: p })) });
+    const filteredProjects = projects.filter(p =>
+        p.toLowerCase().includes(existingProjectInput.toLowerCase())
+    );
+    const projectCollection = createListCollection({ items: filteredProjects.map(p => ({ label: p, value: p })) });
     const tagCollection = createListCollection({ items: existingTags.map(t => ({ label: t, value: t })) });
 
     return (
@@ -226,22 +232,37 @@ export function AddSegmentsDialog({
                                         <Tabs.Content value="existing" pt="4">
                                             <Field.Root>
                                                 <Field.Label>Select Project</Field.Label>
-                                                <Select.Root
+                                                <Combobox.Root
                                                     collection={projectCollection}
-                                                    value={[existingProject]}
-                                                    onValueChange={(e) => setExistingProject(e.value[0])}
+                                                    value={existingProject ? [existingProject] : []}
+                                                    onValueChange={(e) => {
+                                                        setExistingProject(e.value[0]);
+                                                        if (e.value[0]) setExistingProjectInput(e.value[0]);
+                                                    }}
+                                                    inputValue={existingProjectInput}
+                                                    onInputValueChange={(e) => setExistingProjectInput(e.inputValue)}
+                                                    open={projectComboboxOpen}
+                                                    onOpenChange={(details) => setProjectComboboxOpen(details.open)}
                                                 >
-                                                    <Select.Trigger>
-                                                        <Select.ValueText placeholder="Select project" />
-                                                    </Select.Trigger>
-                                                    <Select.Content>
-                                                        {projectCollection.items.map((item) => (
-                                                            <Select.Item item={item} key={item.value}>
-                                                                {item.label}
-                                                            </Select.Item>
-                                                        ))}
-                                                    </Select.Content>
-                                                </Select.Root>
+                                                    <Combobox.Control onClick={() => setProjectComboboxOpen(true)}>
+                                                        <Combobox.Input placeholder="Select or type project name" />
+                                                        <Combobox.IndicatorGroup>
+                                                            <Combobox.Trigger />
+                                                        </Combobox.IndicatorGroup>
+                                                    </Combobox.Control>
+                                                    <Portal>
+                                                        <Combobox.Positioner>
+                                                            <Combobox.Content zIndex={2000} maxH="300px" overflowY="auto">
+                                                                <Combobox.Empty>No projects found</Combobox.Empty>
+                                                                {projectCollection.items.map((item) => (
+                                                                    <Combobox.Item item={item} key={item.value}>
+                                                                        {item.label}
+                                                                    </Combobox.Item>
+                                                                ))}
+                                                            </Combobox.Content>
+                                                        </Combobox.Positioner>
+                                                    </Portal>
+                                                </Combobox.Root>
                                             </Field.Root>
                                         </Tabs.Content>
 
