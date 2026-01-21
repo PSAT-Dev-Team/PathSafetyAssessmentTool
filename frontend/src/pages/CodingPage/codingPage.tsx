@@ -1652,7 +1652,7 @@ export default function CodingPage() {
       </Flex>
 
       <Grid
-        templateColumns={{ base: "1fr", md: "1fr 1fr" }}
+        templateColumns={{ base: "1fr", md: "2fr 1fr" }}
         gap="16px"
       >
         <GridItem
