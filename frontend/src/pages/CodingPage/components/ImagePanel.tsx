@@ -8,7 +8,10 @@ type Props = {
   panelHeight?: number; // px
 };
 
-export default function ImagePanel({ projectName, imageRef }: Props) {
+export default function ImagePanel({
+  projectName,
+  imageRef,
+}: Props) {
   const [brightness, setBrightness] = useState(100);
 
   return (

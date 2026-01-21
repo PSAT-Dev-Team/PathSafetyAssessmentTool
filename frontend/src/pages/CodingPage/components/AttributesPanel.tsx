@@ -26,6 +26,7 @@ type Props = {
   headerAction?: React.ReactNode; // Optional action/toggle to display next to "Attributes" heading
   highlightMessage?: string; // Custom message for changed attributes
   highlightColor?: "green" | "yellow";
+  flex?: number | string;
 };
 
 /** ====== Group ordering (tab order) ====== */
@@ -211,6 +212,7 @@ export default function AttributesPanel({
   headerAction,
   highlightMessage = "*Highlighted attributes have been modified from the original values",
   highlightColor = "green",
+  flex,
 }: Props) {
   const isYellow = highlightColor === "yellow";
   const changedBg = isYellow ? "yellow.50" : "green.100";
@@ -287,7 +289,7 @@ export default function AttributesPanel({
   }
 
   return (
-    <Card.Root minH={`${panelHeight}px`} display="flex" flexDirection="column">
+    <Card.Root minH={`${panelHeight}px`} display="flex" flexDirection="column" flex={flex}>
       <Card.Header display="flex" flexDirection="row" justifyContent="space-between" alignItems="center" gap="2">
         <Box display="flex" flexDirection="row" alignItems="baseline" gap="2">
           <Heading size="sm" flex="0 0 auto">Attributes</Heading>
@@ -307,9 +309,20 @@ export default function AttributesPanel({
       {/* Tabs occupy the body; content area scrolls independently */}
       <Card.Body display="flex" flexDir="column" minH={0} p="0">
         <Tabs.Root defaultValue={defaultTab}>
-          <Tabs.List px="2" py="2" flexWrap="wrap" gap="1">
+          <Tabs.List
+            px="2"
+            py="2"
+            flexWrap="nowrap"
+            overflowX="auto"
+            whiteSpace="nowrap"
+            gap="1"
+            css={{
+              "&::-webkit-scrollbar": { display: "none" },
+              scrollbarWidth: "none",
+            }}
+          >
             {groupsWithFields.map((g) => (
-              <Tabs.Trigger key={g} value={g}>
+              <Tabs.Trigger key={g} value={g} flexShrink={0}>
                 {g}
               </Tabs.Trigger>
             ))}

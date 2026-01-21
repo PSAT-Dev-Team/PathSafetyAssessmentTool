@@ -52,7 +52,6 @@ type AttributesResponse = { rows: AttributeRow[] };
 type AttrMappings = Record<string, Record<string, string>>;
 
 const PANEL_HEIGHT = 550;
-const CONTROLS_H = 56;
 
 // Type for project data
 type ProjectDataState = {
@@ -1660,20 +1659,38 @@ export default function CodingPage() {
           display="flex"
           flexDirection="column"
           minH={`${PANEL_HEIGHT}px`}
+          gap="4"
         >
-          <ImagePanel
-            projectName={currentProjectName!}
-            imageRef={imgRef}
-            panelHeight={PANEL_HEIGHT}
-          />
+          <Box
+            bg="white"
+            borderRadius="md"
+            p="1"
+            borderWidth="1px"
+            borderColor="gray.200"
+            _dark={{ bg: "gray.800", borderColor: "gray.600" }}
+            flexShrink={0}
+          >
+            <SegmentScoresCard
+              scores={scores[currentIndex] || null}
+            />
+          </Box>
+
+          <Box flex="1" minH={0}>
+            <ImagePanel
+              projectName={currentProjectName!}
+              imageRef={imgRef}
+              panelHeight={PANEL_HEIGHT}
+            />
+          </Box>
+
           <Flex
             flex="0 0 auto"
-            h={`${CONTROLS_H}px`}
+            h="56px"
             w="100%"
             minW={0}
             align="center"
             gap="4"
-            pt="2"
+            pt="0"
             position="relative"
             zIndex={1}
             bg="bg"
@@ -1707,30 +1724,18 @@ export default function CodingPage() {
           flexDirection="column"
           gap="4"
         >
-          <Box flex="1 1 auto" minH={0}>
+          <Box flex="1" minH={0} display="flex" flexDirection="column">
             <AttributesPanel
               row={editedRow}
               originalRow={originalCurrentAttr}
               mappings={attrMappings}
-              panelHeight={PANEL_HEIGHT - CONTROLS_H}
+              panelHeight={undefined} // Let it fill the parent
+              flex={1}
               onChange={onAttrChange}
               onEdit={editCurrentAttr}
               changedFields={changedFieldsByRow[currentIndex] || []}
               fieldSources={fieldSourcesByRow[currentIndex] || {}}
               highlightColor="yellow"
-            />
-          </Box>
-
-          <Box
-            bg="white"
-            borderRadius="md"
-            p="1"
-            borderWidth="1px"
-            borderColor="gray.200"
-            _dark={{ bg: "gray.800", borderColor: "gray.600" }}
-          >
-            <SegmentScoresCard
-              scores={scores[currentIndex] || null}
             />
           </Box>
         </GridItem>
