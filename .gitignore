@@ -5,4 +5,4 @@ in/
 model/
 
 # Claude Code settings
-.claude/
+.claude/path_segmentation_inference.ipynb

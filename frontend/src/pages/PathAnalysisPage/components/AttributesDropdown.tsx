@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import {
   Box,
   Text,
@@ -351,16 +351,40 @@ const cyclerapAttributes: AttributeConfig[] = [
   },
 ];
 
+// All attribute names including "Not Selected" and "Project"
+const allAttributes = [
+  { label: "Not Selected", value: "Not Selected", group: "Not Selected" },
+  { label: "Project", value: "Project", group: "Project" },
+  ...safetyScoreAttributes.map((attr) => ({
+    label: attr.displayName || attr.name,
+    value: attr.name,
+    group: attr.group,
+  })),
+  ...cyclerapAttributes.map((attr) => ({
+    label: attr.name,
+    value: attr.name,
+    group: attr.group,
+  })),
+];
+
 interface AttributesDropdownProps {
   selectedAttributes: (string | null)[];
   onAttributeChange: (attributes: (string | null)[]) => void;
 }
 
+const getLabelForValue = (value: string | null) => {
+  if (!value || value === "Not Selected") return "";
+  const attr = allAttributes.find((a) => a.value === value);
+  return attr ? attr.label : "";
+};
+
 export default function AttributesDropdown({
   selectedAttributes,
   onAttributeChange
 }: AttributesDropdownProps) {
-  const [inputValues, setInputValues] = useState<string[]>(selectedAttributes.map(() => ""));
+  const [inputValues, setInputValues] = useState<string[]>(() =>
+    selectedAttributes.map((attr) => getLabelForValue(attr))
+  );
   const [openComboboxes, setOpenComboboxes] = useState<boolean[]>(selectedAttributes.map(() => false));
   // Generate stable IDs for each filter slot to use as React keys
   const [filterIds, setFilterIds] = useState<string[]>(() => selectedAttributes.map(() => Math.random().toString(36).substr(2, 9)));
@@ -431,22 +455,6 @@ export default function AttributesDropdown({
     setOpenComboboxes([false]);
     setFilterIds([Math.random().toString(36).substr(2, 9)]);
   };
-
-  // All attribute names including "Not Selected" and "Project"
-  const allAttributes = useMemo(() => [
-    { label: "Not Selected", value: "Not Selected" },
-    { label: "Project", value: "Project" },
-    ...safetyScoreAttributes.map((attr) => ({
-      label: attr.displayName || attr.name,
-      value: attr.name,
-      group: attr.group,
-    })),
-    ...cyclerapAttributes.map((attr) => ({
-      label: attr.name,
-      value: attr.name,
-      group: attr.group,
-    })),
-  ], []);
 
   // Filter attributes based on input value for each filter
   // Also exclude already-selected attributes to prevent duplicates

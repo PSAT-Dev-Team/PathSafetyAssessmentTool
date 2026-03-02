@@ -244,16 +244,53 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Category toggle states - now tracks toggles per filter attribute
   // Structure: { "attributeName": { "categoryValue": true/false } }
-  const [categoryToggles, setCategoryToggles] = useState<Record<string, Record<string, boolean>>>({});
+  const [categoryToggles, setCategoryToggles] = useState<Record<string, Record<string, boolean>>>(() => {
+    try {
+      const stored = sessionStorage.getItem("pathAnalysisMap_categoryToggles");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
 
   // Track if we should auto-fit bounds (only on initial project load, not on category changes)
   const [shouldAutoFit, setShouldAutoFit] = useState(false);
 
   // Track which attribute to show categories for (defaults to first)
-  const [categoryFilterAttributeIndex, setCategoryFilterAttributeIndex] = useState(0);
+  const [categoryFilterAttributeIndex, setCategoryFilterAttributeIndex] = useState<number>(() => {
+    try {
+      const stored = sessionStorage.getItem("pathAnalysisMap_categoryFilterIndex");
+      return stored ? Number(stored) : 0;
+    } catch {
+      return 0;
+    }
+  });
 
   // Track which attribute is the primary focus for coloring
-  const [primaryFocusAttribute, setPrimaryFocusAttribute] = useState<string | null>(null);
+  const [primaryFocusAttribute, setPrimaryFocusAttribute] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem("pathAnalysisMap_primaryFocus") || null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Persist states to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem("pathAnalysisMap_categoryToggles", JSON.stringify(categoryToggles));
+  }, [categoryToggles]);
+
+  useEffect(() => {
+    sessionStorage.setItem("pathAnalysisMap_categoryFilterIndex", String(categoryFilterAttributeIndex));
+  }, [categoryFilterAttributeIndex]);
+
+  useEffect(() => {
+    if (primaryFocusAttribute) {
+      sessionStorage.setItem("pathAnalysisMap_primaryFocus", primaryFocusAttribute);
+    } else {
+      sessionStorage.removeItem("pathAnalysisMap_primaryFocus");
+    }
+  }, [primaryFocusAttribute]);
 
   // Mode states (Single Point & Polygon)
   const [isDeleteMode, setIsDeleteMode] = useState(false);

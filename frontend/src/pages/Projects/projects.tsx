@@ -163,6 +163,10 @@ export default function Home() {
           const pctA = (a.total_segments || 0) > 0 ? (a.verified_segment_count || 0) / a.total_segments! : 0;
           const pctB = (b.total_segments || 0) > 0 ? (b.verified_segment_count || 0) / b.total_segments! : 0;
           result = pctA - pctB;
+        } else if (criterion.key === 'distance_verified') {
+          const distA = (a.verified_segment_count || 0) * 10;
+          const distB = (b.verified_segment_count || 0) * 10;
+          result = distA - distB;
         } else if (criterion.key === 'autocode_status') {
           const pctA = (a.total_segments || 0) > 0 ? (a.autocoded_segment_count || 0) / a.total_segments! : 0;
           const pctB = (b.total_segments || 0) > 0 ? (b.autocoded_segment_count || 0) / b.total_segments! : 0;
@@ -458,18 +462,24 @@ export default function Home() {
               </Portal>
             </Combobox.Root>
           </div>
-          <div className="actions-buttons">
+        </div>
+
+        <div className="actions-panel" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontWeight: 600, fontSize: '14px' }}>
+            Total Distance Verified: {(filtered.reduce((acc, p) => acc + (p.verified_segment_count || 0), 0) * 10 / 1000).toFixed(2)} km
+          </div>
+          <div className="buttons">
             <Button onClick={() => createProject(navigate)} colorPalette="black" variant="solid">
               Create Project
             </Button>
-            <Button onClick={loadProject} colorPalette="blue" disabled={!selected}>
+            <Button onClick={askDelete} colorPalette="red" disabled={!selected || selected.size === 0}>
+              Delete Project
+            </Button>
+            <Button onClick={loadProject} colorPalette="blue" disabled={!selected || selected.size === 0}>
               Coding
             </Button>
-            <Button onClick={loadTreatment} colorPalette="green" disabled={!selected}>
+            <Button onClick={loadTreatment} colorPalette="green" disabled={!selected || selected.size === 0}>
               Treatment Application
-            </Button>
-            <Button onClick={askDelete} colorPalette="red" disabled={!selected}>
-              Delete Project
             </Button>
           </div>
         </div>
@@ -483,6 +493,7 @@ export default function Home() {
                 <th style={{ width: 48 }}></th>
                 <th>Project Name</th>
                 {renderHeader("Verification Status", "verification_status", 140)}
+                {renderHeader("Distance Verified", "distance_verified", 140)}
                 {renderHeader("Autocode Status", "autocode_status", 140)}
                 {renderHeader("Time Modified", "last_updated", 180)}
                 <th>Tags</th>
@@ -492,7 +503,7 @@ export default function Home() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="empty">
+                  <td colSpan={8} className="empty">
                     No projects found
                   </td>
                 </tr>
@@ -507,7 +518,7 @@ export default function Home() {
                         aria-label="Select all projects"
                       />
                     </td>
-                    <td colSpan={5}>
+                    <td colSpan={6}>
                       <strong>Select All</strong>
                     </td>
                   </tr>
@@ -540,6 +551,13 @@ export default function Home() {
                           </span>
                           {/* Debug: Show raw values if needed */}
                           {/* (segments: {p.verified_segment_count}/{p.total_segments}) */}
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "14px", fontWeight: "500" }}>
+                            {typeof p.verified_segment_count === 'number'
+                              ? `${((p.verified_segment_count * 10) / 1000).toFixed(2)} km`
+                              : "0.00 km"}
+                          </span>
                         </td>
                         <td>
                           <span style={{ fontSize: "14px", fontWeight: "500" }}>
