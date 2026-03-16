@@ -1,61 +1,119 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 
-:: 1) 切到脚本所在目录（/d 兼容不同盘符）
+:: Navigate to script directory
 cd /d "%~dp0"
 
-:: 2) 以脚本所在目录为根目录
+:: Set paths
 set "BASE_DIR=%~dp0"
 set "BACKEND=%BASE_DIR%backend"
 set "FRONTEND=%BASE_DIR%frontend"
 
+echo ============================================
+echo Path Safety Assessment Tool - Setup
+echo ============================================
 echo BASE_DIR=%BASE_DIR%
-echo BACKEND =%BACKEND%
+echo BACKEND=%BACKEND%
 echo FRONTEND=%FRONTEND%
+echo.
 
-:: === 2) 后端：创建/启用虚拟环境，安装依赖，然后启动 ===
-if not exist "%BACKEND%\venv" (
-  echo [Backend] Creating venv ...
-  py -3 -m venv "%BACKEND%\venv"
-)
-
-echo [Backend] Ensuring Python deps ...
-call "%BACKEND%\venv\Scripts\pip.exe" install --upgrade pip >nul 2>&1
-if exist "%BACKEND%\requirements.txt" (
-  call "%BACKEND%\venv\Scripts\pip.exe" install -r "%BACKEND%\requirements.txt"
-) else (
-  :: 没有 requirements.txt 的情况下，至少补你遇到过的依赖
-  call "%BACKEND%\venv\Scripts\pip.exe" install flask exifread
-)
-
-echo [Backend] Starting server ...
-:: 用新的窗口启动后端；失败日志写到 backend_log.txt 方便排错
-start "PSAT Backend" cmd /k ^
- "cd /d %BACKEND% && call venv\Scripts\activate && python app.py 2>backend_log.txt"
-
- echo [Frontend] Using dir: %FRONTEND%
-if not exist "%FRONTEND%\package.json" (
-  echo [Error] FRONTEND path wrong or package.json missing
+:: Check if conda is available
+where conda >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Conda not found in PATH!
+  echo Please install Miniconda or Anaconda:
+  echo https://docs.conda.io/projects/miniconda/en/latest/
+  echo.
+  echo After installation, make sure to check:
+  echo - "Add Miniconda3 to my PATH"
+  echo - "Register Miniconda3 as my default Python"
+  echo.
   pause
   goto :END
 )
 
-where node >nul 2>&1 || ( echo [Error] Node.js not found in PATH & pause & goto :END )
-where npm  >nul 2>&1 || ( echo [Error] npm not found in PATH    & pause & goto :END )
+echo [INFO] Conda found!
+conda --version
+echo.
 
-echo [Frontend] Installing deps if needed ...
-if not exist "%FRONTEND%\node_modules" (
-  if exist "%FRONTEND%\package-lock.json" (
-    cmd /c "cd /d %FRONTEND% && npm ci"
-  ) else (
-    cmd /c "cd /d %FRONTEND% && npm install"
+:: Create or activate conda environment
+echo [Backend] Setting up Python environment...
+conda env list | findstr /r "^psat " >nul 2>&1
+if errorlevel 1 (
+  echo [Backend] Creating conda environment 'psat' with Python 3.11...
+  call conda create -n psat python=3.11 gdal geopandas fiona shapely pyproj pandas numpy opencv flask pillow matplotlib requests streamlit geopy rtree nodejs -y
+  if errorlevel 1 (
+    echo [ERROR] Failed to create conda environment!
+    pause
+    goto :END
   )
 )
 
-echo [Frontend] Starting dev server ...
-:: 用 /D 指定当前目录；把输出写到前端目录下的日志
-start "PSAT Frontend" /D "%FRONTEND%" cmd /k "npm run dev 1>frontend_log.txt 2>&1"
+echo [Backend] Installing Python dependencies...
+call conda run -n psat pip install openpyxl flask-cors exifread
 
-:: 给 Vite 一点时间热身，再开页面；若首启慢可改成 4~6 秒
-timeout /t 4 >nul
+if errorlevel 1 (
+  echo [WARNING] Some pip packages failed to install, but continuing...
+)
+
+:: Start backend in new window
+echo [Backend] Starting Flask server (port 8000)...
+start "PSAT Backend" cmd /k ^
+ "cd /d %BACKEND% && call conda activate psat && python app.py 2>%BASE_DIR%backend_log.txt"
+
+:: Wait for backend to start
+echo [INFO] Waiting for backend to initialize...
+timeout /t 3 >nul
+
+:: Check frontend requirements
+if not exist "%FRONTEND%\package.json" (
+  echo [ERROR] Frontend package.json not found at %FRONTEND%
+  pause
+  goto :END
+)
+
+:: Install frontend dependencies
+echo [Frontend] Installing npm dependencies...
+call conda run -n psat npm --version >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] npm not found in conda environment!
+  pause
+  goto :END
+)
+
+if not exist "%FRONTEND%\node_modules" (
+  cd /d "%FRONTEND%"
+  echo [Frontend] Running npm install...
+  call conda run -n psat npm install
+  if errorlevel 1 (
+    echo [WARNING] npm install completed with warnings
+  )
+  cd /d "%BASE_DIR%"
+) else (
+  echo [Frontend] npm packages already installed
+)
+
+:: Start frontend in new window
+echo [Frontend] Starting development server (port 5173)...
+start "PSAT Frontend" cmd /k ^
+ "cd /d %FRONTEND% && call conda activate psat && npm run dev 1>%BASE_DIR%frontend_log.txt 2>&1"
+
+:: Wait for frontend to start
+echo [INFO] Waiting for frontend to initialize...
+timeout /t 5 >nul
+
+:: Open browser
+echo.
+echo ============================================
+echo PSAT is starting!
+echo Backend:  http://localhost:8000
+echo Frontend: http://localhost:5173
+echo ============================================
+echo.
 start "" http://localhost:5173/
+
+goto :END
+
+:END
+echo.
+pause
