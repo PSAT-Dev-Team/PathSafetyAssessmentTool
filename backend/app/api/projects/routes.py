@@ -2161,8 +2161,6 @@ def autocode_image(project_name: str):
 @bp.post("/<project_name>/autocode/gis")
 def autocode_gis(project_name: str):
     try:
-        _ensure_models_ready()
-
         payload = request.get_json(force=True, silent=True) or {}
         coords = payload.get("coords")  # [[lon, lat], ...]
 
@@ -2319,8 +2317,6 @@ def get_curvature_visualization(project_name: str):
         }
     """
     try:
-        _ensure_models_ready()
-
         payload = request.get_json(force=True, silent=True) or {}
         coords = payload.get("coords")  # [[lon, lat], ...]
 
@@ -2418,8 +2414,6 @@ def get_width_visualization(project_name: str):
         }
     """
     try:
-        _ensure_models_ready()
-
         payload = request.get_json(force=True, silent=True) or {}
         coords = payload.get("coords")  # [[lon, lat], ...]
 
@@ -2459,6 +2453,7 @@ def get_gis_layers(project_name: str):
 
     This endpoint provides cycling paths, footpaths, shared paths, and road crossings within
     a specified radius of a point to show GIS layer context on the coding map.
+    NOTE: This endpoint uses GIS only — no CV models are required.
 
     Request body:
         {
@@ -2487,8 +2482,6 @@ def get_gis_layers(project_name: str):
         }
     """
     try:
-        _ensure_models_ready()
-
         payload = request.get_json(force=True, silent=True) or {}
         point_coords = payload.get("point", [])
         radius = payload.get("radius", 100)  # Default 100m radius
