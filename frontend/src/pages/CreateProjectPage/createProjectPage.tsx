@@ -52,30 +52,32 @@ export default function CreateProjectPage() {
   const [err, setErr] = useState<string | null>(null);
   const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
 
+  const loadFolders = async (ctrl?: AbortController) => {
+    try {
+      setLoadingFolders(true);
+      setErr(null);
+      const [foldersData, projectsData] = await Promise.all([
+        listSourceFolders({ signal: ctrl?.signal }),
+        fetchProjectList()
+      ]);
+      setFolders(foldersData);
+
+      // Extract all unique tags from existing projects
+      const tagSet = new Set<string>();
+      projectsData.projects.forEach(p => {
+        p.tags?.forEach(tag => tagSet.add(tag));
+      });
+      setExistingTags(Array.from(tagSet).sort());
+    } catch (e: any) {
+      if (e?.name !== "AbortError") setErr(e?.message ?? "Failed to load folders");
+    } finally {
+      setLoadingFolders(false);
+    }
+  };
+
   useEffect(() => {
     const ctrl = new AbortController();
-    (async () => {
-      try {
-        setLoadingFolders(true);
-        setErr(null);
-        const [foldersData, projectsData] = await Promise.all([
-          listSourceFolders({ signal: ctrl.signal }),
-          fetchProjectList()
-        ]);
-        setFolders(foldersData);
-
-        // Extract all unique tags from existing projects
-        const tagSet = new Set<string>();
-        projectsData.projects.forEach(p => {
-          p.tags?.forEach(tag => tagSet.add(tag));
-        });
-        setExistingTags(Array.from(tagSet).sort());
-      } catch (e: any) {
-        if (e?.name !== "AbortError") setErr(e?.message ?? "Failed to load folders");
-      } finally {
-        setLoadingFolders(false);
-      }
-    })();
+    loadFolders(ctrl);
     return () => ctrl.abort();
   }, []);
 
@@ -305,6 +307,7 @@ export default function CreateProjectPage() {
       <ImageUploadModal
         open={imageUploadModalOpen}
         onClose={() => setImageUploadModalOpen(false)}
+        onSuccess={() => loadFolders()}
       />
     </Box>
   );

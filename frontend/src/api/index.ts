@@ -783,7 +783,13 @@ export async function uploadImagesToSourceFolder(
 ): Promise<{ count: number; errors: string[] }> {
   const formData = new FormData();
   formData.append("folder_name", folderName);
-  files.forEach(file => formData.append("images", file));
+  
+  files.forEach(file => {
+    // If the file was dropped as part of a folder, it will have webkitRelativePath
+    // Fallback to name if it's just a regular file selection
+    const path = file.webkitRelativePath || file.name;
+    formData.append("images", file, path);
+  });
 
   const res = await fetch("/api/projects/folders/upload-images", {
     method: "POST",

@@ -8,13 +8,14 @@ import "../../ShapefileManagement/shapefileManagement.css";
 interface ImageUploadModalProps {
   open: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
 type WorkflowStep = "upload" | "success";
 
 const FILES_PER_PAGE = 5;
 
-export default function ImageUploadModal({ open, onClose }: ImageUploadModalProps) {
+export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUploadModalProps) {
   const [step, setStep] = useState<WorkflowStep>("upload");
   const [folderName, setFolderName] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
@@ -38,6 +39,9 @@ export default function ImageUploadModal({ open, onClose }: ImageUploadModalProp
   }
 
   function handleClose() {
+    if (step === "success" && onSuccess) {
+      onSuccess();
+    }
     resetState();
     onClose();
   }

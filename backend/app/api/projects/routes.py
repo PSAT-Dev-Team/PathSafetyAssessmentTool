@@ -1727,11 +1727,16 @@ def dms_to_decimal(dms, ref):
 
 def get_image_folder_geo(folder_path):
     records = []
-    for fname in sorted(os.listdir(folder_path)):
-        if not fname.lower().endswith(('.jpg', '.jpeg')):
+    base_path = Path(folder_path)
+    # Recursively find all jpg/jpeg files
+    for filepath in base_path.rglob("*"):
+        if not filepath.is_file() or not filepath.suffix.lower() in ('.jpg', '.jpeg'):
             continue
-        img_path = os.path.join(folder_path, fname)
-        with open(img_path, 'rb') as f:
+            
+        # Record the relative path so we maintain directory structure when tracking images
+        rel_path = filepath.relative_to(base_path)
+        
+        with open(filepath, 'rb') as f:
             tags = exifread.process_file(f, details=False)
 
         # Required GPS tags
@@ -1746,7 +1751,7 @@ def get_image_folder_geo(folder_path):
             records.append({
                 'latitude':  lat,
                 'longitude': lon,
-                'filename':  fname
+                'filename':  str(rel_path)  # Keep the relative path (e.g. folder/img.jpg)
             })
 
     df = pd.DataFrame(records)
@@ -1757,20 +1762,23 @@ def get_image_folder_geo(folder_path):
 def get_All_Img_Folder(folder_path, filename_df, imagePath):
     """
     folder_path:      Source folder containing the .jpg files to copy
-    filename_df:      DataFrame containing a FILENAME column
+    filename_df:      DataFrame containing a FILENAME column (with potential relative paths)
     imagePath:        Destination path to save; will be created if not present
     """
     # 1. Validate source folder
     if not os.path.isdir(folder_path):
         raise FileNotFoundError(f"The folder at {folder_path} does not exist or is not a directory.")
     
-    # 2. Ensure destination folder exists
+    # 2. Ensure base destination folder exists
     os.makedirs(imagePath, exist_ok=True)
     
-    # 3. Copy by names in the FILENAME column
+    # 3. Copy by names in the FILENAME column (which may include subdirectories)
     for img_name in filename_df['FILENAME']:
         src = os.path.join(folder_path, img_name)
         dst = os.path.join(imagePath, img_name)
+        
+        # Make sure destination subdirectory exists before copying
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
         
         if os.path.isfile(src):
             shutil.copy2(src, dst)
@@ -1909,8 +1917,18 @@ def upload_images_to_source_folder():
                 continue
 
             try:
-                # Save file to source folder
-                file_path = source_dir / file.filename
+                # To prevent directory traversal attacks, resolve relative paths securely
+                # file.filename could be "folder/img.jpg" or just "img.jpg"
+                clean_path = Path(file.filename)
+                
+                # Check for malicious paths (e.g. ones with '..')
+                if '..' in clean_path.parts or clean_path.is_absolute():
+                    errors.append(f"Invalid file path: {file.filename}")
+                    continue
+
+                # Save file to source folder, preserving any subdirectories
+                file_path = source_dir / clean_path
+                file_path.parent.mkdir(parents=True, exist_ok=True)
                 file.save(str(file_path))
                 count += 1
             except Exception as e:
