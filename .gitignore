@@ -3,3 +3,9 @@ data/
 shapefiles/
 in/
 model/
+
+# Exception: keep .gitkeep to maintain directory structure
+!data/.gitkeep
+!shapefiles/.gitkeep
+!in/.gitkeep
+!model/.gitkeep

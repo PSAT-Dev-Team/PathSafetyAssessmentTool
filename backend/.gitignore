@@ -29,6 +29,10 @@ data/
 models/
 shapefiles/
 
+# Exception: keep .gitkeep to maintain directory structure
+!models/.gitkeep
+!shapefiles/.gitkeep
+
 # Temporary files
 *.tmp
 *.bak
