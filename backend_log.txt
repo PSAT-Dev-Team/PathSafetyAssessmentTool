@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "C:\Users\Alaster\Documents\GitHub\PathSafetyAssessmentTool\backend\app.py", line 1, in <module>
+    from app import create_app
+  File "C:\Users\Alaster\Documents\GitHub\PathSafetyAssessmentTool\backend\app\__init__.py", line 4, in <module>
+    from .api import register_blueprints
+  File "C:\Users\Alaster\Documents\GitHub\PathSafetyAssessmentTool\backend\app\api\__init__.py", line 4, in <module>
+    from .shapefiles import bp as shapefiles_bp
+ModuleNotFoundError: No module named 'app.api.shapefiles'
