@@ -140,6 +140,7 @@ COMMENT_STR                     = "Comments"
 AREA_TYPE_STR                   = "Area type"
 FACILITY_TYPE_STR               = "Facility Type"
 FACILITY_ACCESS_STR             = "Facility access"
+LINE_OF_SIGHT_STR               = "Line of Sight"
 LOOSE_SLIPPERY_SURFACE_STR      = "Loose or slippery surface"
 TRAM_TRAIN_RAIL_STR             = "Tram or Train Rails"
 DEFORMATION_DRAIN_STR           = "Major Surface Deformation or Drain Opening"
@@ -219,6 +220,7 @@ dataframe_default_values = {
     AREA_TYPE_STR:                  2,
     FACILITY_TYPE_STR:              1,
     FACILITY_ACCESS_STR:            1,
+    LINE_OF_SIGHT_STR:              1,
     LOOSE_SLIPPERY_SURFACE_STR:     2,
     TRAM_TRAIN_RAIL_STR:            2,
     DEFORMATION_DRAIN_STR:          2,

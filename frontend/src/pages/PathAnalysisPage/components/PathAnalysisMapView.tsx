@@ -678,6 +678,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       "Adjacent object or level change 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
 
       // Facility clear width - attributes where Present = Danger (Red), Not Present = Safe (Green)
+      "Line of Sight": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
       "Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
       "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
       "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
@@ -798,6 +799,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       "Adjacent Severe Hazard 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
       "Adjacent object or level change 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
       // Facility clear width
+      "Line of Sight": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
       "Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
       "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
       "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
