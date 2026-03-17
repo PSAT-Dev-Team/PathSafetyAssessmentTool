@@ -1,0 +1,36 @@
+/* Aggregated Score Band Panel - Custom Grid Layout */
+
+.aggregated-score-band-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap; /* Allow wrapping to multiple lines */
+  gap: 20px;
+  justify-content: center; /* Center items on the line */
+  align-items: flex-start;
+  padding: 0;
+  width: 100%;
+  overflow-x: visible; /* Remove horizontal scroll */
+}
+
+.aggregated-score-band-grid-item {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  /* Flex basis of 300px to match the chart max-width, allowing for growth/shrink */
+  flex: 0 1 300px;
+  min-width: 250px;
+  max-width: 350px; /* Prevent becoming too massive on huge screens */
+  overflow: visible;
+  margin-bottom: 20px; /* Add some space if it wraps */
+}
+
+/* 
+   We can keep some media queries if we want to ensure full width on very small screens,
+   but largely the flex-wrap + flex-basis should handle it automatically.
+*/
+
+@media (max-width: 600px) {
+  .aggregated-score-band-grid-item {
+    flex: 0 0 100%;
+  }
+}

@@ -1,0 +1,253 @@
+/* Edit Project Modal Styles */
+
+.edit-modal-backdrop {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.edit-modal-content {
+  max-width: 540px;
+  border-radius: 16px;
+  padding: 24px;
+  background: var(--chakra-colors-bg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+}
+
+.edit-modal-body {
+  padding: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.edit-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.edit-form-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--chakra-colors-fg-emphasized);
+}
+
+.edit-form-hint {
+  font-size: 12px;
+  color: var(--chakra-colors-fg-muted);
+  margin-top: 4px;
+}
+
+.edit-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--chakra-colors-border);
+  border-radius: 10px;
+  background: var(--chakra-colors-bg);
+  color: var(--chakra-colors-fg);
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.edit-input:hover {
+  border-color: var(--chakra-colors-blue-500);
+}
+
+.edit-input:focus {
+  border-color: var(--chakra-colors-blue-600);
+  box-shadow: 0 0 0 3px var(--chakra-colors-blue-100);
+  outline: none;
+}
+
+/* Tag Input Container */
+.tag-input-container {
+  width: 100%;
+}
+
+.tag-input-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--chakra-colors-border);
+  border-radius: 10px;
+  background: var(--chakra-colors-bg);
+  transition: all 0.2s ease;
+  cursor: text;
+}
+
+.tag-input-wrapper:hover {
+  border-color: var(--chakra-colors-blue-500);
+}
+
+.tag-input-wrapper:focus-within {
+  border-color: var(--chakra-colors-blue-600);
+  box-shadow: 0 0 0 3px var(--chakra-colors-blue-100);
+}
+
+/* Tag Chips */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #1a1a1a;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  animation: tagFadeIn 0.2s ease;
+}
+
+@keyframes tagFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.tag-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.tag-chip-text {
+  line-height: 1;
+}
+
+.tag-chip-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 50%;
+  color: #1a1a1a;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tag-chip-remove:hover {
+  background: rgba(0, 0, 0, 0.3);
+  transform: scale(1.1);
+}
+
+/* Tag Input Field */
+.tag-input-field {
+  flex: 1;
+  min-width: 120px;
+  height: 24px;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  font-size: 14px;
+  color: var(--chakra-colors-fg);
+  box-shadow: none !important;
+}
+
+.tag-input-field:hover,
+.tag-input-field:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+/* Modal Footer */
+.edit-modal-footer {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid var(--chakra-colors-border-subtle);
+}
+
+/* Buttons */
+.edit-btn {
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.edit-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.edit-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.edit-btn-cancel {
+  border: 1px solid var(--chakra-colors-border);
+  background: var(--chakra-colors-bg);
+  color: var(--chakra-colors-fg);
+}
+
+.edit-btn-cancel:hover:not(:disabled) {
+  background: var(--chakra-colors-bg-muted);
+  border-color: var(--chakra-colors-border-emphasized);
+}
+
+.edit-btn-save {
+  background: var(--chakra-colors-blue-600);
+  color: white;
+  border: none;
+}
+
+.edit-btn-save:hover:not(:disabled) {
+  background: var(--chakra-colors-blue-700);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+}
+
+.edit-close-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  transition: all 0.2s ease;
+}
+
+.edit-close-btn:hover {
+  transform: rotate(90deg);
+  background: var(--chakra-colors-bg-muted);
+}
+
+/* Disabled state */
+.edit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .edit-modal-content {
+    max-width: 90vw;
+    padding: 20px;
+  }
+
+  .edit-modal-footer {
+    flex-direction: column;
+  }
+
+  .edit-btn {
+    width: 100%;
+  }
+}

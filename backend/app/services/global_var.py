@@ -22,7 +22,7 @@ map_index_color_mapping = {
 
 # Mapping
 risk_category                   = {'Default': 0,'Low': 1, 'Medium': 2, 'High': 3, 'Extreme': 4}
-area_type_mapping               = {'Inner Urban': 1, 'Outer Urban': 2, 'Rural': 3, 'Industrial': 4}
+area_type_mapping               = {'Urban': 1, 'Suburban': 2, 'Rural': 3, 'Industrial': 4}
 facility_type_mapping           = {'Sidewalk': 1, 'Multi-Use Path': 2, 'Off-Road Bicycle Path': 3, 
                                     'On-road Bicycle Lane': 4, 'Road Shoulder': 5, 'Mixed Traffic Road Lane': 6}
 presence_mapping                = {'Present': 1, 'Not Present': 2}
@@ -191,13 +191,13 @@ SB_STR                          = "SB"
 SSB_STR                         = "SB Smoothed"
 VB_STR                          = "VB"
 SVB_STR                         = "VBSmoothed"
-CYCLERAP_SCORE_STR              = "CycleRAP score"  
-CYCLERAP_SCORE_SMOOTHED_STR     = "CycleRAP score Smoothed"
+CYCLERAP_SCORE_STR              = "Overall Risk Level"
+CYCLERAP_SCORE_SMOOTHED_STR     = "Overall Risk Level Smoothed"
 BB_BAND_STR                     = "BB Band"
 BP_BAND_STR                     = "BP Band"
 SB_BAND_STR                     = "SB Band"
 VB_BAND_STR                     = "VB Band"
-CYCLERAP_SCORE_BAND_STR         = "CycleRAP score Band"
+CYCLERAP_SCORE_BAND_STR         = "Overall Risk Level Band"
 # == END ==
 
 # TODO: Can be serialized and set to be editable by user
@@ -255,7 +255,7 @@ dataframe_default_values = {
     OBSERVED_PROPORTION_STR:        1,
     BICYCLE_SPD_AVG_STR:            1,
     BICYCLE_SPD_DIFF_STR:           1,
-    ROAD_AADT_STR:                  50,
+    ROAD_AADT_STR:                  6000,
     HEAVY_VHCL_FLOW_STR:            1,
     SPD_LIMIT_STR:                  10,
     ROAD_OPR_SPEED_AVG_STR:         30,

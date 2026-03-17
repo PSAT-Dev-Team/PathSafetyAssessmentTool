@@ -15,7 +15,7 @@ from pandas.errors import EmptyDataError
 
 # Mapping
 risk_category                   = {'Default': 0,'Low': 1, 'Medium': 2, 'High': 3, 'Extreme': 4}
-area_type_mapping               = {'Inner Urban': 1, 'Outer Urban': 2, 'Rural': 3, 'Industrial': 4}
+area_type_mapping               = {'Urban': 1, 'Suburban': 2, 'Rural': 3, 'Industrial': 4}
 facility_type_mapping           = {'Sidewalk': 1, 'Multi-Use Path': 2, 'Off-Road Bicycle Path': 3, 
                                     'On-road Bicycle Lane': 4, 'Road Shoulder': 5, 'Mixed Traffic Road Lane': 6}
 presence_mapping                = {'Present': 1, 'Not Present': 2}
@@ -31,6 +31,22 @@ low_modhigh_mapping             = {'Low': 1, 'Moderate to high': 2}
 less_more_20_mapping            = {'< 20km/h': 1, '=/> 20km/h': 2}
 less_more_10_mapping            = {'< 10km/h': 1, '=/> 10km/h': 2}
 operating_speed_unit_mapping    = {'km/h': 1, 'mph': 2}
+road_speed_limit_mapping        = {
+    'NA': 'NA',
+    '0 km/h': '0',
+    '10 km/h': '10',
+    '20 km/h': '20',
+    '30 km/h': '30',
+    '40 km/h': '40',
+    '50 km/h': '50',
+    '60 km/h': '60',
+    '70 km/h': '70',
+    '80 km/h': '80',
+    '90 km/h': '90',
+    '100 km/h': '100',
+    '110 km/h': '110',
+    '120 km/h': '120',
+}
 
 class LocWrapper:
     def __init__(self, parent):
@@ -206,7 +222,7 @@ class Attributes(BaseTable):
         Fields.BICYCLE_SPD_DIFF_STR:            less_more_10_mapping,
         Fields.ROAD_AADT_STR:                   None,
         Fields.HEAVY_VHCL_FLOW_STR:             low_modhigh_mapping,
-        Fields.SPD_LIMIT_STR:                   None,
+        Fields.SPD_LIMIT_STR:                   road_speed_limit_mapping,
         Fields.ROAD_OPR_SPEED_AVG_STR:          None,
         Fields.SPEED_UNIT_STR:                  operating_speed_unit_mapping,
     }
@@ -220,12 +236,12 @@ class Results(BaseTable):
         BP_STR                          = "BP"
         SB_STR                          = "SB"
         VB_STR                          = "VB"
-        CYCLERAP_SCORE_STR              = "CycleRAP score"  
+        CYCLERAP_SCORE_STR              = "Overall Risk Level"
         BB_BAND_STR                     = "BB Band"
         BP_BAND_STR                     = "BP Band"
         SB_BAND_STR                     = "SB Band"
         VB_BAND_STR                     = "VB Band"
-        CYCLERAP_SCORE_BAND_STR         = "CycleRAP score Band"
+        CYCLERAP_SCORE_BAND_STR         = "Overall Risk Level Band"
     
     FIELDS_META = {
         Fields.BB_BAND_STR:             risk_category,
@@ -251,6 +267,7 @@ class SnapshotMetadata(BaseTable):
 
 class Treatment(BaseTable):
     class Fields:
+        TREATMENTS_APPLIED_STR  = "Treatments Applied"
         IMAGE_REFERENCE_STR     = "Image Reference"
         TREATMENT_RANK_STR      = "Treatment Rank"
         TREATMENT_ID_STR        = "Treatment ID"
@@ -259,7 +276,7 @@ class Treatment(BaseTable):
         BP_REMEDIED_STR         = "BP"
         SB_REMEDIED_STR         = "SB"
         VB_REMEDIED_STR         = "VB"
-        SCORE_REMEDIED_STR      = "CycleRAP score"
+        SCORE_REMEDIED_STR      = "Overall Risk Level"
 
     def __init__(self, size=0):
         super().__init__(self.Fields, size=size)
@@ -285,12 +302,20 @@ class ProjectGeoData:
             self.parse(file_path)
             return
 
-        self.df = gpd.GeoDataFrame([{
-            self.Fields.IMAGE_REFERENCE_STR:    "",
-            self.Fields.ROAD_NAME_STR:          "",
-            self.Fields.DISTANCE_STR:           0,
-            self.Fields.LINESTRING_STR:         None
-        } for _ in range(size)], geometry=self.Fields.LINESTRING_STR, crs="EPSG:3414")
+        if size == 0:
+            self.df = gpd.GeoDataFrame(columns=[
+                self.Fields.IMAGE_REFERENCE_STR,
+                self.Fields.ROAD_NAME_STR,
+                self.Fields.DISTANCE_STR,
+                self.Fields.LINESTRING_STR
+            ], geometry=self.Fields.LINESTRING_STR, crs="EPSG:3414")
+        else:
+            self.df = gpd.GeoDataFrame([{
+                self.Fields.IMAGE_REFERENCE_STR:    "",
+                self.Fields.ROAD_NAME_STR:          "",
+                self.Fields.DISTANCE_STR:           0,
+                self.Fields.LINESTRING_STR:         None
+            } for _ in range(size)], geometry=self.Fields.LINESTRING_STR, crs="EPSG:3414")
 
     # === UTILITY ===
 
@@ -330,13 +355,16 @@ class ProjectMetadata:
 
     def __init__(self):
         self.project_name : str             = None
-        self.date_created : datetime.date   = None
-        self.last_updated : datetime.date   = None
+        self.date_created : datetime        = None
+        self.last_updated : datetime        = None
         self.created_by   : str             = None
         self.dataset      : str             = None
         self.progress     : int             = None
         self.size         : int             = None
         self.tags         : list[str]       = None
+        self.verified     : bool            = False
+        self.verified_segment_count : int   = 0
+        self.autocoded_segment_count : int  = 0
 
     # === SERIALIZATION ===
 
@@ -344,34 +372,47 @@ class ProjectMetadata:
         with open(file_path, 'r') as f:
             data = json.load(f)
             self.project_name = data.get("project_name")
-            self.date_created = (
-                datetime.fromisoformat(data.get("date_created")).date()
-                if data.get("date_created") else None
-            )
-            self.last_updated = (
-                datetime.fromisoformat(data.get("last_updated")).date()
-                if data.get("last_updated") else None
-            )
+            
+            # Helper to safely parse datetime or date
+            def parse_datetime(s):
+                if not s: return None
+                try:
+                    return datetime.fromisoformat(s)
+                except ValueError:
+                    # Fallback for old date-only strings or other formats if needed
+                    return None
+
+            self.date_created = parse_datetime(data.get("date_created"))
+            self.last_updated = parse_datetime(data.get("last_updated"))
             self.created_by = data.get("created_by")
             self.dataset    = data.get("dataset")
             self.progress   = data.get("progress")
             self.size       = data.get("size")
             self.tags       = data.get("tags")
+            self.verified   = data.get("verified", False)
+            self.verified_segment_count = data.get("verified_segment_count", 0)
+            self.autocoded_segment_count = data.get("autocoded_segment_count", 0)
+
+    def to_dict(self):
+        return {
+            "project_name": self.project_name,
+            "date_created": self.date_created.isoformat() if self.date_created else None,
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+            "created_by": self.created_by,
+            "dataset": self.dataset,
+            "progress": self.progress,
+            "size": self.size,
+            "tags": self.tags,
+            "verified": self.verified,
+            "verified_segment_count": self.verified_segment_count,
+            "autocoded_segment_count": self.autocoded_segment_count
+        }
 
     def serialize(self, to_dir: Path):
         to_dir.mkdir(parents=True, exist_ok=True)
         file_path = to_dir / "project_metadata.json"
         with open(file_path, 'w') as f:
-            json.dump({
-                "project_name": self.project_name,
-                "date_created": self.date_created.isoformat() if self.date_created else None,
-                "last_updated": self.last_updated.isoformat() if self.last_updated else None,
-                "created_by": self.created_by,
-                "dataset": self.dataset,
-                "progress": self.progress,
-                "size": self.size,
-                "tags": self.tags
-            }, f, indent=4)
+            json.dump(self.to_dict(), f, indent=4)
             
 
 # to load APIs

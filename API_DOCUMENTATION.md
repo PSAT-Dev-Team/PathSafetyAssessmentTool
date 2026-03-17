@@ -101,7 +101,7 @@ async function fetchAttributeMappings(): Promise<AttrMappings>
 - **Returns**:
   ```typescript
   {
-    "Area type": { "1": "Inner Urban", "2": "Outer Urban", ... },
+    "Area type": { "1": "Urban", "2": "Suburban", ... },
     "Facility Type": { "1": "Sidewalk", "2": "Multi-Use Path", ... },
     ...
   }
@@ -281,7 +281,7 @@ class Attributes(BaseTable):
     - ... (38 more fields)
 
     CHOICES: Dict mapping field names to enum mappings
-    - "Area type" → {"Inner Urban": 1, "Outer Urban": 2, ...}
+    - "Area type" → {"Urban": 1, "Suburban": 2, ...}
     - "Facility Type" → {"Sidewalk": 1, "Multi-Use Path": 2, ...}
 ```
 
@@ -379,8 +379,8 @@ class SnapshotMetadata(BaseTable):
 ### Field Mappings Reference
 
 #### Area Type
-- 1: Inner Urban
-- 2: Outer Urban
+- 1: Urban
+- 2: Suburban
 - 3: Rural
 - 4: Industrial
 
@@ -908,8 +908,8 @@ GET /api/projects/attribute-mappings HTTP/1.1
 ```json
 {
   "Area type": {
-    "1": "Inner Urban",
-    "2": "Outer Urban",
+    "1": "Urban",
+    "2": "Suburban",
     "3": "Rural",
     "4": "Industrial"
   },

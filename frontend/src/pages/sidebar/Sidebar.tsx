@@ -1,32 +1,44 @@
 import { useLocation, useNavigate, useMatch } from "react-router-dom";
 import { Button, Separator } from "@chakra-ui/react";
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { toaster } from "../../components/ui/toaster";
+import { applyAllTreatments, resetAllTreatments, saveTreatments } from "../../api";
 
 import CodingSidebar from "./components/CodingSidebar";
+import TreatmentSidebar from "./components/TreatmentSidebar";
+import ResetConfirmationDialog from "./components/ResetConfirmationDialog";
+import ShapefileModal from "./components/ShapefileModal";
+import ExitConfirmationDialog from "./components/ExitConfirmationDialog";
+import psatLogo from "../LandingPage/assets/PSAT Logo 2.png";
 import "./sidebar.css";
 
 const LINKS = [
-  { to: "/home", label: "Home" },
-  { to: "/analysis", label: "Analysis" },
-  { to: "/treatment", label: "Treatment" },
+  { to: "/home", label: "Projects" },
 ];
+
 
 export default function Sidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const [treatmentExitDialogOpen, setTreatmentExitDialogOpen] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const createProject = () => {
-    navigate(`/projects/create`);
+  const openShapefileModal = () => {
+    setShapefileModalOpen(true);
   };
 
-  const navigateSidebar = (to: string) => {
-    navigate(to);
+  const closeShapefileModal = () => {
+    setShapefileModalOpen(false);
   };
 
   // Get the project name
   const codingMatch = useMatch("/coding/:projectName");
-  const rawProjectName = codingMatch?.params.projectName ?? null;
+  const treatmentMatch = useMatch("/treatment/:projectName");
+  const rawProjectName = codingMatch?.params.projectName ?? treatmentMatch?.params.projectName ?? null;
   const projectName = useMemo(() => {
     if (!rawProjectName) return null;
     try {
@@ -37,16 +49,121 @@ export default function Sidebar() {
   }, [rawProjectName]);
 
   const inCoding = pathname.startsWith("/coding");
-  const onHome = pathname === "/home";
-  const onTreatment = pathname === "/treatment";
-  const onAnalysis = pathname === "/analysis";
+  const onTreatmentDetail = pathname.startsWith("/treatment/") && projectName;
 
-  const onCalculate = useCallback(async () => {
-    toaster.create({
-      description: "calculating scores",
-      type: "success",
-    });
-  }, []);
+  // Navigate with exit prompt for coding page
+  const navigateSidebar = useCallback((to: string) => {
+    if (inCoding) {
+      // Always show exit dialog when navigating away from coding page
+      (window as any).psat_pendingNavigation = to;
+      setExitDialogOpen(true);
+    } else {
+      navigate(to);
+    }
+  }, [inCoding, navigate]);
+
+  // Bulk treatment operations
+  const handleTreatAllSegments = useCallback(async () => {
+    if (!projectName) {
+      toaster.create({
+        description: "No project selected",
+        type: "error",
+      });
+      return;
+    }
+
+    const projects = projectName.split(',').filter(Boolean);
+    const allDetails: any[] = [];
+    let totalTreated = 0;
+    let totalSkipped = 0;
+    let errors: string[] = [];
+
+    for (const proj of projects) {
+      try {
+        const result = await applyAllTreatments(proj);
+        if (result.ok) {
+          totalTreated += result.segments_treated;
+          totalSkipped += result.segments_skipped;
+          const enrichedDetails = result.details.map((d: any) => ({ ...d, projectName: proj }));
+          allDetails.push(...enrichedDetails);
+        }
+      } catch (error) {
+        errors.push(`${proj}: ${error instanceof Error ? error.message : "Failed"}`);
+      }
+    }
+
+    if (totalTreated > 0 || totalSkipped > 0) {
+      toaster.create({
+        title: "Treatments Applied",
+        description: `Applied to ${totalTreated} segments across ${projects.length} project(s). ${totalSkipped} skipped.`,
+        type: "success",
+      });
+      // Notify using all details
+      window.dispatchEvent(new CustomEvent("psat:treat:all:completed", { detail: allDetails }));
+    }
+
+    if (errors.length > 0) {
+      toaster.create({
+        description: `Some errors occurred: ${errors.join("; ")}`,
+        type: "error"
+      });
+    }
+  }, [projectName]);
+
+  const handleResetClick = useCallback(() => {
+    if (!projectName) {
+      toaster.create({
+        description: "No project selected",
+        type: "error",
+      });
+      return;
+    }
+    setResetDialogOpen(true);
+  }, [projectName]);
+
+  const handleConfirmReset = useCallback(async () => {
+    if (!projectName) return;
+
+    try {
+      setIsResetting(true);
+      const projects = projectName.split(',').filter(Boolean);
+      let totalReset = 0;
+      let errors: string[] = [];
+
+      for (const proj of projects) {
+        try {
+          const result = await resetAllTreatments(proj);
+          if (result.ok) {
+            totalReset += result.segments_reset;
+          }
+        } catch (e) {
+          errors.push(`${proj}: Failed`);
+        }
+      }
+
+      toaster.create({
+        title: "Treatments Reset",
+        description: `Reset ${totalReset} segments across ${projects.length} project(s).`,
+        type: "success",
+      });
+
+      window.dispatchEvent(new CustomEvent("psat:reset:all:completed"));
+      setResetDialogOpen(false);
+
+      if (errors.length > 0) {
+        toaster.create({ description: `Errors: ${errors.join("; ")}`, type: "error" });
+      }
+
+    } catch (error) {
+      toaster.create({
+        description: error instanceof Error ? error.message : "Failed to reset treatments",
+        type: "error",
+      });
+    } finally {
+      setIsResetting(false);
+    }
+  }, [projectName]);
+
 
   const onAutoCodeOne = useCallback(() => {
     window.dispatchEvent(new CustomEvent("psat:autocode:one"));
@@ -54,6 +171,10 @@ export default function Sidebar() {
 
   const onAutoCodeAll = useCallback(() => {
     window.dispatchEvent(new CustomEvent("psat:autocode:all"));
+  }, []);
+
+  const onAutoCodeAllProjects = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("psat:autocode:all-projects"));
   }, []);
 
   const onSave = async () => {
@@ -68,14 +189,127 @@ export default function Sidebar() {
   };
 
   const onExit = useCallback(() => {
+    setExitDialogOpen(true);
+  }, []);
+
+
+  const handleSaveAndExit = useCallback(() => {
+    setIsSaving(true);
+    window.dispatchEvent(new CustomEvent("psat:save"));
+
+    // Give the save event a moment to complete before navigating
+    setTimeout(() => {
+      setIsSaving(false);
+      setExitDialogOpen(false);
+
+      // Navigate to pending location or home
+      const pendingNavigation = (window as any).psat_pendingNavigation;
+      if (pendingNavigation) {
+        navigate(pendingNavigation);
+        (window as any).psat_pendingNavigation = null;
+      } else {
+        navigate(`/home`);
+      }
+    }, 500);
+  }, [navigate]);
+
+  const handleDiscardAndExit = useCallback(() => {
+    setExitDialogOpen(false);
+
+    // Navigate to pending location or home
+    const pendingNavigation = (window as any).psat_pendingNavigation;
+    if (pendingNavigation) {
+      navigate(pendingNavigation);
+      (window as any).psat_pendingNavigation = null;
+    } else {
+      navigate(`/home`);
+    }
+  }, [navigate]);
+
+  const handleExitCancel = useCallback(() => {
+    setExitDialogOpen(false);
+    // Clear pending navigation
+    (window as any).psat_pendingNavigation = null;
+  }, []);
+
+  // Treatment save and exit handlers
+  const onTreatmentSave = useCallback(async () => {
+    if (!projectName) {
+      toaster.create({
+        description: "No project selected",
+        type: "error",
+      });
+      return;
+    }
+
+    try {
+      const projects = projectName.split(',').filter(Boolean);
+      let errors: string[] = [];
+
+      for (const proj of projects) {
+        try {
+          await saveTreatments(proj);
+        } catch (e) {
+          errors.push(`${proj}: Failed`);
+        }
+      }
+
+      if (errors.length === 0) {
+        toaster.create({
+          title: "Treatments Saved",
+          description: `Saved all changes for ${projects.length} project(s).`,
+          type: "success",
+        });
+      } else {
+        toaster.create({
+          description: `Saved with some errors: ${errors.join("; ")}`,
+          type: "error"
+        });
+      }
+    } catch (error) {
+
+      toaster.create({
+        description: error instanceof Error ? error.message : "Failed to save treatments",
+        type: "error",
+      });
+    }
+  }, [projectName]);
+
+  const onTreatmentExit = useCallback(() => {
+    setTreatmentExitDialogOpen(true);
+  }, []);
+
+  const handleTreatmentSaveAndExit = useCallback(() => {
+    setIsSaving(true);
+    onTreatmentSave().then(() => {
+      setIsSaving(false);
+      setTreatmentExitDialogOpen(false);
+      navigate(`/home`);
+    }).catch(() => {
+      setIsSaving(false);
+      toaster.create({
+        title: "Save failed",
+        description: "Failed to save treatments. Please try again.",
+        type: "error",
+      });
+    });
+  }, [navigate, onTreatmentSave]);
+
+  const handleTreatmentDiscardAndExit = useCallback(() => {
+    setTreatmentExitDialogOpen(false);
     navigate(`/home`);
   }, [navigate]);
+
+  const handleTreatmentExitCancel = useCallback(() => {
+    setTreatmentExitDialogOpen(false);
+  }, []);
 
   return (
     <aside className="psat-sidebar" aria-label="PSAT sidebar">
       {/* Top: PSAT + buttons */}
       <div className="psat-side-top">
-        <div className="psat-brand">PSAT</div>
+        <img src={psatLogo} alt="PSAT" className="psat-brand-logo" />
+        <h1 className="psat-sidebar-title">Path Safety Assessment Tool</h1>
 
         <div className="psat-actions">
           {LINKS.map(({ to, label }) => {
@@ -92,6 +326,16 @@ export default function Sidebar() {
               </Button>
             );
           })}
+
+          {/* Path Analysis Button */}
+          <Button
+            onClick={() => navigateSidebar("/analysis/path")}
+            colorPalette="gray"
+            variant={pathname === "/analysis/path" ? "solid" : "outline"}
+            size="sm"
+          >
+            Path Analysis
+          </Button>
         </div>
       </div>
 
@@ -99,28 +343,68 @@ export default function Sidebar() {
       <Separator />
 
       <div className="psat-side-middle">
-        {inCoding && projectName ? (
+        {inCoding && projectName && (
           <CodingSidebar
             projectName={projectName}
-            onCalculate={onCalculate}
             onSave={onSave}
             onExit={onExit}
-            onAutoCodeOne={onAutoCodeOne}   // ★ 新增
-            onAutoCodeAll={onAutoCodeAll}   // ★ 新增
+            onAutoCodeOne={onAutoCodeOne}
+            onAutoCodeAll={onAutoCodeAll}
+            onAutoCodeAllProjects={onAutoCodeAllProjects}
           />
-        ) : (
-          <div className="placeholder">Placeholder</div>
         )}
       </div>
 
-      {/* Bottom: Create Project — 只在 /home 或 /treatment 或 /analysis 时出现 */}
-      {(onHome || onTreatment || onAnalysis) && (
+      {/* Bottom: Create Project & Treatment Actions */}
+      {/* Treatment Detail Page - Show treatment sidebar */}
+      {onTreatmentDetail && projectName && (
         <div className="psat-side-bottom">
-          <Button onClick={createProject} colorPalette="gray" variant="surface" size="sm">
-            Create Project
+          <TreatmentSidebar
+            onTreatAll={handleTreatAllSegments}
+            onResetAll={handleResetClick}
+            onSave={onTreatmentSave}
+            onExit={onTreatmentExit}
+          />
+        </div>
+      )}
+
+
+      {/* Projects Page - Show GIS layer management button */}
+      {pathname === "/home" && (
+        <div className="psat-side-bottom">
+          <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" width="100%">
+            GIS Layer
           </Button>
         </div>
       )}
+
+      {/* Shapefile Management Modal */}
+      <ShapefileModal open={shapefileModalOpen} onClose={closeShapefileModal} />
+
+      {/* Coding Exit Confirmation Dialog */}
+      <ExitConfirmationDialog
+        open={exitDialogOpen}
+        onSaveAndExit={handleSaveAndExit}
+        onDiscardAndExit={handleDiscardAndExit}
+        onCancel={handleExitCancel}
+        isSaving={isSaving}
+      />
+
+      {/* Treatment Exit Confirmation Dialog */}
+      <ExitConfirmationDialog
+        open={treatmentExitDialogOpen}
+        onSaveAndExit={handleTreatmentSaveAndExit}
+        onDiscardAndExit={handleTreatmentDiscardAndExit}
+        onCancel={handleTreatmentExitCancel}
+        isSaving={isSaving}
+      />
+
+      <ResetConfirmationDialog
+        open={resetDialogOpen}
+        onConfirm={handleConfirmReset}
+        onCancel={() => setResetDialogOpen(false)}
+        isResetting={isResetting}
+      />
     </aside>
   );
 }

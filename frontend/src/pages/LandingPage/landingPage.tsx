@@ -22,7 +22,7 @@ export default function LandingPage() {
           draggable={false}
         />
 
-        <h1 className="psat-logo name">path safety assessmenty tool</h1>
+        <h1 className="psat-logo name">path safety assessment tool</h1>
 
         <p className="psat-logo description">an evidence-based risk evaluation model for active mobility users</p>
 

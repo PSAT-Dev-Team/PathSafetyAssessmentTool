@@ -1,350 +1,409 @@
 import { useState, useEffect, useMemo } from "react";
 import {
-  Box,
-  Flex,
-  Text,
   Button,
-  Input,
+  Portal,
+  Combobox,
   createListCollection,
-  For,
 } from "@chakra-ui/react";
-import {
-  SelectContent,
-  SelectItem,
-  SelectRoot,
-  SelectTrigger,
-  SelectValueText,
-} from "@chakra-ui/react";
-import { fetchProjectList } from "../../api";
-import AttributesDropdown from "./components/AttributesDropdown";
-import TreatmentMapView from "./components/TreatmentMapView";
+import { useNavigate } from "react-router-dom";
+import { LuPencil } from "react-icons/lu";
+import { fetchProjectList, type FileResponse } from "../../api";
+import EditProjectModal from "../Projects/components/EditProjectModal";
+import "../Projects/projects.css";
 
-interface FileListResponse {
-  projects: string[];
+// Get border color for Pre/Post tags
+function getTagBorderColor(tag: string): string {
+  if (tag === "Pre") return "#fb923c"; // orange.emphasized
+  if (tag === "Post") return "#22c55e"; // green.emphasized
+  return "rgba(0, 0, 0, 0.1)";
 }
 
-interface ProjectItem {
-  name: string;
+// Generate a consistent, bright, varied color for each unique tag
+function getTagColor(tag: string): string {
+  // Fixed colors for Pre/Post - matching the analysis pages (orange.subtle and green.subtle)
+  if (tag === "Pre") return "#fed7aa"; // orange.subtle
+  if (tag === "Post") return "#bbf7d0"; // green.subtle
+
+  // Simple hash function to convert string to number
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+  }
+
+  // Use multiple hash variations to increase color variety
+  const hash2 = Math.abs(hash >> 16);
+  const hash3 = Math.abs(hash << 3);
+
+  // Create wider hue distribution with warm and cool colors
+  // Avoid muddy middle ranges (40-60 yellow-green, 160-180 cyan)
+  let hue = Math.abs(hash % 360);
+  if (hue >= 40 && hue <= 60) hue = (hue + 30) % 360;  // Skip muddy yellow-green
+  if (hue >= 160 && hue <= 180) hue = (hue + 30) % 360; // Skip muddy cyan
+
+  // Higher saturation (75-95%) for more vibrant colors
+  const saturation = 75 + (hash2 % 21); // 75-95%
+
+  // Higher lightness (65-80%) for brighter, more visible colors
+  const lightness = 65 + (hash3 % 16); // 65-80%
+
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
-
-// Size filter options
-const sizeOptions = createListCollection({
-  items: [
-    { label: "Any Size", value: "any" },
-    { label: "Small (< 10 MB)", value: "small" },
-    { label: "Medium (10-100 MB)", value: "medium" },
-    { label: "Large (100-500 MB)", value: "large" },
-    { label: "Extra Large (> 500 MB)", value: "xlarge" },
-  ],
-});
-
-// Dataset filter options
-const datasetOptions = createListCollection({
-  items: [
-    { label: "All Datasets", value: "all" },
-    { label: "Safety Assessment", value: "safety" },
-    { label: "Traffic Analysis", value: "traffic" },
-    { label: "Infrastructure", value: "infrastructure" },
-    { label: "Environmental", value: "environmental" },
-  ],
-});
-
-// Tags filter options
-const tagsOptions = createListCollection({
-  items: [
-    { label: "All Tags", value: "all" },
-    { label: "Cycling", value: "cycling" },
-    { label: "Pedestrian", value: "pedestrian" },
-    { label: "Urban", value: "urban" },
-    { label: "Rural", value: "rural" },
-    { label: "High Priority", value: "priority" },
-  ],
-});
 
 export default function TreatmentPage() {
   // Project list state
-  const [projectList, setProjectList] = useState<FileListResponse | null>(null);
-  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
+  const [projectList, setProjectList] = useState<FileResponse | null>(null);
 
   // Filter states
   const [nameQuery, setNameQuery] = useState("");
-  const [dateCreatedFrom, setDateCreatedFrom] = useState("");
-  const [dateCreatedTo, setDateCreatedTo] = useState("");
-  const [lastUpdatedFrom, setLastUpdatedFrom] = useState("");
-  const [lastUpdatedTo, setLastUpdatedTo] = useState("");
-  const [sizeFilter, setSizeFilter] = useState("any");
-  const [datasetFilter, setDatasetFilter] = useState("all");
-  const [tagsFilter, setTagsFilter] = useState("all");
+  const [nameQueryComboboxOpen, setNameQueryComboboxOpen] = useState(false);
+  const [tagFilter, setTagFilter] = useState<string>("");
+  const [tagFilterInputValue, setTagFilterInputValue] = useState("");
+  const [tagFilterComboboxOpen, setTagFilterComboboxOpen] = useState(false);
+
+  // Selected Projects (multi-select)
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Edit dialog state
+  const [openEdit, setOpenEdit] = useState(false);
+  const [editingProject, setEditingProject] = useState<any | null>(null);
+
+  const navigate = useNavigate();
 
   // Fetch projects on mount
   useEffect(() => {
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch((e) => console.error("Failed to fetch projects:", e));
+      .catch(() => { });
+  }, []);
+
+  // Listen for project verified status changes from coding page
+  useEffect(() => {
+    const handleVerificationUpdate = (event: CustomEvent) => {
+      const { projectName, verified } = event.detail;
+
+
+      // Update the project list directly
+      setProjectList((prev) => {
+        if (!prev) return prev;
+        return {
+          projects: prev.projects.map((p) =>
+            p.name === projectName ? { ...p, verified } : p
+          ),
+        };
+      });
+    };
+
+    window.addEventListener("psat:verified:updated", handleVerificationUpdate as EventListener);
+    return () => window.removeEventListener("psat:verified:updated", handleVerificationUpdate as EventListener);
   }, []);
 
   // Process projects
-  const projects: ProjectItem[] = useMemo(() => {
+  const projects = useMemo(() => {
     if (!projectList?.projects) return [];
     return projectList.projects
       .slice()
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name }));
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [projectList]);
 
-  // Create collection for project dropdown
-  const projectCollection = useMemo(() => {
-    return createListCollection({
-      items: projects.map((p) => ({
-        label: p.name,
-        value: p.name,
-      })),
+  // Get all unique tags
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    projects.forEach(p => {
+      p.tags?.forEach(tag => tagSet.add(tag));
     });
+    return Array.from(tagSet).sort();
   }, [projects]);
 
-  // Handle View Project button click
-  const handleViewProject = () => {
-    if (selectedProjects.length === 0) {
-      alert("Please select at least one project");
+  // Apply filters
+  const filtered = useMemo(() => {
+    const q = nameQuery.trim().toLowerCase();
+    let list = projects;
+    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+    if (tagFilter) list = list.filter((p) => p.tags?.includes(tagFilter));
+    return list;
+  }, [projects, nameQuery, tagFilter]);
+
+  // Toggle project selection
+  const onRowClick = (name: string) => {
+    setSelected(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(name)) {
+        newSet.delete(name);
+      } else {
+        newSet.add(name);
+      }
+
+      return newSet;
+    });
+  };
+
+  // Toggle select all projects
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length && filtered.length > 0) {
+      // All are selected, deselect all
+      setSelected(new Set());
+    } else {
+      // Select all
+      setSelected(new Set(filtered.map(p => p.name)));
+    }
+  };
+
+  const loadProject = async () => {
+    if (selected.size === 0) {
       return;
     }
-    console.log("Selected projects:", selectedProjects);
-    // TODO: Load treatment data for selected projects
+    const projectNames = Array.from(selected);
+    // Encode each name, then join with ','
+    // Since encodeURIComponent encodes ',' as '%2C', using ',' as separator is safe
+    const joinedNames = projectNames.map(name => encodeURIComponent(name)).join(",");
+    navigate(`/treatment/${joinedNames}`);
+  };
+
+  const handleEditSuccess = (newName: string, newTags: string[]) => {
+    if (!editingProject) return;
+    const oldName = editingProject.name;
+    setProjectList((prev) => {
+      if (!prev) return prev;
+      return {
+        projects: prev.projects.map((p) =>
+          p.name === oldName ? { name: newName, tags: newTags } : p
+        ),
+      };
+    });
+    if (selected.has(oldName) && newName !== oldName) {
+      setSelected(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(oldName);
+        newSet.add(newName);
+        return newSet;
+      });
+    }
   };
 
   return (
-    <Box w="100%" h="100vh" overflowY="auto" p="6">
-      {/* Header */}
-      <Box mb="6">
-        <Text fontSize="2xl" fontWeight="bold" mb="2">
-          Treatment Dashboard
-        </Text>
-        <Text fontSize="sm" color="fg.muted">
-          Select one or more projects to start treatment analysis
-        </Text>
-      </Box>
-
-      {/* Filter Panel */}
-      <Box
-        borderWidth="1px"
-        borderRadius="lg"
-        p="6"
-        bg="bg.panel"
-        mb="6"
-      >
-        <Text fontSize="lg" fontWeight="semibold" mb="4">
-          Filter Projects
-        </Text>
-
-        <Flex direction="column" gap="4">
-          {/* Row 1: Project Name Dropdown (Multi-select) */}
-          <Box>
-            <Text fontSize="sm" fontWeight="semibold" mb="2">
-              Project Name
-            </Text>
-            <SelectRoot
-              collection={projectCollection}
-              size="md"
-              multiple
-              value={selectedProjects}
-              onValueChange={(e) => setSelectedProjects(e.value)}
+    <div className="projects-root">
+      {/* Search Panel */}
+      <div className="search-panel">
+        <div className="search-row">
+          <div className="search-item">
+            <label htmlFor="nameQuery">Search by project name</label>
+            <Combobox.Root
+              collection={createListCollection({
+                items: projects.map(p => ({ label: p.name, value: p.name }))
+              })}
+              inputValue={nameQuery}
+              onInputValueChange={({ inputValue }) => setNameQuery(inputValue)}
+              open={nameQueryComboboxOpen}
+              onOpenChange={(details) => {
+                // Keep dropdown open if there's text in the field
+                if (nameQuery.length > 0) {
+                  setNameQueryComboboxOpen(true);
+                } else {
+                  setNameQueryComboboxOpen(details.open);
+                }
+              }}
             >
-              <SelectTrigger>
-                <SelectValueText placeholder="Select one or more projects...">
-                  {selectedProjects.length === 0
-                    ? "Select one or more projects..."
-                    : `${selectedProjects.length} project${selectedProjects.length > 1 ? "s" : ""} selected`}
-                </SelectValueText>
-              </SelectTrigger>
-              <SelectContent maxH="300px" overflowY="auto">
-                <For each={projectCollection.items}>
-                  {(item) => (
-                    <SelectItem key={item.value} item={item}>
-                      <Flex align="center" gap="2">
-                        <input
-                          type="checkbox"
-                          checked={selectedProjects.includes(item.value)}
-                          readOnly
-                          style={{ pointerEvents: "none" }}
-                        />
-                        <Text>{item.label}</Text>
-                      </Flex>
-                    </SelectItem>
-                  )}
-                </For>
-              </SelectContent>
-            </SelectRoot>
-            {selectedProjects.length > 0 && (
-              <Flex mt="2" gap="2" flexWrap="wrap">
-                {selectedProjects.map((proj) => (
-                  <Flex
-                    key={proj}
-                    align="center"
-                    gap="1"
-                    px="2"
-                    py="1"
-                    bg="blue.subtle"
-                    borderRadius="md"
-                    fontSize="sm"
-                  >
-                    <Text>{proj}</Text>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() =>
-                        setSelectedProjects(selectedProjects.filter((p) => p !== proj))
-                      }
-                      px="1"
-                    >
-                      ×
-                    </Button>
-                  </Flex>
-                ))}
-              </Flex>
-            )}
-          </Box>
-
-          {/* Row 2: Date filters */}
-          <Flex gap="4" direction={{ base: "column", md: "row" }}>
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Date Created
-              </Text>
-              <Flex gap="2" align="center">
-                <Input
-                  type="date"
-                  value={dateCreatedFrom}
-                  onChange={(e) => setDateCreatedFrom(e.target.value)}
-                  size="md"
+              <Combobox.Control onClick={() => setNameQueryComboboxOpen(true)}>
+                <Combobox.Input
+                  id="nameQuery"
+                  placeholder="Type project name…"
                 />
-                <Text fontSize="sm" color="fg.muted">to</Text>
-                <Input
-                  type="date"
-                  value={dateCreatedTo}
-                  onChange={(e) => setDateCreatedTo(e.target.value)}
-                  size="md"
-                />
-              </Flex>
-            </Box>
-
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Last Updated
-              </Text>
-              <Flex gap="2" align="center">
-                <Input
-                  type="date"
-                  value={lastUpdatedFrom}
-                  onChange={(e) => setLastUpdatedFrom(e.target.value)}
-                  size="md"
-                />
-                <Text fontSize="sm" color="fg.muted">to</Text>
-                <Input
-                  type="date"
-                  value={lastUpdatedTo}
-                  onChange={(e) => setLastUpdatedTo(e.target.value)}
-                  size="md"
-                />
-              </Flex>
-            </Box>
-          </Flex>
-
-          {/* Row 3: Other filters */}
-          <Flex gap="4" direction={{ base: "column", md: "row" }}>
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Size
-              </Text>
-              <SelectRoot
-                collection={sizeOptions}
-                size="md"
-                value={[sizeFilter]}
-                onValueChange={(e) => setSizeFilter(e.value[0])}
-              >
-                <SelectTrigger>
-                  <SelectValueText placeholder="Select size" />
-                </SelectTrigger>
-                <SelectContent>
-                  {sizeOptions.items.map((item) => (
-                    <SelectItem key={item.value} item={item}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
-            </Box>
-
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Dataset
-              </Text>
-              <SelectRoot
-                collection={datasetOptions}
-                size="md"
-                value={[datasetFilter]}
-                onValueChange={(e) => setDatasetFilter(e.value[0])}
-              >
-                <SelectTrigger>
-                  <SelectValueText placeholder="Select dataset" />
-                </SelectTrigger>
-                <SelectContent>
-                  {datasetOptions.items.map((item) => (
-                    <SelectItem key={item.value} item={item}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
-            </Box>
-
-            <Box flex="1">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Tags
-              </Text>
-              <SelectRoot
-                collection={tagsOptions}
-                size="md"
-                value={[tagsFilter]}
-                onValueChange={(e) => setTagsFilter(e.value[0])}
-              >
-                <SelectTrigger>
-                  <SelectValueText placeholder="Select tags" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tagsOptions.items.map((item) => (
-                    <SelectItem key={item.value} item={item}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
-            </Box>
-          </Flex>
-
-          {/* Load Selected Projects Button */}
-          <Flex justify="center" mt="4">
-            <Button
-              colorPalette="blue"
-              size="lg"
-              px="12"
-              onClick={handleViewProject}
-              disabled={selectedProjects.length === 0}
+              </Combobox.Control>
+              <Portal>
+                <Combobox.Positioner>
+                  <Combobox.Content>
+                    {projects
+                      .filter(p => p.name.toLowerCase().includes(nameQuery.toLowerCase()))
+                      .map(p => (
+                        <Combobox.Item key={p.name} item={{ label: p.name, value: p.name }}>
+                          {p.name}
+                        </Combobox.Item>
+                      ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
+              </Portal>
+            </Combobox.Root>
+          </div>
+          <div className="search-item">
+            <label htmlFor="tagFilter">Filter by tag</label>
+            <Combobox.Root
+              collection={createListCollection({
+                items: [
+                  { label: "All tags", value: "" },
+                  ...allTags.map(tag => ({ label: tag, value: tag }))
+                ]
+              })}
+              value={tagFilter ? [tagFilter] : [""]}
+              onValueChange={({ value }) => setTagFilter(value[0] ?? "")}
+              inputValue={tagFilterInputValue}
+              onInputValueChange={(e) => setTagFilterInputValue(e.inputValue)}
+              open={tagFilterComboboxOpen}
+              onOpenChange={(details) => {
+                // Keep dropdown open if there's text in the field
+                if (tagFilterInputValue.length > 0) {
+                  setTagFilterComboboxOpen(true);
+                } else {
+                  setTagFilterComboboxOpen(details.open);
+                }
+              }}
             >
-              Load Selected Projects ({selectedProjects.length})
+              <Combobox.Control
+                onClick={() => setTagFilterComboboxOpen(true)}
+              >
+                <Combobox.Input
+                  id="tagFilter"
+                  placeholder="All tags"
+                />
+                <Combobox.IndicatorGroup>
+                  <Combobox.ClearTrigger />
+                  <Combobox.Trigger />
+                </Combobox.IndicatorGroup>
+              </Combobox.Control>
+              <Portal>
+                <Combobox.Positioner>
+                  <Combobox.Content>
+                    <Combobox.Item item={{ label: "All tags", value: "" }} key="">
+                      All tags
+                    </Combobox.Item>
+                    {allTags
+                      .filter(tag => tag.toLowerCase().includes(tagFilterInputValue.toLowerCase()))
+                      .map((tag) => (
+                        <Combobox.Item item={{ label: tag, value: tag }} key={tag}>
+                          {tag}
+                        </Combobox.Item>
+                      ))}
+                  </Combobox.Content>
+                </Combobox.Positioner>
+              </Portal>
+            </Combobox.Root>
+          </div>
+          <div className="actions-buttons">
+            <Button onClick={loadProject} colorPalette="blue" disabled={selected.size === 0}>
+              Load Project
             </Button>
-          </Flex>
-        </Flex>
-      </Box>
+          </div>
+        </div>
+      </div>
 
-      {/* Attributes Dropdown Section */}
-      <Box mb="6">
-        <AttributesDropdown />
-      </Box>
+      {/* Project Table */}
+      <div className="table-container">
+        <div className="table-wrap">
+          <table className="project-table">
+            <thead>
+              <tr>
+                <th style={{ width: 48 }}></th>
+                <th>Project Name</th>
+                <th style={{ width: 120 }}>Verification Status</th>
+                <th>Tags</th>
+                <th style={{ width: 180 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="empty">
+                    No projects found
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  <tr className="select-all-row" onClick={toggleSelectAll} style={{ cursor: "pointer" }}>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={filtered.length > 0 && selected.size === filtered.length}
+                        onChange={toggleSelectAll}
+                        aria-label="Select all projects"
+                      />
+                    </td>
+                    <td colSpan={4}>
+                      <strong>Select All</strong>
+                    </td>
+                  </tr>
+                  {filtered.map((p) => {
+                    const isSelected = selected.has(p.name);
+                    // Get all other tags (excluding Pre/Post)
+                    const otherTags = p.tags?.filter(tag => tag !== "Pre" && tag !== "Post") || [];
 
-      {/* Map/Table Section */}
-      <Box mb="6">
-        <TreatmentMapView />
-      </Box>
-    </Box>
+                    return (
+                      <tr
+                        key={p.name}
+                        className={isSelected ? "row selected" : "row"}
+                        onClick={(e) => {
+                          // Prevent double-toggle if clicking checkbox directly
+                          if ((e.target as HTMLElement).tagName === "INPUT") return;
+                          onRowClick(p.name);
+                        }}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => onRowClick(p.name)}
+                            aria-label={`Select ${p.name}`}
+                          />
+                        </td>
+                        <td title={p.name}>{p.name}</td>
+                        <td>
+                          <span style={{ fontSize: "16px" }}>
+                            {p.verified ? "✅" : "⏳"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="tags-container">
+                            {otherTags.length > 0 ? (
+                              otherTags.map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="tag-badge"
+                                  style={{
+                                    backgroundColor: getTagColor(tag),
+                                    borderColor: getTagBorderColor(tag),
+                                    borderWidth: "1px",
+                                    borderStyle: "solid",
+                                  }}
+                                >
+                                  {tag}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="no-tags">—</span>
+                            )}
+                          </div>
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => {
+                              setEditingProject(p);
+                              setOpenEdit(true);
+                            }}
+                            className="row-edit-btn"
+                            aria-label="Edit project"
+                          >
+                            <LuPencil className="row-edit-icon" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Edit Dialog */}
+      {editingProject && (
+        <EditProjectModal
+          open={openEdit}
+          onClose={() => setOpenEdit(false)}
+          projectName={editingProject.name}
+          projectTags={editingProject.tags}
+          onSuccess={handleEditSuccess}
+        />
+      )}
+    </div>
   );
 }

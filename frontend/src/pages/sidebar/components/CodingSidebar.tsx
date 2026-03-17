@@ -2,22 +2,21 @@ import { Button, Flex, Spacer, Grid, GridItem } from "@chakra-ui/react";
 
 type CodingSidebarProps = {
   projectName: string;
-  onCalculate: () => Promise<void> | void;
   onSave: () => Promise<void> | void;
   onExit: () => void;
 
-  // 新增：自动编码
+  // Auto-coding callbacks
   onAutoCodeOne: () => Promise<void> | void;
   onAutoCodeAll: () => Promise<void> | void;
+  onAutoCodeAllProjects: () => Promise<void> | void;
 };
 
 export default function CodingSidebar({
-  projectName,
-  onCalculate,
   onSave,
   onExit,
   onAutoCodeOne,
   onAutoCodeAll,
+  onAutoCodeAllProjects,
 }: CodingSidebarProps) {
   return (
     <Flex direction="column" h="100%">
@@ -37,6 +36,12 @@ export default function CodingSidebar({
       <Button onClick={onAutoCodeAll} w="100%" size="sm" variant="outline" colorPalette="gray">
         Auto-code all
       </Button>
+
+      <GridItem colSpan={2}>
+        <Button onClick={onAutoCodeAllProjects} w="100%" size="sm" variant="outline" colorPalette="blue">
+          Autocode All Projects
+        </Button>
+      </GridItem>
       </Grid>
 
       <Spacer />
@@ -49,12 +54,6 @@ export default function CodingSidebar({
         rowGap={3}
         mt="auto"
       >
-
-        <GridItem colSpan={2}>
-          <Button onClick={onCalculate} w="100%" size="sm" variant="outline" colorPalette="gray">
-            Calculate Score & Treatment
-          </Button>
-        </GridItem>
 
         <GridItem>
           <Button onClick={onSave} w="100%" size="sm" variant="solid" colorPalette="gray">

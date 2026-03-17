@@ -3,3 +3,6 @@ data/
 shapefiles/
 in/
 model/
+
+# Claude Code settings
+.claude/path_segmentation_inference.ipynb

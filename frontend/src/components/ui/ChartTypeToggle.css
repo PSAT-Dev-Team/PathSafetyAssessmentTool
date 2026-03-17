@@ -1,0 +1,72 @@
+.chart-toggle {
+  position: relative;
+  border-radius: 50px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  border: 2px solid #e2e8f0;
+  background: linear-gradient(135deg, #f0f0f0 0%, #e0e0e0 100%);
+}
+
+.chart-toggle:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.chart-toggle.active.pie-active {
+  background: linear-gradient(135deg, #FF6B9D 0%, #FFA06B 100%);
+  border-color: #FF6B9D;
+  box-shadow: 0 4px 15px rgba(255, 107, 157, 0.4);
+}
+
+.chart-toggle.active.bar-active {
+  background: linear-gradient(135deg, #4A90E2 0%, #67B8E3 100%);
+  border-color: #4A90E2;
+  box-shadow: 0 4px 15px rgba(74, 144, 226, 0.4);
+}
+
+.chart-toggle .toggle-text {
+  color: #666;
+  transition: color 0.3s ease;
+}
+
+.chart-toggle.active .toggle-text {
+  color: white;
+}
+
+.chart-toggle .toggle-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  transition: color 0.3s ease;
+}
+
+.chart-toggle.active .toggle-icon {
+  color: white;
+}
+
+.chart-toggle.active.pie-active .toggle-icon {
+  animation: rotate 2s linear infinite;
+}
+
+.chart-toggle.active.bar-active .toggle-icon {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}

@@ -1,0 +1,168 @@
+/* CycleRAP Score Band Distribution Panel Styles */
+
+.score-band-panel {
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .score-band-panel {
+    background: #1e1e1e;
+    border-color: #3e3e3e;
+  }
+}
+
+.score-band-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e0e0e0;
+  transition: background-color 0.2s;
+}
+
+@media (prefers-color-scheme: dark) {
+  .score-band-header {
+    border-bottom-color: #3e3e3e;
+  }
+}
+
+.score-band-header:hover {
+  background-color: #f8f9fa;
+}
+
+@media (prefers-color-scheme: dark) {
+  .score-band-header:hover {
+    background-color: #2a2a2a;
+  }
+}
+
+.score-band-content {
+  padding: 20px;
+}
+
+.score-band-loading,
+.score-band-error {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+}
+
+@media (prefers-color-scheme: dark) {
+  .score-band-loading,
+  .score-band-error {
+    color: #999;
+  }
+}
+
+.score-band-loading .spinner {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .score-band-loading .spinner {
+    border-color: #3e3e3e;
+    border-top-color: #3498db;
+  }
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.score-band-error {
+  color: #e74c3c;
+  font-weight: 500;
+}
+
+@media (prefers-color-scheme: dark) {
+  .score-band-error {
+    color: #ff6b6b;
+  }
+}
+
+.score-band-empty {
+  text-align: center;
+  padding: 40px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  color: #666;
+}
+
+@media (prefers-color-scheme: dark) {
+  .score-band-empty {
+    background: #2a2a2a;
+    color: #999;
+  }
+}
+
+.score-band-charts-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.score-band-overall {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 40px;
+}
+
+.score-band-grid {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: nowrap;
+  overflow: visible;
+  padding: 0;
+  width: 100%;
+}
+
+@media (max-width: 1280px) {
+  .score-band-grid {
+    gap: 15px;
+  }
+}
+
+@media (max-width: 768px) {
+  .score-band-grid {
+    flex-wrap: wrap;
+    gap: 20px;
+    padding: 0;
+  }
+}
+
+.score-band-grid-item {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  flex: 0 0 calc(25% - 15px);
+  min-width: 0;
+  overflow: visible;
+  min-height: 450px;
+}
+
+@media (max-width: 1280px) {
+  .score-band-grid-item {
+    flex: 0 0 calc(25% - 11px);
+    min-height: 420px;
+  }
+}
+
+@media (max-width: 768px) {
+  .score-band-grid-item {
+    flex: 0 0 calc(50% - 10px);
+    min-height: auto;
+  }
+}

@@ -1,10 +1,11 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import LandingPage from "./pages/LandingPage/landingPage";
-import Home from "./pages/Home/home";
+import Home from "./pages/Projects/projects";
 import CodingPage from "./pages/CodingPage/codingPage"
 import CreateProjectPage from "./pages/CreateProjectPage/createProjectPage"
 import TreatmentPage from "./pages/TreatmentPage/treatmentPage"
-import AnalysisPage from "./pages/AnalysisPage/analysisPage"
+import TreatmentDetailPage from "./pages/TreatmentPage/treatmentDetailPage"
+import PathAnalysisPage from "./pages/PathAnalysisPage/pathAnalysisPage"
 
 import AppLayout from "./layouts/AppLayout";
 
@@ -16,9 +17,10 @@ export default function App() {
 
       <Route element={<AppLayout />}>
         <Route path="/home" element={<Home />} />
-        <Route path="/coding/:projectName" element={<CodingPage />} />
+        <Route path="/coding/:projectNames" element={<CodingPage />} />
         <Route path="/treatment" element={<TreatmentPage />} />
-        <Route path="/analysis" element={<AnalysisPage />} />
+        <Route path="/treatment/:projectName" element={<TreatmentDetailPage />} />
+        <Route path="/analysis/path" element={<PathAnalysisPage />} />
         <Route path="/projects/create" element={<CreateProjectPage />} />
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Route>

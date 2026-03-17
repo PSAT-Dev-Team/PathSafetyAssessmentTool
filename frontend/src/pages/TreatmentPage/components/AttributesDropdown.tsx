@@ -196,7 +196,6 @@ export default function AttributesDropdown() {
 
   const handleAttributeChange = (fieldName: string, value: string) => {
     setAttributeValues((prev) => ({ ...prev, [fieldName]: value }));
-    console.log(`${fieldName} changed to:`, value);
   };
 
   // Reset all filters

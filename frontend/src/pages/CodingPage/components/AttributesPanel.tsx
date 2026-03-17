@@ -15,22 +15,27 @@ import {
 /** ====== Props ====== */
 type Props = {
   row: AttributeRow | null;
+  originalRow?: AttributeRow | null; // Original autocode values for comparison
   mappings?: AttrMappings;
   panelHeight?: number; // px
   onChange?: (key: string, value: string | number | boolean | null) => void;
   onEdit?: (field: string, value: string | number | boolean | null) => void;
   changedFields?: string[]; // Fields that were changed by auto-coding
   fieldSources?: Record<string, string>; // Field name -> "CV" | "GIS"
+  readOnly?: boolean; // If true, disable editing (display-only mode)
+  headerAction?: React.ReactNode; // Optional action/toggle to display next to "Attributes" heading
+  highlightMessage?: string; // Custom message for changed attributes
+  highlightColor?: "green" | "yellow";
+  flex?: number | string;
 };
 
 /** ====== Group ordering (tab order) ====== */
 const GROUP_ORDER = [
   "Facility configuration",
-  "Flow & Speed",
   "Facility clear width",
   "Facility surface conditions",
   "Intersection",
-  "Others",
+  "Flow & Speed",
 ] as const;
 
 /** ====== Display fields under each group (keep your original order) ====== */
@@ -90,7 +95,6 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
     "Number of lanes – adjacent road",
     "Number of lanes – intersecting road",
   ],
-  Others: [],
 };
 
 /** ====== Aliases: display name -> real key in row ====== */
@@ -173,8 +177,6 @@ function groupEntries(row: AttributeRow) {
     const hit = keyToGroup[k];
     if (hit) {
       grouped[hit.group].push([k, v]);
-    } else {
-      grouped["Others"].push([k, v]);
     }
   }
 
@@ -199,17 +201,67 @@ const toDisplayString = (v: unknown): string => {
 /** ====== Component ====== */
 export default function AttributesPanel({
   row,
+  originalRow,
   mappings = {},
   panelHeight = 420,
   onChange,
   onEdit,
   changedFields = [],
   fieldSources = {},
+  readOnly = false,
+  headerAction,
+  highlightMessage = "*Highlighted attributes have been modified from the original values",
+  highlightColor = "green",
+  flex,
 }: Props) {
+  const isYellow = highlightColor === "yellow";
+  const changedBg = isYellow ? "yellow.50" : "green.100";
+  const changedBorder = isYellow ? "yellow.500" : "green.500";
+  const changedText = isYellow ? { base: "yellow.900", _dark: "yellow.200" } : { base: "green.900", _dark: "green.900" };
+  const changedInputBg = isYellow ? "#FFFFF0" : "#F0FFF4"; // yellow.50 vs green.50 (approx)
+  const changedInputBorder = isYellow ? "#D69E2E" : "#38A169"; // yellow.500 vs green.500
+
   const grouped = useMemo(() => (row ? groupEntries(row) : null), [row]);
 
   // Create a Set for fast lookup of changed fields
   const changedFieldsSet = useMemo(() => new Set(changedFields), [changedFields]);
+
+  // Check if a field value differs from the original autocode value
+  const isManuallyEdited = (key: string, currentValue: any): boolean => {
+    if (!originalRow) return false;
+    const originalValue = originalRow[key];
+
+    // Handle null/undefined as equivalent
+    if (currentValue === null || currentValue === undefined) {
+      return originalValue !== null && originalValue !== undefined;
+    }
+    if (originalValue === null || originalValue === undefined) {
+      return currentValue !== null && currentValue !== undefined;
+    }
+
+    // Strict comparison first (same type, same value)
+    if (currentValue === originalValue) {
+      return false;
+    }
+
+    // Type-aware comparison for numeric values
+    // If one is a number and one is a string, try numeric comparison
+    if (typeof currentValue === 'number' && typeof originalValue === 'string') {
+      const parsedOriginal = Number(originalValue);
+      if (!Number.isNaN(parsedOriginal) && currentValue === parsedOriginal) {
+        return false;
+      }
+    }
+    if (typeof currentValue === 'string' && typeof originalValue === 'number') {
+      const parsedCurrent = Number(currentValue);
+      if (!Number.isNaN(parsedCurrent) && parsedCurrent === originalValue) {
+        return false;
+      }
+    }
+
+    // If we get here, values are genuinely different
+    return true;
+  };
 
   // collect groups with fields (for tabs)
   const groupsWithFields = useMemo(() => {
@@ -219,11 +271,15 @@ export default function AttributesPanel({
 
   const defaultTab = groupsWithFields[0] ?? "Facility configuration";
 
+  // Check if any fields have been changed (for showing the info text)
+  const hasChangedFields = changedFieldsSet.size > 0;
+
   if (!row) {
     return (
       <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
-        <Card.Header>
-          <Heading size="sm">Attributes</Heading>
+        <Card.Header display="flex" flexDirection="row" justifyContent="space-between" alignItems="center" gap="2">
+          <Heading size="sm" flex="0 0 auto">Attributes</Heading>
+          {headerAction}
         </Card.Header>
         <Card.Body>
           <Text color="gray.500">No attributes</Text>
@@ -233,17 +289,40 @@ export default function AttributesPanel({
   }
 
   return (
-    <Card.Root h={`${panelHeight}px`} display="flex" flexDirection="column">
-      <Card.Header>
-        <Heading size="sm">Attributes</Heading>
+    <Card.Root minH={`${panelHeight}px`} display="flex" flexDirection="column" flex={flex}>
+      <Card.Header display="flex" flexDirection="row" justifyContent="space-between" alignItems="center" gap="2">
+        <Box display="flex" flexDirection="row" alignItems="baseline" gap="2">
+          <Heading size="sm" flex="0 0 auto">Attributes</Heading>
+          {hasChangedFields && (
+            <Text
+              fontSize="xs"
+              color="gray.600"
+              transition="opacity 0.3s"
+            >
+              {highlightMessage}
+            </Text>
+          )}
+        </Box>
+        {headerAction}
       </Card.Header>
 
       {/* Tabs occupy the body; content area scrolls independently */}
       <Card.Body display="flex" flexDir="column" minH={0} p="0">
         <Tabs.Root defaultValue={defaultTab}>
-          <Tabs.List px="2" py="2" overflowX="auto" gap="1">
+          <Tabs.List
+            px="2"
+            py="2"
+            flexWrap="nowrap"
+            overflowX="auto"
+            whiteSpace="nowrap"
+            gap="1"
+            css={{
+              "&::-webkit-scrollbar": { display: "none" },
+              scrollbarWidth: "none",
+            }}
+          >
             {groupsWithFields.map((g) => (
-              <Tabs.Trigger key={g} value={g}>
+              <Tabs.Trigger key={g} value={g} flexShrink={0}>
                 {g}
               </Tabs.Trigger>
             ))}
@@ -256,8 +335,8 @@ export default function AttributesPanel({
             const fields = grouped![groupName] ?? [];
             return (
               <Tabs.Content key={groupName} value={groupName}>
-                {/* Scrollable area for this tab */}
-                <Box minH={0} h={`${panelHeight - 150}px`} overflowY="auto" px="4" py="3">
+                {/* Content area expands naturally */}
+                <Box px="4" py="3">
 
                   {/* Responsive grid: 1 col on small, 2 cols on md+ */}
                   <SimpleGrid columns={{ base: 1, md: 2 }} gap="4">
@@ -265,6 +344,7 @@ export default function AttributesPanel({
                       const dict = mappings[k];
                       const strVal: string = toDisplayString(v);
                       const isChanged = changedFieldsSet.has(k);
+                      const isEdited = isManuallyEdited(k, v);
                       const source = fieldSources[k]; // "CV" | "GIS" | undefined
 
                       return (
@@ -275,48 +355,76 @@ export default function AttributesPanel({
                           gap="1"
                           p="2"
                           borderRadius="md"
-                          bg={isChanged ? "yellow.100" : "transparent"}
-                          borderWidth={isChanged ? "2px" : "0px"}
-                          borderColor={isChanged ? "yellow.500" : "transparent"}
+                          bg={isEdited ? "red.50" : isChanged ? changedBg : "transparent"}
+                          borderWidth={isEdited || isChanged ? "2px" : "0px"}
+                          borderColor={isEdited ? "red.200" : isChanged ? changedBorder : "transparent"}
                           transition="all 0.2s"
                         >
                           <Text
                             fontSize="xs"
-                            color={isChanged ? { base: "yellow.900", _dark: "yellow.900" } : "gray.600"}
-                            fontWeight={isChanged ? "bold" : "semibold"}
+                            color={isEdited ? "red.800" : isChanged ? changedText : "gray.600"}
+                            fontWeight={isEdited || isChanged ? "bold" : "semibold"}
                           >
                             {k}
                             {isChanged && source && ` ✨ (${source})`}
+                            {isEdited && (
+                              <Text as="span" color="red.600" fontWeight="bold" ml="1">
+                                (Manual Edit Done)
+                              </Text>
+                            )}
                           </Text>
 
                           {dict ? (
-                            <NativeSelect.Root size="sm" width="100%" mt="auto">
+                            <NativeSelect.Root size="sm" width="100%" mt="auto" disabled={readOnly}>
                               <NativeSelect.Field
                                 value={strVal}
                                 onChange={(e) => {
-                                  const val = e.target.value === "" ? null : e.target.value;
+                                  let val: string | number | boolean | null = e.target.value === "" ? null : e.target.value;
+
+                                  // Convert to original value's type if needed
+                                  if (val !== null && originalRow) {
+                                    const originalValue = originalRow[k];
+                                    // If original was a number, convert the string to a number
+                                    if (typeof originalValue === 'number' && typeof val === 'string' && !Number.isNaN(Number(val))) {
+                                      val = Number(val);
+                                    }
+                                  }
+
                                   onChange?.(k, val);
                                   onEdit?.(k, val);
                                 }}
                                 style={{
-                                  borderColor: isChanged ? "#D69E2E" : undefined,
-                                  borderWidth: isChanged ? "2px" : undefined,
-                                  backgroundColor: isChanged ? "#FEFCBF" : undefined,
+                                  borderColor: isEdited ? "#E53E3E" : isChanged ? changedInputBorder : undefined,
+                                  borderWidth: isEdited || isChanged ? "2px" : undefined,
+                                  backgroundColor: isEdited ? "#FFF5F5" : isChanged ? changedInputBg : undefined,
                                 }}
-                                color={isChanged ? "gray.900" : undefined}
+                                color={isEdited || isChanged ? "gray.900" : undefined}
                                 _dark={{
-                                  color: isChanged ? "gray.900" : undefined,
+                                  color: isEdited || isChanged ? "gray.900" : undefined,
                                 }}
                               >
-                                {/* Preserve unknown code if present */}
-                                {!dict[strVal] && strVal !== "" && (
+                                {/* Preserve unknown code if present (except for Road speed limit) */}
+                                {k !== "Road speed limit" && !dict[strVal] && strVal !== "" && (
                                   <option value={strVal}>{`(Unknown) ${strVal}`}</option>
                                 )}
-                                {Object.entries(dict).map(([code, label]) => (
-                                  <option key={code} value={code}>
-                                    {label}
-                                  </option>
-                                ))}
+                                {
+                                  k === "Road speed limit" && dict
+                                    ? ['NA', '0', '10', '20', '30', '40', '50', '60', '70', '80', '90', '100', '110', '120']
+                                      .map(code => {
+                                        const label = dict[code];
+                                        return label ? (
+                                          <option key={code} value={code}>
+                                            {label}
+                                          </option>
+                                        ) : null;
+                                      })
+                                      .filter(Boolean)
+                                    : Object.entries(dict || {}).map(([code, label]) => (
+                                      <option key={code} value={code}>
+                                        {label}
+                                      </option>
+                                    ))
+                                }
                               </NativeSelect.Field>
                               <NativeSelect.Indicator />
                             </NativeSelect.Root>
@@ -324,30 +432,31 @@ export default function AttributesPanel({
                             <Input
                               size="sm"
                               value={strVal}
+                              disabled={readOnly}
                               onChange={(e) => {
                                 const raw = e.target.value;
                                 const num = Number(raw);
                                 const val =
                                   raw !== "" &&
-                                  Number.isFinite(num) &&
-                                  /^\d+(\.\d+)?$/.test(raw)
+                                    Number.isFinite(num) &&
+                                    /^\d+(\.\d+)?$/.test(raw)
                                     ? num
                                     : raw === ""
-                                    ? null
-                                    : raw;
+                                      ? null
+                                      : raw;
                                 onChange?.(k, val);
                                 onEdit?.(k, val);
                               }}
-                              borderColor={isChanged ? "yellow.500" : undefined}
-                              borderWidth={isChanged ? "2px" : undefined}
-                              bg={isChanged ? "yellow.50" : undefined}
-                              color={isChanged ? "gray.900" : undefined}
+                              borderColor={isEdited ? "red.500" : isChanged ? changedBorder : undefined}
+                              borderWidth={isEdited || isChanged ? "2px" : undefined}
+                              bg={isEdited ? "red.50" : isChanged ? changedBg : undefined}
+                              color={isEdited || isChanged ? "gray.900" : undefined}
                               _dark={{
-                                color: isChanged ? "gray.900" : undefined,
+                                color: isEdited || isChanged ? "gray.900" : undefined,
                               }}
                               _focus={{
-                                borderColor: isChanged ? "yellow.600" : "blue.500",
-                                boxShadow: isChanged ? "0 0 0 1px var(--chakra-colors-yellow-600)" : undefined,
+                                borderColor: isEdited ? "red.600" : isChanged ? "yellow.600" : "blue.500",
+                                boxShadow: isEdited ? "0 0 0 1px var(--chakra-colors-red-600)" : isChanged ? "0 0 0 1px var(--chakra-colors-yellow-600)" : undefined,
                               }}
                             />
                           )}

@@ -2,20 +2,31 @@ import type { FeatureCollection } from "geojson";
 
 // Health
 export async function ping(): Promise<{ status: string }> {
-    const res = await fetch('/api/ping')
-    if (!res.ok) throw new Error('Failed /api/ping')
-    return res.json()
+  const res = await fetch('/api/ping')
+  if (!res.ok) throw new Error('Failed /api/ping')
+  return res.json()
 }
 
 // Project list
-interface FileResponse {
-  projects: string[];
+export interface ProjectListItem {
+  name: string;
+  tags: string[];
+  date_created?: string;
+  last_updated?: string;
+  verified?: boolean;
+  verified_segment_count?: number;
+  autocoded_segment_count?: number;
+  total_segments?: number;
+}
+
+export interface FileResponse {
+  projects: ProjectListItem[];
 }
 
 export async function fetchProjectList(): Promise<FileResponse> {
-    const res = await fetch('/api/projects')
-    if (!res.ok) throw new Error('Failed /api/projects')
-    return res.json()
+  const res = await fetch('/api/projects')
+  if (!res.ok) throw new Error('Failed /api/projects')
+  return res.json()
 }
 
 // Project detail
@@ -31,17 +42,25 @@ export async function fetchProjectDetail(projectName: string): Promise<ProjectDe
   return res.json()
 }
 
-// 一Project attributes
+// Fetch project metadata including verified status
+export async function fetchProjectMetadata(projectName: string): Promise<ProjectListItem> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/metadata`)
+  if (!res.ok) throw new Error(`Failed to fetch metadata for ${projectName}`)
+  return res.json()
+}
+
+// Project attributes
 export type AttributeRow = Record<string, string | number | boolean | null>;
 export type AttributesResponse = { rows: AttributeRow[] };
 
 export async function fetchProjectAttributes(projectName: string): Promise<AttributesResponse> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/versions/latest/attributes`)
-  
+
   if (!res.ok) throw new Error(`Failed GET /api/projects/${projectName}/versions/latest/attributes`)
-  
+
   return res.json()
 }
+
 
 // Project GEO data
 export async function fetchProjectGeoJSON(projectName: string): Promise<FeatureCollection> {
@@ -53,7 +72,7 @@ export async function fetchProjectGeoJSON(projectName: string): Promise<FeatureC
 }
 
 // ===== types =====
-export type AttrMappings = Record<string, Record<string, string>>; // 字段名 -> { "1": "Outer Urban", ... }
+export type AttrMappings = Record<string, Record<string, string>>; // 字段名 -> { "1": "Suburban", ... }
 
 // ===== fetch mappings (数字 -> 文本) =====
 export async function fetchAttributeMappings(): Promise<AttrMappings> {
@@ -79,11 +98,11 @@ export async function listSourceFolders(opts?: { signal?: AbortSignal }) {
   return (data?.items ?? []) as string[];
 }
 
-export async function createProjectFromFolder(project_name: string, folder_name: string) {
+export async function createProjectFromFolder(project_name: string, folder_name: string, tags: string[] = []) {
   const res = await fetch("/api/projects/folders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_name, folder_name }),
+    body: JSON.stringify({ project_name, folder_name, tags }),
   });
   if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
   // 返回形如 { ok: true, name: "<project>" }
@@ -102,6 +121,76 @@ export async function deleteProject(projectName: string) {
   }
   // 预计返回 { ok: true, name: string }
   return (await res.json()) as { ok?: boolean; name?: string };
+}
+
+// Update Project Metadata (name, tags, verified status, and/or verified segment count)
+export async function updateProject(
+  projectName: string,
+  updates: { new_name?: string; tags?: string[]; verified?: boolean; verified_segment_count?: number; autocoded_segment_count?: number }
+) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(msg || "Update failed");
+  }
+  return (await res.json()) as { ok?: boolean; name?: string; tags?: string[]; verified?: boolean; verified_segment_count?: number; autocoded_segment_count?: number };
+}
+
+// Delete single segment
+export async function deleteSegment(project: string, index: number) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/segments/${index}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+// Batch delete segments
+export async function deleteSegmentsBatch(project: string, indices: number[]) {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/segments/delete-batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ indices }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+// Check for segment collisions in target project
+export async function checkCollisions(
+  sourceProject: string,
+  targetProject: string,
+  indices: number[]
+): Promise<{ ok: boolean; collisions: string[] }> {
+  const res = await fetch("/api/projects/check-collisions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceProject, targetProject, indices }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+// Copy segments to another project
+export async function copySegments(
+  sourceProject: string,
+  targetProject: string,
+  indices: number[],
+  createTarget: boolean,
+  replace: boolean = false,
+  tags: string[] = []
+): Promise<{ ok: boolean; message: string; count: number; targetProject: string }> {
+  const res = await fetch("/api/projects/copy-segments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceProject, targetProject, indices, createTarget, replace, tags }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
 }
 
 export async function autocodeImage(project: string, imageRef: string) {
@@ -221,4 +310,510 @@ export async function autocodeAll(project: string, payload: AutoCodeAllPayload):
     throw new Error(await readError(res));
   }
   return (await res.json()) as AutoCodeAllResult;
+}
+
+// ---------- Calculate Score ----------
+
+export type CalculateScoreResult = {
+  ok: boolean;
+  result_rows: Record<string, any>[];
+};
+
+/**
+ * Calculate cycleRAP scores for the entire project
+ *
+ * @param project - Project name
+ * @returns Score calculation results
+ */
+export async function calculateScore(project: string): Promise<CalculateScoreResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/score`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(await readError(res));
+  }
+  return (await res.json()) as CalculateScoreResult;
+}
+
+/**
+ * Calculate cycleRAP scores for a single row
+ *
+ * @param project - Project name
+ * @param attributes - Single attribute row
+ * @returns Score for the single row
+ */
+export async function calculateScoreForRow(project: string, attributes: AttributeRow): Promise<Record<string, any>> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/score`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ attributes: [attributes] }),
+  });
+  if (!res.ok) {
+    throw new Error(await readError(res));
+  }
+  const result = (await res.json()) as CalculateScoreResult;
+  return result.result_rows[0] || {};
+}
+
+// ========================================================================
+// SHAPEFILE MANAGEMENT API
+// ========================================================================
+
+export type ShapefileMetadata = {
+  feature_count: number;
+  crs: string;
+  bounds: {
+    minx: number;
+    miny: number;
+    maxx: number;
+    maxy: number;
+  };
+  columns: string[];
+  geometry_type: string[];
+};
+
+export type ShapefileInfo = {
+  name: string;
+  base_name: string;
+  path: string;
+  category: string;
+  size: number;
+  files: string[];
+  metadata: ShapefileMetadata;
+  full_path: string;
+};
+
+export type ShapefileCategoryInfo = {
+  name: string;
+  shapefile_count: number;
+  path: string;
+};
+
+export type UploadResult = {
+  uploaded: Array<{
+    name: string;
+    category: string;
+    path: string;
+  }>;
+  errors: string[];
+  count: number;
+};
+
+export type ReplaceResult = {
+  replaced: Array<{
+    target: string;
+    status: string;
+    backup: string;
+  }>;
+  errors: string[];
+  count: number;
+};
+
+export type ValidationResult = {
+  valid: boolean;
+  error?: string;
+  shapefiles?: Array<{
+    name: string;
+    valid: boolean;
+    missing_files: string[];
+    present_files: string[];
+    metadata: ShapefileMetadata;
+  }>;
+};
+
+export type ReplacementValidationResult = {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  info: Record<string, any>;
+  column_mapping: Record<string, string>;
+};
+
+/**
+ * List all available shapefiles with metadata
+ */
+export async function listShapefiles(): Promise<ShapefileInfo[]> {
+  const res = await fetch("/api/shapefiles");
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Upload new shapefiles (ZIP or individual files)
+ * @param files - Array of File objects to upload
+ * @param category - Optional category/subdirectory name
+ */
+export async function uploadShapefiles(files: File[], category?: string): Promise<UploadResult> {
+  const formData = new FormData();
+  files.forEach(file => formData.append("files", file));
+  if (category) {
+    formData.append("category", category);
+  }
+
+  const res = await fetch("/api/shapefiles/upload", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Replace existing shapefiles with uploaded ones
+ * @param replacements - Array of {uploaded_path, target_path} pairs
+ */
+export async function replaceShapefiles(
+  replacements: Array<{ uploaded_path: string; target_path: string }>
+): Promise<ReplaceResult> {
+  const res = await fetch("/api/shapefiles/replace", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ replacements }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Delete a shapefile and all companion files
+ * @param shapefilePath - Relative path to shapefile (e.g., "area_type/Central.shp")
+ */
+export async function deleteShapefile(shapefilePath: string): Promise<{ message: string; deleted_files: string[] }> {
+  const res = await fetch(`/api/shapefiles/${encodeURIComponent(shapefilePath)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Validate a shapefile (check for required files, valid CRS, etc.)
+ * @param file - File object to validate (must be .zip)
+ */
+export async function validateShapefile(file: File): Promise<ValidationResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch("/api/shapefiles/validate", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Validate that a new shapefile is compatible with one being replaced
+ * @param newFilePath - Path to new uploaded shapefile (e.g., "temp_replace/new.shp")
+ * @param targetFilePath - Path to existing shapefile being replaced (e.g., "area_type/old.shp")
+ * @param layerName - Optional layer identifier (e.g., "cycling_path")
+ */
+export async function validateShapefileReplacement(
+  newFilePath: string,
+  targetFilePath: string,
+  layerName?: string
+): Promise<ReplacementValidationResult> {
+  const res = await fetch("/api/shapefiles/validate-replacement", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      new_file_path: newFilePath,
+      target_file_path: targetFilePath,
+      layer_name: layerName,
+    }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * List all shapefile categories (subdirectories)
+ */
+export async function listShapefileCategories(): Promise<ShapefileCategoryInfo[]> {
+  const res = await fetch("/api/shapefiles/categories");
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+// ========================================================================
+// TREATMENT APPLICATION API
+// ========================================================================
+
+/**
+ * Payload for applying treatments to a segment
+ */
+export type ApplyTreatmentsPayload = {
+  segment_index: number;
+  treatment_ids: number[];
+  image_ref?: string;
+};
+
+/**
+ * Result of applying treatments
+ */
+export type ApplyTreatmentsResult = {
+  ok: boolean;
+  segment_index: number;
+  treatments_applied: string;
+  modified_attributes: Record<string, number>;
+  before_scores: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "Overall Risk Level": number;
+  };
+  after_scores: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "Overall Risk Level": number;
+  };
+};
+
+/**
+ * Treatment state for a segment
+ */
+export type SegmentTreatmentState = {
+  ok: boolean;
+  segment_index: number;
+  has_treatments: boolean;
+  treatments_applied: number[];
+  modified_attributes?: Record<string, number>;
+  after_scores?: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "Overall Risk Level": number;
+  };
+};
+
+/**
+ * Apply treatments to a specific segment
+ * @param project - Project name
+ * @param payload - Treatment application payload
+ * @returns Treatment application result with before/after scores
+ */
+export async function applyTreatments(
+  project: string,
+  payload: ApplyTreatmentsPayload
+): Promise<ApplyTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/apply`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Get treatment state for a specific segment
+ * @param project - Project name
+ * @param segmentIndex - Segment index
+ * @returns Treatment state including applied treatments and after scores
+ */
+export async function getSegmentTreatments(
+  project: string,
+  segmentIndex: number
+): Promise<SegmentTreatmentState> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/segment/${segmentIndex}`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Export modified attributes CSV after treatment is applied
+ * @param project - Project name
+ * @param payload - Segment index and treatment IDs
+ * @returns Export result with filename and path
+ */
+
+/**
+ * Payload for previewing treatments on a segment
+ */
+export type PreviewTreatmentsPayload = {
+  segment_index: number;
+  treatment_ids: number[];
+};
+
+/**
+ * Result of previewing treatments
+ */
+export type PreviewTreatmentsResult = {
+  ok: boolean;
+  segment_index: number;
+  modified_attributes: Record<string, number>;
+  before_scores: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "Overall Risk Level": number;
+  };
+  after_scores: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "Overall Risk Level": number;
+  };
+};
+
+/**
+ * Preview treatments for a specific segment without saving
+ * @param project - Project name
+ * @param payload - Preview payload
+ * @returns Preview result with before/after scores
+ */
+export async function previewTreatments(
+  project: string,
+  payload: PreviewTreatmentsPayload
+): Promise<PreviewTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/preview`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Apply all applicable recommended treatments to all segments in a project
+ * @param project - Project name
+ * @returns Result with details on how many segments were treated
+ */
+export type ApplyAllTreatmentsResult = {
+  ok: boolean;
+  total_segments: number;
+  segments_treated: number;
+  segments_skipped: number;
+  details: Array<{
+    segment_index: number;
+    treatment_ids: number[];
+    before_scores: Record<string, number>;
+    after_scores: Record<string, number>;
+  }>;
+};
+
+export async function applyAllTreatments(
+  project: string
+): Promise<ApplyAllTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/apply-all`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Reset all applied treatments for all segments in a project
+ * @param project - Project name
+ * @returns Result with details on how many segments were reset
+ */
+export type ResetAllTreatmentsResult = {
+  ok: boolean;
+  total_segments: number;
+  segments_reset: number;
+  message: string;
+};
+
+export async function resetAllTreatments(
+  project: string
+): Promise<ResetAllTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/reset-all`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Save all pending treatment changes to treatment.csv
+ * @param project - Project name
+ * @returns Result of save operation
+ */
+export type SaveTreatmentsResult = {
+  ok: boolean;
+  message: string;
+};
+
+export async function saveTreatments(
+  project: string
+): Promise<SaveTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/save`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Upload images to a source folder in the /in directory
+ * @param folderName - Name of the folder to create/upload to in /in directory
+ * @param files - Array of image files to upload
+ */
+export async function uploadImagesToSourceFolder(
+  folderName: string,
+  files: File[]
+): Promise<{ count: number; errors: string[] }> {
+  const formData = new FormData();
+  formData.append("folder_name", folderName);
+  
+  files.forEach(file => {
+    // If the file was dropped as part of a folder, it will have webkitRelativePath
+    // Fallback to name if it's just a regular file selection
+    const path = file.webkitRelativePath || file.name;
+    formData.append("images", file, path);
+  });
+
+  const res = await fetch("/api/projects/folders/upload-images", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Download filtered images as a ZIP file
+ * @param payload - Map of project names to list of image references
+ */
+export async function downloadFilteredImages(payload: { projects: Record<string, string[]> }) {
+  const res = await fetch("/api/projects/download-images", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorText = await readError(res);
+    throw new Error(errorText || "Download failed");
+  }
+
+  return res.blob();
 }
