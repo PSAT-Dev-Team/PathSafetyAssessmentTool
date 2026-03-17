@@ -1,0 +1,27 @@
+# Python
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/backend_log.txt
+**/torch_install.log
+**/backend_pip_install.log
+
+# Node
+**/node_modules
+**/frontend_log.txt
+
+# Data / input (mounted as volumes at runtime)
+data/
+in/
+
+# Git / IDE
+.git
+.vscode
+*.bat
+
+# Large project files
+*.xlsm
+*.pdf
+batch_output.txt
