@@ -166,3 +166,42 @@ docker compose up --build
 ```
 
 The `--build` flag ensures the Docker image is rebuilt with any code changes. Project data in `./data/` is unaffected by rebuilds.
+
+---
+
+## Advanced: Running Without Docker
+
+For active development, you can run the backend and frontend directly on your machine without Docker. This gives faster iteration (no rebuild required) at the cost of having to manage dependencies yourself.
+
+### Prerequisites
+
+- **Python 3.11** (match the Docker base image version)
+- **Node.js 20**
+
+### Backend (Flask)
+
+```bash
+cd backend
+pip install -r requirements.txt
+python app.py
+```
+
+The backend starts on `http://localhost:8000`. The `data/` and `in/` paths are resolved relative to the `backend/` directory when running locally (not `/app/`).
+
+### Frontend (Vite dev server)
+
+In a separate terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite dev server starts on `http://localhost:5173`. It is pre-configured to proxy all `/api/*` requests to `http://localhost:8000`, so the backend must be running first.
+
+> **Note:** `pywin32` (required for Excel COM automation) is Windows-only and is listed in `requirements.txt`. On non-Windows machines, remove or skip that line, or use:
+> ```bash
+> grep -v 'pywin32' requirements.txt | pip install -r /dev/stdin
+> ```
+

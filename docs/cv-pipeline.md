@@ -70,9 +70,36 @@ Models are loaded once at first use by `CycleRAP_Coding_Helper.initialise(model_
 
 If no model directory is found, the backend raises a `RuntimeError` and returns HTTP 503 for all subsequent CV requests.
 
----
+### Replacing or Updating a Model
 
-## Inference Pipeline (`prediction.py`)
+When a retrained or improved `.pt` file becomes available, follow these steps:
+
+1. **Drop the new file into `backend/models/`**, using the **exact same filename** as the model it replaces (e.g. `path_seg.pt`). The filename is hardcoded in `prediction.py` — changing it will break loading.
+
+   ```
+   backend/models/
+   ├── path_seg.pt                          ← replace this
+   ├── off_road_bicycle_path.pt
+   ├── adj_road_lane.pt
+   ├── LTA_FIXEDOBSTACLE_BEST_2.pt
+   ├── DevelopmentAccess_last_150epochs.pt
+   ├── LTA_Dill_4_Best.pt
+   └── RoadClassification_best.pt
+   ```
+
+2. **Rebuild the Docker image** so the new file is copied into the container:
+
+   ```bash
+   docker compose up --build
+   ```
+
+3. **Verify the model loaded correctly** by checking the backend logs on startup and sending a test auto-code request. The models are loaded lazily on the first CV request, not at boot.
+
+> **If you need to rename the new file** (e.g. the new model has a different name): update the corresponding filename string in `prediction.py` inside `CycleRAP_Coding_Helper.initialise()`, then rebuild.
+
+> **Storing multiple versions:** Keep old `.pt` files archived on the SSD. Only the file with the exact expected name in `backend/models/` will be used by the app.
+
+
 
 All inference logic lives in the `CycleRAP_Coding_Helper` class (static methods only).
 

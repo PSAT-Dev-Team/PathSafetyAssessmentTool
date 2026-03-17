@@ -62,13 +62,13 @@ CM3 = (product of CU factors) ^ (1 + CQ_sum × 0.1)
 | Factor | Attribute | Effect |
 |---|---|---|
 | Loose/slippery surface | `Loose or slippery surface` | 1.5 if Present |
-| Delineation | `Delineation` | 1.2 if Inadequate |
+| Delineation | `Delineation` | 1.2 if Not Present |
 | Facility width | `Facility Width per Direction` | 1.8/1.5/1.0 for Very Narrow/Narrow/Wide |
 | Flow direction | `Flow Direction` | 1.5 if Two Way |
 | Width restriction | `Width Restriction` | 1.2 if Present |
 | Grade | `Grade` | 1.2 if ≥5 Degrees |
 | Cargo bikes | `Observed proportion of cargo bikes` | 1.2 if Moderate to high |
-| Pedestrian flow | `Peak pedestrian flow` | 1.5 if Moderate to high |
+| Pedestrian flow | `Peak pedestrian flow` | 1.2 if Low; 1.5 if Moderate to high |
 | Bicycle flow | `Peak bicycle/LV traffic flow` | 1.2 if Moderate to high |
 | Speed differential | `Bicycle/LV speed differential` | 1.2 if ≥10 km/h |
 | Curvature | `Curvature` | 1.5 if Sharp Turn Present |
@@ -101,7 +101,72 @@ Only fires if at least one of: Intersection crossing, Property access, Adjacent 
 
 ---
 
-## AADT Risk Factor
+## Worked Example: CM3
+
+The following example traces a single segment through the CM3 calculation by hand.
+
+**Segment attributes:**
+
+| Attribute | Value | Code |
+|---|---|---|
+| Loose or slippery surface | Not Present | 2 |
+| Delineation | Not Present | 2 |
+| Facility Width per Direction | Narrow | 2 |
+| Flow Direction | One Way | 1 |
+| Width Restriction | Not Present | 2 |
+| Grade | < 5 Degrees | 1 |
+| Observed proportion of cargo bikes | Low | 1 |
+| Peak pedestrian flow | None | 1 |
+| Peak bicycle/LV traffic flow | Low | 1 |
+| Bicycle/LV speed differential | < 10 km/h | 1 |
+| Curvature | Sharp Turn Present | 1 |
+| Street Lighting | Present | 1 |
+| All CQ-trigger fields | Not Present / N/A | 2 |
+
+**Step 1 — Build the CU product:**
+
+```
+CU = 1.0  (loose surface: Not Present → 1.0)
+   × 1.2  (delineation:  Not Present → 1.2)
+   × 1.5  (width:        Narrow      → 1.5)
+   × 1.0  (flow:         One Way     → 1.0)
+   × 1.0  (width restr:  Not Present → 1.0)
+   × 1.0  (grade:        <5°         → 1.0)
+   × 1.0  (cargo bikes:  Low         → 1.0)
+   × 1.0  (ped flow:     None        → 1.0)
+   × 1.0  (bike flow:    Low         → 1.0)
+   × 1.0  (speed diff:   <10 km/h    → 1.0)
+   × 1.5  (curvature:    Sharp Turn  → 1.5)
+   × 1.0  (lighting:     Present     → 1.0)
+   = 1.8
+```
+
+**Step 2 — Count the CQ triggers:**
+
+All eight CQ-trigger fields (surface deformation, fixed obstacle, non-fixed obstacle, adjacent parking 0–1m, intersection crossing, property access, intersecting facility, pedestrian crossing) are coded as Not Present. CQ_sum = 0.
+
+**Step 3 — Apply the formula:**
+
+```
+CM3 = CU_product ^ (1 + CQ_sum × 0.1)
+    = 1.8 ^ (1 + 0 × 0.1)
+    = 1.8 ^ 1.0
+    = 1.8
+```
+
+**Now add one CQ trigger — set Intersection or Road Crossing = Present (1):**
+
+- CQ_sum = 1 (intersection_crossing fires)
+
+```
+CM3 = 1.8 ^ (1 + 1 × 0.1)
+    = 1.8 ^ 1.1
+    ≈ 1.91
+```
+
+The exponent increases by 0.1 per active CQ trigger, compounding the base risk. Eight simultaneous triggers would raise the exponent to 1.8, producing `1.8^1.8 ≈ 2.66`.
+
+
 
 Road traffic volume is converted to a risk factor using a stepped lookup table:
 
@@ -119,6 +184,10 @@ Road traffic volume is converted to a risk factor using a stepped lookup table:
 | 15000 – 17499 | 1.40 |
 | 17500 – 19999 | 1.50 |
 | 20000 – 22499 | 1.61 |
+| 22500 – 24999 | 1.72 |
+| 25000 – 29999 | 1.84 |
+| 30000 – 34999 | 1.97 |
+| 35000 – 39999 | 2.10 |
 | ≥ 40000 | 2.25 |
 
 ### Road Speed Risk Factor
@@ -126,14 +195,19 @@ Road traffic volume is converted to a risk factor using a stepped lookup table:
 Operating speed is converted via a sigmoid formula:
 
 ```
-risk = 1 + 27.82 / (1 + exp(5.84 − 0.091 × speed))
+lookup_speed = round(speed) - 1
+risk = 1 + 27.82 / (1 + exp(5.84 − 0.091 × lookup_speed))
 ```
+
+> Speed is first rounded to the nearest integer, then decremented by 1 before the sigmoid is applied. Returns 1.0 if speed ≤ 1.
 
 ---
 
-## The 41 Attribute Fields
+## Attribute Fields Reference
 
-The table below documents every field used as input to the scoring algorithm.
+The table below documents every field stored per segment. **39 fields are actively used in the scoring algorithm**; the remaining fields (Area type, Road speed limit, operating speed, unit) are stored for reference or display but do not feed into the CycleRAP formulas.
+
+> The data model contains 43 fields in total. Of those: 39 are scored, 1 (Area type) is metadata only, and 3 (Road speed limit, operating speed, unit) are informational. The "41 fields" figure cited in CycleRAP v2.11 literature refers to the 41 coded attributes including Area type but excluding the three road speed fields.
 
 ### Metadata Fields (not scored)
 
@@ -203,7 +277,7 @@ The table below documents every field used as input to the scoring algorithm.
 
 | # | Field name | Type | Values | Scoring use |
 |---|---|---|---|---|
-| 35 | Peak pedestrian flow along or across facility | Enum | 1 = None, 2 = Low, 3 = Moderate to high | CM3 CU (1.5 if moderate/high); BP trigger |
+| 35 | Peak pedestrian flow along or across facility | Enum | 1 = None, 2 = Low, 3 = Moderate to high | CM3 CU (1.2 if Low; 1.5 if Moderate to high); BP trigger |
 | 36 | Peak bicycle/LV traffic flow | Enum | 1 = Low, 2 = Moderate to high | CM3 CU (1.2 if moderate/high) |
 | 37 | Observed proportion of cargo bikes and mopeds | Enum | 1 = Low, 2 = Moderate to high | CM3 CU (1.2 if moderate/high); BB severity |
 | 38 | Bicycle/LV speed – average | Enum | 1 = < 20 km/h, 2 = ≥ 20 km/h | CM16/CM25 CU; BB/SB/VB severity (1.5) |
