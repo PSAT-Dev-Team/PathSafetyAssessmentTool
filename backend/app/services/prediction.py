@@ -149,23 +149,22 @@ class CycleRAP_Coding_Helper:
 
                     if adj_conf_score < ADJ_RD_CONF_THRESHOLD: pred_adj_class = 0
 
-                    match(pred_adj_class):
-                        case 0: 
-                            # This case would mean that either the confidence score is too low 
-                            # or the classifier predicts no road even though the segmentation detects a road
-                            print("Adjacent road lane classifier uncertain — manual review recommended.")
-                        case 1:
-                            attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_01M_STR] = serializer.presence_mapping["Present"]
-                            attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_13M_STR] = serializer.presence_mapping["Not Present"]
+                    if pred_adj_class == 0:
+                        # This case would mean that either the confidence score is too low 
+                        # or the classifier predicts no road even though the segmentation detects a road
+                        print("Adjacent road lane classifier uncertain — manual review recommended.")
+                    elif pred_adj_class == 1:
+                        attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_01M_STR] = serializer.presence_mapping["Present"]
+                        attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_13M_STR] = serializer.presence_mapping["Not Present"]
 
-                            attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_01M_STR] = serializer.presence_mapping["Present"]
-                            attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_13M_STR] = serializer.presence_mapping["Not Present"]
-                        case 2:
-                            attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_01M_STR] = serializer.presence_mapping["Not Present"]
-                            attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_13M_STR] = serializer.presence_mapping["Present"]
+                        attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_01M_STR] = serializer.presence_mapping["Present"]
+                        attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_13M_STR] = serializer.presence_mapping["Not Present"]
+                    elif pred_adj_class == 2:
+                        attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_01M_STR] = serializer.presence_mapping["Not Present"]
+                        attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_13M_STR] = serializer.presence_mapping["Present"]
 
-                            attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_01M_STR] = serializer.presence_mapping["Not Present"]
-                            attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_13M_STR] = serializer.presence_mapping["Present"]
+                        attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_01M_STR] = serializer.presence_mapping["Not Present"]
+                        attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_13M_STR] = serializer.presence_mapping["Present"]
                 
                 # === Off-road bicycle classification ===
                 cls_result = cls.off_road_bicycle_classifier.predict(cropped)[0]
