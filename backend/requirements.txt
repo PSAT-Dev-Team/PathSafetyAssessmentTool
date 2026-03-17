@@ -36,7 +36,6 @@ ultralytics>=8.0
 Flask>=3.0
 flask-cors>=4.0
 exifread>=3.0    # 你后端 routes 里有 import exifread
-recharts>=3.8.0
 
 # CPU torch + ultralytics are installed by Run-PSAT.bat before requirements.txt,
 # so the lines above ensure they are present if someone installs manually.
