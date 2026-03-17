@@ -1,4 +1,5 @@
 # app/api/projects/routes.py
+from __future__ import annotations
 from flask import (
     Blueprint,
     jsonify,

@@ -1,4 +1,5 @@
 # Interface with the CycleRAP excel sheet
+from __future__ import annotations
 import re
 import json
 import shutil
