@@ -6,6 +6,7 @@ import CreateProjectPage from "./pages/CreateProjectPage/createProjectPage"
 import TreatmentPage from "./pages/TreatmentPage/treatmentPage"
 import TreatmentDetailPage from "./pages/TreatmentPage/treatmentDetailPage"
 import PathAnalysisPage from "./pages/PathAnalysisPage/pathAnalysisPage"
+import GisLayersPage from "./pages/GisLayersPage/GisLayersPage"
 
 import AppLayout from "./layouts/AppLayout";
 
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/treatment/:projectName" element={<TreatmentDetailPage />} />
         <Route path="/analysis/path" element={<PathAnalysisPage />} />
         <Route path="/projects/create" element={<CreateProjectPage />} />
+        <Route path="/gis-layers" element={<GisLayersPage />} />
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Route>
     </Routes>

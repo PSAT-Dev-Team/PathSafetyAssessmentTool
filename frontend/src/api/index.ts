@@ -375,13 +375,14 @@ export type ShapefileMetadata = {
 
 export type ShapefileInfo = {
   name: string;
+  filename: string;
   base_name: string;
   path: string;
   category: string;
   size: number;
-  files: string[];
-  metadata: ShapefileMetadata;
-  full_path: string;
+  type: string;
+  year: string;
+  source: string;
 };
 
 export type ShapefileCategoryInfo = {
