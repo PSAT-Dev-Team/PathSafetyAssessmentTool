@@ -136,6 +136,7 @@ class Attributes(BaseTable):
         AREA_TYPE_STR                   = "Area type"
         FACILITY_TYPE_STR               = "Facility Type"
         FACILITY_ACCESS_STR             = "Facility access"
+        LINE_OF_SIGHT_STR               = "Line of Sight"
         LOOSE_SLIPPERY_SURFACE_STR      = "Loose or slippery surface"
         TRAM_TRAIN_RAIL_STR             = "Tram or Train Rails"
         DEFORMATION_DRAIN_STR           = "Major Surface Deformation or Drain Opening"
@@ -186,6 +187,7 @@ class Attributes(BaseTable):
         Fields.AREA_TYPE_STR:                   area_type_mapping,
         Fields.FACILITY_TYPE_STR:               facility_type_mapping,
         Fields.FACILITY_ACCESS_STR:             adequecy_mapping,
+        "Line of Sight":                        adequecy_mapping,
         Fields.LOOSE_SLIPPERY_SURFACE_STR:      presence_mapping,
         Fields.TRAM_TRAIN_RAIL_STR:             presence_mapping,
         Fields.DEFORMATION_DRAIN_STR:           presence_mapping,

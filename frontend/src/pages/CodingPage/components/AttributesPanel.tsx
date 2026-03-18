@@ -68,13 +68,14 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
   ],
   "Facility clear width": [
     "Facility Access",
+    "Light segregation",
     "Fixed obstacle on facility",
     "Non-fixed obstacle on facility",
     "Facility width per direction",
     "Width restrictions",
-    "Light segregation",
     "Adjacent severe hazard 0-1m",
     "Adjacent severe hazard 1-3m",
+    "Line of Sight",
   ],
   "Facility surface conditions": [
     "Delineation",
@@ -127,6 +128,7 @@ const KEY_ALIASES: Record<string, string> = {
 
   // Facility clear width
   "Facility Access": "Facility access",
+  "Line of Sight": "Line of Sight",
   "Fixed obstacle on facility": "Fixed Obstacle on Facility",
   "Non-fixed obstacle on facility": "Non-Fixed Obstacle on Facility",
   "Facility width per direction": "Facility Width per Direction",
@@ -157,7 +159,19 @@ const KEY_ALIASES: Record<string, string> = {
 
 /** ====== Utils ====== */
 function groupEntries(row: AttributeRow) {
-  const allEntries = Object.entries(row) as [string, unknown][];
+  // Build a copy of the row that includes any missing fields defined in GROUP_RULES
+  // (so new attributes like "Line of Sight" appear even for old project CSVs)
+  const rowWithDefaults: AttributeRow = { ...row };
+  for (const group of GROUP_ORDER) {
+    for (const displayName of GROUP_RULES[group]) {
+      const realKey = KEY_ALIASES[displayName] ?? displayName;
+      if (!(realKey in rowWithDefaults)) {
+        rowWithDefaults[realKey] = null;
+      }
+    }
+  }
+
+  const allEntries = Object.entries(rowWithDefaults) as [string, unknown][];
 
   // reverse index: real key -> group & order
   const keyToGroup: Record<string, { group: string; order: number }> = {};

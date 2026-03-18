@@ -41,13 +41,14 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
   ],
   "Facility clear width": [
     "Facility Access",
+    "Light segregation",
     "Fixed obstacle on facility",
     "Non-fixed obstacle on facility",
     "Facility width per direction",
     "Width restrictions",
-    "Light segregation",
     "Adjacent severe hazard 0-1m",
     "Adjacent severe hazard 1-3m",
+    "Line of Sight",
   ],
   "Facility surface conditions": [
     "Delineation",
@@ -100,6 +101,7 @@ const KEY_ALIASES: Record<string, string> = {
 
   // Facility clear width
   "Facility Access": "Facility access",
+  "Line of Sight": "Line of Sight",
   "Fixed obstacle on facility": "Fixed Obstacle on Facility",
   "Non-fixed obstacle on facility": "Non-Fixed Obstacle on Facility",
   "Facility width per direction": "Facility Width per Direction",

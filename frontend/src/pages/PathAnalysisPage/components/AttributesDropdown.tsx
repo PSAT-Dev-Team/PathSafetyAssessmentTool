@@ -246,6 +246,11 @@ const cyclerapAttributes: AttributeConfig[] = [
 
   // Facility clear width group
   {
+    name: "Line of Sight",
+    group: "Facility clear width",
+    options: ["Not Selected", "Adequate", "Inadequate"]
+  },
+  {
     name: "Facility Width per Direction",
     group: "Facility clear width",
     options: ["Not Selected", "Very Narrow", "Narrow", "Wide"]

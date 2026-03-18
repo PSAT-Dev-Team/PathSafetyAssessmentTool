@@ -1114,9 +1114,13 @@ export default function CodingPage() {
     (async () => {
       try {
         const map = await fetchAttributeMappings();
+        // Ensure "Line of Sight" always has a dropdown even if the backend hasn't been restarted
+        if (!map["Line of Sight"]) {
+          map["Line of Sight"] = { "1": "Adequate", "2": "Inadequate" };
+        }
         if (!cancelled) setAttrMappings(map);
       } catch {
-        if (!cancelled) setAttrMappings({});
+        if (!cancelled) setAttrMappings({ "Line of Sight": { "1": "Adequate", "2": "Inadequate" } });
       }
     })();
     return () => { cancelled = true; };
