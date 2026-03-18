@@ -185,12 +185,6 @@ DELINEATION_RELEVANT_LABELS = {0, 1, 2, 5}
 
 ---
 
-## GIS Auto-coding
-
-In addition to image-based CV, the `/autocode/gis` endpoint derives attributes from spatial context using the shapefiles in `backend/shapefiles/`. This includes attributes such as road AADT, speed limits, and area type that cannot be inferred from images alone.
-
----
-
 ## Auto-coding in Bulk
 
 The `/autocode/all` endpoint supports three modes:
@@ -234,3 +228,27 @@ The following fields can be set by the CV pipeline. All other fields require man
 | Fixed Obstacle on Facility | Fixed obstacle segmentation |
 | Non-Fixed Obstacle on Facility | Fixed obstacle segmentation (label 9) |
 | Delineation | Delineation classifier |
+
+---
+
+## GIS Auto-coding
+
+In addition to image-based CV, the `/autocode/gis` endpoint derives attributes from spatial context using the shapefiles in `backend/shapefiles/`. The following layers are used and the attributes each one sets:
+
+| Layer | Attribute(s) Set | Notes |
+|---|---|---|
+| `inner` (polygon) | Area Type = 1 (Urban/CBD) | Containment query |
+| `industrial` (polygon) | Area Type = 4 (Industrial) | Containment query |
+| `rural` (polygon) | Area Type = 3 (Rural) | Containment query |
+| *(no layer match)* | Area Type = 2 (Suburban) | Default fallback |
+| `cycling_path` / `shared_path` / `footpath` | Facility Width per Direction | Reads `WIDTH` field from shapefile |
+| `road_links` | Road Operating Speed (mean) | Looks up mean speed via `LK_ID_NUM` from linked CSV |
+| `speed_limit` | Road Speed Limit | Reads `SPEEDLIMIT` field |
+| `mrt` | MRT proximity | 20 m buffer |
+| `bus_lane` / `bus_stop` | Bus lane/stop proximity | 20 m buffer |
+| `road_crossing` | Road crossing proximity | 5 m buffer |
+| `parking` | Adjacent Vehicle Parking | 20 m buffer |
+| `beforeCount` / `sensorCount` | Peak Pedestrian Flow | Aggregated from count data |
+
+> **Note:** Road AADT has no GIS auto-coding path — it must be coded manually.
+

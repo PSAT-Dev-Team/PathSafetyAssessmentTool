@@ -217,6 +217,10 @@ Key exports:
 
 Renders a curvature measurement overlay on top of the current segment image. Uses `api/curvatureVisualization.ts` which calls `/api/projects/<name>/width-visualization` (width/curvature analysis endpoint).
 
+The curvature calculation uses a sliding window with a default radius of **5.0 m** (`collect_radius` parameter in `gis_mapping.py`), extended internally to **5.5 m** to capture edge geometry. Path geometry is densified at a **0.25 m** step (hardcoded) for accurate curvature detection.
+
+The path width search uses a separate expanding-ring approach, ranging from **1.0 m to 10.0 m** in 1 m increments (hardcoded in `width_visualization.py`).
+
 ### `WidthVisualizationPanel`
 
 Renders a path width measurement overlay. Powered by `backend/app/utils/path_width_curvature.py`.

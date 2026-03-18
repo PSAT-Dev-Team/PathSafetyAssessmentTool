@@ -6,10 +6,10 @@
 
 ## What is PSAT?
 
-The **Path Safety Assessment Tool (PSAT)** is an internal web application for assessing the safety of cycling infrastructure using the **CycleRAP v2.11** risk-scoring methodology. It assists engineers and safety analysts in:
+The **Path Safety Assessment Tool (PSAT)** is an internal web application for assessing the safety of cycling infrastructure using the **CycleRAP v2.11** risk-scoring methodology. It assists planners, engineers and safety analysts in:
 
-- Ingesting street-level photographs of cycling facilities (footpaths, bicycle lanes, shared roads, etc.)
-- Automatically coding safety-relevant attributes from images using computer-vision (CV) models
+- Ingesting street-level photographs of cycling facilities (footpaths, cycling paths, shared roads, etc.)
+- Automatically coding safety-relevant attributes from images using computer-vision (CV) models, GIS infrastructure layer mapping and logit-based models.
 - Manually reviewing and correcting auto-coded attributes in an interactive table + map view
 - Running the CycleRAP risk-scoring algorithm to produce **BB, BP, SB, and VB** risk scores
 - Applying treatment recommendations and evaluating their projected effect on risk scores
