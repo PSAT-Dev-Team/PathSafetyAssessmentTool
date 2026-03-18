@@ -41,7 +41,6 @@ const GROUP_ORDER = [
 /** ====== Display fields under each group (keep your original order) ====== */
 const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
   "Facility configuration": [
-    "Facility configuration",
     "Area type",
     "Facility type",
     "Adjacent sidewalk 0-1m",
@@ -101,7 +100,6 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
 /** ====== Aliases: display name -> real key in row ====== */
 const KEY_ALIASES: Record<string, string> = {
   // Facility configuration
-  "Facility configuration": "facility_config",
   "Area type": "Area type",
   "Facility type": "Facility Type",
   "Adjacent sidewalk 0-1m": "Adjacent Sidewalk 0-1m",
