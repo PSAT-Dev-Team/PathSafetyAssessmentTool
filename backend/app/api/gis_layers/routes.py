@@ -1,0 +1,419 @@
+"""
+GIS Layers Blueprint  (url_prefix: /api/shapefiles)
+
+Serves the shapefiles stored in backend/shapefiles/ to the frontend GIS
+Layers page.  The URL prefix is kept as /api/shapefiles so no frontend
+changes are needed; only the Python module was renamed to gis_layers to
+avoid being swallowed by the backend/.gitignore rule that ignores any
+folder named 'shapefiles'.
+
+Endpoints
+---------
+GET  /api/shapefiles                      – list all shapefiles with metadata
+GET  /api/shapefiles/categories           – list category subdirectories
+POST /api/shapefiles/geojson              – return GeoJSON for one shapefile
+POST /api/shapefiles/upload               – upload new shapefile(s)
+POST /api/shapefiles/validate             – validate a shapefile ZIP
+POST /api/shapefiles/validate-replacement – check replacement compatibility
+PUT  /api/shapefiles/replace              – move uploaded file over existing
+DELETE /api/shapefiles/<path>             – delete a shapefile + companions
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import tempfile
+import zipfile
+from datetime import datetime
+from pathlib import Path
+from typing import List
+
+import geopandas as gpd
+from flask import Blueprint, jsonify, request
+
+from app.services.shapefile_validator import ShapefileValidator
+
+bp = Blueprint("gis_layers", __name__)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _shp_root() -> Path:
+    """Absolute path to backend/shapefiles/."""
+    return (Path(__file__).resolve().parents[3] / "shapefiles").resolve()
+
+
+def _temp_root() -> Path:
+    """Writable temp area that is NOT inside shapefiles/ (avoids gitignore)."""
+    p = Path(__file__).resolve().parents[3] / "temp_uploads"
+    p.mkdir(exist_ok=True)
+    return p
+
+
+def _safe_relative(rel: str) -> Path | None:
+    """
+    Resolve a relative path string against the shapefile root.
+    Returns None (and should result in a 400) if the resolved path escapes
+    the shapefiles directory.
+    """
+    root = _shp_root()
+    try:
+        resolved = (root / rel).resolve()
+        resolved.relative_to(root)  # raises ValueError if outside root
+        return resolved
+    except (ValueError, Exception):
+        return None
+
+
+def _companion_extensions() -> List[str]:
+    return [".shp", ".shx", ".dbf", ".prj", ".cpg", ".sbn", ".sbx",
+            ".fbn", ".fbx", ".ain", ".aih", ".ixs", ".mxs", ".atx",
+            ".xml", ".qmd"]
+
+
+def _file_info(shp_path: Path, root: Path) -> dict:
+    """Build a ShapefileInfo dict for one .shp file."""
+    rel = shp_path.relative_to(root)
+    category = rel.parts[0] if len(rel.parts) > 1 else "uncategorised"
+    stat = shp_path.stat()
+    # Sum size of all companion files
+    total_size = sum(
+        shp_path.with_suffix(ext).stat().st_size
+        for ext in _companion_extensions()
+        if shp_path.with_suffix(ext).exists()
+    )
+    mtime = datetime.fromtimestamp(stat.st_mtime)
+    return {
+        "name": shp_path.stem.replace("_", " ").title(),
+        "filename": shp_path.name,
+        "base_name": shp_path.stem,
+        "path": rel.as_posix(),
+        "category": category,
+        "size": total_size,
+        "type": "Shapefile",
+        "year": str(mtime.year),
+        "source": category,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /api/shapefiles
+# ---------------------------------------------------------------------------
+
+@bp.get("")
+def list_shapefiles():
+    """Return metadata for every .shp file found under backend/shapefiles/."""
+    root = _shp_root()
+    if not root.exists():
+        return jsonify([])
+
+    results = [
+        _file_info(p, root)
+        for p in sorted(root.rglob("*.shp"))
+        if not any(part.startswith("temp") for part in p.parts)
+        and not p.name.startswith("._")   # macOS AppleDouble metadata files
+    ]
+    return jsonify(results)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/shapefiles/categories
+# ---------------------------------------------------------------------------
+
+@bp.get("/categories")
+def list_categories():
+    """Return one entry per immediate subdirectory of backend/shapefiles/."""
+    root = _shp_root()
+    if not root.exists():
+        return jsonify([])
+
+    cats = []
+    for d in sorted(root.iterdir()):
+        if not d.is_dir() or d.name.startswith("temp"):
+            continue
+        count = sum(1 for _ in d.glob("*.shp"))
+        cats.append({"name": d.name, "shapefile_count": count, "path": d.name})
+    return jsonify(cats)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shapefiles/geojson
+# ---------------------------------------------------------------------------
+
+@bp.post("/geojson")
+def get_geojson():
+    """
+    Read a shapefile and return its features as GeoJSON (WGS84).
+
+    Body: { "path": "relative/path.shp", "max_features": 10000 }
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    rel = body.get("path", "")
+    max_features = int(body.get("max_features", 10000))
+
+    if not rel:
+        return jsonify({"error": "path is required"}), 400
+
+    if Path(rel).name.startswith("._"):
+        return jsonify({"error": "Not a valid shapefile"}), 400
+
+    abs_path = _safe_relative(rel)
+    if abs_path is None or not abs_path.exists():
+        return jsonify({"error": f"Shapefile not found: {rel}"}), 404
+
+    try:
+        gdf = gpd.read_file(str(abs_path))
+        if len(gdf) > max_features:
+            gdf = gdf.iloc[:max_features]
+        # Reproject to WGS84 for the map
+        if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs("EPSG:4326")
+        # Stringify any datetime/timestamp columns — not JSON-serializable natively
+        for col in gdf.columns:
+            if col == "geometry":
+                continue
+            if hasattr(gdf[col], "dt") or str(gdf[col].dtype).startswith(("datetime", "timestamp")):
+                gdf[col] = gdf[col].astype(str)
+        return jsonify(json.loads(gdf.to_json()))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shapefiles/validate
+# ---------------------------------------------------------------------------
+
+@bp.post("/validate")
+def validate_shapefile():
+    """
+    Validate an uploaded ZIP containing a shapefile.
+
+    Form field: file  (ZIP archive)
+    """
+    uploaded = request.files.get("file")
+    if not uploaded:
+        return jsonify({"valid": False, "error": "No file uploaded"}), 400
+
+    tmp_dir = Path(tempfile.mkdtemp(dir=_temp_root()))
+    try:
+        zip_path = tmp_dir / uploaded.filename
+        uploaded.save(str(zip_path))
+
+        if not zipfile.is_zipfile(str(zip_path)):
+            return jsonify({"valid": False, "error": "File is not a valid ZIP archive"}), 400
+
+        with zipfile.ZipFile(str(zip_path)) as zf:
+            zf.extractall(str(tmp_dir))
+
+        shp_files = list(tmp_dir.rglob("*.shp"))
+        if not shp_files:
+            return jsonify({"valid": False, "error": "No .shp file found in ZIP"}), 400
+
+        results = []
+        for shp in shp_files:
+            missing = [
+                ext for ext in [".shx", ".dbf"]
+                if not shp.with_suffix(ext).exists()
+            ]
+            meta: dict = {}
+            valid_shp = not missing
+            if valid_shp:
+                try:
+                    gdf = gpd.read_file(str(shp))
+                    bounds = gdf.total_bounds
+                    meta = {
+                        "feature_count": len(gdf),
+                        "crs": str(gdf.crs) if gdf.crs else "None",
+                        "bounds": {
+                            "minx": float(bounds[0]), "miny": float(bounds[1]),
+                            "maxx": float(bounds[2]), "maxy": float(bounds[3]),
+                        },
+                        "columns": [c for c in gdf.columns if c != "geometry"],
+                        "geometry_type": list(gdf.geometry.geom_type.unique()),
+                    }
+                except Exception as e:
+                    valid_shp = False
+                    missing.append(f"read error: {e}")
+
+            results.append({
+                "name": shp.name,
+                "valid": valid_shp,
+                "missing_files": missing,
+                "present_files": [shp.name],
+                "metadata": meta,
+            })
+
+        all_valid = all(r["valid"] for r in results)
+        return jsonify({"valid": all_valid, "shapefiles": results})
+
+    finally:
+        shutil.rmtree(str(tmp_dir), ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shapefiles/validate-replacement
+# ---------------------------------------------------------------------------
+
+@bp.post("/validate-replacement")
+def validate_replacement():
+    """
+    Check whether an uploaded shapefile is compatible with the one it would replace.
+
+    Body: { "new_file_path": "...", "target_file_path": "...", "layer_name": "..." }
+    Paths are relative to backend/shapefiles/.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    new_rel = body.get("new_file_path", "")
+    target_rel = body.get("target_file_path", "")
+    layer_name = body.get("layer_name")
+
+    if not new_rel or not target_rel:
+        return jsonify({"valid": False, "errors": ["new_file_path and target_file_path are required"]}), 400
+
+    new_abs = _safe_relative(new_rel)
+    target_abs = _safe_relative(target_rel)
+
+    if new_abs is None or not new_abs.exists():
+        return jsonify({"valid": False, "errors": [f"New file not found: {new_rel}"]}), 404
+    if target_abs is None or not target_abs.exists():
+        return jsonify({"valid": False, "errors": [f"Target file not found: {target_rel}"]}), 404
+
+    result = ShapefileValidator.validate_replacement(
+        str(new_abs), str(target_abs), layer_name
+    )
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shapefiles/upload
+# ---------------------------------------------------------------------------
+
+@bp.post("/upload")
+def upload_shapefiles():
+    """
+    Upload one or more shapefiles (or a ZIP) into a category subdirectory.
+
+    Form fields:
+        files    – one or more files (.shp + companions, or a .zip)
+        category – destination subdirectory name (default: "uncategorised")
+    """
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"uploaded": [], "errors": ["No files received"], "count": 0}), 400
+
+    category = request.form.get("category", "uncategorised").strip().replace("..", "")
+    dest_dir = _shp_root() / category
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    uploaded, errors = [], []
+    tmp_dir = Path(tempfile.mkdtemp(dir=_temp_root()))
+
+    try:
+        for f in files:
+            tmp_path = tmp_dir / f.filename
+            f.save(str(tmp_path))
+
+            if tmp_path.suffix.lower() == ".zip":
+                # Extract ZIP
+                try:
+                    with zipfile.ZipFile(str(tmp_path)) as zf:
+                        zf.extractall(str(dest_dir))
+                    for shp in dest_dir.rglob("*.shp"):
+                        uploaded.append({"name": shp.stem, "category": category, "path": shp.relative_to(_shp_root()).as_posix()})
+                except Exception as e:
+                    errors.append(f"{f.filename}: {e}")
+            else:
+                dest = dest_dir / f.filename
+                shutil.copy2(str(tmp_path), str(dest))
+                if tmp_path.suffix.lower() == ".shp":
+                    uploaded.append({"name": tmp_path.stem, "category": category, "path": (category + "/" + f.filename)})
+    finally:
+        shutil.rmtree(str(tmp_dir), ignore_errors=True)
+
+    return jsonify({"uploaded": uploaded, "errors": errors, "count": len(uploaded)})
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/shapefiles/replace
+# ---------------------------------------------------------------------------
+
+@bp.put("/replace")
+def replace_shapefiles():
+    """
+    Replace existing shapefiles with previously uploaded ones.
+
+    Body: { "replacements": [{ "uploaded_path": "...", "target_path": "..." }] }
+    Both paths are relative to backend/shapefiles/.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    replacements = body.get("replacements", [])
+    if not replacements:
+        return jsonify({"replaced": [], "errors": ["No replacements specified"], "count": 0}), 400
+
+    replaced, errors = [], []
+
+    for item in replacements:
+        src_rel = item.get("uploaded_path", "")
+        tgt_rel = item.get("target_path", "")
+
+        src_abs = _safe_relative(src_rel)
+        tgt_abs = _safe_relative(tgt_rel)
+
+        if src_abs is None or not src_abs.exists():
+            errors.append(f"Source not found: {src_rel}")
+            continue
+        if tgt_abs is None:
+            errors.append(f"Invalid target path: {tgt_rel}")
+            continue
+
+        try:
+            # Back up the existing file before overwriting
+            backup = tgt_abs.with_suffix(tgt_abs.suffix + ".bak")
+            if tgt_abs.exists():
+                shutil.copy2(str(tgt_abs), str(backup))
+
+            # Copy all companion files that exist alongside the source
+            stem = src_abs.stem
+            for ext in _companion_extensions():
+                src_comp = src_abs.with_suffix(ext)
+                tgt_comp = tgt_abs.with_suffix(ext)
+                if src_comp.exists():
+                    shutil.copy2(str(src_comp), str(tgt_comp))
+
+            replaced.append({
+                "target": tgt_rel,
+                "status": "replaced",
+                "backup": backup.name,
+            })
+        except Exception as e:
+            errors.append(f"{tgt_rel}: {e}")
+
+    return jsonify({"replaced": replaced, "errors": errors, "count": len(replaced)})
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/shapefiles/<path:shapefile_path>
+# ---------------------------------------------------------------------------
+
+@bp.delete("/<path:shapefile_path>")
+def delete_shapefile(shapefile_path: str):
+    """
+    Delete a shapefile and all its companion files (.shx, .dbf, .prj, etc.)
+
+    URL param: relative path, e.g. area_type/Central.shp
+    """
+    abs_path = _safe_relative(shapefile_path)
+    if abs_path is None or not abs_path.exists():
+        return jsonify({"error": f"Shapefile not found: {shapefile_path}"}), 404
+
+    deleted = []
+    for ext in _companion_extensions():
+        companion = abs_path.with_suffix(ext)
+        if companion.exists():
+            companion.unlink()
+            deleted.append(companion.name)
+
+    return jsonify({"message": f"Deleted {len(deleted)} file(s)", "deleted_files": deleted})
