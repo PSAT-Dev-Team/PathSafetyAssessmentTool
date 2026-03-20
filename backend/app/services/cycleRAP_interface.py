@@ -347,8 +347,3 @@ class cycleRAP_interface:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=4)
-
-    # TODO: Export project entirety into the CycleRAP testbed excel
-    @staticmethod
-    def _TODO_export_cycleRAP():
-        pass

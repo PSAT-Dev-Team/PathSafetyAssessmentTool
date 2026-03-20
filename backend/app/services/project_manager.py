@@ -790,12 +790,6 @@ class project_manager:
 
         self._discover_projects()
 
-    # TODO: DEPRECATED, NEEDS UPDATE
-    def get_project_directory(self) -> Path:
-        return self.des_path / self.project_name
-    
-    def get_data_directory(self) -> Path:
-        return self.get_project_directory(self) / global_var.PROJECT_CYCLERAP_DIRECTORY
 
 # ================================================================================================================
 # UTILITY
@@ -827,11 +821,6 @@ class project_manager:
                 return proj
         raise KeyError(f"Project not found: {project_name}")
     
-    # TODO: DEPRECATED, NEEDS UPDATE
-    def isValid(self):
-        if self.project_name is not None: return True 
-        else: return False
-        
     def create_project(self, project_title, geo_data : gpd.geodataframe, dataset_name, tags=None):
         proj_root = self.des_path / project_title
 
@@ -884,26 +873,6 @@ class project_manager:
 
         self.projects.append(new_project)
         
-    # NOTE: DEPRECATED
-    def get_latest_file_before(project_path: Path, cutoff_date: datetime) -> str:
-        all_files = list(project_path.glob("*.json"))
-        valid_files = []
-
-        for file in all_files:
-            date_str = file.stem
-            try:
-                file_date = datetime.strptime(date_str, "%Y%m%d")
-                if file_date <= cutoff_date:
-                    valid_files.append((file_date, file))
-            except ValueError:
-                continue  # Skip invalid files
-
-        if not valid_files:
-            return None
-
-        latest_file = max(valid_files, key=lambda x: x[0])[1]
-        return latest_file
-    
     # Search the entire project repository and create a temporary project based on the filter
     def create_temporary_project(self, filter_input : serializer.ProjectMetadata) -> Project:
         return self.merge_project_list(self.search(filter_input))

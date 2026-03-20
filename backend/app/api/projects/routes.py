@@ -8,7 +8,7 @@ from flask import (
     abort,
     send_file,
     make_response,
-    current_app,     # ✅ 一次性在顶层导入
+    current_app,
 )
 import zipfile
 import io
@@ -32,8 +32,7 @@ import threading
 from werkzeug.exceptions import ServiceUnavailable
 
 _INIT_LOCK = threading.Lock()
-_INIT_ERR = {"cv": None, "gis": None}
-_MODELS_READY = {"cv": False, "gis": False}
+_INIT_ERR = {"cv": None}
 
 _GIS_INSTANCE: "gis.GIS | None" = None
 
@@ -328,7 +327,7 @@ def get_ctx():
     _CTX.update({"pm": pm, "ready": True})
     return _CTX
 
-_MODELS_READY = {"cv": False, "gis": False}
+_MODELS_READY = {"cv": False}
 
 def _ensure_models_ready():
     """Load CV / GIS only once (thread-safe). Memoize init errors as 503."""
@@ -379,10 +378,6 @@ def _ensure_models_ready():
                 _INIT_ERR["cv"] = f"CV init failed: {e}"
                 # Next calls will short-circuit quickly
                 raise ServiceUnavailable(_INIT_ERR["cv"])
-
-        # GIS 部分一般是惰性读取（LayerStore.default 内部），这里只做标记
-        if not _MODELS_READY["gis"]:
-            _MODELS_READY["gis"] = True
 
 
 
@@ -807,7 +802,6 @@ def download_images():
                             zf.write(str(img_path), zip_path)
                             
                 except Exception as e:
-                    print(f"Error filtering images for project {project_name}: {e}")
                     continue
                     
     except Exception as e:
@@ -1033,7 +1027,6 @@ def get_results(project_name: str):
                 "result_rows": []
             })
     except Exception as e:
-        print(f"Error retrieving results: {e}")
         return jsonify({
             "ok": False,
             "error": str(e)
@@ -1550,8 +1543,7 @@ def apply_all_treatments(project_name: str):
 
                 total_treated += 1
 
-            except Exception as e:
-                print(f"Error processing segment {segment_index}: {str(e)}")
+            except Exception:
                 continue
 
         # Mark treatment dataframe as dirty but don't save yet
@@ -1604,8 +1596,6 @@ def reset_all_treatments(project_name: str):
             treatment_df = pd.concat([treatment_df, pd.DataFrame(new_rows)], ignore_index=True)
 
         # Count how many segments had treatments
-        # DEBUG: Print column info to backend logs
-        print(f"[reset_all_treatments] Columns: {treatment_df.columns.tolist()}")
         if "Treatments Applied" in treatment_df.columns:
             # fillna("") ensures NaNs become empty strings. astype(str) ensures everything is string.
             # str.strip() removes distinct whitespace.
@@ -1614,10 +1604,7 @@ def reset_all_treatments(project_name: str):
             # It counts ANY row that has non-empty treatment string.
             applied_col = treatment_df["Treatments Applied"].fillna("").astype(str).str.strip()
             segments_reset = int((applied_col != "").sum())
-            print(f"[reset_all_treatments] Count calculated: {segments_reset}")
-            print(f"[reset_all_treatments] Sample head: {applied_col.head().tolist()}")
         else:
-            print("[reset_all_treatments] 'Treatments Applied' column missing")
             segments_reset = 0
 
         # Clear "Treatments Applied" column for all rows
@@ -1733,10 +1720,9 @@ def update_attributes(name: str):
             for col in band_cols:
                 new_attrs_df[col] = results_df[col].values
         else:
-            print(f"[Warning] Score calculation returned {len(results_df)} rows, expected {len(new_attrs_df)}. Skipping band persistence.")
+            pass  # row count mismatch: skip band persistence
             
-    except Exception as e:
-        print(f"[Error] Failed to calculate/persist bands during save: {e}")
+    except Exception:
         traceback.print_exc()
         # Non-blocking: proceed to save attributes even if scoring fails
     # --------------------------------------------------------
@@ -1820,7 +1806,7 @@ def get_All_Img_Folder(folder_path, filename_df, imagePath):
             shutil.copy2(src, dst)
         else:
             # Similar to the Zip version: record missing files
-            print(f"Image {img_name} not found in folder {folder_path}.")
+            pass
     
     # 4. Return the original DataFrame for downstream use
     return filename_df
@@ -2082,8 +2068,8 @@ def update_project_metadata(project_name: str):
                                     
                                     if new_filename != img_file.name:
                                         img_file.rename(images_dir / new_filename)
-                except Exception as e:
-                    print(f"Warning: Failed to rename some images: {e}")
+                except Exception:
+                    pass
 
                 # Update metadata
                 proj.project_path = new_path
@@ -2137,7 +2123,6 @@ def update_project_metadata(project_name: str):
                     proj.save_all()
                     
                 except Exception as data_e:
-                    print(f"Warning: Failed to update image references in data files: {data_e}")
                     traceback.print_exc()
 
                 proj.metadata.last_updated = datetime.datetime.now()
@@ -2502,11 +2487,6 @@ def get_gis_layers(project_name: str):
         radius = payload.get("radius", 100)  # Default 100m radius
         requested_layers = payload.get("layers", ["cycling", "shared", "footpath"])
 
-        print(f"\n[GIS] ===== NEW REQUEST =====")
-        print(f"[GIS] Project: {project_name}")
-        print(f"[GIS] Point: {point_coords}")
-        print(f"[GIS] Radius: {radius}m")
-
         if not point_coords or len(point_coords) != 2:
             return fail("point [lon, lat] is required", 400)
 
@@ -2515,7 +2495,6 @@ def get_gis_layers(project_name: str):
 
         _gis = _get_gis()
         pt_metric = _gis.store.to_metric_point(pt)
-        print(f"[GIS] Point in metric (EPSG:3414): {pt_metric}")
 
         # Create buffer for spatial query
         buffer_geom = pt_metric.buffer(radius)
@@ -2537,20 +2516,15 @@ def get_gis_layers(project_name: str):
             layer_name = layer_names[layer_key]
 
             try:
-                print(f"[GIS] Fetching layer: {layer_key} -> {layer_name}")
-                gdf = layer_store.get(layer_name)
+                gdf = _gis.store.get(layer_name)
 
                 if gdf is None:
-                    print(f"[GIS] Layer {layer_key} is None!")
                     result_layers[layer_key] = []
                     continue
 
                 if gdf.empty:
-                    print(f"[GIS] Layer {layer_key} is empty!")
                     result_layers[layer_key] = []
                     continue
-
-                print(f"[GIS] Layer {layer_key} has {len(gdf)} features, CRS: {gdf.crs}")
 
                 # Ensure metric CRS (EPSG:3414)
                 if gdf.crs.to_epsg() != 3414:
@@ -2570,9 +2544,7 @@ def get_gis_layers(project_name: str):
                     continue
 
                 # Spatial query using index
-                print(f"[GIS] Buffer bounds: {buffer_geom.bounds}")
                 candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
-                print(f"[GIS] Found {len(candidate_indices)} candidates for {layer_key}")
 
                 if not candidate_indices:
                     result_layers[layer_key] = []
@@ -2582,7 +2554,6 @@ def get_gis_layers(project_name: str):
 
                 # Filter to features that actually intersect the buffer
                 intersecting = candidates[candidates.intersects(buffer_geom)]
-                print(f"[GIS] After intersect filter: {len(intersecting)} features for {layer_key}")
 
                 if intersecting.empty:
                     result_layers[layer_key] = []
@@ -2636,8 +2607,7 @@ def get_gis_layers(project_name: str):
 
                 result_layers[layer_key] = features
 
-            except Exception as e:
-                print(f"Warning: Error loading {layer_key}: {e}")
+            except Exception:
                 result_layers[layer_key] = []
 
         # Build response
