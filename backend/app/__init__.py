@@ -11,4 +11,10 @@ def create_app(config_object=Config):
     CORS(app, resources={r"/api/*": {"origins": "*"}})
 
     register_blueprints(app)
+
+    # Pre-warm the GIS singleton so the first real request doesn't pay the
+    # cold-start cost of loading all shapefiles from disk.
+    from app.api.projects.routes import warmup_gis
+    warmup_gis()
+
     return app

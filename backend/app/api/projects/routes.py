@@ -35,6 +35,41 @@ _INIT_LOCK = threading.Lock()
 _INIT_ERR = {"cv": None, "gis": None}
 _MODELS_READY = {"cv": False, "gis": False}
 
+_GIS_INSTANCE: "gis.GIS | None" = None
+
+def _get_gis() -> "gis.GIS":
+    global _GIS_INSTANCE
+    if _GIS_INSTANCE is not None:
+        return _GIS_INSTANCE
+    with _INIT_LOCK:
+        if _GIS_INSTANCE is None:
+            shp_dir = (Path(__file__).resolve().parents[3] / "shapefiles").resolve()
+            if not shp_dir.exists():
+                raise FileNotFoundError(f"Shapefile directory not found: {shp_dir}")
+            _GIS_INSTANCE = gis.GIS(gis.LayerStore.default(base_dir=str(shp_dir)))
+    return _GIS_INSTANCE
+
+
+def warmup_gis() -> None:
+    """Pre-warm the GIS singleton in a background thread at app startup.
+
+    Called once from create_app() so shapefiles are loaded before the first
+    real request arrives, eliminating the cold-start penalty for end users.
+    Any error is logged but never raised — the app remains fully functional,
+    _get_gis() will just re-attempt construction on first use.
+    """
+    import threading
+
+    def _warm():
+        try:
+            _get_gis()
+        except Exception as exc:  # pragma: no cover
+            import logging
+            logging.getLogger(__name__).warning("GIS warmup failed: %s", exc)
+
+    t = threading.Thread(target=_warm, name="gis-warmup", daemon=True)
+    t.start()
+
 
 
 
@@ -2173,14 +2208,7 @@ def autocode_gis(project_name: str):
         from shapely.geometry import Point
         pt = Point(start_lon, start_lat)
 
-        # backend/shapefiles 作为基准目录
-        backend_root = Path(__file__).resolve().parents[3]  # .../backend
-        shp_dir = (backend_root / "shapefiles").resolve()
-        if not shp_dir.exists():
-            return fail(f"Shapefile base dir not found: {shp_dir}", 500)
-
-        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
-        _gis = gis.GIS(layer_store)
+        _gis = _get_gis()
 
         updates: dict[str, int | float] = {}
 
@@ -2329,14 +2357,7 @@ def get_curvature_visualization(project_name: str):
         from shapely.geometry import Point
         pt = Point(start_lon, start_lat)
 
-        # Backend shapefiles directory
-        backend_root = Path(__file__).resolve().parents[3]  # .../backend
-        shp_dir = (backend_root / "shapefiles").resolve()
-        if not shp_dir.exists():
-            return fail(f"Shapefile base dir not found: {shp_dir}", 500)
-
-        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
-        _gis = gis.GIS(layer_store)
+        _gis = _get_gis()
 
         # Generate visualization data
         viz_data = _gis.get_curvature_visualization(pt, collect_radius=5.0)
@@ -2425,14 +2446,7 @@ def get_width_visualization(project_name: str):
         start_lon, start_lat = coords[0]
         pt = Point(start_lon, start_lat)
 
-        # Backend shapefiles directory
-        backend_root = Path(__file__).resolve().parents[3]
-        shp_dir = (backend_root / "shapefiles").resolve()
-        if not shp_dir.exists():
-            return fail(f"Shapefile base dir not found: {shp_dir}", 500)
-
-        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
-        _gis = gis.GIS(layer_store)
+        _gis = _get_gis()
 
         # Generate visualization data
         viz_data = _gis.get_width_visualization(pt, start_radius=1.0, max_radius=10.0, step=1.0)
@@ -2499,16 +2513,7 @@ def get_gis_layers(project_name: str):
         lon, lat = point_coords
         pt = Point(lon, lat)
 
-        # Backend shapefiles directory
-        backend_root = Path(__file__).resolve().parents[3]
-        shp_dir = (backend_root / "shapefiles").resolve()
-        if not shp_dir.exists():
-            return fail(f"Shapefile base dir not found: {shp_dir}", 500)
-
-        print(f"[GIS] Shapefile directory: {shp_dir}")
-        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
-        print(f"[GIS] Layer store paths: {list(layer_store.paths.keys())}")
-        _gis = gis.GIS(layer_store)
+        _gis = _get_gis()
         pt_metric = _gis.store.to_metric_point(pt)
         print(f"[GIS] Point in metric (EPSG:3414): {pt_metric}")
 
