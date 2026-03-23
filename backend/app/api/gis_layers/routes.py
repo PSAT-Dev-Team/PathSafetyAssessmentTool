@@ -31,6 +31,9 @@ from pathlib import Path
 from typing import List
 
 import geopandas as gpd
+import fiona
+from pyproj import Transformer, CRS
+from shapely.geometry import shape, mapping
 from flask import Blueprint, jsonify, request
 
 from app.services.shapefile_validator import ShapefileValidator
@@ -41,9 +44,54 @@ bp = Blueprint("gis_layers", __name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+import xml.etree.ElementTree as ET
+
 def _shp_root() -> Path:
     """Absolute path to backend/shapefiles/."""
     return (Path(__file__).resolve().parents[3] / "shapefiles").resolve()
+
+# ── Metadata about each shapefile category ──────────────────────────────
+# Maps the folder/category name to its creation year and data source.
+# Edit this dictionary to keep the information up to date.
+LAYER_METADATA = {
+    "AMGbeforeCount":       {"year": "2024", "source": "LTA – Active Mobility Group"},
+    "AMGsensorCount":       {"year": "2024", "source": "LTA – Active Mobility Group"},
+    "CyclingPath_Jul2024":  {"year": "2024", "source": "LTA / URA – Cycling Path Network"},
+    "FootPath_Mar2025":     {"year": "2025", "source": "LTA / NParks – Footpath Network"},
+    "LanduseRecre2026":     {"year": "2026", "source": "URA – Master Plan Land Use (Recreation)"},
+    "LanduseRural2026":     {"year": "2026", "source": "URA – Master Plan Land Use (Rural)"},
+    "LinkID_Shape_File":    {"year": "2024", "source": "LTA – Road Network Link IDs"},
+    "Mrt_exit":             {"year": "2024", "source": "LTA – MRT Station Exits"},
+    "Planning_area":        {"year": "2024", "source": "URA – Planning Area Boundaries"},
+    "Road_name":            {"year": "2024", "source": "LTA / SLA – Road Name Layer"},
+    "Speed_limit":          {"year": "2024", "source": "LTA – Speed Limit Segments"},
+    "area_type":            {"year": "2024", "source": "URA – Area Type Classification"},
+    "bus_lane":             {"year": "2024", "source": "LTA – Bus Lane Network"},
+    "bus_stop":             {"year": "2024", "source": "LTA – Bus Stop Locations"},
+    "kerb_line":            {"year": "2024", "source": "LTA – Kerb Line Layer"},
+    "parking_lot":          {"year": "2024", "source": "HDB / URA – Parking Lot Locations"},
+    "path":                 {"year": "2024", "source": "LTA – Path Centreline Network"},
+    "roadcrossinglayer":    {"year": "2024", "source": "LTA – Road Crossing Points"},
+}
+
+def _extract_xml_yearStr(shp_path: Path) -> str | None:
+    """Attempt to parse `<CreaDate>`, `<ModDate>`, `<SyncDate>`, or `<pubDate>` from native XML metadata."""
+    xml_path = shp_path.with_suffix('.shp.xml')
+    if not xml_path.exists():
+        xml_path = shp_path.with_suffix('.xml')
+    
+    if xml_path.exists():
+        try:
+            tree = ET.parse(str(xml_path))
+            root = tree.getroot()
+            for tag in ['.//CreaDate', './/ModDate', './/SyncDate', './/pubDate']:
+                elem = root.find(tag)
+                if elem is not None and elem.text and len(elem.text) >= 4:
+                    return elem.text[:4] # Format usually 'YYYYMMDD'
+        except Exception:
+            pass
+    return None
+
 
 
 def _temp_root() -> Path:
@@ -85,7 +133,23 @@ def _file_info(shp_path: Path, root: Path) -> dict:
         for ext in _companion_extensions()
         if shp_path.with_suffix(ext).exists()
     )
-    mtime = datetime.fromtimestamp(stat.st_mtime)
+    
+    # Grab metadata fallbacks from predefined mappings based on category
+    layer_meta = LAYER_METADATA.get(category, {})
+    fallback_source = layer_meta.get("source", category.replace("_", " ").title())
+    fallback_year = layer_meta.get("year", None)
+
+    # 1. Native XML exact metadata year takes priority
+    xml_year = _extract_xml_yearStr(shp_path)
+    if xml_year:
+        year = xml_year
+    elif fallback_year:
+        # 2. Existing internal mapping fallback year
+        year = fallback_year
+    else:
+        # 3. File upload/mtime fallback year
+        year = str(datetime.fromtimestamp(stat.st_mtime).year)
+    
     return {
         "name": shp_path.stem.replace("_", " ").title(),
         "filename": shp_path.name,
@@ -94,8 +158,8 @@ def _file_info(shp_path: Path, root: Path) -> dict:
         "category": category,
         "size": total_size,
         "type": "Shapefile",
-        "year": str(mtime.year),
-        "source": category,
+        "year": year,
+        "source": fallback_source,
     }
 
 
@@ -143,6 +207,47 @@ def list_categories():
 # POST /api/shapefiles/geojson
 # ---------------------------------------------------------------------------
 
+def _read_shapefile_as_geojson(full_path, max_features=5000):
+    features = []
+    with fiona.open(full_path) as src:
+        src_crs = CRS(src.crs) if src.crs else None
+        transformer = None
+        if src_crs and src_crs.to_epsg() != 4326:
+            transformer = Transformer.from_crs(src_crs, CRS.from_epsg(4326), always_xy=True)
+
+        count = 0
+        for feat in src:
+            if count >= max_features:
+                break
+            geom = shape(feat["geometry"])
+            if transformer:
+                from shapely.ops import transform
+                geom = transform(transformer.transform, geom)
+
+            props = {}
+            for k, v in (feat.get("properties") or {}).items():
+                if v is None:
+                    props[k] = None
+                elif isinstance(v, (int, float, str, bool)):
+                    if isinstance(v, float) and (v != v or v == float("inf") or v == float("-inf")):
+                        props[k] = None
+                    else:
+                        props[k] = v
+                else:
+                    props[k] = str(v)
+
+            features.append({
+                "type": "Feature",
+                "geometry": mapping(geom),
+                "properties": props,
+            })
+            count += 1
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+    }
+
+
 @bp.post("/geojson")
 def get_geojson():
     """
@@ -165,19 +270,8 @@ def get_geojson():
         return jsonify({"error": f"Shapefile not found: {rel}"}), 404
 
     try:
-        gdf = gpd.read_file(str(abs_path))
-        if len(gdf) > max_features:
-            gdf = gdf.iloc[:max_features]
-        # Reproject to WGS84 for the map
-        if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
-            gdf = gdf.to_crs("EPSG:4326")
-        # Stringify any datetime/timestamp columns — not JSON-serializable natively
-        for col in gdf.columns:
-            if col == "geometry":
-                continue
-            if hasattr(gdf[col], "dt") or str(gdf[col].dtype).startswith(("datetime", "timestamp")):
-                gdf[col] = gdf[col].astype(str)
-        return jsonify(json.loads(gdf.to_json()))
+        geojson = _read_shapefile_as_geojson(str(abs_path), max_features)
+        return jsonify(geojson)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

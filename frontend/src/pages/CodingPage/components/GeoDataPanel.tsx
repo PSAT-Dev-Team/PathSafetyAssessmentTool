@@ -249,6 +249,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [showCycling, setShowCycling] = useState(false);     // Green
   const [showShared, setShowShared] = useState(false);       // Orange
   const [showRoadcrossing, setShowRoadcrossing] = useState(false);  // Red
+  const [showMrtExit, setShowMrtExit] = useState(false);     // Teal
+  const [showParkingLot, setShowParkingLot] = useState(false); // Yellow
+  const [showKerbLine, setShowKerbLine] = useState(false);   // Pink
 
   // Delete Mode State
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -282,12 +285,16 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   type GISLayerFeature = {
     coordinates: [number, number][];
     properties: { width?: number };
+    geometry_type?: "line" | "point" | "polygon";
   };
   type GISLayers = {
     footpath: GISLayerFeature[];
     cycling: GISLayerFeature[];
     shared: GISLayerFeature[];
     roadcrossing: GISLayerFeature[];
+    mrt_exit: GISLayerFeature[];
+    parking_lot: GISLayerFeature[];
+    kerb_line: GISLayerFeature[];
   };
   const [gisLayers, setGisLayers] = useState<GISLayers | null>(null);
 
@@ -393,7 +400,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
 
     if (!decodedName || !current) return;
 
-    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing;
+    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showParkingLot || showKerbLine;
     if (!anyLayerEnabled) {
       setGisLayers(null);
       return;
@@ -412,7 +419,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
           body: JSON.stringify({
             point: [lon, lat],  // API expects [lon, lat]
             radius: 200,  // 200m radius around coding area (increased for better visibility)
-            layers: ['cycling', 'shared', 'footpath', 'roadcrossing']
+            layers: ['cycling', 'shared', 'footpath', 'roadcrossing', 'mrt_exit', 'parking_lot', 'kerb_line']
           })
         });
 
@@ -427,14 +434,17 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     })();
 
     return () => { aborted = true; };
-  }, [decodedName, current, showFootpath, showCycling, showShared, showRoadcrossing, hasExternalGeoFeatures]);
+  }, [decodedName, current, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
     footpath: "#1E90FF",    // Blue - rgb(30, 144, 255)
     cycling: "#B84A39",     // Darker Terracotta Red
     shared: "#9333EA",      // Purple - rgb(147, 51, 234)
-    roadcrossing: "#00B400" // Green - rgb(0, 180, 0)
+    roadcrossing: "#00B400", // Green - rgb(0, 180, 0)
+    mrt_exit: "#14B8A6",    // Teal - rgb(20, 184, 166)
+    parking_lot: "#EAB308", // Yellow - rgb(234, 179, 8)
+    kerb_line: "#EC4899"    // Pink - rgb(236, 72, 153)
   };
 
   // Get segment color based on the crash type with the highest score
@@ -834,6 +844,42 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 onCheckedChange={(e) => setShowRoadcrossing(e.checked)}
               />
             </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showMrtExit ? "teal.600" : "gray.500"}>
+                MRT Exit
+              </Text>
+              <Switch
+                colorPalette="teal"
+                size="sm"
+                checked={showMrtExit}
+                onCheckedChange={(e) => setShowMrtExit(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showParkingLot ? "yellow.600" : "gray.500"}>
+                Parking Lot
+              </Text>
+              <Switch
+                colorPalette="yellow"
+                size="sm"
+                checked={showParkingLot}
+                onCheckedChange={(e) => setShowParkingLot(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showKerbLine ? "pink.600" : "gray.500"}>
+                Kerb Line
+              </Text>
+              <Switch
+                colorPalette="pink"
+                size="sm"
+                checked={showKerbLine}
+                onCheckedChange={(e) => setShowKerbLine(e.checked)}
+              />
+            </Flex>
           </HStack>
         </Flex>
       </CardHeader>
@@ -914,6 +960,79 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.roadcrossing,
+                      weight: 3,
+                      opacity: 0.8
+                    }}
+                  />
+                ))
+              )}
+
+              {/* MRT Exit - Point layer rendered as CircleMarkers */}
+              {gisLayers && showMrtExit && gisLayers.mrt_exit && (
+                gisLayers.mrt_exit.map((feature, i) => (
+                  <CircleMarker
+                    key={`mrt_exit-${i}`}
+                    center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
+                    radius={6}
+                    pathOptions={{
+                      color: layerColors.mrt_exit,
+                      weight: 2,
+                      opacity: 0.9,
+                      fillOpacity: 0.7
+                    }}
+                  >
+                    <Tooltip>MRT Exit</Tooltip>
+                  </CircleMarker>
+                ))
+              )}
+
+              {/* Parking Lot - Polygon layer */}
+              {gisLayers && showParkingLot && gisLayers.parking_lot && (
+                gisLayers.parking_lot.map((feature, i) => {
+                  const geomType = feature.geometry_type;
+                  if (geomType === "polygon") {
+                    return (
+                      <Polygon
+                        key={`parking_lot-${i}`}
+                        positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                        pathOptions={{
+                          color: layerColors.parking_lot,
+                          weight: 2,
+                          opacity: 0.8,
+                          fillOpacity: 0.3
+                        }}
+                      >
+                        <Tooltip>Parking Lot</Tooltip>
+                      </Polygon>
+                    );
+                  }
+                  // Fallback: render as point if geometry_type is "point"
+                  return (
+                    <CircleMarker
+                      key={`parking_lot-${i}`}
+                      center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
+                      radius={6}
+                      pathOptions={{
+                        color: layerColors.parking_lot,
+                        weight: 2,
+                        opacity: 0.9,
+                        fillOpacity: 0.7
+                      }}
+                    >
+                      <Tooltip>Parking Lot</Tooltip>
+                    </CircleMarker>
+                  );
+                })
+              )}
+
+              {/* Kerb Line - LineString layer */}
+              {gisLayers && showKerbLine && gisLayers.kerb_line && (
+                gisLayers.kerb_line.map((feature, i) => (
+                  <Polyline
+                    key={`kerb_line-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
+                    pathOptions={{
+                      color: layerColors.kerb_line,
                       weight: 3,
                       opacity: 0.8
                     }}

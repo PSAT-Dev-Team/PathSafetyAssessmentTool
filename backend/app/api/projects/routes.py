@@ -2504,7 +2504,10 @@ def get_gis_layers(project_name: str):
             "cycling": "cycling_path",
             "shared": "shared_path",
             "footpath": "footpath",
-            "roadcrossing": "roadcrossing"
+            "roadcrossing": "roadcrossing",
+            "mrt_exit": "mrt",
+            "parking_lot": "parking",
+            "kerb_line": "kerb_line"
         }
 
         result_layers = {}
@@ -2571,6 +2574,7 @@ def get_gis_layers(project_name: str):
 
                     # Extract coordinates based on geometry type
                     coords = []
+                    geom_output_type = "line"  # default
                     if geom.geom_type == "LineString":
                         coords = [[float(x), float(y)] for x, y in geom.coords]
                     elif geom.geom_type == "MultiLineString":
@@ -2587,9 +2591,33 @@ def get_gis_layers(project_name: str):
 
                             features.append({
                                 "coordinates": line_coords,
-                                "properties": props
+                                "properties": props,
+                                "geometry_type": "line"
                             })
                         continue  # Skip the append at the end since we handled MultiLineString
+                    elif geom.geom_type == "Point":
+                        coords = [[float(geom.x), float(geom.y)]]
+                        geom_output_type = "point"
+                    elif geom.geom_type == "MultiPoint":
+                        for pt_geom in geom.geoms:
+                            features.append({
+                                "coordinates": [[float(pt_geom.x), float(pt_geom.y)]],
+                                "properties": {},
+                                "geometry_type": "point"
+                            })
+                        continue
+                    elif geom.geom_type == "Polygon":
+                        coords = [[float(x), float(y)] for x, y in geom.exterior.coords]
+                        geom_output_type = "polygon"
+                    elif geom.geom_type == "MultiPolygon":
+                        for poly in geom.geoms:
+                            poly_coords = [[float(x), float(y)] for x, y in poly.exterior.coords]
+                            features.append({
+                                "coordinates": poly_coords,
+                                "properties": {},
+                                "geometry_type": "polygon"
+                            })
+                        continue
                     else:
                         continue  # Skip unsupported geometry types
 
@@ -2602,12 +2630,16 @@ def get_gis_layers(project_name: str):
 
                     features.append({
                         "coordinates": coords,
-                        "properties": props
+                        "properties": props,
+                        "geometry_type": geom_output_type
                     })
 
                 result_layers[layer_key] = features
 
-            except Exception:
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"[GIS layers] Error loading layer '{layer_key}' (store name: '{layer_name}'): {e}")
                 result_layers[layer_key] = []
 
         # Build response
