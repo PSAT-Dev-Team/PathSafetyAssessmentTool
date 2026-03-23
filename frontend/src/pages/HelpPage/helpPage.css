@@ -24,6 +24,10 @@
   border-bottom: 2px solid #ecf0f1;
   padding-bottom: 1rem;
   margin-bottom: 1.5rem;
+  position: sticky;
+  top: 0;
+  background: white;
+  z-index: 10;
 }
 
 .help-header h1 {

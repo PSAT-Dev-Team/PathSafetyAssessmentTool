@@ -45,6 +45,15 @@ proj4.defs(
   "+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 +ellps=WGS84 +units=m +no_defs"
 );
 const to4326 = (p: Position): [number, number] => {
+  const x = p[0];
+  const y = p[1];
+  
+  // If arguably already WGS84 (Singapore lon is ~103, lat is ~1.3)
+  // Newly created projects natively output EPSG:4326, so we must not project SVY21 -> WGS84.
+  if (x >= 90 && x <= 120 && y >= -10 && y <= 20) {
+    return [y, x]; // return [lat, lon]
+  }
+
   // 返回 [lat, lng]
   const [lon, lat] = proj4("EPSG:3414", "EPSG:4326", p as [number, number]) as [number, number];
   return [lat, lon];
@@ -223,6 +232,9 @@ const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
   return inside;
 };
 
+// Global cache for map layer toggles per project to preserve state across navigations
+const layerToggleCache: Record<string, any> = {};
+
 export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
@@ -244,14 +256,25 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     return (externalScores && externalScores.length > 0) ? externalScores : internalScores;
   }, [externalScores, internalScores]);
 
+  // Read initial toggle states from cache if available
+  const cachedLayers = layerToggleCache[projectName] || {};
+  
   // GIS Layer toggles (matching curvature analysis colors)
-  const [showFootpath, setShowFootpath] = useState(false);  // Blue
-  const [showCycling, setShowCycling] = useState(false);     // Green
-  const [showShared, setShowShared] = useState(false);       // Orange
-  const [showRoadcrossing, setShowRoadcrossing] = useState(false);  // Red
-  const [showMrtExit, setShowMrtExit] = useState(false);     // Teal
-  const [showParkingLot, setShowParkingLot] = useState(false); // Yellow
-  const [showKerbLine, setShowKerbLine] = useState(false);   // Pink
+  const [showFootpath, setShowFootpath] = useState(cachedLayers.showFootpath ?? false);  // Blue
+  const [showCycling, setShowCycling] = useState(cachedLayers.showCycling ?? false);     // Green
+  const [showShared, setShowShared] = useState(cachedLayers.showShared ?? false);       // Orange
+  const [showRoadcrossing, setShowRoadcrossing] = useState(cachedLayers.showRoadcrossing ?? false);  // Red
+  const [showMrtExit, setShowMrtExit] = useState(cachedLayers.showMrtExit ?? false);     // Teal
+  const [showParkingLot, setShowParkingLot] = useState(cachedLayers.showParkingLot ?? false); // Yellow
+  const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Pink
+
+  // Update cache whenever these toggles change
+  useEffect(() => {
+    layerToggleCache[projectName] = {
+      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showParkingLot, showKerbLine
+    };
+  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showParkingLot, showKerbLine, projectName]);
+
 
   // Delete Mode State
   const [isDeleteMode, setIsDeleteMode] = useState(false);
