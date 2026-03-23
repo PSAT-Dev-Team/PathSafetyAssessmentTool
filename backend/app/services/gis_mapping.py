@@ -9,28 +9,17 @@ import pandas as pd
 # Import utility module for width and curvature calculation
 from app.utils.path_width_curvature import get_radius_and_width_at_point
 
-# ==== 新增：可选导入 Streamlit，并定义缓存加载函数 ====
-try:
-    import streamlit as st
-
-    @st.cache_resource(show_spinner=False)
-    def _load_gdf_cached(path_str: str, metric_crs: str, src_mtime: float):
-        """读取 -> 转CRS -> 预热sindex；src_mtime作为缓存键，源文件更新自动失效"""
-        gdf = gpd.read_file(path_str)
-        if gdf.crs is None:
-            raise ValueError(f"{Path(path_str).name} 缺少CRS")
-        gdf = gdf.to_crs(metric_crs)
-        _ = gdf.sindex  # 预热空间索引
-        return gdf
-except Exception:
-    # 非 Streamlit 场景下的兜底（无缓存）
-    def _load_gdf_cached(path_str: str, metric_crs: str, src_mtime: float):
-        gdf = gpd.read_file(path_str)
-        if gdf.crs is None:
-            raise ValueError(f"{Path(path_str).name} 缺少CRS")
-        gdf = gdf.to_crs(metric_crs)
-        _ = gdf.sindex
-        return gdf
+# ==== Changed: Removed Streamlit caching because it deadlocks Flask ====
+def _load_gdf_cached(path_str: str, metric_crs: str, src_mtime: float):
+    """读取 -> 转CRS -> 预热sindex；源文件更新自动失效由 LayerStore 控制"""
+    import fiona
+    with fiona.open(path_str) as src:
+        gdf = gpd.GeoDataFrame.from_features(src, crs=src.crs)
+    if gdf.crs is None:
+        raise ValueError(f"{Path(path_str).name} 缺少CRS")
+    gdf = gdf.to_crs(metric_crs)
+    _ = gdf.sindex  # 预热空间索引
+    return gdf
 # =======================================================
 
 CRS_WGS84 = "EPSG:4326"
