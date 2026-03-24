@@ -42,10 +42,15 @@ def _get_gis() -> "gis.GIS":
         return _GIS_INSTANCE
     with _INIT_LOCK:
         if _GIS_INSTANCE is None:
+            # backend/app/api/projects/routes.py -> backend is parents[3]
             shp_dir = (Path(__file__).resolve().parents[3] / "shapefiles").resolve()
+            print(f"[GIS] Initializing with shp_dir: {shp_dir}")
             if not shp_dir.exists():
+                print(f"[GIS] ERROR: Shapefile directory NOT FOUND at {shp_dir}")
+                # Try fallback parent logic if needed, but resolve() should be correct
                 raise FileNotFoundError(f"Shapefile directory not found: {shp_dir}")
             _GIS_INSTANCE = gis.GIS(gis.LayerStore.default(base_dir=str(shp_dir)))
+            print(f"[GIS] Instance created successfully.")
     return _GIS_INSTANCE
 
 
@@ -2506,6 +2511,8 @@ def get_gis_layers(project_name: str):
             "footpath": "footpath",
             "roadcrossing": "roadcrossing",
             "mrt_exit": "mrt",
+            "bus_stop": ["bus_stop", "bus_shelter"], # Try both
+            "bus_lane": "bus_lane",
             "parking_lot": "parking",
             "kerb_line": "kerb_line"
         }
@@ -2516,131 +2523,142 @@ def get_gis_layers(project_name: str):
             if layer_key not in layer_names:
                 continue
 
-            layer_name = layer_names[layer_key]
+            layer_targets = layer_names[layer_key]
+            if not isinstance(layer_targets, list):
+                layer_targets = [layer_targets]
 
-            try:
-                gdf = _gis.store.get(layer_name)
-
-                if gdf is None:
-                    result_layers[layer_key] = []
-                    continue
-
-                if gdf.empty:
-                    result_layers[layer_key] = []
-                    continue
-
-                # Ensure metric CRS (EPSG:3414)
-                if gdf.crs.to_epsg() != 3414:
-                    gdf = gdf.to_crs("EPSG:3414")
-
-                # Remove Z-coordinates if present
-                if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
-                    gdf.geometry = gdf.geometry.apply(
-                        lambda geom: gis.GIS._remove_z_coordinate(geom) if geom is not None else None
-                    )
-
-                # Filter to valid geometries
-                gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
-
-                if gdf.empty:
-                    result_layers[layer_key] = []
-                    continue
-
-                # Spatial query using index
-                candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
-
-                if not candidate_indices:
-                    result_layers[layer_key] = []
-                    continue
-
-                candidates = gdf.iloc[candidate_indices]
-
-                # Filter to features that actually intersect the buffer
-                intersecting = candidates[candidates.intersects(buffer_geom)]
-
-                if intersecting.empty:
-                    result_layers[layer_key] = []
-                    continue
-
-                # Convert to WGS84 for frontend
-                intersecting_wgs84 = intersecting.to_crs("EPSG:4326")
-
-                features = []
-                for _, feature in intersecting_wgs84.iterrows():
-                    geom = feature.geometry
-
-                    if geom is None or geom.is_empty:
+            all_features = []
+            for layer_name in layer_targets:
+                try:
+                    gdf = _gis.store.get(layer_name)
+                    if gdf is None or gdf.empty:
                         continue
 
-                    # Extract coordinates based on geometry type
-                    coords = []
-                    geom_output_type = "line"  # default
-                    if geom.geom_type == "LineString":
-                        coords = [[float(x), float(y)] for x, y in geom.coords]
-                    elif geom.geom_type == "MultiLineString":
-                        # For MultiLineString, create separate features for each part
-                        for line in geom.geoms:
-                            line_coords = [[float(x), float(y)] for x, y in line.coords]
+                    # Ensure metric CRS (EPSG:3414)
+                    try:
+                        # For transit/infrastructure layers, if CRS is missing or suspicious, force SVY21
+                        needs_svy21 = (gdf.crs is None) or (layer_key in ["bus_stop", "mrt_exit", "parking_lot", "kerb_line"])
+                        
+                        if gdf.crs is None:
+                            gdf.set_crs("EPSG:3414", inplace=True)
+                            print(f"[GIS] Assigned EPSG:3414 to naive layer: {layer_name}")
+                        
+                        epsg = getattr(gdf.crs, "to_epsg", lambda: None)()
+                        if epsg != 3414:
+                            gdf = gdf.to_crs("EPSG:3414")
+                    except Exception as crs_err:
+                        print(f"Warning: CRS assignment/transform failed for {layer_name}: {crs_err}")
 
-                            # Extract properties
-                            props = {}
-                            if "WIDTH" in feature.index:
-                                width_val = feature["WIDTH"]
-                                if width_val is not None and not (isinstance(width_val, float) and math.isnan(width_val)):
-                                    props["width"] = float(width_val)
+                    # Remove Z-coordinates if present
+                    # Remove Z-coordinates if present
+                    if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+                        try:
+                            gdf.geometry = gdf.geometry.apply(
+                                lambda geom: gis.GIS._remove_z_coordinate(geom) if geom is not None else None
+                            )
+                        except Exception as z_err:
+                            print(f"[GIS] Z-coord removal failed for {layer_name}: {z_err}")
+                            import traceback
+                            traceback.print_exc()
 
-                            features.append({
-                                "coordinates": line_coords,
-                                "properties": props,
-                                "geometry_type": "line"
-                            })
-                        continue  # Skip the append at the end since we handled MultiLineString
-                    elif geom.geom_type == "Point":
-                        coords = [[float(geom.x), float(geom.y)]]
-                        geom_output_type = "point"
-                    elif geom.geom_type == "MultiPoint":
-                        for pt_geom in geom.geoms:
-                            features.append({
-                                "coordinates": [[float(pt_geom.x), float(pt_geom.y)]],
-                                "properties": {},
-                                "geometry_type": "point"
-                            })
+                    # Filter to valid geometries
+                    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+
+                    if gdf.empty:
                         continue
-                    elif geom.geom_type == "Polygon":
-                        coords = [[float(x), float(y)] for x, y in geom.exterior.coords]
-                        geom_output_type = "polygon"
-                    elif geom.geom_type == "MultiPolygon":
-                        for poly in geom.geoms:
-                            poly_coords = [[float(x), float(y)] for x, y in poly.exterior.coords]
-                            features.append({
-                                "coordinates": poly_coords,
-                                "properties": {},
-                                "geometry_type": "polygon"
-                            })
+
+                    # Spatial query using index
+                    candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
+
+                    if not candidate_indices:
                         continue
-                    else:
-                        continue  # Skip unsupported geometry types
 
-                    # Extract properties for LineString
-                    props = {}
-                    if "WIDTH" in feature.index:
-                        width_val = feature["WIDTH"]
-                        if width_val is not None and not (isinstance(width_val, float) and math.isnan(width_val)):
-                            props["width"] = float(width_val)
+                    candidates = gdf.iloc[candidate_indices]
 
-                    features.append({
-                        "coordinates": coords,
-                        "properties": props,
-                        "geometry_type": geom_output_type
-                    })
+                    # Filter to features that actually intersect the buffer
+                    intersecting = candidates[candidates.intersects(buffer_geom)]
 
-                result_layers[layer_key] = features
+                    print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': {len(intersecting)} intersecting features found (candidates: {len(candidates)})")
 
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                print(f"[GIS layers] Error loading layer '{layer_key}' (store name: '{layer_name}'): {e}")
-                result_layers[layer_key] = []
+                    if intersecting.empty:
+                        continue
+
+                    # Convert to WGS84 for frontend
+                    intersecting_wgs84 = intersecting.to_crs("EPSG:4326")
+
+                    for _, feature in intersecting_wgs84.iterrows():
+                        geom = feature.geometry
+                        if geom is None or geom.is_empty:
+                            continue
+
+                        # Extract properties first to avoid NameError
+                        props = {}
+                        if "WIDTH" in feature.index:
+                            width_val = feature["WIDTH"]
+                            if width_val is not None and not (isinstance(width_val, float) and math.isnan(width_val)):
+                                props["width"] = float(width_val)
+                        
+                        # Add other relevant properties if needed (name, etc.)
+                        for col in feature.index:
+                            if col not in ["geometry", "WIDTH"]:
+                                val = feature[col]
+                                if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                                    props[col] = str(val)
+
+                        # Extract coordinates based on geometry type
+                        geom_output_type = None
+                        coords = []
+                        
+                        if geom.geom_type == "LineString":
+                            coords = [[float(x), float(y)] for x, y in geom.coords]
+                            geom_output_type = "line"
+                        elif geom.geom_type == "MultiLineString":
+                            # Leaflet can handle nested arrays or we can unroll
+                            for line in geom.geoms:
+                                all_features.append({
+                                    "coordinates": [[float(x), float(y)] for x, y in line.coords],
+                                    "properties": props,
+                                    "geometry_type": "line"
+                                })
+                            continue
+                        elif geom.geom_type == "Point":
+                            coords = [[float(geom.x), float(geom.y)]]
+                            geom_output_type = "point"
+                        elif geom.geom_type == "MultiPoint":
+                            for pt_geom in geom.geoms:
+                                all_features.append({
+                                    "coordinates": [[float(pt_geom.x), float(pt_geom.y)]],
+                                    "properties": props,
+                                    "geometry_type": "point"
+                                })
+                            continue
+                        elif geom.geom_type == "Polygon":
+                            coords = [[float(x), float(y)] for x, y in geom.exterior.coords]
+                            geom_output_type = "polygon"
+                        elif geom.geom_type == "MultiPolygon":
+                            for poly in geom.geoms:
+                                all_features.append({
+                                    "coordinates": [[float(x), float(y)] for x, y in poly.exterior.coords],
+                                    "properties": props,
+                                    "geometry_type": "polygon"
+                                })
+                            continue
+                        else:
+                            continue
+
+                        if geom_output_type and coords:
+                            all_features.append({
+                                "coordinates": coords,
+                                "geometry_type": geom_output_type,
+                                "properties": props
+                            })
+
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    print(f"Error processing sub-layer '{layer_name}': {e}")
+
+            result_layers[layer_key] = all_features
 
         # Build response
         response = {
@@ -2657,6 +2675,56 @@ def get_gis_layers(project_name: str):
     except Exception as e:
         traceback.print_exc()
         return fail(f"GIS layers error: {e}", 500)
+
+@bp.route("/<projectName>/gis/detect", methods=["POST"])
+def detect_nearby_gis(projectName):
+    """
+    Diagnostic endpoint to auto-detect nearby bus stops and bus lanes within 200m.
+    """
+    try:
+        data = request.json
+        lon, lat = data.get("point", [0, 0])
+        search_radius = 200  # 200m as requested
+        
+        _gis = _get_gis()
+        from shapely.geometry import Point
+        import pyproj
+        
+        # Project to SVY21
+        transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3414", always_xy=True)
+        svy21_x, svy21_y = transformer.transform(lon, lat)
+        current_pt = Point(svy21_x, svy21_y)
+        buffer_geom = current_pt.buffer(search_radius)
+
+        results = {
+            "bus_stop": {"found": False, "distance": None},
+            "bus_lane": {"found": False, "distance": None}
+        }
+
+        # Bus Stops
+        for layer_name in ["bus_stop", "bus_shelter"]:
+            gdf = _gis.store.get(layer_name)
+            if gdf is not None:
+                intersecting = gdf[gdf.intersects(buffer_geom)]
+                for _, row in intersecting.iterrows():
+                    d = current_pt.distance(row.geometry)
+                    if results["bus_stop"]["distance"] is None or d < results["bus_stop"]["distance"]:
+                        results["bus_stop"] = {"found": True, "distance": round(float(d), 2)}
+
+        # Bus Lanes
+        gdf_lane = _gis.store.get("bus_lane")
+        if gdf_lane is not None:
+            intersecting = gdf_lane[gdf_lane.intersects(buffer_geom)]
+            for _, row in intersecting.iterrows():
+                d = current_pt.distance(row.geometry)
+                if results["bus_lane"]["distance"] is None or d < results["bus_lane"]["distance"]:
+                    results["bus_lane"] = {"found": True, "distance": round(float(d), 2)}
+
+        return jsonify({"ok": True, "results": results})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @bp.post("/<project_name>/autocode/all")

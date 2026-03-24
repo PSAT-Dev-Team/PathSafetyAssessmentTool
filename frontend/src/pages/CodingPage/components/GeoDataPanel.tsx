@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 
-import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle } from "react-leaflet";
 import L, { divIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -98,7 +98,7 @@ interface DraggableMarkerProps {
   onDragEnd: (index: number, latlng: L.LatLng) => void;
 }
 
-function DraggableMarker({ position, index, color, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
+function DraggableMarker({ position, index, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
   const eventHandlers = useMemo(
     () => ({
       drag: (e: L.LeafletEvent) => {
@@ -232,8 +232,8 @@ const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
   return inside;
 };
 
-// Global cache for map layer toggles per project to preserve state across navigations
-const layerToggleCache: Record<string, any> = {};
+// No global cache needed anymore as we use localStorage
+
 
 export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange }: Props) {
   const decodedName = useMemo(() => {
@@ -256,24 +256,46 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     return (externalScores && externalScores.length > 0) ? externalScores : internalScores;
   }, [externalScores, internalScores]);
 
-  // Read initial toggle states from cache if available
-  const cachedLayers = layerToggleCache[projectName] || {};
+  // Read initial toggle states from localStorage if available
+  const cachedLayers = useMemo(() => {
+    if (!projectName) return {};
+    try {
+      const stored = localStorage.getItem(`gisLayerToggles_${projectName}`);
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  }, [projectName]);
   
   // GIS Layer toggles (matching curvature analysis colors)
   const [showFootpath, setShowFootpath] = useState(cachedLayers.showFootpath ?? false);  // Blue
-  const [showCycling, setShowCycling] = useState(cachedLayers.showCycling ?? false);     // Green
+  const [showCycling, setShowCycling] = useState(cachedLayers.showCycling ?? false);     // Red
   const [showShared, setShowShared] = useState(cachedLayers.showShared ?? false);       // Orange
   const [showRoadcrossing, setShowRoadcrossing] = useState(cachedLayers.showRoadcrossing ?? false);  // Red
-  const [showMrtExit, setShowMrtExit] = useState(cachedLayers.showMrtExit ?? false);     // Teal
-  const [showParkingLot, setShowParkingLot] = useState(cachedLayers.showParkingLot ?? false); // Yellow
-  const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Pink
+  const [showMrtExit, setShowMrtExit] = useState(cachedLayers.showMrtExit ?? false);     // Cyan
+  const [showBusStop, setShowBusStop] = useState(cachedLayers.showBusStop ?? false);     // Purple
+  const [showBusLane, setShowBusLane] = useState(cachedLayers.showBusLane ?? false);     // Yellow
+  const [showParkingLot, setShowParkingLot] = useState(cachedLayers.showParkingLot ?? false); // Gold
+  const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Deep Pink
 
-  // Update cache whenever these toggles change
+  // Update localStorage whenever these toggles change
   useEffect(() => {
-    layerToggleCache[projectName] = {
-      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showParkingLot, showKerbLine
-    };
-  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showParkingLot, showKerbLine, projectName]);
+    if (!projectName) return;
+    localStorage.setItem(`gisLayerToggles_${projectName}`, JSON.stringify({
+      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine
+    }));
+  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, projectName]);
+
+// Sub-component to pan map to current selection
+function MapAutoCenter({ center }: { center: [number, number] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center) {
+      map.setView(center, map.getZoom(), { animate: true });
+    }
+  }, [center, map]);
+  return null;
+}
 
 
   // Delete Mode State
@@ -316,6 +338,8 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     shared: GISLayerFeature[];
     roadcrossing: GISLayerFeature[];
     mrt_exit: GISLayerFeature[];
+    bus_stop: GISLayerFeature[];
+    bus_lane: GISLayerFeature[];
     parking_lot: GISLayerFeature[];
     kerb_line: GISLayerFeature[];
   };
@@ -423,7 +447,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
 
     if (!decodedName || !current) return;
 
-    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showParkingLot || showKerbLine;
+    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine;
     if (!anyLayerEnabled) {
       setGisLayers(null);
       return;
@@ -441,6 +465,8 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
         if (showFootpath) layers.push('footpath');
         if (showRoadcrossing) layers.push('roadcrossing');
         if (showMrtExit) layers.push('mrt_exit');
+        if (showBusStop) layers.push('bus_stop');
+        if (showBusLane) layers.push('bus_lane');
         if (showParkingLot) layers.push('parking_lot');
         if (showKerbLine) layers.push('kerb_line');
 
@@ -450,7 +476,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             point: [lon, lat],  // API expects [lon, lat]
-            radius: 200,  // 200m radius around coding area (increased for better visibility)
+            radius: 200,        // Reverted to 200m radius
             layers: layers
           })
         });
@@ -462,21 +488,26 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
           setGisLayers(data.layers);
         }
       } catch (e: any) {
+        if (!aborted) {
+          console.error("[GIS] Fetch error:", e);
+        }
       }
     })();
 
     return () => { aborted = true; };
-  }, [decodedName, current, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
+  }, [decodedName, current, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
-    footpath: "#1E90FF",    // Blue - rgb(30, 144, 255)
-    cycling: "#B84A39",     // Darker Terracotta Red
-    shared: "#9333EA",      // Purple - rgb(147, 51, 234)
-    roadcrossing: "#00B400", // Green - rgb(0, 180, 0)
-    mrt_exit: "#14B8A6",    // Teal - rgb(20, 184, 166)
-    parking_lot: "#EAB308", // Yellow - rgb(234, 179, 8)
-    kerb_line: "#EC4899"    // Pink - rgb(236, 72, 153)
+    footpath: "#1E90FF",    // DodgerBlue
+    cycling: "#B91C1C",     // Deep Red
+    shared: "#A855F7",      // Purple
+    roadcrossing: "#10B981", // Emerald/Green
+    mrt_exit: "#06B6D4",    // Cyan
+    bus_stop: "#8B5CF6",    // Purple
+    bus_lane: "#EAB308",    // Yellow
+    parking_lot: "#D97706", // Amber/Gold
+    kerb_line: "#D946EF",   // Fuchsia
   };
 
   // Get segment color based on the crash type with the highest score
@@ -842,11 +873,11 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
             </Flex>
 
             <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showCycling ? "orange.600" : "gray.500"}>
+              <Text fontSize="sm" fontWeight="medium" color={showCycling ? "red.700" : "gray.500"}>
                 Cycling Path
               </Text>
               <Switch
-                colorPalette="orange"
+                colorPalette="red"
                 size="sm"
                 checked={showCycling}
                 onCheckedChange={(e) => setShowCycling(e.checked)}
@@ -878,14 +909,38 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
             </Flex>
 
             <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showMrtExit ? "teal.600" : "gray.500"}>
+              <Text fontSize="sm" fontWeight="medium" color={showMrtExit ? "cyan.600" : "gray.500"}>
                 MRT Exit
               </Text>
               <Switch
-                colorPalette="teal"
+                colorPalette="cyan"
                 size="sm"
                 checked={showMrtExit}
                 onCheckedChange={(e) => setShowMrtExit(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showBusStop ? "purple.600" : "gray.500"}>
+                Bus Stop
+              </Text>
+              <Switch
+                colorPalette="purple"
+                size="sm"
+                checked={showBusStop}
+                onCheckedChange={(e) => setShowBusStop(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showBusLane ? "yellow.600" : "gray.500"}>
+                Bus Lane
+              </Text>
+              <Switch
+                colorPalette="yellow"
+                size="sm"
+                checked={showBusLane}
+                onCheckedChange={(e) => setShowBusLane(e.checked)}
               />
             </Flex>
 
@@ -941,6 +996,26 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
 
               {/* 数据范围自适应 */}
               {allLatLngs.length > 0 && <FitBounds points={allLatLngs} />}
+              
+              {/* 自动跟随当前选中点 */}
+              <MapAutoCenter center={current?.latlng ?? null} />
+
+              {/* 搜索半径可视化 (200m) */}
+              {current && (() => {
+                const [lat, lon] = current.latlng;
+                return (
+                  <Circle
+                    center={[lat, lon]}
+                    radius={200} // Matches user preferred 200m radius
+                    pathOptions={{
+                      color: '#3182ce',
+                      fillColor: '#3182ce',
+                      fillOpacity: 0.1,
+                      dashArray: '5, 5'
+                    }}
+                  />
+                );
+              })()}
 
               {/* GIS Layers - Render below the segment points */}
               {gisLayers && showFootpath && gisLayers.footpath && (
@@ -1016,6 +1091,85 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                     <Tooltip>MRT Exit</Tooltip>
                   </CircleMarker>
                 ))
+              )}
+
+              {/* Bus Stop - Point or Line (Shelters) */}
+              {gisLayers && showBusStop && gisLayers.bus_stop && (
+                gisLayers.bus_stop.map((feature, i) => {
+                  if (feature.geometry_type === "point") {
+                    return (
+                      <CircleMarker
+                        key={`bus_stop-${i}`}
+                        center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
+                        radius={6}
+                        pathOptions={{
+                          color: layerColors.bus_stop,
+                          weight: 2,
+                          opacity: 0.9,
+                          fillOpacity: 0.7
+                        }}
+                      >
+                        <Tooltip>Bus Stop</Tooltip>
+                      </CircleMarker>
+                    );
+                  } else if (feature.geometry_type === "line") {
+                    return (
+                      <Polyline
+                        key={`bus_shelter-${i}`}
+                        positions={feature.coordinates.map(c => [c[1], c[0]])}
+                        pathOptions={{
+                          color: layerColors.bus_stop,
+                          weight: 4,
+                          opacity: 0.8
+                        }}
+                      >
+                        <Tooltip>Bus Shelter</Tooltip>
+                      </Polyline>
+                    );
+                  }
+                  return null;
+                })
+              )}
+
+              {/* Bus Lane - LineString or MultiLineString layer */}
+              {gisLayers && showBusLane && gisLayers.bus_lane && (
+                gisLayers.bus_lane.map((feature, i) => {
+                  const coords = feature.coordinates;
+                  // If it's a MultiLineString structure (array of arrays of coordinates)
+                  const isMulti = Array.isArray(coords[0]) && Array.isArray(coords[0][0]);
+                  
+                  if (isMulti) {
+                    return (coords as any).map((line: any, j: number) => (
+                      <Polyline
+                        key={`bus_lane-${i}-${j}`}
+                        positions={line.map((c: any) => [c[1], c[0]])}
+                        pathOptions={{
+                          color: layerColors.bus_lane,
+                          weight: 4,
+                          opacity: 0.8,
+                          dashArray: "5, 10"
+                        }}
+                      >
+                         <Tooltip>Bus Lane</Tooltip>
+                      </Polyline>
+                    ));
+                  }
+
+                  return (
+                    <Polyline
+                      key={`bus_lane-${i}`}
+                      positions={coords.map((c: any) => [c[1], c[0]])}
+                      pathOptions={{
+                        color: layerColors.bus_lane,
+                        weight: 4,
+                        opacity: 0.8,
+                        dashArray: "5, 10"
+                      }}
+                    >
+                       <Tooltip>Bus Lane</Tooltip>
+                    </Polyline>
+                  );
+                })
               )}
 
               {/* Parking Lot - Polygon layer */}

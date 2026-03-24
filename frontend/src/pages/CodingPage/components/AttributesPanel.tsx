@@ -10,7 +10,11 @@ import {
   SimpleGrid,
   Separator,
   Tabs,
+  Button,
 } from "@chakra-ui/react";
+import { FaSyncAlt } from "react-icons/fa";
+import { useState } from "react";
+import { toaster } from "../../../components/ui/toaster";
 
 /** ====== Props ====== */
 type Props = {
@@ -225,7 +229,10 @@ export default function AttributesPanel({
   highlightMessage = "*Highlighted attributes have been modified from the original values",
   highlightColor = "green",
   flex,
-}: Props) {
+  projectName, // Passed from parent
+}: Props & { projectName?: string }) {
+  const [detecting, setDetecting] = useState(false);
+
   const isYellow = highlightColor === "yellow";
   const changedBg = isYellow ? "yellow.50" : "green.100";
   const changedBorder = isYellow ? "yellow.500" : "green.500";
@@ -303,16 +310,57 @@ export default function AttributesPanel({
   return (
     <Card.Root minH={`${panelHeight}px`} display="flex" flexDirection="column" flex={flex}>
       <Card.Header display="flex" flexDirection="row" justifyContent="space-between" alignItems="center" gap="2">
-        <Box display="flex" flexDirection="row" alignItems="baseline" gap="2">
-          <Heading size="sm" flex="0 0 auto">Attributes</Heading>
-          {hasChangedFields && (
-            <Text
-              fontSize="xs"
-              color="gray.600"
-              transition="opacity 0.3s"
+        <Box display="flex" flexDirection="row" alignItems="center" gap="4">
+          <Box display="flex" flexDirection="row" alignItems="baseline" gap="2">
+            <Heading size="sm" flex="0 0 auto">Attributes</Heading>
+            {hasChangedFields && (
+              <Text
+                fontSize="xs"
+                color="gray.600"
+                transition="opacity 0.3s"
+              >
+                {highlightMessage}
+              </Text>
+            )}
+          </Box>
+
+          {row && row.geometry && projectName && (
+            <Button
+              size="xs"
+              variant="surface"
+              colorPalette="blue"
+              loading={detecting}
+              onClick={async () => {
+                try {
+                  setDetecting(true);
+                  const coords = (row.geometry as any).coordinates[0];
+                  const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/gis/detect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ point: coords })
+                  });
+                  const data = await res.json();
+                  if (data.ok) {
+                    const r = data.results;
+                    let summary = [];
+                    if (r.bus_stop.found) summary.push(`Bus Stop is ${r.bus_stop.distance}m away`);
+                    if (r.bus_lane.found) summary.push(`Bus Lane is ${r.bus_lane.distance}m away`);
+                    
+                    if (summary.length > 0) {
+                      toaster.create({ title: "Nearby GIS Detected", description: summary.join(". "), type: "success" });
+                    } else {
+                      toaster.create({ title: "No Infrastructure Found", description: "None within 200m.", type: "info" });
+                    }
+                  }
+                } catch (e) {
+                  toaster.create({ title: "Detection Failed", type: "error" });
+                } finally {
+                  setDetecting(false);
+                }
+              }}
             >
-              {highlightMessage}
-            </Text>
+              <FaSyncAlt /> Detect Nearby GIS
+            </Button>
           )}
         </Box>
         {headerAction}
