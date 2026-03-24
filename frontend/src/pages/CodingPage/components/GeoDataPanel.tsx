@@ -435,6 +435,15 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
         // current.latlng is [lat, lon] format from to4326()
         const [lat, lon] = current.latlng;
 
+        const layers = [];
+        if (showCycling) layers.push('cycling');
+        if (showShared) layers.push('shared');
+        if (showFootpath) layers.push('footpath');
+        if (showRoadcrossing) layers.push('roadcrossing');
+        if (showMrtExit) layers.push('mrt_exit');
+        if (showParkingLot) layers.push('parking_lot');
+        if (showKerbLine) layers.push('kerb_line');
+
         // Fetch GIS layers near the current coding point
         const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/gis/layers`, {
           method: 'POST',
@@ -442,7 +451,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
           body: JSON.stringify({
             point: [lon, lat],  // API expects [lon, lat]
             radius: 200,  // 200m radius around coding area (increased for better visibility)
-            layers: ['cycling', 'shared', 'footpath', 'roadcrossing', 'mrt_exit', 'parking_lot', 'kerb_line']
+            layers: layers
           })
         });
 

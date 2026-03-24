@@ -2484,7 +2484,7 @@ def get_gis_layers(project_name: str):
     try:
         payload = request.get_json(force=True, silent=True) or {}
         point_coords = payload.get("point", [])
-        radius = payload.get("radius", 100)  # Default 100m radius
+        radius = payload.get("radius", 200)  # Default 200m radius
         requested_layers = payload.get("layers", ["cycling", "shared", "footpath"])
 
         if not point_coords or len(point_coords) != 2:
