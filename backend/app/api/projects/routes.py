@@ -349,6 +349,78 @@ def _ensure_models_ready():
             _MODELS_READY["gis"] = True
 
 
+# ───────────────────────── Gradient lookup (module-level) ─────────────────────
+# Loaded once and cached for the lifetime of the server process.
+# Works for any project — the CSV accumulates entries across all project areas.
+
+_GRADIENT_LOOKUP: "dict | None" = None
+
+
+def _load_gradient_lookup() -> dict:
+    """Load (and cache) the gradient lookup CSV. Returns {} if unavailable."""
+    global _GRADIENT_LOOKUP
+    if _GRADIENT_LOOKUP is not None:
+        return _GRADIENT_LOOKUP
+    lookup_path = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_lookup.csv"
+    if not lookup_path.exists():
+        _GRADIENT_LOOKUP = {}
+        return _GRADIENT_LOOKUP
+    try:
+        import csv as _csv
+        result = {}
+        with open(lookup_path, newline="", encoding="utf-8") as f:
+            reader = _csv.DictReader(f)
+            if "Image Reference" not in (reader.fieldnames or []):
+                print("[Gradient] WARNING: gradient_lookup.csv missing 'Image Reference' column — skipping")
+                _GRADIENT_LOOKUP = {}
+                return _GRADIENT_LOOKUP
+            for row in reader:
+                try:
+                    img = row.get("Image Reference", "").strip()
+                    grade_raw = row.get("Grade", "").strip()
+                    if img and grade_raw:
+                        result[img] = int(float(grade_raw))
+                except (ValueError, TypeError):
+                    continue
+        _GRADIENT_LOOKUP = result
+        print(f"[Gradient] Loaded {len(_GRADIENT_LOOKUP)} entries from gradient_lookup.csv")
+    except Exception as _e:
+        print(f"[Gradient] WARNING: could not load gradient_lookup.csv: {_e} — Grade will not be set")
+        _GRADIENT_LOOKUP = {}
+    return _GRADIENT_LOOKUP
+
+
+def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
+                   project_name: str = "") -> None:
+    """Inject Grade from the gradient lookup into *updates* (in-place).
+
+    The lookup is keyed by original subset filename (no project-name prefix),
+    so the same gradient data is shared across all projects that include a
+    given subset. Works for any project — no re-run needed per project.
+
+    Silent no-op when the CSV is missing, unreadable, or has no entry for
+    this image — autocode continues normally without setting Grade.
+    """
+    try:
+        lookup = _load_gradient_lookup()
+        # Strip project-name prefix to get the original subset filename key
+        # e.g. "AMK 1_Cam4_..." with project "AMK 1" → key "Cam4_..."
+        key = image_ref
+        if project_name:
+            prefix = project_name + "_"
+            if key.startswith(prefix):
+                key = key[len(prefix):]
+        if not lookup or key not in lookup:
+            return
+        grade = lookup[key]
+        if grade not in (1, 2):
+            print(f"[Gradient] WARNING: unexpected Grade value {grade!r} for {image_ref} — skipping")
+            return
+        updates["Grade"] = grade
+        if sources is not None:
+            sources["Grade"] = "LAZ"
+    except Exception as _e:
+        print(f"[Gradient] WARNING: error injecting Grade for {image_ref}: {_e}")
 
 
 # ───────────────────────── Endpoints ─────────────────────────
@@ -2147,6 +2219,9 @@ def autocode_image(project_name: str):
         updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path)  # returns dict
         updates = {k: v for k, v in (updates or {}).items() if v is not None}
 
+        # Inject Grade from pre-computed LAZ gradient lookup (no-op if not available)
+        _inject_grade(image_ref, updates, project_name=project_name)
+
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by CV model
         return ok({"updates": updates, "changed_fields": list(updates.keys())})
@@ -2793,8 +2868,6 @@ def autocode_all(project_name: str):
             return merged, sources, None
 
         # ========================================================================
-        # SINGLE MODE: Auto-code one image (backward compatible)
-        # ========================================================================
         # Used by the single "Auto-code" button in the UI
         # Payload: { imageRef: "...", coords: [[lon,lat],...], index?: int }
         if has_single_fields and not run_all and not indices:
@@ -2808,7 +2881,8 @@ def autocode_all(project_name: str):
             if err:
                 return fail(err, 500)
 
-            # Optional write-back to attributes table if index is provided
+            # Inject Grade from pre-computed LAZ gradient lookup
+            _inject_grade(image_ref, merged, sources, project_name=project_name)
             idx = payload.get("index")
             if isinstance(idx, int) and 0 <= idx < len(ver.attributes.df):
                 changed_fields = []  # Only fields that actually changed value
@@ -2897,6 +2971,9 @@ def autocode_all(project_name: str):
                 if err:
                     errors.append({"index": idx, "reason": err})
                     continue
+
+                # Inject Grade from pre-computed LAZ gradient lookup
+                _inject_grade(image_ref, merged, sources, project_name=project_name)
 
                 # Track which fields actually changed (for UI highlighting)
                 changed_fields = []  # List of field names that changed

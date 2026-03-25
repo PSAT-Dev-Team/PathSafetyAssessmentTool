@@ -15,15 +15,7 @@ echo  BACKEND  = %BACKEND%
 echo  FRONTEND = %FRONTEND%
 echo.
 
-:: ===== PRE-FLIGHT: check dependencies before doing any work =====
-where py >nul 2>&1
-if errorlevel 1 (
-    echo [Error] Python 3 not found.
-    echo         Install Python 3.10 or newer from: https://www.python.org/downloads/
-    echo         Tick "Add Python to PATH" and "Install launcher for all users" during setup.
-    pause
-    exit /b 1
-)
+:: ===== PRE-FLIGHT: check Node.js =====
 where node >nul 2>&1
 if errorlevel 1 (
     echo [Error] Node.js not found.
@@ -32,67 +24,121 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo [Check] Python and Node.js found.
+echo [Check] Node.js found.
 echo.
-:: =================================================================
+:: ======================================
 
-:: BACKEND: Create virtual environment if missing
+:: ===== BACKEND: Detect conda psat env vs venv =====
+set "USE_CONDA=0"
+set "CONDA_PYTHON="
+
+:: Look for conda in common install locations
+for %%C in (
+    "%USERPROFILE%\miniconda3\Scripts\conda.exe"
+    "%USERPROFILE%\anaconda3\Scripts\conda.exe"
+    "C:\ProgramData\miniconda3\Scripts\conda.exe"
+    "C:\ProgramData\anaconda3\Scripts\conda.exe"
+) do (
+    if exist %%C (
+        set "CONDA_EXE=%%~C"
+        goto :conda_found
+    )
+)
+goto :no_conda
+
+:conda_found
+:: Check if the psat environment exists
+for %%C in (
+    "%USERPROFILE%\miniconda3\envs\psat\python.exe"
+    "%USERPROFILE%\anaconda3\envs\psat\python.exe"
+    "C:\ProgramData\miniconda3\envs\psat\python.exe"
+    "C:\ProgramData\anaconda3\envs\psat\python.exe"
+) do (
+    if exist %%C (
+        set "CONDA_PYTHON=%%~C"
+        set "USE_CONDA=1"
+        goto :env_decided
+    )
+)
+echo [Warning] conda found but 'psat' environment not found.
+echo           Run: conda create -n psat python=3.11 -y
+echo           Then: conda install -c conda-forge gdal geopandas pyproj fiona rtree pyogrio -y
+echo           Falling back to venv...
+
+:no_conda
+:env_decided
+
+if "%USE_CONDA%"=="1" (
+    echo [Backend] Using conda 'psat' environment: %CONDA_PYTHON%
+    echo.
+    :: Install pip requirements into the conda env (conda-forge packages assumed already installed)
+    if exist "%BACKEND%\requirements.txt" (
+        echo [Backend] Installing/updating pip requirements into conda env ...
+        "%CONDA_PYTHON%" -m pip install -r "%BACKEND%\requirements.txt" --quiet >"%BACKEND%\backend_pip_install.log" 2>&1
+        if errorlevel 1 echo [Warning] Some pip packages failed. See: %BACKEND%\backend_pip_install.log
+        if not errorlevel 1 echo [Backend] Requirements installed.
+    )
+    :: Launch backend using conda python directly
+    start "PSAT Backend" cmd /k "cd /d %BACKEND% && "%CONDA_PYTHON%" app.py"
+    goto :backend_done
+)
+
+:: --- Fallback: venv path ---
+echo [Backend] conda 'psat' env not available - using venv fallback.
+
+where py >nul 2>&1
+if errorlevel 1 (
+    echo [Error] Python 3 not found.
+    echo         Install Miniconda from: https://docs.conda.io/en/latest/miniconda.html
+    echo         Then run: conda create -n psat python=3.11 -y
+    echo         And: conda install -c conda-forge gdal geopandas pyproj fiona rtree pyogrio -y
+    pause
+    exit /b 1
+)
+
 if exist "%VENV%\Scripts\activate.bat" goto :venv_ready
 
 echo [Backend] Creating Python virtual environment ...
 py -3 -m venv "%VENV%"
-if errorlevel 1 goto :venv_error
+if errorlevel 1 (
+    echo [Error] Failed to create virtual environment.
+    pause
+    exit /b 1
+)
 echo [Backend] Virtual environment created.
-goto :venv_ready
-
-:venv_error
-echo [Error] Failed to create virtual environment.
-echo         Make sure Python 3 is installed: https://www.python.org/downloads/
-pause
-exit /b 1
 
 :venv_ready
 echo [Backend] Upgrading pip ...
 "%VENV%\Scripts\python.exe" -m pip install --upgrade pip --quiet
 
-:: BACKEND: Install CPU PyTorch
-echo [Backend] Installing CPU PyTorch (skipped if already present, may take a while) ...
+echo [Backend] Installing CPU PyTorch (may take a while) ...
 "%VENV%\Scripts\pip.exe" install torch torchvision --index-url https://download.pytorch.org/whl/cpu --quiet >"%BACKEND%\torch_install.log" 2>&1
 if errorlevel 1 echo [Warning] PyTorch install may have failed. See: %BACKEND%\torch_install.log
 if not errorlevel 1 echo [Backend] PyTorch ready.
 
-:: BACKEND: Install requirements.txt
 if not exist "%BACKEND%\requirements.txt" goto :skip_requirements
-
 echo [Backend] Installing Python requirements ...
 "%VENV%\Scripts\pip.exe" install -r "%BACKEND%\requirements.txt" >"%BACKEND%\backend_pip_install.log" 2>&1
-if errorlevel 1 goto :pip_failed
-echo [Backend] Requirements installed.
-goto :skip_requirements
-
-:pip_failed
-echo [Warning] Some pip packages failed. See: %BACKEND%\backend_pip_install.log
-echo           For geospatial packages that need system libs, see: %BACKEND%\ONBOARDING.md
+if errorlevel 1 (
+    echo [Warning] Some pip packages failed. See: %BACKEND%\backend_pip_install.log
+    echo           For geospatial packages, follow: %BACKEND%\ONBOARDING.md
+)
+if not errorlevel 1 echo [Backend] Requirements installed.
 
 :skip_requirements
-
-:: BACKEND: Ensure ultralytics (use pip show - avoids hanging torch DLL load)
 "%VENV%\Scripts\pip.exe" show ultralytics >nul 2>&1
-if errorlevel 1 goto :install_ultralytics
-echo [Backend] ultralytics OK.
-goto :ultralytics_done
+if errorlevel 1 (
+    echo [Backend] ultralytics not found - installing ...
+    "%VENV%\Scripts\pip.exe" install ultralytics >"%BACKEND%\ultralytics_install.log" 2>&1
+    if errorlevel 1 echo [Warning] ultralytics install failed. See: %BACKEND%\ultralytics_install.log
+    if not errorlevel 1 echo [Backend] ultralytics installed.
+) else (
+    echo [Backend] ultralytics OK.
+)
 
-:install_ultralytics
-echo [Backend] ultralytics not found - installing ...
-"%VENV%\Scripts\pip.exe" install ultralytics >"%BACKEND%\ultralytics_install.log" 2>&1
-if errorlevel 1 echo [Warning] ultralytics install failed. See: %BACKEND%\ultralytics_install.log
-if not errorlevel 1 echo [Backend] ultralytics installed.
-
-:ultralytics_done
-
-:: BACKEND: Launch server in its own window
-echo [Backend] Starting server ...
 start "PSAT Backend" cmd /k "cd /d %BACKEND% && call .venv\Scripts\activate.bat && python app.py"
+
+:backend_done
 
 :: FRONTEND: Check prerequisites
 echo.

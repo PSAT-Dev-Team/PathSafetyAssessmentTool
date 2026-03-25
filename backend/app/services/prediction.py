@@ -37,51 +37,66 @@ class CycleRAP_Coding_Helper:
     @classmethod
     def initialise(cls, model_dir: Path):
         from ultralytics import YOLO
+        from ultralytics.nn import tasks as _ul_tasks
+
+        # Patch BaseModel.fuse() at the class level so Ultralytics >=8.x doesn't
+        # crash on older .pt files that have already-fused Conv layers (no 'bn').
+        _orig_fuse = _ul_tasks.BaseModel.fuse
+        def _safe_fuse(self, verbose=True):
+            try:
+                return _orig_fuse(self, verbose=verbose)
+            except AttributeError:
+                return self
+        _ul_tasks.BaseModel.fuse = _safe_fuse
+
+        def _load(path: Path) -> "YOLO":
+            return YOLO(path)
+
         # === Load Path Segmentation Model ===
         seg_path = model_dir / "path_seg.pt"
         if seg_path.exists():
-            cls.path_segmentation_model = YOLO(seg_path)
+            cls.path_segmentation_model = _load(seg_path)
         else:
             raise RuntimeError(f"\"{seg_path}\" Could not be loaded")
         
         # === Load Off-Road Bicycle Classifier ===
         off_road_path  = model_dir / "off_road_bicycle_path.pt"
         if off_road_path.exists():
-            cls.off_road_bicycle_classifier = YOLO(off_road_path)
+            cls.off_road_bicycle_classifier = _load(off_road_path)
         else:
             raise RuntimeError(f"\"{off_road_path}\" Could not be loaded")
         
         # === Load Adjacent Road Lanes Classifier ===
         adj_road_path  = model_dir / "adj_road_lane.pt"
         if adj_road_path.exists():
-            cls.adj_road_lanes_classifier = YOLO(adj_road_path)
+            cls.adj_road_lanes_classifier = _load(adj_road_path)
         else:
             raise RuntimeError(f"\"{adj_road_path}\" Could not be loaded")
 
         # === Load fixed obstacle lane Classifier ===
         fixed_obstacle_path = model_dir / "LTA_FIXEDOBSTACLE_BEST_2.pt" #cy
         if fixed_obstacle_path.exists():
-            cls.fixed_obstacle_classifier = YOLO(fixed_obstacle_path)
+            cls.fixed_obstacle_classifier = _load(fixed_obstacle_path)
         else:
             raise RuntimeError(f"\"{fixed_obstacle_path}\"Could not be loaded")
         
         # === Load  dev access Classifier ===
         Development_Access_path = model_dir / "DevelopmentAccess_last_150epochs.pt" #cy
         if Development_Access_path.exists():
-            cls.Development_access_classfier = YOLO(Development_Access_path)
+            cls.Development_access_classfier = _load(Development_Access_path)
         else:
             raise RuntimeError(f"\"{Development_Access_path}\"Could not be loaded")
 
         Delineation_path = model_dir / "LTA_Dill_4_Best.pt" #cy
         if Delineation_path.exists():
-            cls.Delineation_classfier = YOLO(Delineation_path)
+            cls.Delineation_classfier = _load(Delineation_path)
         else:
             raise RuntimeError(f"\"{Delineation_path}\"Could not be loaded")
         
 
         Road_class_path = model_dir / "RoadClassification_best.pt"
         if Road_class_path.exists():
-            cls.road_classification_model = YOLO(Road_class_path)
+            cls.road_classification_model = _load(Road_class_path)
         else:
             raise RuntimeError(f"\"{Road_class_path}\" Could not be loaded")
 
