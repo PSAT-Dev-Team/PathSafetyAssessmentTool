@@ -34,6 +34,10 @@ _INIT_LOCK = threading.Lock()
 _INIT_ERR = {"cv": None, "gis": None}
 _MODELS_READY = {"cv": False, "gis": False}
 
+# Set to True while YOLO inference is running.  PATCH handlers check this and
+# return immediately (no-op 200) so they don't hold the GIL during inference.
+_INFERENCE_IN_PROGRESS = False
+
 
 
 
@@ -336,17 +340,38 @@ def _ensure_models_ready():
                     raise RuntimeError(f"Cannot find model_dir (missing path_seg.pt). Tried:\n{tried}")
 
                 # YOLO models load
+                print(f"[Autocode] Loading CV models from {model_dir} — this may take several minutes on CPU...", flush=True)
                 cv_pred.CycleRAP_Coding_Helper.initialise(model_dir)
                 _MODELS_READY["cv"] = True
+                print("[Autocode] CV models loaded successfully.", flush=True)
 
             except Exception as e:
                 _INIT_ERR["cv"] = f"CV init failed: {e}"
+                print(f"[Autocode] ERROR: CV model init failed: {e}", flush=True)
                 # Next calls will short-circuit quickly
                 raise ServiceUnavailable(_INIT_ERR["cv"])
 
         # GIS 部分一般是惰性读取（LayerStore.default 内部），这里只做标记
         if not _MODELS_READY["gis"]:
             _MODELS_READY["gis"] = True
+
+
+def _warmup_models_in_background():
+    """Daemon thread: pre-load CV models at server startup so the first autocode request is fast."""
+    import time
+    # Small delay to let Flask finish starting up before we hammer the CPU
+    time.sleep(2)
+    print("[Autocode] Background warmup: starting model pre-load...", flush=True)
+    try:
+        _ensure_models_ready()
+        print("[Autocode] Background warmup: models ready.", flush=True)
+    except Exception as e:
+        print(f"[Autocode] Background warmup failed: {e}", flush=True)
+
+
+# Kick off background warmup immediately when this module is imported (server start)
+_warmup_thread = threading.Thread(target=_warmup_models_in_background, daemon=True, name="model-warmup")
+_warmup_thread.start()
 
 
 # ───────────────────────── Gradient lookup (module-level) ─────────────────────
@@ -424,6 +449,10 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
 
 
 # ───────────────────────── Endpoints ─────────────────────────
+
+@bp.before_request
+def _log_incoming():
+    print(f"[Flask] >>> {request.method} {request.path}", flush=True)
 
 @bp.get("")
 def list_projects():
@@ -2052,6 +2081,13 @@ def update_project_metadata(project_name: str):
         new_verified_segment_count = payload.get("verified_segment_count")
         new_autocoded_segment_count = payload.get("autocoded_segment_count")
 
+        # While YOLO inference is running, skip all disk I/O to avoid holding
+        # the GIL and slowing down inference (10-20x overhead observed).
+        # Name renames are never batched by the frontend during autocode, so
+        # it is safe to defer counter/tag updates until inference finishes.
+        if _INFERENCE_IN_PROGRESS and new_name is None:
+            return ok({"ok": True, "deferred": True})
+
         # Get the project
         try:
             proj = pm.project(project_name)
@@ -2202,6 +2238,7 @@ def update_project_metadata(project_name: str):
 
 @bp.post("/<project_name>/autocode/image")
 def autocode_image(project_name: str):
+    print(f"[Autocode] >>> autocode_image called for project='{project_name}'", flush=True)
     try:
         _ensure_models_ready()
 
@@ -2216,8 +2253,15 @@ def autocode_image(project_name: str):
         if not img_path.exists():
             return fail(f"image not found: {img_path.name}", 404)
 
-        updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path)  # returns dict
-        updates = {k: v for k, v in (updates or {}).items() if v is not None}
+        print(f"[Autocode] CV inference: {image_ref}", flush=True)
+        global _INFERENCE_IN_PROGRESS
+        _INFERENCE_IN_PROGRESS = True
+        try:
+            updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path) or {}
+        finally:
+            _INFERENCE_IN_PROGRESS = False
+        updates = {k: v for k, v in updates.items() if v is not None}
+        print(f"[Autocode] CV done: {image_ref} → {len(updates)} field(s) set", flush=True)
 
         # Inject Grade from pre-computed LAZ gradient lookup (no-op if not available)
         _inject_grade(image_ref, updates, project_name=project_name)
@@ -2944,6 +2988,8 @@ def autocode_all(project_name: str):
         images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
 
         # Process each row
+        total = len(indices)
+        print(f"[Autocode] Bulk starting: {total} rows for project '{project_name}'", flush=True)
         for idx in indices:
             try:
                 # Resolve image filename and coordinates for this row
@@ -2996,6 +3042,10 @@ def autocode_all(project_name: str):
                 sources_by_row[idx] = field_sources
                 ok_count += 1
 
+                # Progress every 10 rows
+                if ok_count % 10 == 0:
+                    print(f"[Autocode] Bulk progress: {ok_count}/{total} done ({len(errors)} errors so far)", flush=True)
+
             except Exception as e:
                 # Catch and log any unexpected errors
                 traceback.print_exc()
@@ -3004,6 +3054,7 @@ def autocode_all(project_name: str):
         # Save to disk only if requested and at least one row succeeded
         # Note: UI typically passes save=False to keep changes temporary until user clicks Save
         if save and ok_count > 0:
+            print(f"[Autocode] Bulk complete: {ok_count}/{total} OK, {len(errors)} failed. Saving...", flush=True)
             ver.save_all()
 
             # Update last_updated

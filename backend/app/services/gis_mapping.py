@@ -1,4 +1,5 @@
 # gis_mapping.py
+from __future__ import annotations
 import geopandas as gpd
 from shapely.geometry import Point
 from pathlib import Path
@@ -8,28 +9,17 @@ import pandas as pd
 # Import utility module for width and curvature calculation
 from app.utils.path_width_curvature import get_radius_and_width_at_point
 
-# ==== 新增：可选导入 Streamlit，并定义缓存加载函数 ====
-try:
-    import streamlit as st
-
-    @st.cache_resource(show_spinner=False)
-    def _load_gdf_cached(path_str: str, metric_crs: str, src_mtime: float):
-        """读取 -> 转CRS -> 预热sindex；src_mtime作为缓存键，源文件更新自动失效"""
-        gdf = gpd.read_file(path_str)
-        if gdf.crs is None:
-            raise ValueError(f"{Path(path_str).name} 缺少CRS")
-        gdf = gdf.to_crs(metric_crs)
-        _ = gdf.sindex  # 预热空间索引
-        return gdf
-except Exception:
-    # 非 Streamlit 场景下的兜底（无缓存）
-    def _load_gdf_cached(path_str: str, metric_crs: str, src_mtime: float):
-        gdf = gpd.read_file(path_str)
-        if gdf.crs is None:
-            raise ValueError(f"{Path(path_str).name} 缺少CRS")
-        gdf = gdf.to_crs(metric_crs)
-        _ = gdf.sindex
-        return gdf
+# ==== Changed: Removed Streamlit caching because it deadlocks Flask ====
+def _load_gdf_cached(path_str: str, metric_crs: str, src_mtime: float):
+    """读取 -> 转CRS -> 预热sindex；源文件更新自动失效由 LayerStore 控制"""
+    import fiona
+    with fiona.open(path_str) as src:
+        gdf = gpd.GeoDataFrame.from_features(src, crs=src.crs)
+    if gdf.crs is None:
+        raise ValueError(f"{Path(path_str).name} 缺少CRS")
+    gdf = gdf.to_crs(metric_crs)
+    _ = gdf.sindex  # 预热空间索引
+    return gdf
 # =======================================================
 
 CRS_WGS84 = "EPSG:4326"
@@ -1071,15 +1061,119 @@ class GIS:
             # Uses default parameters from original implementation
         )
 
-        # If no radius could be calculated, return default
-        if min_radius is None:
-            return default_value
+        # Check 1 (along-path curve): circumradius < 10 m → sharp turn
+        is_sharp_curve = (min_radius is not None) and (min_radius < sharp_turn_threshold)
 
-        # Classify based on threshold
-        if min_radius < sharp_turn_threshold:
+        # Check 2 (kink) + Check 3 (side-path junction): angle-based detections
+        # - Sudden kink: any vertex on a path within the window deflects > 45°
+        # - Non-parallel junction: any joining path meets the main path at > 45°
+        has_angle_turn = self._check_angle_curvature(point)
+
+        if is_sharp_curve or has_angle_turn:
             return 1  # Sharp Turn Present
         else:
             return 2  # No Sharp Turn Present
+
+    def _check_angle_curvature(self, point, collect_radius=5.0, angle_threshold=45.0, epsilon=1e-9):
+        """
+        Check for two angle-based curvature conditions over all path layers within the window:
+
+        1. KINK (along-path): Any original vertex on a path whose deflection angle exceeds
+           `angle_threshold` degrees. This catches sudden direction changes in a single path
+           that are too abrupt to be detected as a small circumradius (e.g. a hard kink
+           encoded as a single vertex rather than a tight curve).
+
+        2. NON-PARALLEL JUNCTION (side-path): Any point where two path endpoints meet (within
+           0.5 m tolerance) and the angle between their outgoing directions — normalised to
+           [0°, 90°] so direction of traversal does not matter — exceeds `angle_threshold`.
+           An exactly parallel continuation scores 0°; a T-junction scores 90°.
+
+        Both checks use only the **original (un-densified) shapefile vertices** so that
+        interpolated points do not dilute sharp angles.
+
+        Args:
+            point:            Shapely Point or (lon, lat) tuple (WGS84 or metric EPSG:3414).
+            collect_radius:   Search window radius in metres (default 5.0).
+            angle_threshold:  Degrees above which a kink/junction is flagged (default 45.0).
+            epsilon:          Minimum length threshold to skip degenerate segments.
+
+        Returns:
+            bool: True if any kink or non-parallel junction is found, False otherwise.
+        """
+        import math
+
+        pt = self.store.to_metric_point(point)
+        buf = pt.buffer(collect_radius)
+
+        all_layer_names = {
+            "cycling": "cycling_path",
+            "shared":  "shared_path",
+            "footpath": "footpath",
+        }
+
+        # Collect original vertex lists for every segment near the point
+        all_segments = []
+        for store_key in all_layer_names.values():
+            try:
+                gdf = self.store.get(store_key)
+                if gdf is None or gdf.empty:
+                    continue
+                if gdf.crs.to_epsg() != 3414:
+                    gdf = gdf.to_crs("EPSG:3414")
+                if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+                    gdf.geometry = gdf.geometry.apply(
+                        lambda g: self._remove_z_coordinate(g) if g is not None else None
+                    )
+                gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+                if gdf.empty:
+                    continue
+                cands = list(gdf.sindex.intersection(buf.bounds))
+                if not cands:
+                    continue
+                subset = gdf.iloc[cands]
+                subset = subset[subset.intersects(buf)]
+                for geom in subset.geometry:
+                    if geom.geom_type == "LineString":
+                        all_segments.append(list(geom.coords))
+                    elif geom.geom_type == "MultiLineString":
+                        for part in geom.geoms:
+                            all_segments.append(list(part.coords))
+            except Exception:
+                continue
+
+        if not all_segments:
+            return False
+
+        # ------------------------------------------------------------------
+        # Helper: deflection angle at vertex B along A→B→C (0° = straight)
+        # ------------------------------------------------------------------
+        def deflection_angle(ax, ay, bx, by, cx, cy):
+            v1x, v1y = bx - ax, by - ay
+            v2x, v2y = cx - bx, cy - by
+            m1 = math.sqrt(v1x * v1x + v1y * v1y)
+            m2 = math.sqrt(v2x * v2x + v2y * v2y)
+            if m1 < epsilon or m2 < epsilon:
+                return 0.0
+            cos_a = max(-1.0, min(1.0, (v1x * v2x + v1y * v2y) / (m1 * m2)))
+            return math.degrees(math.acos(cos_a))
+
+        # ------------------------------------------------------------------
+        # CHECK 1 — Sudden kink on original vertices
+        # A vertex is only tested when it lies inside the analysis window.
+        # ------------------------------------------------------------------
+        for coords in all_segments:
+            if len(coords) < 3:
+                continue
+            for i in range(len(coords) - 2):
+                bx, by = coords[i + 1]
+                if (bx - pt.x) ** 2 + (by - pt.y) ** 2 > collect_radius ** 2:
+                    continue  # middle vertex outside window
+                ax, ay = coords[i]
+                cx, cy = coords[i + 2]
+                if deflection_angle(ax, ay, bx, by, cx, cy) > angle_threshold:
+                    return True
+
+        return False
 
     def get_curvature_visualization(self, point, collect_radius=5.0):
         """
