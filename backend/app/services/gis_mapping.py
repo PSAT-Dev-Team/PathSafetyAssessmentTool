@@ -675,8 +675,10 @@ class GIS:
         # ========================================================================
         # STAGE 1: EXPANDING RING SEARCH FOR WIDTH
         # ========================================================================
-        found_layer = None
+        found_layer = None       # layer that gave us a valid width
         found_width = None
+        curvature_layer = None   # layer to use for curvature (first geometric hit,
+                                 # even if it has no WIDTH attribute)
 
         # Expand search radius from start_radius to max_radius in steps
         current_radius = start_radius
@@ -716,6 +718,10 @@ class GIS:
                     if intersecting.empty:
                         continue
 
+                    # Record the first layer found geometrically for curvature use
+                    if curvature_layer is None:
+                        curvature_layer = layer_key
+
                     # Lock width if not yet set
                     if found_width is None:
                         # Standardize WIDTH column
@@ -738,12 +744,18 @@ class GIS:
             # Increment radius for next ring
             current_radius += step
 
+        # Curvature uses the width layer when available, otherwise the first geometric hit
+        effective_curvature_layer = found_layer if found_layer is not None else curvature_layer
+
         # ========================================================================
         # STAGE 2: CURVATURE CALCULATION (Fixed Window)
         # ========================================================================
-        # Calculate curvature ONLY from the layer that provided the width
+        # Calculate curvature from the best available layer
         min_radius = None
 
+        if effective_curvature_layer is not None:
+            # Temporarily swap found_layer so the existing Stage 2 block works unchanged
+            found_layer = effective_curvature_layer
         if found_layer is not None:
             try:
                 gdf = self.store.get(layer_names[found_layer])

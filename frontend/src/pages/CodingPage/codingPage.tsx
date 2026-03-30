@@ -39,10 +39,8 @@ import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
 import GeoDataPanel from "./components/GeoDataPanel";
 import { saveAttributes } from "../../api";
-import { CurvatureVisualizationPanel } from "../../components/visualization/curvature/CurvatureVisualizationPanel";
-import "../../components/visualization/curvature/CurvatureVisualizationPanel.css";
-import { WidthVisualizationPanel } from "../../components/visualization/width/WidthVisualizationPanel";
-import "../../components/visualization/width/WidthVisualizationPanel.css";
+import { AnalysisPanel } from "../../components/visualization/AnalysisPanel";
+import "../../components/visualization/AnalysisPanel.css";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
 import AutocodeValidation from "../PathAnalysisPage/components/AutocodeValidation";
 
@@ -1773,20 +1771,12 @@ export default function CodingPage() {
 
         {currentFeature?.geometry?.type === "LineString" && (
           <GridItem colSpan={{ base: 1, md: 2 }}>
-            <WidthVisualizationPanel
+            <AnalysisPanel
               projectName={currentProjectName!}
               coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
               segmentIndex={currentIndex}
-            />
-          </GridItem>
-        )}
-
-        {currentFeature?.geometry?.type === "LineString" && (
-          <GridItem colSpan={{ base: 1, md: 2 }}>
-            <CurvatureVisualizationPanel
-              projectName={currentProjectName!}
-              coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
-              segmentIndex={currentIndex}
+              grade={currentAttr?.["Grade"] as number | null}
+              gradientPct={currentAttr?.["Gradient %"] as number | null}
             />
           </GridItem>
         )}

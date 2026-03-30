@@ -509,8 +509,10 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
             print(f"[Gradient] WARNING: unexpected Grade value {grade_coded!r} for {image_ref} — skipping")
             return None
         updates["Grade"] = grade_coded
+        updates["Gradient %"] = round(grade_pct, 2)
         if sources is not None:
             sources["Grade"] = "LAZ"
+            sources["Gradient %"] = "LAZ"
         return grade_pct
     except Exception as _e:
         print(f"[Gradient] WARNING: error injecting Grade for {image_ref}: {_e}")
