@@ -111,6 +111,7 @@ class LayerStore:
         store.add_path("mrt", base / "Mrt_exit" / "MRT_EXITS.shp")
         store.add_path("bus_lane", base / "bus_lane" / "Bus lanes.shp")
         store.add_path("bus_stop", base / "bus_stop" / "BusStop.shp")
+        store.add_path("bus_shelter", base / "bus_stop" / "BusShelter.shp")
         store.add_path("parking", base / "parking_lot" / "URA_PARKING_LOT.shp")
         store.add_path("inner", base / "area_type" / "CentralMB2025.shp")
         store.add_path("industrial", base / "area_type" / "LanduseIndustrial2025.shp")
@@ -157,6 +158,30 @@ class GIS:
         gdf = self.store.get(layer)
         return not gdf[gdf.geometry.buffer(tol).contains(pt)].empty
     
+    @staticmethod
+    def _remove_z_coordinate(geom):
+        """Helper to force 3D geometries into 2D by stripping Z."""
+        from shapely.geometry import Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon
+        if geom is None: return None
+        if not geom.has_z: return geom
+        
+        if geom.geom_type == 'Point':
+            return Point(geom.x, geom.y)
+        elif geom.geom_type == 'LineString':
+            return LineString([(x, y) for x, y, z in geom.coords])
+        elif geom.geom_type == 'Polygon':
+            if len(geom.exterior.coords[0]) == 3:
+                exterior = LineString([(x, y) for x, y, z in geom.exterior.coords])
+                interiors = [LineString([(x, y) for x, y, z in ring.coords]) for ring in geom.interiors]
+                return Polygon(exterior, interiors)
+            return geom
+        elif geom.geom_type.startswith('Multi'):
+            parts = [GIS._remove_z_coordinate(g) for g in geom.geoms]
+            if geom.geom_type == 'MultiPoint': return MultiPoint(parts)
+            if geom.geom_type == 'MultiLineString': return MultiLineString(parts)
+            if geom.geom_type == 'MultiPolygon': return MultiPolygon(parts)
+        return geom
+
     @staticmethod
     def _peak_hourly_by_group(df, data_col='data_type', time_col='timestamp', count_col='count', dayfirst=True):
         if df is None or len(df) == 0:

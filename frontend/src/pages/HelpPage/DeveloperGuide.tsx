@@ -23,23 +23,18 @@ export default function DeveloperGuide() {
     let isMounted = true;
     setLoading(true);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-
-    fetch(activeDoc.path, { signal: controller.signal })
+    fetch(activeDoc.path)
       .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load document (${res.status})`);
+        if (!res.ok) throw new Error("Failed to load document");
         return res.text();
       })
       .then((text) => {
         if (isMounted) setContent(text);
       })
       .catch((err) => {
-        if (isMounted)
-          setContent(`**Error loading document:** ${err.name === "AbortError" ? "Request timed out" : err.message}`);
+        if (isMounted) setContent(`**Error loading document:** ${err.message}`);
       })
       .finally(() => {
-        clearTimeout(timeout);
         if (isMounted) setLoading(false);
       });
 

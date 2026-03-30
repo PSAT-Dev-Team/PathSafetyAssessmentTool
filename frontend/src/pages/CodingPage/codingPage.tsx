@@ -83,6 +83,9 @@ const defaultProjectData: ProjectDataState = {
   editedRow: null,
 };
 
+// Global cache for project data to prevent reloading when navigating away and back (e.g. to Help page)
+const projectDataCache: Record<string, ProjectDataState> = {};
+
 export default function CodingPage() {
   const { projectNames } = useParams<{ projectNames: string }>();
 
@@ -124,7 +127,7 @@ export default function CodingPage() {
   const isShowingCodingGuide = activeTab === "coding-guide";
 
   // State for each project: keyed by project name
-  const [projectData, setProjectData] = useState<Record<string, ProjectDataState>>({});
+  const [projectData, setProjectData] = useState<Record<string, ProjectDataState>>(projectDataCache);
 
   // Global state
   const [autoCoding, setAutoCoding] = useState(false);
@@ -189,13 +192,17 @@ export default function CodingPage() {
 
   // Helper to update a specific project's data
   const updateProjectData = (projectName: string, updates: Partial<ProjectDataState>) => {
-    setProjectData(prev => ({
-      ...prev,
-      [projectName]: {
-        ...prev[projectName] || defaultProjectData,
-        ...updates,
-      },
-    }));
+    setProjectData(prev => {
+      const newState = {
+        ...prev,
+        [projectName]: {
+          ...prev[projectName] || defaultProjectData,
+          ...updates,
+        },
+      };
+      projectDataCache[projectName] = newState[projectName];
+      return newState;
+    });
   };
 
   const refreshCurrentProject = useCallback(async () => {
@@ -871,6 +878,7 @@ export default function CodingPage() {
 
     // If already loaded, don't reload
     if (projectData[currentProjectName] && !projectData[currentProjectName].loading) {
+      setImagesLoaded(true);
       return;
     }
 
@@ -1300,9 +1308,11 @@ export default function CodingPage() {
       const raw = Number(valStr);
       if (!Number.isFinite(raw)) return;
       const clamped = Math.max(0, Math.min(len || 0, raw));
+      // Guard against infinite loop if value hasn't changed
+      if (clamped === (currentData.verifiedSegmentCount ?? 0)) return;
       updateVerifiedSegmentCount(currentProjectName!, clamped);
     },
-    [currentProjectName, len, updateVerifiedSegmentCount]
+    [currentProjectName, len, updateVerifiedSegmentCount, currentData.verifiedSegmentCount]
   );
 
   const commitAutocodedSegment = useCallback(
@@ -1310,9 +1320,11 @@ export default function CodingPage() {
       const raw = Number(valStr);
       if (!Number.isFinite(raw)) return;
       const clamped = Math.max(0, Math.min(len || 0, raw));
+      // Guard against infinite loop if value hasn't changed
+      if (clamped === (currentData.autocodedSegmentCount ?? 0)) return;
       updateAutocodedSegmentCount(currentProjectName!, clamped);
     },
-    [currentProjectName, len, updateAutocodedSegmentCount]
+    [currentProjectName, len, updateAutocodedSegmentCount, currentData.autocodedSegmentCount]
   );
 
   useEffect(() => {

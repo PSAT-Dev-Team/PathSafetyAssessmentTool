@@ -1,7 +1,7 @@
 # --- Core data / geo ---
 pandas>=2.0
 numpy>=1.24
-geopandas>=0.14
+geopandas>=0.13.2
 shapely>=2.0
 pyproj>=3.5
 fiona>=1.9

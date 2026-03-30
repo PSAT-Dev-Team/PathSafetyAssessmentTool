@@ -11,8 +11,8 @@ def register_blueprints(app):
     # source tree). Import lazily and register only if available to avoid
     # crashing the whole app on import-time ModuleNotFoundError.
     try:
-        from .shapefiles import bp as shapefiles_bp
+        from .gis_layers import bp as shapefiles_bp
     except Exception:
-        app.logger.warning("Optional blueprint 'shapefiles' not available; skipping")
+        app.logger.warning("Optional blueprint 'gis_layers' not available; skipping")
     else:
         app.register_blueprint(shapefiles_bp, url_prefix="/api/shapefiles")

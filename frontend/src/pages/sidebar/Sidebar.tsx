@@ -371,9 +371,12 @@ export default function Sidebar() {
 
       {/* Projects Page - Show GIS layer management button */}
       {pathname === "/home" && (
-        <div className="psat-side-bottom">
+        <div className="psat-side-bottom" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <Button onClick={() => navigateSidebar("/gis-layers")} colorPalette="teal" variant="surface" size="sm" width="100%">
+            View GIS Layers
+          </Button>
           <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" width="100%">
-            GIS Layer
+            Update GIS Layer
           </Button>
         </div>
       )}

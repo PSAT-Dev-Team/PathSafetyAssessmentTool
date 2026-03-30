@@ -29,5 +29,3 @@ Windows notes
 If `Run-PSAT.bat` logs pip errors
 - The script writes `backend/backend_pip_install.log` on pip failures and will create `backend/SETUP_NOTES.txt` with the conda instructions above. Check those files and follow the conda steps if needed.
 
-Questions or blockers
-- Paste the relevant lines from `backend/backend_pip_install.log` and I’ll help diagnose.

@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 
-import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle } from "react-leaflet";
 import L, { divIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -45,19 +45,48 @@ proj4.defs(
   "+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 +ellps=WGS84 +units=m +no_defs"
 );
 const to4326 = (p: Position): [number, number] => {
+  const x = p[0];
+  const y = p[1];
+  
+  // If arguably already WGS84 (Singapore lon is ~103, lat is ~1.3)
+  // Newly created projects natively output EPSG:4326, so we must not project SVY21 -> WGS84.
+  if (x >= 90 && x <= 120 && y >= -10 && y <= 20) {
+    return [y, x]; // return [lat, lon]
+  }
+
   // 返回 [lat, lng]
   const [lon, lat] = proj4("EPSG:3414", "EPSG:4326", p as [number, number]) as [number, number];
   return [lat, lon];
 };
 
-// 小组件：根据点集自动 fit bounds
+// 小组件：根据点集自动 fit bounds (only on first load)
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
+  const hasFitRef = useRef(false);
   useEffect(() => {
-    if (!points.length) return;
+    if (!points.length || hasFitRef.current) return;
     const bounds = L.latLngBounds(points.map(([lat, lng]) => L.latLng(lat, lng)));
     map.fitBounds(bounds, { padding: [24, 24] });
+    hasFitRef.current = true;
   }, [points, map]);
+  return null;
+}
+
+// Zoom to current point when GIS layers are active
+function ZoomToGIS({ center, anyLayerOn }: { center: [number, number] | null; anyLayerOn: boolean }) {
+  const map = useMap();
+  const prevLayerOnRef = useRef(false);
+  useEffect(() => {
+    // Zoom in when a layer is turned on (transition from off->on)
+    if (anyLayerOn && !prevLayerOnRef.current && center) {
+      map.setView(center, 17, { animate: true });
+    }
+    // When all layers turned off, fit the full route again
+    if (!anyLayerOn && prevLayerOnRef.current && center) {
+      // Don't force re-fit — just let user navigate freely
+    }
+    prevLayerOnRef.current = anyLayerOn;
+  }, [anyLayerOn, center, map]);
   return null;
 }
 
@@ -89,7 +118,7 @@ interface DraggableMarkerProps {
   onDragEnd: (index: number, latlng: L.LatLng) => void;
 }
 
-function DraggableMarker({ position, index, color, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
+function DraggableMarker({ position, index, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
   const eventHandlers = useMemo(
     () => ({
       drag: (e: L.LeafletEvent) => {
@@ -223,6 +252,9 @@ const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
   return inside;
 };
 
+// No global cache needed anymore as we use localStorage
+
+
 export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
@@ -244,11 +276,55 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     return (externalScores && externalScores.length > 0) ? externalScores : internalScores;
   }, [externalScores, internalScores]);
 
+  // Read initial toggle states from localStorage if available
+  const cachedLayers = useMemo(() => {
+    if (!projectName) return {};
+    try {
+      const stored = localStorage.getItem(`gisLayerToggles_${projectName}`);
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  }, [projectName]);
+  
   // GIS Layer toggles (matching curvature analysis colors)
-  const [showFootpath, setShowFootpath] = useState(false);  // Blue
-  const [showCycling, setShowCycling] = useState(false);     // Green
-  const [showShared, setShowShared] = useState(false);       // Orange
-  const [showRoadcrossing, setShowRoadcrossing] = useState(false);  // Red
+  const [showFootpath, setShowFootpath] = useState(cachedLayers.showFootpath ?? false);  // Blue
+  const [showCycling, setShowCycling] = useState(cachedLayers.showCycling ?? false);     // Red
+  const [showShared, setShowShared] = useState(cachedLayers.showShared ?? false);       // Orange
+  const [showRoadcrossing, setShowRoadcrossing] = useState(cachedLayers.showRoadcrossing ?? false);  // Red
+  const [showMrtExit, setShowMrtExit] = useState(cachedLayers.showMrtExit ?? false);     // Cyan
+  const [showBusStop, setShowBusStop] = useState(cachedLayers.showBusStop ?? false);     // Purple
+  const [showBusLane, setShowBusLane] = useState(cachedLayers.showBusLane ?? false);     // Yellow
+  const [showParkingLot, setShowParkingLot] = useState(cachedLayers.showParkingLot ?? false); // Gold
+  const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Deep Pink
+
+  // Update localStorage whenever these toggles change
+  useEffect(() => {
+    if (!projectName) return;
+    localStorage.setItem(`gisLayerToggles_${projectName}`, JSON.stringify({
+      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine
+    }));
+  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, projectName]);
+
+// Sub-component to pan map to current selection
+function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null; anyLayerOn?: boolean }) {
+  const map = useMap();
+  const prevCenterRef = useRef<[number, number] | null>(null);
+  useEffect(() => {
+    if (!center) return;
+    const prevCenter = prevCenterRef.current;
+    const centerChanged = !prevCenter || prevCenter[0] !== center[0] || prevCenter[1] !== center[1];
+    prevCenterRef.current = center;
+    if (centerChanged) {
+      // When navigating to a new segment, pan to it
+      // If GIS layers are on, zoom in close enough to see them
+      const targetZoom = anyLayerOn ? Math.max(map.getZoom(), 17) : map.getZoom();
+      map.setView(center, targetZoom, { animate: true });
+    }
+  }, [center, anyLayerOn, map]);
+  return null;
+}
+
 
   // Delete Mode State
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -282,12 +358,18 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   type GISLayerFeature = {
     coordinates: [number, number][];
     properties: { width?: number };
+    geometry_type?: "line" | "point" | "polygon";
   };
   type GISLayers = {
     footpath: GISLayerFeature[];
     cycling: GISLayerFeature[];
     shared: GISLayerFeature[];
     roadcrossing: GISLayerFeature[];
+    mrt_exit: GISLayerFeature[];
+    bus_stop: GISLayerFeature[];
+    bus_lane: GISLayerFeature[];
+    parking_lot: GISLayerFeature[];
+    kerb_line: GISLayerFeature[];
   };
   const [gisLayers, setGisLayers] = useState<GISLayers | null>(null);
 
@@ -379,6 +461,30 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   // 当前高亮点 - use globalIdx to match the index prop (global index)
   const current = useMemo(() => points.find(p => p.globalIdx === index) ?? null, [points, index]);
 
+  // GIS query point: starts at current segment, can be repositioned by clicking on the map
+  // Stored as { lat, lon } primitives so React useEffect deps work reliably (no array reference issues)
+  const currentLat = current?.latlng[0] ?? null;
+  const currentLon = current?.latlng[1] ?? null;
+  const [gisLat, setGisLat] = useState<number | null>(null);
+  const [gisLon, setGisLon] = useState<number | null>(null);
+
+  // When segment changes (user clicks a green dot → navigates to new segment),
+  // reset the GIS query point to the new segment's first coordinate.
+  useEffect(() => {
+    if (currentLat !== null && currentLon !== null) {
+      setGisLat(currentLat);
+      setGisLon(currentLon);
+    }
+  }, [index, currentLat, currentLon]);
+
+  // Active query point (primitives, reliable for useEffect deps)
+  const activeGisLat = gisLat ?? currentLat;
+  const activeGisLon = gisLon ?? currentLon;
+
+  // Array form for rendering (buffer circle, zoom components)
+  const activeQueryPoint: [number, number] | null =
+    (activeGisLat !== null && activeGisLon !== null) ? [activeGisLat, activeGisLon] : null;
+
   // 初始中心（无数据时默认新加坡中心点）
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
 
@@ -391,9 +497,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     //   return;
     // }
 
-    if (!decodedName || !current) return;
+    if (!decodedName || activeGisLat === null || activeGisLon === null) return;
 
-    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing;
+    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine;
     if (!anyLayerEnabled) {
       setGisLayers(null);
       return;
@@ -402,17 +508,28 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
     let aborted = false;
     (async () => {
       try {
-        // current.latlng is [lat, lon] format from to4326()
-        const [lat, lon] = current.latlng;
+        const lat = activeGisLat;
+        const lon = activeGisLon;
 
-        // Fetch GIS layers near the current coding point
+        const layers = [];
+        if (showCycling) layers.push('cycling');
+        if (showShared) layers.push('shared');
+        if (showFootpath) layers.push('footpath');
+        if (showRoadcrossing) layers.push('roadcrossing');
+        if (showMrtExit) layers.push('mrt_exit');
+        if (showBusStop) layers.push('bus_stop');
+        if (showBusLane) layers.push('bus_lane');
+        if (showParkingLot) layers.push('parking_lot');
+        if (showKerbLine) layers.push('kerb_line');
+
+        // Fetch GIS layers near the active query point
         const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/gis/layers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             point: [lon, lat],  // API expects [lon, lat]
-            radius: 200,  // 200m radius around coding area (increased for better visibility)
-            layers: ['cycling', 'shared', 'footpath', 'roadcrossing']
+            radius: 200,
+            layers: layers
           })
         });
 
@@ -423,18 +540,26 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
           setGisLayers(data.layers);
         }
       } catch (e: any) {
+        if (!aborted) {
+          console.error("[GIS] Fetch error:", e);
+        }
       }
     })();
 
     return () => { aborted = true; };
-  }, [decodedName, current, showFootpath, showCycling, showShared, showRoadcrossing, hasExternalGeoFeatures]);
+  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
-    footpath: "#1E90FF",    // Blue - rgb(30, 144, 255)
-    cycling: "#B84A39",     // Darker Terracotta Red
-    shared: "#9333EA",      // Purple - rgb(147, 51, 234)
-    roadcrossing: "#00B400" // Green - rgb(0, 180, 0)
+    footpath: "#1E90FF",    // DodgerBlue
+    cycling: "#B91C1C",     // Deep Red
+    shared: "#A855F7",      // Purple
+    roadcrossing: "#10B981", // Emerald/Green
+    mrt_exit: "#06B6D4",    // Cyan
+    bus_stop: "#8B5CF6",    // Purple
+    bus_lane: "#EAB308",    // Yellow
+    parking_lot: "#D97706", // Amber/Gold
+    kerb_line: "#D946EF",   // Fuchsia
   };
 
   // Get segment color based on the crash type with the highest score
@@ -800,11 +925,11 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
             </Flex>
 
             <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showCycling ? "orange.600" : "gray.500"}>
+              <Text fontSize="sm" fontWeight="medium" color={showCycling ? "red.700" : "gray.500"}>
                 Cycling Path
               </Text>
               <Switch
-                colorPalette="orange"
+                colorPalette="red"
                 size="sm"
                 checked={showCycling}
                 onCheckedChange={(e) => setShowCycling(e.checked)}
@@ -834,6 +959,66 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 onCheckedChange={(e) => setShowRoadcrossing(e.checked)}
               />
             </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showMrtExit ? "cyan.600" : "gray.500"}>
+                MRT Exit
+              </Text>
+              <Switch
+                colorPalette="cyan"
+                size="sm"
+                checked={showMrtExit}
+                onCheckedChange={(e) => setShowMrtExit(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showBusStop ? "purple.600" : "gray.500"}>
+                Bus Stop
+              </Text>
+              <Switch
+                colorPalette="purple"
+                size="sm"
+                checked={showBusStop}
+                onCheckedChange={(e) => setShowBusStop(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showBusLane ? "yellow.600" : "gray.500"}>
+                Bus Lane
+              </Text>
+              <Switch
+                colorPalette="yellow"
+                size="sm"
+                checked={showBusLane}
+                onCheckedChange={(e) => setShowBusLane(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showParkingLot ? "yellow.600" : "gray.500"}>
+                Parking Lot
+              </Text>
+              <Switch
+                colorPalette="yellow"
+                size="sm"
+                checked={showParkingLot}
+                onCheckedChange={(e) => setShowParkingLot(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showKerbLine ? "pink.600" : "gray.500"}>
+                Kerb Line
+              </Text>
+              <Switch
+                colorPalette="pink"
+                size="sm"
+                checked={showKerbLine}
+                onCheckedChange={(e) => setShowKerbLine(e.checked)}
+              />
+            </Flex>
           </HStack>
         </Flex>
       </CardHeader>
@@ -861,8 +1046,39 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                 maxZoom={22}
               />
 
-              {/* 数据范围自适应 */}
+              {/* 数据范围自适应 (first load only) */}
               {allLatLngs.length > 0 && <FitBounds points={allLatLngs} />}
+
+              {/* Auto-zoom to current point when GIS layers active */}
+              <ZoomToGIS
+                center={activeQueryPoint}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+              />
+
+              {/* 自动跟随当前选中点 */}
+              <MapAutoCenter
+                center={current?.latlng ?? null}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+              />
+
+
+
+              {/* 搜索半径可视化 (200m) — follows current segment dot */}
+              {activeQueryPoint && (() => {
+                const [lat, lon] = activeQueryPoint;
+                return (
+                  <Circle
+                    center={[lat, lon]}
+                    radius={200}
+                    pathOptions={{
+                      color: '#3182ce',
+                      fillColor: '#3182ce',
+                      fillOpacity: 0.1,
+                      dashArray: '5, 5'
+                    }}
+                  />
+                );
+              })()}
 
               {/* GIS Layers - Render below the segment points */}
               {gisLayers && showFootpath && gisLayers.footpath && (
@@ -914,6 +1130,158 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.roadcrossing,
+                      weight: 3,
+                      opacity: 0.8
+                    }}
+                  />
+                ))
+              )}
+
+              {/* MRT Exit - Point layer rendered as CircleMarkers */}
+              {gisLayers && showMrtExit && gisLayers.mrt_exit && (
+                gisLayers.mrt_exit.map((feature, i) => (
+                  <CircleMarker
+                    key={`mrt_exit-${i}`}
+                    center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
+                    radius={6}
+                    pathOptions={{
+                      color: layerColors.mrt_exit,
+                      weight: 2,
+                      opacity: 0.9,
+                      fillOpacity: 0.7
+                    }}
+                  >
+                    <Tooltip>MRT Exit</Tooltip>
+                  </CircleMarker>
+                ))
+              )}
+
+              {/* Bus Stop - Point or Line (Shelters) */}
+              {gisLayers && showBusStop && gisLayers.bus_stop && (
+                gisLayers.bus_stop.map((feature, i) => {
+                  if (feature.geometry_type === "point") {
+                    return (
+                      <CircleMarker
+                        key={`bus_stop-${i}`}
+                        center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
+                        radius={6}
+                        pathOptions={{
+                          color: layerColors.bus_stop,
+                          weight: 2,
+                          opacity: 0.9,
+                          fillOpacity: 0.7
+                        }}
+                      >
+                        <Tooltip>Bus Stop</Tooltip>
+                      </CircleMarker>
+                    );
+                  } else if (feature.geometry_type === "line") {
+                    return (
+                      <Polyline
+                        key={`bus_shelter-${i}`}
+                        positions={feature.coordinates.map(c => [c[1], c[0]])}
+                        pathOptions={{
+                          color: layerColors.bus_stop,
+                          weight: 4,
+                          opacity: 0.8
+                        }}
+                      >
+                        <Tooltip>Bus Shelter</Tooltip>
+                      </Polyline>
+                    );
+                  }
+                  return null;
+                })
+              )}
+
+              {/* Bus Lane - LineString or MultiLineString layer */}
+              {gisLayers && showBusLane && gisLayers.bus_lane && (
+                gisLayers.bus_lane.map((feature, i) => {
+                  const coords = feature.coordinates;
+                  // If it's a MultiLineString structure (array of arrays of coordinates)
+                  const isMulti = Array.isArray(coords[0]) && Array.isArray(coords[0][0]);
+                  
+                  if (isMulti) {
+                    return (coords as any).map((line: any, j: number) => (
+                      <Polyline
+                        key={`bus_lane-${i}-${j}`}
+                        positions={line.map((c: any) => [c[1], c[0]])}
+                        pathOptions={{
+                          color: layerColors.bus_lane,
+                          weight: 4,
+                          opacity: 0.8,
+                          dashArray: "5, 10"
+                        }}
+                      >
+                         <Tooltip>Bus Lane</Tooltip>
+                      </Polyline>
+                    ));
+                  }
+
+                  return (
+                    <Polyline
+                      key={`bus_lane-${i}`}
+                      positions={coords.map((c: any) => [c[1], c[0]])}
+                      pathOptions={{
+                        color: layerColors.bus_lane,
+                        weight: 4,
+                        opacity: 0.8,
+                        dashArray: "5, 10"
+                      }}
+                    >
+                       <Tooltip>Bus Lane</Tooltip>
+                    </Polyline>
+                  );
+                })
+              )}
+
+              {/* Parking Lot - Polygon layer */}
+              {gisLayers && showParkingLot && gisLayers.parking_lot && (
+                gisLayers.parking_lot.map((feature, i) => {
+                  const geomType = feature.geometry_type;
+                  if (geomType === "polygon") {
+                    return (
+                      <Polygon
+                        key={`parking_lot-${i}`}
+                        positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                        pathOptions={{
+                          color: layerColors.parking_lot,
+                          weight: 2,
+                          opacity: 0.8,
+                          fillOpacity: 0.3
+                        }}
+                      >
+                        <Tooltip>Parking Lot</Tooltip>
+                      </Polygon>
+                    );
+                  }
+                  // Fallback: render as point if geometry_type is "point"
+                  return (
+                    <CircleMarker
+                      key={`parking_lot-${i}`}
+                      center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
+                      radius={6}
+                      pathOptions={{
+                        color: layerColors.parking_lot,
+                        weight: 2,
+                        opacity: 0.9,
+                        fillOpacity: 0.7
+                      }}
+                    >
+                      <Tooltip>Parking Lot</Tooltip>
+                    </CircleMarker>
+                  );
+                })
+              )}
+
+              {/* Kerb Line - LineString layer */}
+              {gisLayers && showKerbLine && gisLayers.kerb_line && (
+                gisLayers.kerb_line.map((feature, i) => (
+                  <Polyline
+                    key={`kerb_line-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
+                    pathOptions={{
+                      color: layerColors.kerb_line,
                       weight: 3,
                       opacity: 0.8
                     }}

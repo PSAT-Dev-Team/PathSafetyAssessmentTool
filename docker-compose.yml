@@ -3,22 +3,20 @@ services:
     build:
       context: .
       dockerfile: backend.Dockerfile
-    # Mount local data/model/shapefile directories for easy replacement & persistence
     volumes:
-      - ./backend/data:/app/data
-      - ./backend/models:/app/models
-      - ./backend/shapefiles:/app/shapefiles
+      # Persist project data and input folders outside the container
+      - ./data:/app/data
+      - ./in:/app/in
     ports:
-      - "8000:8000"   # Optional: allows direct backend debugging
-    # Add timezone or environment variables here if needed:
-    # environment:
-    #   - TZ=Asia/Singapore
+      - "8000:8000"
+    restart: unless-stopped
 
   frontend:
     build:
-      context: .
-      dockerfile: frontend.Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
     depends_on:
       - backend
-    ports:
-      - "5173:80"
+    restart: unless-stopped
