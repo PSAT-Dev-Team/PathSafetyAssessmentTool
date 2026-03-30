@@ -59,14 +59,34 @@ const to4326 = (p: Position): [number, number] => {
   return [lat, lon];
 };
 
-// 小组件：根据点集自动 fit bounds
+// 小组件：根据点集自动 fit bounds (only on first load)
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
+  const hasFitRef = useRef(false);
   useEffect(() => {
-    if (!points.length) return;
+    if (!points.length || hasFitRef.current) return;
     const bounds = L.latLngBounds(points.map(([lat, lng]) => L.latLng(lat, lng)));
     map.fitBounds(bounds, { padding: [24, 24] });
+    hasFitRef.current = true;
   }, [points, map]);
+  return null;
+}
+
+// Zoom to current point when GIS layers are active
+function ZoomToGIS({ center, anyLayerOn }: { center: [number, number] | null; anyLayerOn: boolean }) {
+  const map = useMap();
+  const prevLayerOnRef = useRef(false);
+  useEffect(() => {
+    // Zoom in when a layer is turned on (transition from off->on)
+    if (anyLayerOn && !prevLayerOnRef.current && center) {
+      map.setView(center, 17, { animate: true });
+    }
+    // When all layers turned off, fit the full route again
+    if (!anyLayerOn && prevLayerOnRef.current && center) {
+      // Don't force re-fit — just let user navigate freely
+    }
+    prevLayerOnRef.current = anyLayerOn;
+  }, [anyLayerOn, center, map]);
   return null;
 }
 
@@ -287,13 +307,21 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, projectName]);
 
 // Sub-component to pan map to current selection
-function MapAutoCenter({ center }: { center: [number, number] | null }) {
+function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null; anyLayerOn?: boolean }) {
   const map = useMap();
+  const prevCenterRef = useRef<[number, number] | null>(null);
   useEffect(() => {
-    if (center) {
-      map.setView(center, map.getZoom(), { animate: true });
+    if (!center) return;
+    const prevCenter = prevCenterRef.current;
+    const centerChanged = !prevCenter || prevCenter[0] !== center[0] || prevCenter[1] !== center[1];
+    prevCenterRef.current = center;
+    if (centerChanged) {
+      // When navigating to a new segment, pan to it
+      // If GIS layers are on, zoom in close enough to see them
+      const targetZoom = anyLayerOn ? Math.max(map.getZoom(), 17) : map.getZoom();
+      map.setView(center, targetZoom, { animate: true });
     }
-  }, [center, map]);
+  }, [center, anyLayerOn, map]);
   return null;
 }
 
@@ -433,6 +461,30 @@ function MapAutoCenter({ center }: { center: [number, number] | null }) {
   // 当前高亮点 - use globalIdx to match the index prop (global index)
   const current = useMemo(() => points.find(p => p.globalIdx === index) ?? null, [points, index]);
 
+  // GIS query point: starts at current segment, can be repositioned by clicking on the map
+  // Stored as { lat, lon } primitives so React useEffect deps work reliably (no array reference issues)
+  const currentLat = current?.latlng[0] ?? null;
+  const currentLon = current?.latlng[1] ?? null;
+  const [gisLat, setGisLat] = useState<number | null>(null);
+  const [gisLon, setGisLon] = useState<number | null>(null);
+
+  // When segment changes (user clicks a green dot → navigates to new segment),
+  // reset the GIS query point to the new segment's first coordinate.
+  useEffect(() => {
+    if (currentLat !== null && currentLon !== null) {
+      setGisLat(currentLat);
+      setGisLon(currentLon);
+    }
+  }, [index, currentLat, currentLon]);
+
+  // Active query point (primitives, reliable for useEffect deps)
+  const activeGisLat = gisLat ?? currentLat;
+  const activeGisLon = gisLon ?? currentLon;
+
+  // Array form for rendering (buffer circle, zoom components)
+  const activeQueryPoint: [number, number] | null =
+    (activeGisLat !== null && activeGisLon !== null) ? [activeGisLat, activeGisLon] : null;
+
   // 初始中心（无数据时默认新加坡中心点）
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
 
@@ -445,7 +497,7 @@ function MapAutoCenter({ center }: { center: [number, number] | null }) {
     //   return;
     // }
 
-    if (!decodedName || !current) return;
+    if (!decodedName || activeGisLat === null || activeGisLon === null) return;
 
     const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine;
     if (!anyLayerEnabled) {
@@ -456,8 +508,8 @@ function MapAutoCenter({ center }: { center: [number, number] | null }) {
     let aborted = false;
     (async () => {
       try {
-        // current.latlng is [lat, lon] format from to4326()
-        const [lat, lon] = current.latlng;
+        const lat = activeGisLat;
+        const lon = activeGisLon;
 
         const layers = [];
         if (showCycling) layers.push('cycling');
@@ -470,13 +522,13 @@ function MapAutoCenter({ center }: { center: [number, number] | null }) {
         if (showParkingLot) layers.push('parking_lot');
         if (showKerbLine) layers.push('kerb_line');
 
-        // Fetch GIS layers near the current coding point
+        // Fetch GIS layers near the active query point
         const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/gis/layers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             point: [lon, lat],  // API expects [lon, lat]
-            radius: 200,        // Reverted to 200m radius
+            radius: 200,
             layers: layers
           })
         });
@@ -495,7 +547,7 @@ function MapAutoCenter({ center }: { center: [number, number] | null }) {
     })();
 
     return () => { aborted = true; };
-  }, [decodedName, current, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
+  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
@@ -994,19 +1046,30 @@ function MapAutoCenter({ center }: { center: [number, number] | null }) {
                 maxZoom={22}
               />
 
-              {/* 数据范围自适应 */}
+              {/* 数据范围自适应 (first load only) */}
               {allLatLngs.length > 0 && <FitBounds points={allLatLngs} />}
-              
-              {/* 自动跟随当前选中点 */}
-              <MapAutoCenter center={current?.latlng ?? null} />
 
-              {/* 搜索半径可视化 (200m) */}
-              {current && (() => {
-                const [lat, lon] = current.latlng;
+              {/* Auto-zoom to current point when GIS layers active */}
+              <ZoomToGIS
+                center={activeQueryPoint}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+              />
+
+              {/* 自动跟随当前选中点 */}
+              <MapAutoCenter
+                center={current?.latlng ?? null}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+              />
+
+
+
+              {/* 搜索半径可视化 (200m) — follows current segment dot */}
+              {activeQueryPoint && (() => {
+                const [lat, lon] = activeQueryPoint;
                 return (
                   <Circle
                     center={[lat, lon]}
-                    radius={200} // Matches user preferred 200m radius
+                    radius={200}
                     pathOptions={{
                       color: '#3182ce',
                       fillColor: '#3182ce',
