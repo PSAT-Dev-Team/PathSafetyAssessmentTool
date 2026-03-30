@@ -372,18 +372,9 @@ class CycleRAP_Coding_Helper:
             print(f"Road Classification Prediction: {pred_class} (conf {pred_conf:.2f})")
 
             # --- CASE 0: Dev Access ---
-
+            # (Dev access detection handled below in the unconditional block)
             if pred_class == 0:
-                dev_results = cls.Development_access_classfier.predict(image_path)[0]
-                dev_result = cls._filter_segmentation_results(dev_results, 0.5)
-                dev_cls_ids = set(dev_result.boxes.cls.int().tolist()) if dev_result.boxes else set()
-
-                # check if traffic crossing present (label 3)
-                if 3 in dev_cls_ids or 4 in cls_ids:
-                    attribute_fields[serializer.Attributes.Fields.PROP_ACCESS_STR] = serializer.presence_mapping["Not Present"]
-    
-                else:
-                    attribute_fields[serializer.Attributes.Fields.PROP_ACCESS_STR] = serializer.presence_mapping["Not Present"]
+                pass
 
             # --- CASE 1: Off-Road Bicycle ---
             elif pred_class == 1:

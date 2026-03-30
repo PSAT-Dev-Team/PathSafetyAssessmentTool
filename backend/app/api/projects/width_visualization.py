@@ -32,7 +32,7 @@ def get_layer_color(layer_name: str) -> tuple:
 def _get_gis_instance():
     """Get the cached GIS instance from the parent blueprint's routes module."""
     from app.api.projects import routes as _routes
-    return _routes._get_gis_instance()
+    return _routes._get_gis()
 
 
 @bp.post("/visualize")

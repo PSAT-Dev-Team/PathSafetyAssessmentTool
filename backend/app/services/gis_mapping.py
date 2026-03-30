@@ -9,24 +9,42 @@ import pandas as pd
 # Import utility module for width and curvature calculation
 from app.utils.path_width_curvature import get_radius_and_width_at_point
 
-# ==== Changed: Removed Streamlit caching because it deadlocks Flask ====
+
 def _load_gdf_cached(path_str: str, metric_crs: str, src_mtime: float):
-    """读取 -> 转CRS -> 预热sindex；源文件更新自动失效由 LayerStore 控制"""
-    import fiona
-    with fiona.open(path_str) as src:
-        gdf = gpd.GeoDataFrame.from_features(src, crs=src.crs)
+    """Load shapefile → reproject → warm sindex.  Uses parquet cache for speed."""
+    shp = Path(path_str)
+    cache = shp.with_name(shp.stem + ".cache.parquet")
+
+    # Fast path: read from parquet cache (skips shapefile parsing + CRS conversion)
+    if cache.exists():
+        try:
+            if cache.stat().st_mtime >= src_mtime:
+                gdf = gpd.read_parquet(cache)
+                _ = gdf.sindex
+                return gdf
+        except Exception:
+            pass  # corrupt / incompatible cache → fall through
+
+    # Read shapefile via pyogrio (C-level GDAL reader — releases GIL, ~5x faster than fiona)
+    gdf = gpd.read_file(path_str, engine="pyogrio")
     if gdf.crs is None:
-        raise ValueError(f"{Path(path_str).name} 缺少CRS")
+        raise ValueError(f"{shp.name} missing CRS")
     gdf = gdf.to_crs(metric_crs)
-    _ = gdf.sindex  # 预热空间索引
+    _ = gdf.sindex
+
+    # Write parquet cache for next startup
+    try:
+        gdf.to_parquet(cache)
+    except Exception:
+        pass
+
     return gdf
-# =======================================================
 
 CRS_WGS84 = "EPSG:4326"
 CRS_METRIC = "EPSG:3414"
 
 class LayerStore:
-    """懒加载 shapefile"""
+    """Lazy-loading shapefile store with parquet caching."""
     def __init__(self, metric_crs=CRS_METRIC):
         self.metric_crs = metric_crs
         self.paths: dict[str, Path] = {}
@@ -56,7 +74,7 @@ class LayerStore:
             raise ValueError(f"Speed CSV missing LINKID column. Found columns: {df.columns.tolist()}")
 
     def get(self, name: str):
-        """懒加载：第一次用时读取 shapefile（B：通过 cache_resource 缓存）"""
+        """Lazy load: reads from parquet cache or shapefile on first access."""
         if name not in self.layers:
             if name not in self.paths:
                 raise KeyError(f"未注册图层: {name}")

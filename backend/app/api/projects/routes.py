@@ -74,9 +74,9 @@ def warmup_gis() -> None:
     t = threading.Thread(target=_warm, name="gis-warmup", daemon=True)
     t.start()
 
-# Set to True while YOLO inference is running.  PATCH handlers check this and
+# Counts nested inference scopes.  PATCH handlers check this and
 # return immediately (no-op 200) so they don't hold the GIL during inference.
-_INFERENCE_IN_PROGRESS = False
+_INFERENCE_DEPTH = 0
 
 
 # —— Reuse your existing service layer —— #
@@ -391,6 +391,7 @@ def _ensure_models_ready():
 def _warmup_models_in_background():
     """Daemon thread: pre-load CV + GIS at server startup so the first autocode request is fast."""
     import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     # Small delay to let Flask finish starting up before we hammer the CPU
     time.sleep(2)
     print("[Autocode] Background warmup: starting model pre-load...", flush=True)
@@ -400,18 +401,30 @@ def _warmup_models_in_background():
     except Exception as e:
         print(f"[Autocode] Background warmup (CV) failed: {e}", flush=True)
 
-    # Pre-load GIS shapefiles in the same warmup thread
+    # Pre-load GIS shapefiles in parallel threads (I/O + C extensions release GIL)
     try:
-        print("[GIS] Background warmup: loading shapefiles...", flush=True)
-        _inst = _get_gis_instance()
-        # Force-load every registered layer so the first real request hits the cache
-        for layer_name in list(_inst.store.paths.keys()):
-            try:
-                _inst.store.get(layer_name)
-                print(f"[GIS] Loaded layer: {layer_name}", flush=True)
-            except Exception as _e:
-                print(f"[GIS] Warning: could not pre-load layer '{layer_name}': {_e}", flush=True)
-        print("[GIS] Background warmup: shapefiles ready.", flush=True)
+        print("[GIS] Background warmup: loading shapefiles in parallel...", flush=True)
+        t_total = time.perf_counter()
+        _inst = _get_gis()
+        layer_names = list(_inst.store.paths.keys())
+
+        def _load_one(name):
+            t0 = time.perf_counter()
+            _inst.store.get(name)
+            return time.perf_counter() - t0
+
+        with ThreadPoolExecutor(max_workers=6, thread_name_prefix="gis-load") as pool:
+            futs = {pool.submit(_load_one, n): n for n in layer_names}
+            for fut in as_completed(futs):
+                name = futs[fut]
+                try:
+                    elapsed = fut.result()
+                    print(f"[GIS] Loaded: {name} ({elapsed:.1f}s)", flush=True)
+                except Exception as exc:
+                    print(f"[GIS] Warning: {name}: {exc}", flush=True)
+
+        elapsed_total = time.perf_counter() - t_total
+        print(f"[GIS] Background warmup complete ({elapsed_total:.1f}s total).", flush=True)
     except Exception as e:
         print(f"[GIS] Background warmup failed: {e}", flush=True)
 
@@ -2133,7 +2146,7 @@ def update_project_metadata(project_name: str):
         # the GIL and slowing down inference (10-20x overhead observed).
         # Name renames are never batched by the frontend during autocode, so
         # it is safe to defer counter/tag updates until inference finishes.
-        if _INFERENCE_IN_PROGRESS and new_name is None:
+        if _INFERENCE_DEPTH > 0 and new_name is None:
             return ok({"ok": True, "deferred": True})
 
         # Get the project
@@ -2301,12 +2314,12 @@ def autocode_image(project_name: str):
             return fail(f"image not found: {img_path.name}", 404)
 
         print(f"[Autocode] CV inference: {image_ref}", flush=True)
-        global _INFERENCE_IN_PROGRESS
-        _INFERENCE_IN_PROGRESS = True
+        global _INFERENCE_DEPTH
+        _INFERENCE_DEPTH += 1
         try:
             updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path) or {}
         finally:
-            _INFERENCE_IN_PROGRESS = False
+            _INFERENCE_DEPTH -= 1
         updates = {k: v for k, v in updates.items() if v is not None}
         print(f"[Autocode] CV done: {image_ref} → {len(updates)} field(s) set", flush=True)
 
@@ -3088,9 +3101,14 @@ def autocode_all(project_name: str):
         images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
 
         # Process each row
+        # Hold _INFERENCE_DEPTH for the entire bulk loop so PATCH handlers
+        # short-circuit instead of competing for the GIL between images.
+        global _INFERENCE_DEPTH
+        _INFERENCE_DEPTH += 1
         total = len(indices)
         print(f"[Autocode] Bulk starting: {total} rows for project '{project_name}'", flush=True)
-        for idx in indices:
+        try:
+          for idx in indices:
             try:
                 # Resolve image filename and coordinates for this row
                 image_ref = _resolve_image_ref(idx)
@@ -3150,6 +3168,8 @@ def autocode_all(project_name: str):
                 # Catch and log any unexpected errors
                 traceback.print_exc()
                 errors.append({"index": idx, "reason": str(e)})
+        finally:
+          _INFERENCE_DEPTH -= 1
 
         # Save to disk only if requested and at least one row succeeded
         # Note: UI typically passes save=False to keep changes temporary until user clicks Save
