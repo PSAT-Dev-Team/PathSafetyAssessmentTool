@@ -29,6 +29,12 @@ def get_layer_color(layer_name: str) -> tuple:
     return colors.get(layer_name, (0, 0, 0))
 
 
+def _get_gis_instance():
+    """Get the cached GIS instance from the parent blueprint's routes module."""
+    from app.api.projects import routes as _routes
+    return _routes._get_gis_instance()
+
+
 @bp.post("/visualize")
 def visualize_width():
     """
@@ -98,16 +104,14 @@ def visualize_width():
         if not shp_dir.exists():
             return jsonify({"ok": False, "error": f"Shapefile directory not found: {shp_dir}"}), 500
 
-        # Initialize GIS
-        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
-        _gis = gis.GIS(layer_store)
+        # Initialize GIS using the cached singleton
+        _gis = _get_gis_instance()
         pt_metric = _gis.store.to_metric_point(point)
 
-        # Load path layers
-        base_dir = str(shp_dir)
-        gdf_cycling = load_layer("path/CyclingpathCentreline.shp", base_dir=base_dir)
-        gdf_foot = load_layer("path/Footpathcentreline.shp", base_dir=base_dir)
-        gdf_share = load_layer("path/Sharedpathcentreline.shp", base_dir=base_dir)
+        # Load path layers from the cached GIS store (avoids disk I/O on every request)
+        gdf_cycling = _gis.store.get("cycling_path")
+        gdf_foot = _gis.store.get("footpath")
+        gdf_share = _gis.store.get("shared_path")
 
         layers = {
             "cycling": gdf_cycling,

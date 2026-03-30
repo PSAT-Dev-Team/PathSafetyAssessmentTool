@@ -38,6 +38,27 @@ _MODELS_READY = {"cv": False, "gis": False}
 # return immediately (no-op 200) so they don't hold the GIL during inference.
 _INFERENCE_IN_PROGRESS = False
 
+# Module-level GIS instance — loaded once, reused for every autocode/gis request.
+# Previously each request called LayerStore.default() which reloaded all 15+
+# shapefiles from disk, causing 5–13 minute per-request overhead.
+_GIS_INSTANCE: "gis.GIS | None" = None
+_GIS_LOCK = threading.Lock()
+
+
+def _get_gis_instance() -> "gis.GIS":
+    """Return the singleton GIS instance, initialising on first call."""
+    global _GIS_INSTANCE
+    if _GIS_INSTANCE is None:
+        with _GIS_LOCK:
+            if _GIS_INSTANCE is None:
+                backend_root = Path(__file__).resolve().parents[3]
+                shp_dir = (backend_root / "shapefiles").resolve()
+                print(f"[GIS] Creating GIS instance from {shp_dir} …", flush=True)
+                layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
+                _GIS_INSTANCE = gis.GIS(layer_store)
+                print("[GIS] GIS instance created (layers will load on first access).", flush=True)
+    return _GIS_INSTANCE
+
 
 
 
@@ -357,16 +378,31 @@ def _ensure_models_ready():
 
 
 def _warmup_models_in_background():
-    """Daemon thread: pre-load CV models at server startup so the first autocode request is fast."""
+    """Daemon thread: pre-load CV + GIS at server startup so the first autocode request is fast."""
     import time
     # Small delay to let Flask finish starting up before we hammer the CPU
     time.sleep(2)
     print("[Autocode] Background warmup: starting model pre-load...", flush=True)
     try:
         _ensure_models_ready()
-        print("[Autocode] Background warmup: models ready.", flush=True)
+        print("[Autocode] Background warmup: CV models ready.", flush=True)
     except Exception as e:
-        print(f"[Autocode] Background warmup failed: {e}", flush=True)
+        print(f"[Autocode] Background warmup (CV) failed: {e}", flush=True)
+
+    # Pre-load GIS shapefiles in the same warmup thread
+    try:
+        print("[GIS] Background warmup: loading shapefiles...", flush=True)
+        _inst = _get_gis_instance()
+        # Force-load every registered layer so the first real request hits the cache
+        for layer_name in list(_inst.store.paths.keys()):
+            try:
+                _inst.store.get(layer_name)
+                print(f"[GIS] Loaded layer: {layer_name}", flush=True)
+            except Exception as _e:
+                print(f"[GIS] Warning: could not pre-load layer '{layer_name}': {_e}", flush=True)
+        print("[GIS] Background warmup: shapefiles ready.", flush=True)
+    except Exception as e:
+        print(f"[GIS] Background warmup failed: {e}", flush=True)
 
 
 # Kick off background warmup immediately when this module is imported (server start)
@@ -402,9 +438,12 @@ def _load_gradient_lookup() -> dict:
             for row in reader:
                 try:
                     img = row.get("Image Reference", "").strip()
-                    grade_raw = row.get("Grade", "").strip()
-                    if img and grade_raw:
-                        result[img] = int(float(grade_raw))
+                    grade_pct_raw = row.get("gradient_pct", "").strip()
+                    grade_coded_raw = row.get("Grade", "").strip()
+                    if img and grade_coded_raw:
+                        grade_coded = int(float(grade_coded_raw))
+                        grade_pct = float(grade_pct_raw) if grade_pct_raw else float("nan")
+                        result[img] = (grade_coded, grade_pct)
                 except (ValueError, TypeError):
                     continue
         _GRADIENT_LOOKUP = result
@@ -416,36 +455,42 @@ def _load_gradient_lookup() -> dict:
 
 
 def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
-                   project_name: str = "") -> None:
+                   project_name: str = "") -> "float | None":
     """Inject Grade from the gradient lookup into *updates* (in-place).
-
-    The lookup is keyed by original subset filename (no project-name prefix),
-    so the same gradient data is shared across all projects that include a
-    given subset. Works for any project — no re-run needed per project.
-
-    Silent no-op when the CSV is missing, unreadable, or has no entry for
-    this image — autocode continues normally without setting Grade.
+    Returns grade_pct if found, else None.
     """
     try:
         lookup = _load_gradient_lookup()
-        # Strip project-name prefix to get the original subset filename key
-        # e.g. "AMK 1_Cam4_..." with project "AMK 1" → key "Cam4_..."
+        if not lookup:
+            return None
+        # Try exact match first, then strip project prefix, then suffix match
         key = image_ref
-        if project_name:
+        if key not in lookup and project_name:
             prefix = project_name + "_"
             if key.startswith(prefix):
                 key = key[len(prefix):]
-        if not lookup or key not in lookup:
-            return
-        grade = lookup[key]
-        if grade not in (1, 2):
-            print(f"[Gradient] WARNING: unexpected Grade value {grade!r} for {image_ref} — skipping")
-            return
-        updates["Grade"] = grade
+        if key not in lookup:
+            # Last resort: find any CSV entry whose key is a suffix of image_ref
+            bare = image_ref.split("_", 1)[-1] if "_" in image_ref else image_ref
+            for k in lookup:
+                if image_ref.endswith(k) or k.endswith(bare):
+                    key = k
+                    break
+        if key not in lookup:
+            print(f"[Gradient] no entry for '{image_ref}' — skipping", flush=True)
+            return None
+        grade_coded, grade_pct = lookup[key]
+        print(f"[Gradient] {image_ref}: {grade_pct:+.2f}% → Grade {grade_coded}", flush=True)
+        if grade_coded not in (1, 2):
+            print(f"[Gradient] WARNING: unexpected Grade value {grade_coded!r} for {image_ref} — skipping")
+            return None
+        updates["Grade"] = grade_coded
         if sources is not None:
             sources["Grade"] = "LAZ"
+        return grade_pct
     except Exception as _e:
         print(f"[Gradient] WARNING: error injecting Grade for {image_ref}: {_e}")
+        return None
 
 
 # ───────────────────────── Endpoints ─────────────────────────
@@ -2264,11 +2309,14 @@ def autocode_image(project_name: str):
         print(f"[Autocode] CV done: {image_ref} → {len(updates)} field(s) set", flush=True)
 
         # Inject Grade from pre-computed LAZ gradient lookup (no-op if not available)
-        _inject_grade(image_ref, updates, project_name=project_name)
+        gradient_pct = _inject_grade(image_ref, updates, project_name=project_name)
 
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by CV model
-        return ok({"updates": updates, "changed_fields": list(updates.keys())})
+        resp: dict = {"updates": updates, "changed_fields": list(updates.keys())}
+        if gradient_pct is not None:
+            resp["gradient_pct"] = round(gradient_pct, 3)
+        return ok(resp)
 
     except ServiceUnavailable as e:
         return fail(str(e), 503)
@@ -2291,14 +2339,7 @@ def autocode_gis(project_name: str):
         from shapely.geometry import Point
         pt = Point(start_lon, start_lat)
 
-        # backend/shapefiles 作为基准目录
-        backend_root = Path(__file__).resolve().parents[3]  # .../backend
-        shp_dir = (backend_root / "shapefiles").resolve()
-        if not shp_dir.exists():
-            return fail(f"Shapefile base dir not found: {shp_dir}", 500)
-
-        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
-        _gis = gis.GIS(layer_store)
+        _gis = _get_gis_instance()
 
         updates: dict[str, int | float] = {}
 
@@ -2453,8 +2494,7 @@ def get_curvature_visualization(project_name: str):
         if not shp_dir.exists():
             return fail(f"Shapefile base dir not found: {shp_dir}", 500)
 
-        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
-        _gis = gis.GIS(layer_store)
+        _gis = _get_gis_instance()
 
         # Generate visualization data
         viz_data = _gis.get_curvature_visualization(pt, collect_radius=5.0)
@@ -2549,8 +2589,7 @@ def get_width_visualization(project_name: str):
         if not shp_dir.exists():
             return fail(f"Shapefile base dir not found: {shp_dir}", 500)
 
-        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
-        _gis = gis.GIS(layer_store)
+        _gis = _get_gis_instance()
 
         # Generate visualization data
         viz_data = _gis.get_width_visualization(pt, start_radius=1.0, max_radius=10.0, step=1.0)
@@ -2623,10 +2662,8 @@ def get_gis_layers(project_name: str):
         if not shp_dir.exists():
             return fail(f"Shapefile base dir not found: {shp_dir}", 500)
 
-        print(f"[GIS] Shapefile directory: {shp_dir}")
-        layer_store = gis.LayerStore.default(base_dir=str(shp_dir))
-        print(f"[GIS] Layer store paths: {list(layer_store.paths.keys())}")
-        _gis = gis.GIS(layer_store)
+        print(f"[GIS] Using cached GIS instance")
+        _gis = _get_gis_instance()
         pt_metric = _gis.store.to_metric_point(pt)
         print(f"[GIS] Point in metric (EPSG:3414): {pt_metric}")
 
