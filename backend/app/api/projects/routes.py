@@ -857,6 +857,7 @@ def _convert_attribute_types(df: pd.DataFrame) -> pd.DataFrame:
         'Area type',
         'Facility Type',
         'Facility access',
+        'Line of Sight',
         'Loose or slippery surface',
         'Tram or Train Rails',
         'Major Surface Deformation or Drain Opening',

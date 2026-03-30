@@ -21,6 +21,9 @@ LOOKUP_TABLES = {
     'fixed_obstacle': {1: {'risk': 1.0, 'cond': 1}, 2: {'risk': 1.0, 'cond': 0}},
     'non_fixed_obstacle': {1: {'risk': 1.0, 'cond': 1}, 2: {'risk': 1.0, 'cond': 0}},
     'delineation': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 0}},
+    # Line of Sight: Adequate (1) = no penalty; Inadequate (2) = 1.2x risk + condition trigger
+    # Poor visibility raises likelihood of conflicts with cyclists, pedestrians and vehicles
+    'line_of_sight': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 1}},
     'facility_width': {1: {'risk': 1.8, 'cond': 0}, 2: {'risk': 1.5, 'cond': 0}, 3: {'risk': 1.0, 'cond': 0}},
     'flow_direction': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.5, 'cond': 0}},
     'width_restriction': {1: {'risk': 1.2, 'cond': 0}, 2: {'risk': 1.0, 'cond': 0}},
@@ -106,6 +109,7 @@ ROAD_AADT = Attributes.Fields.ROAD_AADT_STR
 HEAVY_VEHICLE = Attributes.Fields.HEAVY_VHCL_FLOW_STR
 ROAD_SPEED = Attributes.Fields.ROAD_OPR_SPEED_AVG_STR
 SPEED_UNIT = Attributes.Fields.SPEED_UNIT_STR
+LINE_OF_SIGHT = Attributes.Fields.LINE_OF_SIGHT_STR
 
 
 def get_risk(attr_key: str, value: int) -> float:
@@ -176,6 +180,8 @@ def calculate_cm3(row: pd.Series) -> float:
         get_risk('speed_differential', row.get(SPEED_DIFFERENTIAL, 1)),
         get_risk('curvature', row.get(CURVATURE, 2)),
         get_risk('street_lighting', row.get(STREET_LIGHTING, 1)),
+        # Line of Sight: inadequate visibility raises general conflict risk
+        get_risk('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
     ]
 
     cq_triggers = [
@@ -187,6 +193,8 @@ def calculate_cm3(row: pd.Series) -> float:
         get_cond('property_access', row.get(PROPERTY_ACCESS, 2)),
         get_cond('intersecting_facility', row.get(INTERSECTING_FACILITY, 2)),
         get_cond('pedestrian_crossing', row.get(PEDESTRIAN_CROSSING, 2)),
+        # Line of Sight: inadequate LOS is a condition trigger — compounds all BB/BP/SB risks
+        get_cond('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
     ]
 
     cu_product = np.prod(cu_factors)
@@ -252,6 +260,7 @@ def calculate_cm40(row: pd.Series) -> float:
         get_cond('adjacent_road_1_3m', row.get(ADJACENT_ROAD_1_3M, 2)),
         facility_vb_cond,
         get_cond('intersection_approach', row.get(INTERSECTION_APPROACH, 2)),
+        get_cond('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
     ]
     cq_sum = sum(cq40_triggers)
     if cq_sum == 0:
@@ -272,10 +281,11 @@ def calculate_cm40(row: pd.Series) -> float:
         get_risk('delineation', row.get(DELINEATION, 2)),
         get_risk('light_segregation', row.get(LIGHT_SEGREGATION, 2)),
         facility_vb_sev,
+        # Line of Sight: inadequate visibility directly increases vehicle-bicyclist conflict risk
+        get_risk('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
     ]
     cu40_product = np.prod(cu40_factors)
     return cu40_product ** (1 + cq_sum * 0.1)
-
 
 # ============ SCORE CALCULATION ============
 def calculate_cyclerap_score(row: pd.Series, cm3: float, cm16: float, cm25: float, cm40: float) -> tuple:
