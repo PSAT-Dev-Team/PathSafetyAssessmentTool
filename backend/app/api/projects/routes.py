@@ -308,6 +308,20 @@ def ok(data, code=200):
 def fail(message, code=400):
     return jsonify({"error": message}), code
 
+def df_to_records(df) -> list:
+    """Convert a DataFrame to JSON-safe records, replacing NaN/Inf with None."""
+    records = df.to_dict(orient="records")
+    sanitized = []
+    for row in records:
+        clean = {}
+        for k, v in row.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                clean[k] = None
+            else:
+                clean[k] = v
+        sanitized.append(clean)
+    return sanitized
+
 # Process-level context (replaces Streamlit's session_state)
 _CTX = {"ready": False, "pm": None}
 
@@ -834,7 +848,7 @@ def get_latest_attributes(project_name: str):
             for col in available_bands:
                 attrs_df[col] = results_df[col].values
 
-    return jsonify({"rows": attrs_df.to_dict(orient="records")})
+    return jsonify({"rows": df_to_records(attrs_df)})
 
 @bp.get("/<project_name>/geodata")
 def get_geodata(project_name: str):
@@ -1143,7 +1157,7 @@ def calculate_score(project_name: str):
         proj.metadata.last_updated = datetime.datetime.now()
         proj.metadata.serialize(proj.project_path)
     # Return results to frontend
-    return jsonify({"ok": True, "result_rows": results_df.to_dict(orient="records")})
+    return jsonify({"ok": True, "result_rows": df_to_records(results_df)})
 
 @bp.get("/<project_name>/results")
 def get_results(project_name: str):
@@ -1160,7 +1174,7 @@ def get_results(project_name: str):
         if ver.results and ver.results.df is not None and len(ver.results.df) > 0:
             return jsonify({
                 "ok": True,
-                "result_rows": ver.results.df.to_dict(orient="records")
+                "result_rows": df_to_records(ver.results.df)
             })
         else:
             # No results yet
@@ -1191,7 +1205,7 @@ def evaluate_treatments(project_name: str):
     ver._treatment = treatment_tbl
     proj.save_all()
 
-    return jsonify({"ok": True, "rows": treatment_tbl.df.to_dict(orient="records")})
+    return jsonify({"ok": True, "rows": df_to_records(treatment_tbl.df)})
 
 
 @bp.post("/<project_name>/treatments/apply")
@@ -3185,7 +3199,7 @@ def autocode_all(project_name: str):
 
         # Return the updated attributes DataFrame so frontend can update UI without refetching
         # This enables temporary (in-memory) changes that aren't persisted until Save is clicked
-        updated_attributes = ver.attributes.df.to_dict(orient="records")
+        updated_attributes = df_to_records(ver.attributes.df)
 
         return ok({
             "saved": bool(save and ok_count > 0),      # Whether changes were persisted to disk
@@ -3252,7 +3266,7 @@ def get_baseline(project_name: str):
 
         # Read CSV and convert to JSON
         baseline_df = pd.read_csv(baseline_path)
-        rows = baseline_df.to_dict(orient="records")
+        rows = df_to_records(baseline_df)
 
         return ok({"rows": rows})
 

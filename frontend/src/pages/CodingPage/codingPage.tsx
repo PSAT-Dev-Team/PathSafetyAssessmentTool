@@ -66,6 +66,7 @@ type ProjectDataState = {
   verified?: boolean;
   verifiedSegmentCount?: number;
   autocodedSegmentCount?: number;
+  isDirty?: boolean;
 };
 
 const defaultProjectData: ProjectDataState = {
@@ -79,6 +80,7 @@ const defaultProjectData: ProjectDataState = {
   loading: true,
   error: null,
   editedRow: null,
+  isDirty: false,
 };
 
 // Global cache for project data to prevent reloading when navigating away and back (e.g. to Help page)
@@ -230,6 +232,7 @@ export default function CodingPage() {
         changedFieldsByRow: autoMeta?.changedFieldsByRow || {},
         fieldSourcesByRow: autoMeta?.fieldSourcesByRow || {},
         loading: false,
+        isDirty: false,
       });
 
     } catch (e: any) {
@@ -403,6 +406,7 @@ export default function CodingPage() {
           ...prev,
           [projName]: {
             ...prev[projName] || defaultProjectData,
+            isDirty: true,
             attrs: (prev[projName]?.attrs || []).map((row, i) =>
               i === currentIndex ? { ...row, ...updates } : row
             ),
@@ -630,6 +634,7 @@ export default function CodingPage() {
               attrs: a.rows,
               changedFieldsByRow: allChangedFieldsByRow,
               fieldSourcesByRow: allSourcesByRow,
+              isDirty: true,
             });
 
             // Save metadata
@@ -785,6 +790,7 @@ export default function CodingPage() {
                   attrs: a.rows,
                   changedFieldsByRow: projectChangedFieldsByRow,
                   fieldSourcesByRow: projectSourcesByRow,
+                  isDirty: true,
                 });
 
                 // Save metadata
@@ -986,6 +992,7 @@ export default function CodingPage() {
           changedFieldsByRow: autoMeta?.changedFieldsByRow || {},
           fieldSourcesByRow: autoMeta?.fieldSourcesByRow || {},
           loading: false,
+          isDirty: false,
         });
       } catch (e: any) {
         if (!cancelled) {
@@ -1137,47 +1144,53 @@ export default function CodingPage() {
     if (projectList.length === 0) return true;
 
     try {
-      // Create save promises for all loaded projects
-      const savePromises = projectList.map(projName => {
-        const projData = projectData[projName];
-        if (!projData?.attrs) return Promise.resolve();
+      // Only save projects that actually have unsaved changes
+      const dirtyProjects = projectList.filter(projName => projectData[projName]?.isDirty);
 
-        // Save attributes and metadata together
-        return Promise.all([
-          saveAttributes(projName, projData.attrs),
-          updateProject(projName, {
-            autocoded_segment_count: projData.autocodedSegmentCount ?? 0,
-            verified_segment_count: projData.verifiedSegmentCount ?? 0
-          })
-        ]);
-      });
+      if (dirtyProjects.length > 0) {
+        const savePromises = dirtyProjects.map(projName => {
+          const projData = projectData[projName];
+          if (!projData?.attrs) return Promise.resolve();
 
-      await Promise.all(savePromises);
+          return Promise.all([
+            saveAttributes(projName, projData.attrs),
+            updateProject(projName, {
+              autocoded_segment_count: projData.autocodedSegmentCount ?? 0,
+              verified_segment_count: projData.verifiedSegmentCount ?? 0
+            })
+          ]);
+        });
 
-      // Re-fetch scores for all saved projects to reflect backend updates
-      for (const projName of projectList) {
-        try {
-          const res = await fetch(`/api/projects/${encodeURIComponent(projName)}/results`);
-          if (res.ok) {
-            const result = await res.json();
-            if (result.ok && result.result_rows) {
-              updateProjectData(projName, { scores: result.result_rows });
+        await Promise.all(savePromises);
+
+        // Mark saved projects as clean
+        dirtyProjects.forEach(projName => {
+          updateProjectData(projName, { isDirty: false });
+        });
+
+        // Re-fetch scores for saved projects to reflect backend updates
+        for (const projName of dirtyProjects) {
+          try {
+            const res = await fetch(`/api/projects/${encodeURIComponent(projName)}/results`);
+            if (res.ok) {
+              const result = await res.json();
+              if (result.ok && result.result_rows) {
+                updateProjectData(projName, { scores: result.result_rows });
+              }
             }
+          } catch (e) {
+            // Ignore fetch error, user just won't see updated scores immediately
           }
-        } catch (e) {
-          // Ignore fetch error, user just won't see updated scores immediately
         }
       }
 
-      // Dispatch events to update Projects page for all projects
+      // Dispatch events to update Projects page for all projects (counts may have changed)
       projectList.forEach(projName => {
         const projData = projectData[projName];
         if (projData) {
-          // Dispatch verified status update
           window.dispatchEvent(new CustomEvent("psat:verified:updated", {
             detail: { projectName: projName, verifiedSegmentCount: projData.verifiedSegmentCount ?? 0 }
           }));
-          // Dispatch autocoded status update
           window.dispatchEvent(new CustomEvent("psat:autocoded:updated", {
             detail: { projectName: projName, autocodedSegmentCount: projData.autocodedSegmentCount ?? 0 }
           }));
@@ -1186,7 +1199,9 @@ export default function CodingPage() {
 
       toaster.create({
         title: "Saved",
-        description: `All ${projectList.length} project(s) saved successfully.`,
+        description: dirtyProjects.length > 0
+          ? `${dirtyProjects.length} project(s) saved successfully.`
+          : "Nothing to save.",
         type: "success"
       });
       return true;
@@ -1239,6 +1254,7 @@ export default function CodingPage() {
       attrs: attrs.map((row, i) =>
         i === currentIndex ? updatedRow : row
       ),
+      isDirty: true,
     });
 
     // Dispatch event to notify validation component of attribute change
