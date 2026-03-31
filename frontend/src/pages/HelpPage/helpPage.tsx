@@ -40,6 +40,15 @@ export default function HelpPage() {
           {activeTab === "user" && (
             <div className="guide-section">
               <h2>User Guide</h2>
+              <a 
+                href="/Path_Safety_Assessment_Tool_User_Guide.pdf" 
+                download
+                className="help-download-button"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Download PDF Guide
+              </a>
               <p>Welcome to the Path Safety Assessment Tool (PSAT). This tool allows you to evaluate active mobility paths using the CycleRAP model.</p>
               
               <h3>1. Getting Started</h3>
