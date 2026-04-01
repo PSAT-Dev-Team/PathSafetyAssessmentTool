@@ -102,7 +102,11 @@ export function CurvatureVisualizationPanel({
             <div className="info-row">
               <span className="label">Curvature Radius:</span>
               <span className="value">
-                {data.radius !== null ? `${data.radius.toFixed(1)}m` : 'N/A'}
+                {data.radius !== null
+                  ? `${data.radius.toFixed(1)}m`
+                  : data.layer_used
+                    ? '∞ (Straight)'
+                    : 'N/A'}
               </span>
             </div>
             <div className="info-row">

@@ -200,7 +200,11 @@ export async function autocodeImage(project: string, imageRef: string) {
     body: JSON.stringify({ imageRef }),
   });
   if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as { updates: Record<string, number>; changed_fields: string[] };
+  const data = (await res.json()) as { updates: Record<string, number>; changed_fields: string[]; gradient_pct?: number };
+  if (data.gradient_pct !== undefined) {
+    console.log(`[Gradient] ${imageRef}: ${data.gradient_pct >= 0 ? "+" : ""}${data.gradient_pct.toFixed(2)}%`);
+  }
+  return data;
 }
 
 export async function autocodeGIS(project: string, coords: number[][]) {
@@ -210,7 +214,11 @@ export async function autocodeGIS(project: string, coords: number[][]) {
     body: JSON.stringify({ coords }),
   });
   if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as { updates: Record<string, number>; changed_fields: string[] };
+  const data = (await res.json()) as { updates: Record<string, number>; changed_fields: string[]; gradient_pct?: number };
+  if (data.gradient_pct !== undefined) {
+    console.log(`[Gradient] GIS result: ${data.gradient_pct >= 0 ? "+" : ""}${data.gradient_pct.toFixed(2)}%`);
+  }
+  return data;
 }
 
 // ========================================================================

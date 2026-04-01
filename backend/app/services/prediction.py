@@ -37,53 +37,64 @@ class CycleRAP_Coding_Helper:
     @classmethod
     def initialise(cls, model_dir: Path):
         from ultralytics import YOLO
-        # === Load Path Segmentation Model ===
-        seg_path = model_dir / "path_seg.pt"
-        if seg_path.exists():
-            cls.path_segmentation_model = YOLO(seg_path)
-        else:
-            raise RuntimeError(f"\"{seg_path}\" Could not be loaded")
-        
-        # === Load Off-Road Bicycle Classifier ===
-        off_road_path  = model_dir / "off_road_bicycle_path.pt"
-        if off_road_path.exists():
-            cls.off_road_bicycle_classifier = YOLO(off_road_path)
-        else:
-            raise RuntimeError(f"\"{off_road_path}\" Could not be loaded")
-        
-        # === Load Adjacent Road Lanes Classifier ===
-        adj_road_path  = model_dir / "adj_road_lane.pt"
-        if adj_road_path.exists():
-            cls.adj_road_lanes_classifier = YOLO(adj_road_path)
-        else:
-            raise RuntimeError(f"\"{adj_road_path}\" Could not be loaded")
+        from ultralytics.nn import tasks as _ul_tasks
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # === Load fixed obstacle lane Classifier ===
-        fixed_obstacle_path = model_dir / "LTA_FIXEDOBSTACLE_BEST_2.pt" #cy
-        if fixed_obstacle_path.exists():
-            cls.fixed_obstacle_classifier = YOLO(fixed_obstacle_path)
-        else:
-            raise RuntimeError(f"\"{fixed_obstacle_path}\"Could not be loaded")
-        
-        # === Load  dev access Classifier ===
-        Development_Access_path = model_dir / "DevelopmentAccess_last_150epochs.pt" #cy
-        if Development_Access_path.exists():
-            cls.Development_access_classfier = YOLO(Development_Access_path)
-        else:
-            raise RuntimeError(f"\"{Development_Access_path}\"Could not be loaded")
+        # Patch BaseModel.fuse() at the class level so Ultralytics >=8.x doesn't
+        # crash on older .pt files that have already-fused Conv layers (no 'bn').
+        _orig_fuse = _ul_tasks.BaseModel.fuse
+        def _safe_fuse(self, verbose=True):
+            try:
+                return _orig_fuse(self, verbose=verbose)
+            except AttributeError:
+                return self
+        _ul_tasks.BaseModel.fuse = _safe_fuse
 
-        Delineation_path = model_dir / "LTA_Dill_4_Best.pt" #cy
-        if Delineation_path.exists():
-            cls.Delineation_classfier = YOLO(Delineation_path)
-        else:
-            raise RuntimeError(f"\"{Delineation_path}\"Could not be loaded")
-        
+        # Map of attribute name → filename for each model
+        models_to_load = {
+            "path_segmentation_model":      "path_seg.pt",
+            "off_road_bicycle_classifier":  "off_road_bicycle_path.pt",
+            "adj_road_lanes_classifier":    "adj_road_lane.pt",
+            "fixed_obstacle_classifier":    "LTA_FIXEDOBSTACLE_BEST_2.pt",
+            "Development_access_classfier": "DevelopmentAccess_last_150epochs.pt",
+            "Delineation_classfier":        "LTA_Dill_4_Best.pt",
+            "road_classification_model":    "RoadClassification_best.pt",
+        }
 
-        Road_class_path = model_dir / "RoadClassification_best.pt"
-        if Road_class_path.exists():
-            cls.road_classification_model = YOLO(Road_class_path)
-        else:
-            raise RuntimeError(f"\"{Road_class_path}\" Could not be loaded")
+        # Validate all files exist before spawning threads
+        for attr, filename in models_to_load.items():
+            path = model_dir / filename
+            if not path.exists():
+                raise RuntimeError(f'"{path}" could not be found')
+
+        def _load_one(attr: str, filename: str):
+            import time
+            path = model_dir / filename
+            print(f"[Autocode] Loading {filename}...", flush=True)
+            t0 = time.time()
+            model = YOLO(path)
+            elapsed = time.time() - t0
+            print(f"[Autocode] Loaded  {filename} in {elapsed:.1f}s", flush=True)
+            return attr, model
+
+        # Load all 7 models in parallel — IO+deserialization bound, safe to thread
+        results: dict = {}
+        errors: list = []
+        with ThreadPoolExecutor(max_workers=7, thread_name_prefix="model-load") as pool:
+            futures = {pool.submit(_load_one, attr, fn): attr for attr, fn in models_to_load.items()}
+            for future in as_completed(futures):
+                try:
+                    attr, model = future.result()
+                    results[attr] = model
+                except Exception as e:
+                    errors.append(str(e))
+
+        if errors:
+            raise RuntimeError("Model loading failed:\n" + "\n".join(errors))
+
+        # Assign all loaded models to class attributes atomically
+        for attr, model in results.items():
+            setattr(cls, attr, model)
 
     # Facility Type
     # Adj road Lane (0-1, 1-3)
@@ -102,7 +113,7 @@ class CycleRAP_Coding_Helper:
         if not cls.path_segmentation_model:
             raise RuntimeError("Path segmentation model is not initialised.")
         
-        SEGMENTATION_CONFIDENCE_THRESHOLD = 0.5
+        SEGMENTATION_CONFIDENCE_THRESHOLD= 0.5
         ADJ_RD_CONF_THRESHOLD = 0.8
         OFF_RD_CONF_THRESHOLD = 0.8
         FIXED_OBSTACLE_CONFIDENCE_THRESHOLD= 0.6
@@ -260,11 +271,7 @@ class CycleRAP_Coding_Helper:
 
                 # === Fixed Obstacle Detection with pathway–obstacle intersection logic ===
         if cls.fixed_obstacle_classifier and masks_present:
-            fixed_results = cls.fixed_obstacle_classifier.predict(image_path)
-            fixed_result = cls._filter_segmentation_results(
-                fixed_results[0], FIXED_OBSTACLE_CONFIDENCE_THRESHOLD
-            )
-
+            # Reuse the fixed_result already computed above (avoid duplicate inference)
             detected_cls_ids = fixed_result.boxes.cls.int().tolist() if fixed_result.boxes else []
             obstacle_masks = fixed_result.masks.data.cpu().numpy() if fixed_result.masks is not None else []
 
@@ -365,23 +372,13 @@ class CycleRAP_Coding_Helper:
             print(f"Road Classification Prediction: {pred_class} (conf {pred_conf:.2f})")
 
             # --- CASE 0: Dev Access ---
-
+            # (Dev access detection handled below in the unconditional block)
             if pred_class == 0:
-                dev_results = cls.Development_access_classfier.predict(image_path)[0]
-                dev_result = cls._filter_segmentation_results(dev_results, 0.5)
-                dev_cls_ids = set(dev_result.boxes.cls.int().tolist()) if dev_result.boxes else set()
-
-                # check if traffic crossing present (label 3)
-                if 3 in dev_cls_ids or 4 in cls_ids:
-                    attribute_fields[serializer.Attributes.Fields.PROP_ACCESS_STR] = serializer.presence_mapping["Not Present"]
-    
-                else:
-                    attribute_fields[serializer.Attributes.Fields.PROP_ACCESS_STR] = serializer.presence_mapping["Not Present"]
+                pass
 
             # --- CASE 1: Off-Road Bicycle ---
             elif pred_class == 1:
-                delineation_results = cls.Delineation_classfier.predict(image_path)[0]
-                delineation_result = cls._filter_segmentation_results(delineation_results, 0.5)
+                # Reuse the delineation_result already computed above (avoid duplicate inference)
                 dill_cls_ids = set(delineation_result.boxes.cls.int().tolist()) if delineation_result.boxes else set()
 
                 # Check for Red Path (label 5)

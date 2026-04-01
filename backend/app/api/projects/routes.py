@@ -74,9 +74,9 @@ def warmup_gis() -> None:
     t = threading.Thread(target=_warm, name="gis-warmup", daemon=True)
     t.start()
 
-
-
-
+# Counts nested inference scopes.  PATCH handlers check this and
+# return immediately (no-op 200) so they don't hold the GIL during inference.
+_INFERENCE_DEPTH = 0
 
 
 # —— Reuse your existing service layer —— #
@@ -308,6 +308,20 @@ def ok(data, code=200):
 def fail(message, code=400):
     return jsonify({"error": message}), code
 
+def df_to_records(df) -> list:
+    """Convert a DataFrame to JSON-safe records, replacing NaN/Inf with None."""
+    records = df.to_dict(orient="records")
+    sanitized = []
+    for row in records:
+        clean = {}
+        for k, v in row.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                clean[k] = None
+            else:
+                clean[k] = v
+        sanitized.append(clean)
+    return sanitized
+
 # Process-level context (replaces Streamlit's session_state)
 _CTX = {"ready": False, "pm": None}
 
@@ -376,18 +390,154 @@ def _ensure_models_ready():
                     raise RuntimeError(f"Cannot find model_dir (missing path_seg.pt). Tried:\n{tried}")
 
                 # YOLO models load
+                print(f"[Autocode] Loading CV models from {model_dir} — this may take several minutes on CPU...", flush=True)
                 cv_pred.CycleRAP_Coding_Helper.initialise(model_dir)
                 _MODELS_READY["cv"] = True
+                print("[Autocode] CV models loaded successfully.", flush=True)
 
             except Exception as e:
                 _INIT_ERR["cv"] = f"CV init failed: {e}"
+                print(f"[Autocode] ERROR: CV model init failed: {e}", flush=True)
                 # Next calls will short-circuit quickly
                 raise ServiceUnavailable(_INIT_ERR["cv"])
 
 
+def _warmup_models_in_background():
+    """Daemon thread: pre-load CV + GIS at server startup so the first autocode request is fast."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    # Small delay to let Flask finish starting up before we hammer the CPU
+    time.sleep(2)
+    print("[Autocode] Background warmup: starting model pre-load...", flush=True)
+    try:
+        _ensure_models_ready()
+        print("[Autocode] Background warmup: CV models ready.", flush=True)
+    except Exception as e:
+        print(f"[Autocode] Background warmup (CV) failed: {e}", flush=True)
+
+    # Pre-load GIS shapefiles in parallel threads (I/O + C extensions release GIL)
+    try:
+        print("[GIS] Background warmup: loading shapefiles in parallel...", flush=True)
+        t_total = time.perf_counter()
+        _inst = _get_gis()
+        layer_names = list(_inst.store.paths.keys())
+
+        def _load_one(name):
+            t0 = time.perf_counter()
+            _inst.store.get(name)
+            return time.perf_counter() - t0
+
+        with ThreadPoolExecutor(max_workers=6, thread_name_prefix="gis-load") as pool:
+            futs = {pool.submit(_load_one, n): n for n in layer_names}
+            for fut in as_completed(futs):
+                name = futs[fut]
+                try:
+                    elapsed = fut.result()
+                    print(f"[GIS] Loaded: {name} ({elapsed:.1f}s)", flush=True)
+                except Exception as exc:
+                    print(f"[GIS] Warning: {name}: {exc}", flush=True)
+
+        elapsed_total = time.perf_counter() - t_total
+        print(f"[GIS] Background warmup complete ({elapsed_total:.1f}s total).", flush=True)
+    except Exception as e:
+        print(f"[GIS] Background warmup failed: {e}", flush=True)
+
+
+# Kick off background warmup immediately when this module is imported (server start)
+_warmup_thread = threading.Thread(target=_warmup_models_in_background, daemon=True, name="model-warmup")
+_warmup_thread.start()
+
+
+# ───────────────────────── Gradient lookup (module-level) ─────────────────────
+# Loaded once and cached for the lifetime of the server process.
+# Works for any project — the CSV accumulates entries across all project areas.
+
+_GRADIENT_LOOKUP: "dict | None" = None
+
+
+def _load_gradient_lookup() -> dict:
+    """Load (and cache) the gradient lookup CSV. Returns {} if unavailable."""
+    global _GRADIENT_LOOKUP
+    if _GRADIENT_LOOKUP is not None:
+        return _GRADIENT_LOOKUP
+    lookup_path = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_lookup.csv"
+    if not lookup_path.exists():
+        _GRADIENT_LOOKUP = {}
+        return _GRADIENT_LOOKUP
+    try:
+        import csv as _csv
+        result = {}
+        with open(lookup_path, newline="", encoding="utf-8") as f:
+            reader = _csv.DictReader(f)
+            if "Image Reference" not in (reader.fieldnames or []):
+                print("[Gradient] WARNING: gradient_lookup.csv missing 'Image Reference' column — skipping")
+                _GRADIENT_LOOKUP = {}
+                return _GRADIENT_LOOKUP
+            for row in reader:
+                try:
+                    img = row.get("Image Reference", "").strip()
+                    grade_pct_raw = row.get("gradient_pct", "").strip()
+                    grade_coded_raw = row.get("Grade", "").strip()
+                    if img and grade_coded_raw:
+                        grade_coded = int(float(grade_coded_raw))
+                        grade_pct = float(grade_pct_raw) if grade_pct_raw else float("nan")
+                        result[img] = (grade_coded, grade_pct)
+                except (ValueError, TypeError):
+                    continue
+        _GRADIENT_LOOKUP = result
+        print(f"[Gradient] Loaded {len(_GRADIENT_LOOKUP)} entries from gradient_lookup.csv")
+    except Exception as _e:
+        print(f"[Gradient] WARNING: could not load gradient_lookup.csv: {_e} — Grade will not be set")
+        _GRADIENT_LOOKUP = {}
+    return _GRADIENT_LOOKUP
+
+
+def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
+                   project_name: str = "") -> "float | None":
+    """Inject Grade from the gradient lookup into *updates* (in-place).
+    Returns grade_pct if found, else None.
+    """
+    try:
+        lookup = _load_gradient_lookup()
+        if not lookup:
+            return None
+        # Try exact match first, then strip project prefix, then suffix match
+        key = image_ref
+        if key not in lookup and project_name:
+            prefix = project_name + "_"
+            if key.startswith(prefix):
+                key = key[len(prefix):]
+        if key not in lookup:
+            # Last resort: find any CSV entry whose key is a suffix of image_ref
+            bare = image_ref.split("_", 1)[-1] if "_" in image_ref else image_ref
+            for k in lookup:
+                if image_ref.endswith(k) or k.endswith(bare):
+                    key = k
+                    break
+        if key not in lookup:
+            print(f"[Gradient] no entry for '{image_ref}' — skipping", flush=True)
+            return None
+        grade_coded, grade_pct = lookup[key]
+        print(f"[Gradient] {image_ref}: {grade_pct:+.2f}% → Grade {grade_coded}", flush=True)
+        if grade_coded not in (1, 2):
+            print(f"[Gradient] WARNING: unexpected Grade value {grade_coded!r} for {image_ref} — skipping")
+            return None
+        updates["Grade"] = grade_coded
+        updates["Gradient %"] = round(grade_pct, 2)
+        if sources is not None:
+            sources["Grade"] = "LAZ"
+            sources["Gradient %"] = "LAZ"
+        return grade_pct
+    except Exception as _e:
+        print(f"[Gradient] WARNING: error injecting Grade for {image_ref}: {_e}")
+        return None
 
 
 # ───────────────────────── Endpoints ─────────────────────────
+
+@bp.before_request
+def _log_incoming():
+    print(f"[Flask] >>> {request.method} {request.path}", flush=True)
 
 @bp.get("")
 def list_projects():
@@ -698,7 +848,7 @@ def get_latest_attributes(project_name: str):
             for col in available_bands:
                 attrs_df[col] = results_df[col].values
 
-    return jsonify({"rows": attrs_df.to_dict(orient="records")})
+    return jsonify({"rows": df_to_records(attrs_df)})
 
 @bp.get("/<project_name>/geodata")
 def get_geodata(project_name: str):
@@ -1007,7 +1157,7 @@ def calculate_score(project_name: str):
         proj.metadata.last_updated = datetime.datetime.now()
         proj.metadata.serialize(proj.project_path)
     # Return results to frontend
-    return jsonify({"ok": True, "result_rows": results_df.to_dict(orient="records")})
+    return jsonify({"ok": True, "result_rows": df_to_records(results_df)})
 
 @bp.get("/<project_name>/results")
 def get_results(project_name: str):
@@ -1024,7 +1174,7 @@ def get_results(project_name: str):
         if ver.results and ver.results.df is not None and len(ver.results.df) > 0:
             return jsonify({
                 "ok": True,
-                "result_rows": ver.results.df.to_dict(orient="records")
+                "result_rows": df_to_records(ver.results.df)
             })
         else:
             # No results yet
@@ -1055,7 +1205,7 @@ def evaluate_treatments(project_name: str):
     ver._treatment = treatment_tbl
     proj.save_all()
 
-    return jsonify({"ok": True, "rows": treatment_tbl.df.to_dict(orient="records")})
+    return jsonify({"ok": True, "rows": df_to_records(treatment_tbl.df)})
 
 
 @bp.post("/<project_name>/treatments/apply")
@@ -2008,6 +2158,13 @@ def update_project_metadata(project_name: str):
         new_verified_segment_count = payload.get("verified_segment_count")
         new_autocoded_segment_count = payload.get("autocoded_segment_count")
 
+        # While YOLO inference is running, skip all disk I/O to avoid holding
+        # the GIL and slowing down inference (10-20x overhead observed).
+        # Name renames are never batched by the frontend during autocode, so
+        # it is safe to defer counter/tag updates until inference finishes.
+        if _INFERENCE_DEPTH > 0 and new_name is None:
+            return ok({"ok": True, "deferred": True})
+
         # Get the project
         try:
             proj = pm.project(project_name)
@@ -2157,6 +2314,7 @@ def update_project_metadata(project_name: str):
 
 @bp.post("/<project_name>/autocode/image")
 def autocode_image(project_name: str):
+    print(f"[Autocode] >>> autocode_image called for project='{project_name}'", flush=True)
     try:
         _ensure_models_ready()
 
@@ -2171,12 +2329,25 @@ def autocode_image(project_name: str):
         if not img_path.exists():
             return fail(f"image not found: {img_path.name}", 404)
 
-        updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path)  # returns dict
-        updates = {k: v for k, v in (updates or {}).items() if v is not None}
+        print(f"[Autocode] CV inference: {image_ref}", flush=True)
+        global _INFERENCE_DEPTH
+        _INFERENCE_DEPTH += 1
+        try:
+            updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path) or {}
+        finally:
+            _INFERENCE_DEPTH -= 1
+        updates = {k: v for k, v in updates.items() if v is not None}
+        print(f"[Autocode] CV done: {image_ref} → {len(updates)} field(s) set", flush=True)
+
+        # Inject Grade from pre-computed LAZ gradient lookup (no-op if not available)
+        gradient_pct = _inject_grade(image_ref, updates, project_name=project_name)
 
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by CV model
-        return ok({"updates": updates, "changed_fields": list(updates.keys())})
+        resp: dict = {"updates": updates, "changed_fields": list(updates.keys())}
+        if gradient_pct is not None:
+            resp["gradient_pct"] = round(gradient_pct, 3)
+        return ok(resp)
 
     except ServiceUnavailable as e:
         return fail(str(e), 503)
@@ -2870,8 +3041,6 @@ def autocode_all(project_name: str):
             return merged, sources, None
 
         # ========================================================================
-        # SINGLE MODE: Auto-code one image (backward compatible)
-        # ========================================================================
         # Used by the single "Auto-code" button in the UI
         # Payload: { imageRef: "...", coords: [[lon,lat],...], index?: int }
         if has_single_fields and not run_all and not indices:
@@ -2885,7 +3054,8 @@ def autocode_all(project_name: str):
             if err:
                 return fail(err, 500)
 
-            # Optional write-back to attributes table if index is provided
+            # Inject Grade from pre-computed LAZ gradient lookup
+            _inject_grade(image_ref, merged, sources, project_name=project_name)
             idx = payload.get("index")
             if isinstance(idx, int) and 0 <= idx < len(ver.attributes.df):
                 changed_fields = []  # Only fields that actually changed value
@@ -2947,7 +3117,14 @@ def autocode_all(project_name: str):
         images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
 
         # Process each row
-        for idx in indices:
+        # Hold _INFERENCE_DEPTH for the entire bulk loop so PATCH handlers
+        # short-circuit instead of competing for the GIL between images.
+        global _INFERENCE_DEPTH
+        _INFERENCE_DEPTH += 1
+        total = len(indices)
+        print(f"[Autocode] Bulk starting: {total} rows for project '{project_name}'", flush=True)
+        try:
+          for idx in indices:
             try:
                 # Resolve image filename and coordinates for this row
                 image_ref = _resolve_image_ref(idx)
@@ -2975,6 +3152,9 @@ def autocode_all(project_name: str):
                     errors.append({"index": idx, "reason": err})
                     continue
 
+                # Inject Grade from pre-computed LAZ gradient lookup
+                _inject_grade(image_ref, merged, sources, project_name=project_name)
+
                 # Track which fields actually changed (for UI highlighting)
                 changed_fields = []  # List of field names that changed
                 field_sources = {}   # {field_name: "CV"|"GIS"} for changed fields
@@ -2996,14 +3176,21 @@ def autocode_all(project_name: str):
                 sources_by_row[idx] = field_sources
                 ok_count += 1
 
+                # Progress every 10 rows
+                if ok_count % 10 == 0:
+                    print(f"[Autocode] Bulk progress: {ok_count}/{total} done ({len(errors)} errors so far)", flush=True)
+
             except Exception as e:
                 # Catch and log any unexpected errors
                 traceback.print_exc()
                 errors.append({"index": idx, "reason": str(e)})
+        finally:
+          _INFERENCE_DEPTH -= 1
 
         # Save to disk only if requested and at least one row succeeded
         # Note: UI typically passes save=False to keep changes temporary until user clicks Save
         if save and ok_count > 0:
+            print(f"[Autocode] Bulk complete: {ok_count}/{total} OK, {len(errors)} failed. Saving...", flush=True)
             ver.save_all()
 
             # Update last_updated
@@ -3012,7 +3199,7 @@ def autocode_all(project_name: str):
 
         # Return the updated attributes DataFrame so frontend can update UI without refetching
         # This enables temporary (in-memory) changes that aren't persisted until Save is clicked
-        updated_attributes = ver.attributes.df.to_dict(orient="records")
+        updated_attributes = df_to_records(ver.attributes.df)
 
         return ok({
             "saved": bool(save and ok_count > 0),      # Whether changes were persisted to disk
@@ -3079,7 +3266,7 @@ def get_baseline(project_name: str):
 
         # Read CSV and convert to JSON
         baseline_df = pd.read_csv(baseline_path)
-        rows = baseline_df.to_dict(orient="records")
+        rows = df_to_records(baseline_df)
 
         return ok({"rows": rows})
 
