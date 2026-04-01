@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DeveloperGuide from "./DeveloperGuide";
+import UserGuide from "./UserGuide";
 import "./helpPage.css";
 
 export default function HelpPage() {
@@ -39,37 +40,7 @@ export default function HelpPage() {
         <div className="help-content">
           {activeTab === "user" && (
             <div className="guide-section">
-              <h2>User Guide</h2>
-              <a 
-                href="/Path_Safety_Assessment_Tool_User_Guide.pdf" 
-                download
-                className="help-download-button"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Download PDF Guide
-              </a>
-              <p>Welcome to the Path Safety Assessment Tool (PSAT). This tool allows you to evaluate active mobility paths using the CycleRAP model.</p>
-              
-              <h3>1. Getting Started</h3>
-              <ul>
-                <li><strong>Start a Project:</strong> From the Home page, click "New Project" to import your shapefiles, mapping data, and street-level imagery.</li>
-                <li><strong>Project Settings:</strong> Ensure your project name is correctly set. You can manage multiple projects simultaneously from the Projects listing.</li>
-              </ul>
-              
-              <h3>2. Coding Page</h3>
-              <ul>
-                <li><strong>Auto-coding:</strong> Use the "Auto-code image" button to leverage AI models that automatically identify risk factors from the image.</li>
-                <li><strong>GIS Coding:</strong> Our GIS backend automatically evaluates contextual data such as proximity to MRT exits, bus stops, and road intersections.</li>
-                <li><strong>Manual Review:</strong> You can meticulously review and override the attributes predicted by the AI directly on the panel.</li>
-              </ul>
-
-              <h3>3. Map View & Analysis</h3>
-              <ul>
-                <li><strong>GIS Layers:</strong> Toggle the map layers to visualize Footpaths, Cycling Paths, and Road Crossings.</li>
-                <li><strong>Risk Bands:</strong> Segments are color-coded based on overall risk logic.</li>
-                <li><strong>Editing:</strong> You can add or delete segment points directly on the Map preview using the cursor tools.</li>
-              </ul>
+              <UserGuide />
             </div>
           )}
 
