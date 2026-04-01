@@ -266,7 +266,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [err, setErr] = useState<string | null>(null);
 
   // Use external geofeatures if provided (for multi-project display), otherwise use fetched data
-  const hasExternalGeoFeatures = externalGeoFeatures && externalGeoFeatures.length > 0;
+  const hasExternalGeoFeatures = externalGeoFeatures !== undefined;
 
   // Internal scores state (fallback if externalScores not provided)
   const [internalScores, setInternalScores] = useState<ScoreRow[]>([]);
@@ -505,7 +505,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
       return;
     }
 
-    let aborted = false;
+    const controller = new AbortController();
     (async () => {
       try {
         const lat = activeGisLat;
@@ -530,23 +530,24 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
             point: [lon, lat],  // API expects [lon, lat]
             radius: 200,
             layers: layers
-          })
+          }),
+          signal: controller.signal
         });
 
         if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
         const data = await res.json();
 
-        if (!aborted && data.ok) {
+        if (data.ok) {
           setGisLayers(data.layers);
         }
       } catch (e: any) {
-        if (!aborted) {
+        if (e.name !== 'AbortError') {
           console.error("[GIS] Fetch error:", e);
         }
       }
     })();
 
-    return () => { aborted = true; };
+    return () => { controller.abort(); };
   }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
 
   // Layer colors matching curvature analysis

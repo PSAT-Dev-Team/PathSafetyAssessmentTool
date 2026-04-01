@@ -66,7 +66,9 @@ def warmup_gis() -> None:
 
     def _warm():
         try:
-            _get_gis()
+            g = _get_gis()
+            # Pre-load all registered layers so the first toggle is instant
+            g.store.reload()
         except Exception as exc:  # pragma: no cover
             import logging
             logging.getLogger(__name__).warning("GIS warmup failed: %s", exc)
@@ -1452,6 +1454,77 @@ def preview_treatments(project_name: str):
         return fail(f"Error previewing treatments: {str(e)}", 500)
 
 
+@bp.get("/<project_name>/treatments/all")
+def get_all_treatments(project_name: str):
+    """
+    Return treatment state for every segment in one call.
+
+    Reads treatment.csv once and returns which segments have treatments and
+    what modified attributes are stored.  Does NOT re-score — scores are
+    calculated lazily per segment on demand.
+
+    Response:
+        {
+            "ok": true,
+            "segments": {
+                "3":  { "has_treatments": true,  "treatments_applied": [1, 9], "modified_attributes": {...} },
+                "17": { "has_treatments": true,  "treatments_applied": [5],    "modified_attributes": {...} }
+            }
+        }
+    Only segments that actually have treatments are included.
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        treatment_df = ver.treatment.df
+        attrs_df = ver.attributes.df
+
+        segments: dict = {}
+
+        if treatment_df is None or treatment_df.empty or "Treatments Applied" not in treatment_df.columns:
+            return jsonify({"ok": True, "segments": segments})
+
+        for idx, row in treatment_df.iterrows():
+            treatments_str = row.get("Treatments Applied", "")
+            if not treatments_str or pd.isna(treatments_str) or str(treatments_str).strip() == "":
+                continue
+
+            try:
+                treatment_ids = [int(x.strip()) for x in str(treatments_str).split(",") if x.strip()]
+            except ValueError:
+                continue
+
+            if not treatment_ids:
+                continue
+
+            modified_attributes: dict = {}
+            for col in attrs_df.columns:
+                if col in treatment_df.columns and col != "Treatments Applied":
+                    val = row.get(col)
+                    if pd.notna(val):
+                        try:
+                            modified_attributes[col] = val.item() if hasattr(val, 'item') else val
+                        except (ValueError, TypeError):
+                            modified_attributes[col] = None
+                    else:
+                        modified_attributes[col] = None
+
+            segments[str(idx)] = {
+                "has_treatments": True,
+                "treatments_applied": treatment_ids,
+                "modified_attributes": modified_attributes,
+            }
+
+        return jsonify({"ok": True, "segments": segments})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error retrieving all treatments: {str(e)}", 500)
+
+
 @bp.get("/<project_name>/treatments/segment/<int:segment_index>")
 def get_segment_treatments(project_name: str, segment_index: int):
     """
@@ -2704,73 +2777,46 @@ def get_gis_layers(project_name: str):
                 try:
                     gdf = _gis.store.get(layer_name)
                     if gdf is None or gdf.empty:
+                        print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': empty or None — skipped")
                         continue
 
-                    # Ensure metric CRS (EPSG:3414)
-                    try:
-                        # For transit/infrastructure layers, if CRS is missing or suspicious, force SVY21
-                        needs_svy21 = (gdf.crs is None) or (layer_key in ["bus_stop", "mrt_exit", "parking_lot", "kerb_line"])
-                        
-                        if gdf.crs is None:
-                            gdf.set_crs("EPSG:3414", inplace=True)
-                            print(f"[GIS] Assigned EPSG:3414 to naive layer: {layer_name}")
-                        
-                        epsg = getattr(gdf.crs, "to_epsg", lambda: None)()
-                        if epsg != 3414:
-                            gdf = gdf.to_crs("EPSG:3414")
-                    except Exception as crs_err:
-                        print(f"Warning: CRS assignment/transform failed for {layer_name}: {crs_err}")
-
-                    # Remove Z-coordinates if present
-                    # Remove Z-coordinates if present
-                    if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
-                        try:
-                            gdf.geometry = gdf.geometry.apply(
-                                lambda geom: gis.GIS._remove_z_coordinate(geom) if geom is not None else None
-                            )
-                        except Exception as z_err:
-                            print(f"[GIS] Z-coord removal failed for {layer_name}: {z_err}")
-                            import traceback
-                            traceback.print_exc()
-
-                    # Filter to valid geometries
-                    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
-
-                    if gdf.empty:
-                        continue
-
-                    # Spatial query using index
+                    # Spatial query using the CACHED sindex (fast, read-only)
                     candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
 
                     if not candidate_indices:
+                        print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': 0 candidates in spatial index (total features: {len(gdf)})")
                         continue
 
                     candidates = gdf.iloc[candidate_indices]
-
-                    # Filter to features that actually intersect the buffer
-                    intersecting = candidates[candidates.intersects(buffer_geom)]
+                    intersecting = candidates[candidates.geometry.notna() & candidates.intersects(buffer_geom)]
 
                     print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': {len(intersecting)} intersecting features found (candidates: {len(candidates)})")
 
                     if intersecting.empty:
                         continue
 
-                    # Convert to WGS84 for frontend
-                    intersecting_wgs84 = intersecting.to_crs("EPSG:4326")
+                    # Copy only the small result set, then convert to WGS84
+                    intersecting_wgs84 = intersecting.copy().to_crs("EPSG:4326")
 
                     for _, feature in intersecting_wgs84.iterrows():
                         geom = feature.geometry
                         if geom is None or geom.is_empty:
                             continue
 
-                        # Extract properties first to avoid NameError
+                        # Strip Z if present (on single geometry, negligible cost)
+                        if geom.has_z:
+                            try:
+                                geom = gis.GIS._remove_z_coordinate(geom)
+                            except Exception:
+                                pass
+
+                        # Extract properties
                         props = {}
                         if "WIDTH" in feature.index:
                             width_val = feature["WIDTH"]
                             if width_val is not None and not (isinstance(width_val, float) and math.isnan(width_val)):
                                 props["width"] = float(width_val)
                         
-                        # Add other relevant properties if needed (name, etc.)
                         for col in feature.index:
                             if col not in ["geometry", "WIDTH"]:
                                 val = feature[col]
@@ -2785,7 +2831,6 @@ def get_gis_layers(project_name: str):
                             coords = [[float(x), float(y)] for x, y in geom.coords]
                             geom_output_type = "line"
                         elif geom.geom_type == "MultiLineString":
-                            # Leaflet can handle nested arrays or we can unroll
                             for line in geom.geoms:
                                 all_features.append({
                                     "coordinates": [[float(x), float(y)] for x, y in line.coords],
@@ -2833,6 +2878,9 @@ def get_gis_layers(project_name: str):
             result_layers[layer_key] = all_features
 
         # Build response
+        layer_summary = {k: len(v) for k, v in result_layers.items()}
+        print(f"[GIS] Response: {layer_summary}")
+
         response = {
             "ok": True,
             "point": {"lon": lon, "lat": lat},

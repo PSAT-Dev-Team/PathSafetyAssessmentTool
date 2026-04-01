@@ -12,4 +12,8 @@ def create_app(config_object=Config):
 
     register_blueprints(app)
 
+    # Pre-load GIS shapefiles in background so layer toggles are instant
+    from .api.projects.routes import warmup_gis
+    warmup_gis()
+
     return app

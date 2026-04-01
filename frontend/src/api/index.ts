@@ -639,6 +639,26 @@ export async function getSegmentTreatments(
   return res.json();
 }
 
+export type AllTreatmentsSegment = {
+  has_treatments: boolean;
+  treatments_applied: number[];
+  modified_attributes: Record<string, number | null>;
+};
+
+/**
+ * Fetch treatment state for all segments in one call (no re-scoring).
+ * Only returns segments that actually have treatments applied.
+ */
+export async function getAllTreatments(
+  project: string
+): Promise<{ ok: boolean; segments: Record<string, AllTreatmentsSegment> }> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/all`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 /**
  * Export modified attributes CSV after treatment is applied
  * @param project - Project name

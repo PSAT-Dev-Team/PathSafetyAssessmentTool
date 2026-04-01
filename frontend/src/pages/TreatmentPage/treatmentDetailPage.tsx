@@ -20,6 +20,7 @@ import {
   fetchProjectGeoJSON,
   applyTreatments,
   getSegmentTreatments,
+  getAllTreatments,
   fetchAttributeMappings,
   previewTreatments,
 } from "../../api";
@@ -398,7 +399,7 @@ export default function TreatmentDetailPage() {
   const [attrs, setAttrs] = useState<AttributeRow[]>([]);
   const [geoFeatures, setGeoFeatures] = useState<Feature[]>([]);
   const [scores, setScores] = useState<Record<string, any>[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTreatments, setSelectedTreatments] = useState<Set<number>>(new Set());
 
@@ -549,13 +550,16 @@ export default function TreatmentDetailPage() {
     if (projectNames.length === 0) return;
     setLoading(true);
     setError(null);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
     try {
       const results = await Promise.all(projectNames.map(async (name) => {
+        const sig = controller.signal;
         const [d, a, gjson, resultsRes] = await Promise.all([
           fetchProjectDetail(name),
           fetchProjectAttributes(name) as Promise<AttributesResponse>,
           fetchProjectGeoJSON(name) as Promise<FeatureCollection>,
-          fetch(`/api/projects/${encodeURIComponent(name)}/results`).then(res =>
+          fetch(`/api/projects/${encodeURIComponent(name)}/results`, { signal: sig }).then(res =>
             res.ok ? res.json() : { result_rows: [] }
           ).catch(() => ({ result_rows: [] })),
         ]);
@@ -582,53 +586,47 @@ export default function TreatmentDetailPage() {
       setAttrs(newAttrs);
       setGeoFeatures(newGeo);
       setScores(newScores);
-
-      // Load all treatments proactively for all segments
-      await loadAllTreatments(newMap, projectNames);
     } catch (e: any) {
       setError(e?.message ?? "Unknown error");
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
     }
   }, [projectNames]);
 
-  // Load all treatments for all segments proactively
-  const loadAllTreatments = useCallback(async (map: typeof projectMap, projects: string[]) => {
-    const newTreatmentState: Record<number, any> = {};
+  // Load treatment state in background AFTER page is already visible
+  useEffect(() => {
+    if (projectNames.length === 0 || projectMap.length === 0) return;
 
-    for (const project of projects) {
-      const projectInfo = map.find(p => p.name === project);
-      if (!projectInfo) continue;
-
-      // Load treatments for each segment in this project
-      for (let i = 0; i < projectInfo.count; i++) {
+    let cancelled = false;
+    (async () => {
+      const newTreatmentState: Record<number, any> = {};
+      await Promise.all(projectNames.map(async (name) => {
+        const projectInfo = projectMap.find(p => p.name === name);
+        if (!projectInfo) return;
         try {
-          const state = await getSegmentTreatments(project, i);
-          if (state.has_treatments) {
-            const globalIndex = projectInfo.startIndex + i;
-            newTreatmentState[globalIndex] = {
-              applied: true,
-              treatment_ids: state.treatments_applied,
-              after_scores: state.after_scores ? {
-                BB: state.after_scores.BB,
-                BP: state.after_scores.BP,
-                SB: state.after_scores.SB,
-                VB: state.after_scores.VB,
-                total: state.after_scores["Overall Risk Level"],
-              } : null,
-            };
+          const { segments } = await getAllTreatments(name);
+          for (const [localIdxStr, seg] of Object.entries(segments)) {
+            if (seg.has_treatments) {
+              const globalIndex = projectInfo.startIndex + parseInt(localIdxStr, 10);
+              newTreatmentState[globalIndex] = {
+                applied: true,
+                treatment_ids: seg.treatments_applied,
+                after_scores: null,
+              };
+            }
           }
         } catch (e) {
-          // Silently skip segments that fail to load
-          console.error(`Failed to load treatments for ${project} segment ${i}:`, e);
+          console.error(`Failed to load treatments for ${name}:`, e);
         }
+      }));
+      if (!cancelled && Object.keys(newTreatmentState).length > 0) {
+        setTreatmentState(newTreatmentState);
       }
-    }
+    })();
 
-    if (Object.keys(newTreatmentState).length > 0) {
-      setTreatmentState(newTreatmentState);
-    }
-  }, []);
+    return () => { cancelled = true; };
+  }, [projectNames, projectMap]);
 
   useEffect(() => {
     fetchData();
@@ -1000,8 +998,8 @@ export default function TreatmentDetailPage() {
             onJump={(i) => setCurrentPage(i + 1)}
             containerHeight={MAP_HEIGHT}
             subtitle="Before Treatment"
-            geoFeatures={projectNames.length > 1 ? (geoFeatures as Feature<LineString, any>[]) : undefined}
-            startIndex={0}
+            geoFeatures={geoFeatures as Feature<LineString, any>[]}
+            startIndex={currentCtx ? getProjectFirstSegmentIndex(currentCtx.name) : 0}
             scores={scores as any}
           />
         </GridItem>
@@ -1020,8 +1018,8 @@ export default function TreatmentDetailPage() {
             containerHeight={MAP_HEIGHT}
             scores={afterTreatmentScores as any}
             subtitle="After Treatment"
-            geoFeatures={projectNames.length > 1 ? (geoFeatures as Feature<LineString, any>[]) : undefined}
-            startIndex={0}
+            geoFeatures={geoFeatures as Feature<LineString, any>[]}
+            startIndex={currentCtx ? getProjectFirstSegmentIndex(currentCtx.name) : 0}
           />
         </GridItem>
       </Grid>
