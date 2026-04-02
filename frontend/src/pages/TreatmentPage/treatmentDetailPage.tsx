@@ -984,9 +984,9 @@ export default function TreatmentDetailPage() {
       </Flex>
 
       {/* Map Previews: Before and After Treatment - Side by Side */}
-      <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap="16px" mb="6">
+      <Grid templateColumns={{ base: "1fr", lg: "repeat(2, minmax(0, 1fr))" }} gap="16px" mb="6" w="100%">
         {/* Before Treatment Map */}
-        <GridItem>
+        <GridItem minW="0" w="100%">
           <GeoDataPanel
             projectName={currentCtx ? currentCtx.name : ""}
             feature={
@@ -1005,7 +1005,7 @@ export default function TreatmentDetailPage() {
         </GridItem>
 
         {/* After Treatment Map */}
-        <GridItem>
+        <GridItem minW="0" w="100%">
           <GeoDataPanel
             projectName={currentCtx ? currentCtx.name : ""}
             feature={
