@@ -220,7 +220,7 @@ def assign_attributes(
         "Adjacent Road Lane 1-3m":          adj_13,
         "Adjacent Object/Level Change 0-1m": adj_01,
         "Adjacent Object/Level Change 1-3m": adj_13,
-        "Adjacent Sidewalk 0-1m":           "Present",
+        "Adjacent Sidewalk 0-1m":           "Not Present",
         "Crossing Facility":                "Not Present",
         "Peak Pedestrian Flow":             "Low",
         "Intersection/Road Crossing":       "Not Present",
@@ -231,6 +231,7 @@ def assign_attributes(
     if check_bottom_presence(masks["cycling"], img_h, fraction=0.20):
         attrs["Facility Type"] = "Off-Road Bicycle Path"
         attrs["Delineation"] = "Present"
+        attrs["Adjacent Sidewalk 0-1m"] = "Present"
 
     # Step 3 – Red Stripe / Wet Red Stripe in bottom 20 %
     if check_bottom_presence(masks["red_stripe"], img_h, fraction=0.20):
@@ -241,7 +242,7 @@ def assign_attributes(
     if check_bottom_majority(masks["traffic_crossing"], img_h, img_w):
         attrs.update({
             "Facility Type":                    "Mixed Traffic Road Lane",
-            "Light Segregation":                "Present",
+            "Light Segregation":                "Not Present",
             "Delineation":                      "Present",
             "Adjacent Road Lane 0-1m":          "Present",
             "Adjacent Road Lane 1-3m":          "Not Present",
@@ -258,7 +259,7 @@ def assign_attributes(
     if check_bottom_majority(masks["zebra_crossing"], img_h, img_w):
         attrs.update({
             "Facility Type":                    "Mixed Traffic Road Lane",
-            "Light Segregation":                "Present",
+            "Light Segregation":                "Not Present",
             "Delineation":                      "Present",
             "Adjacent Road Lane 0-1m":          "Present",
             "Adjacent Road Lane 1-3m":          "Not Present",

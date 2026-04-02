@@ -643,6 +643,13 @@ export type AllTreatmentsSegment = {
   has_treatments: boolean;
   treatments_applied: number[];
   modified_attributes: Record<string, number | null>;
+  after_scores?: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "Overall Risk Level": number;
+  };
 };
 
 /**
@@ -745,6 +752,28 @@ export async function applyAllTreatments(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Apply a specific treatment to all applicable segments in a project
+ * @param project - Project name
+ * @param treatmentId - ID of the treatment to apply
+ * @returns Result with details on how many segments were treated
+ */
+export async function applySpecificTreatment(
+  project: string,
+  treatmentId: number
+): Promise<ApplyAllTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/apply-specific`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ treatment_id: treatmentId }),
     }
   );
   if (!res.ok) throw new Error(await readError(res));

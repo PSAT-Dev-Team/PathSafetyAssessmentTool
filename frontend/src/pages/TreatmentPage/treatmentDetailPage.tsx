@@ -9,6 +9,9 @@ import {
   Spinner,
   NumberInput,
   Button,
+  Dialog,
+  Portal,
+  CloseButton,
 } from "@chakra-ui/react";
 import { Switch } from "../../components/ui/switch";
 
@@ -23,6 +26,7 @@ import {
   getAllTreatments,
   fetchAttributeMappings,
   previewTreatments,
+  applySpecificTreatment,
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
@@ -397,6 +401,25 @@ export default function TreatmentDetailPage() {
   }>>([]);
 
   const [attrs, setAttrs] = useState<AttributeRow[]>([]);
+  const [accordionView, setAccordionView] = useState<"segment" | "treatment">("segment");
+
+  const allApplicableTreatments = useMemo(() => {
+    if (!attrs || attrs.length === 0) return [];
+    
+    const uniqueMap = new Map<number, Treatment>();
+    attrs.forEach(row => {
+      // getApplicableTreatments expects a dict. It's safe to cast row.
+      const applicable = getApplicableTreatments(row as any);
+      applicable.forEach(t => {
+        if (!uniqueMap.has(t.id)) {
+          uniqueMap.set(t.id, t);
+        }
+      });
+    });
+    
+    return Array.from(uniqueMap.values()).sort((a,b) => a.id - b.id);
+  }, [attrs]);
+
   const [geoFeatures, setGeoFeatures] = useState<Feature[]>([]);
   const [scores, setScores] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -415,7 +438,35 @@ export default function TreatmentDetailPage() {
     treatment_ids: number[];
     after_scores: ScoreType | null;
   }>>({});
+
+  const fullyAppliedTreatments = useMemo(() => {
+    const fullyApplied = new Set<number>();
+    
+    allApplicableTreatments.forEach(t => {
+      let applicableCount = 0;
+      let appliedCount = 0;
+      
+      for (let i = 0; i < attrs.length; i++) {
+         const attr = attrs[i] as any;
+         if (!attr) continue;
+         const applicable = getApplicableTreatments(attr);
+         if (applicable.some(x => x.id === t.id)) {
+            applicableCount++;
+            if (treatmentState[i]?.applied && treatmentState[i]?.treatment_ids?.includes(t.id)) {
+               appliedCount++;
+            }
+         }
+      }
+      
+      if (applicableCount > 0 && applicableCount === appliedCount) {
+         fullyApplied.add(t.id);
+      }
+    });
+    
+    return fullyApplied;
+  }, [allApplicableTreatments, attrs, treatmentState]);
   const [applyLoading, setApplyLoading] = useState(false);
+  const [openConfirmAlert, setOpenConfirmAlert] = useState(false);
 
   // Preview state
   const [previewScores, setPreviewScores] = useState<ScoreType | null>(null);
@@ -612,7 +663,13 @@ export default function TreatmentDetailPage() {
               newTreatmentState[globalIndex] = {
                 applied: true,
                 treatment_ids: seg.treatments_applied,
-                after_scores: null,
+                after_scores: seg.after_scores ? {
+                  BB: seg.after_scores.BB,
+                  BP: seg.after_scores.BP,
+                  SB: seg.after_scores.SB,
+                  VB: seg.after_scores.VB,
+                  total: seg.after_scores["Overall Risk Level"],
+                } : null,
               };
             }
           }
@@ -654,7 +711,7 @@ export default function TreatmentDetailPage() {
               const globalIndex = project.startIndex + localIndex;
               newState[globalIndex] = {
                 applied: true,
-                treatment_ids: detail.treatments_applied || [],
+                treatment_ids: detail.treatments_applied || detail.treatment_ids || [],
                 after_scores: afterScores ? {
                   BB: afterScores.BB,
                   BP: afterScores.BP,
@@ -787,6 +844,29 @@ export default function TreatmentDetailPage() {
       setApplyLoading(false);
     }
   }, [resolveIndex, currentIndex, selectedTreatments, imgRef]);
+
+  const handleConfirmApplyToAll = async () => {
+    if (selectedTreatments.size === 0 || !currentCtx) return;
+    setApplyLoading(true);
+    setOpenConfirmAlert(false);
+    try {
+        const allDetails: any[] = [];
+        for (const id of Array.from(selectedTreatments)) {
+            const res = await applySpecificTreatment(currentCtx.name, id);
+            if (res.details) {
+                res.details.forEach((d: any) => d.projectName = currentCtx.name);
+                allDetails.push(...res.details);
+            }
+        }
+        window.dispatchEvent(new CustomEvent("psat:treat:all:completed", { detail: allDetails }));
+        setSelectedTreatments(new Set());
+    } catch (e: any) {
+        console.error("Apply specific failed:", e);
+        alert(e.message || "Failed to apply treatment");
+    } finally {
+        setApplyLoading(false);
+    }
+  };
 
   // Fetch preview scores when selection changes
   useEffect(() => {
@@ -1027,40 +1107,80 @@ export default function TreatmentDetailPage() {
       {/* Main layout: 3 Columns - Image | Treatments | Scores+Attributes */}
       <Grid templateColumns={{ base: "1fr", lg: "0.5fr 1.5fr 1.5fr" }} gap="16px" mb="6">
         {/* Left: Recommended Treatments (Vertical, Scrollable) */}
-        <GridItem
-          display="flex"
-          flexDirection="column"
-          bg="gray.50"
-          _dark={{ bg: "gray.800" }}
-          borderWidth="1px"
-          borderColor="gray.200"
-          borderRadius="md"
-          overflow="hidden"
-        >
+        <GridItem position="relative" minH={{ base: "400px", lg: "0" }}>
+          <Box
+            position={{ base: "relative", lg: "absolute" }}
+            top="0" bottom="0" left="0" right="0"
+            display="flex"
+            flexDirection="column"
+            bg="gray.50"
+            _dark={{ bg: "gray.800" }}
+            borderWidth="1px"
+            borderColor="gray.200"
+            borderRadius="md"
+            overflow="hidden"
+          >
           <Box p="3" borderBottomWidth="1px" borderColor="gray.200" _dark={{ borderColor: "gray.700" }}>
             <Text fontSize="sm" fontWeight="bold" color="gray.700" _dark={{ color: "gray.200" }}>
-              Recommended Treatments
+              Treatment Options
             </Text>
-            <Text fontSize="xs" color="gray.500">Select to apply</Text>
+            <Box mt="2">
+              <select
+                value={accordionView}
+                onChange={(e) => {
+                  setAccordionView(e.target.value as any);
+                  setSelectedTreatments(new Set());
+                }}
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  borderRadius: '4px',
+                  border: '1px solid var(--chakra-colors-gray-300)',
+                  backgroundColor: 'white',
+                  color: 'inherit',
+                  fontSize: '14px',
+                  cursor: 'pointer'
+                }}
+                className="theme-select"
+              >
+                <option value="segment">By Segment</option>
+                <option value="treatment">By Treatment</option>
+              </select>
+            </Box>
           </Box>
 
           <Box flex="1" overflowY="auto" p="3">
             {(() => {
+              let displayTreatments: Treatment[] = [];
               const currentAttr = attrs[currentIndex] as any;
-              if (!currentAttr) {
+              
+              if (accordionView === "segment") {
+                if (!currentAttr) {
+                  return <Text fontSize="xs" color="gray.400">No segment data</Text>;
+                }
+                displayTreatments = getApplicableTreatments(currentAttr);
+              } else {
+                displayTreatments = allApplicableTreatments;
+              }
+
+              if (displayTreatments.length === 0) {
                 return (
-                  <Text fontSize="xs" color="gray.400">
-                    No segment data
+                  <Text fontSize="xs" color="gray.400" _dark={{ color: "gray.500" }}>
+                    {accordionView === "segment" ? "No treatments applicable" : "No treatments applicable in whole project"}
                   </Text>
                 );
               }
-              const applicable = getApplicableTreatments(currentAttr);
-              return applicable.length > 0 ? (
+
+              return (
                 <Flex direction="column" gap="2">
-                  {applicable.map((t) => {
-                    const isApplied = treatmentState[currentIndex]?.applied &&
-                      treatmentState[currentIndex]?.treatment_ids.includes(t.id);
-                    const isDisabled = treatmentState[currentIndex]?.applied;
+                  {displayTreatments.map((t) => {
+                    const isApplied = accordionView === "segment" 
+                      ? (treatmentState[currentIndex]?.applied && treatmentState[currentIndex]?.treatment_ids.includes(t.id))
+                      : fullyAppliedTreatments.has(t.id);
+                      
+                    const isDisabled = accordionView === "segment" 
+                      ? treatmentState[currentIndex]?.applied 
+                      : fullyAppliedTreatments.has(t.id);
 
                     return (
                       <Flex
@@ -1137,10 +1257,6 @@ export default function TreatmentDetailPage() {
                     );
                   })}
                 </Flex>
-              ) : (
-                <Text fontSize="xs" color="gray.400" _dark={{ color: "gray.500" }}>
-                  No treatments applicable
-                </Text>
               );
             })()}
           </Box>
@@ -1156,27 +1272,34 @@ export default function TreatmentDetailPage() {
                   colorScheme={selectedTreatments.size > 0 ? "red" : "blue"}
                   disabled={
                     (() => {
-                      const currentAttr = attrs[currentIndex] as any;
-                      if (!currentAttr) return true;
-                      const applicable = getApplicableTreatments(currentAttr);
-                      return applicable.length === 0 || treatmentState[currentIndex]?.applied;
+                      if (accordionView === "segment") {
+                        const currentAttr = attrs[currentIndex] as any;
+                        if (!currentAttr) return true;
+                        const applicable = getApplicableTreatments(currentAttr);
+                        return applicable.length === 0 || treatmentState[currentIndex]?.applied;
+                      } else {
+                        return allApplicableTreatments.length === 0;
+                      }
                     })()
                   }
                   onClick={() => {
-                    const currentAttr = attrs[currentIndex] as any;
-                    if (!currentAttr) return;
-
                     if (selectedTreatments.size > 0) {
                       setSelectedTreatments(new Set());
                     } else {
-                      const applicable = getApplicableTreatments(currentAttr);
-                      setSelectedTreatments(new Set(applicable.map(t => t.id)));
+                      if (accordionView === "segment") {
+                        const currentAttr = attrs[currentIndex] as any;
+                        if (!currentAttr) return;
+                        const applicable = getApplicableTreatments(currentAttr);
+                        setSelectedTreatments(new Set(applicable.map(t => t.id)));
+                      } else {
+                        setSelectedTreatments(new Set(allApplicableTreatments.map(t => t.id)));
+                      }
                     }
                   }}
                 >
                   {selectedTreatments.size > 0 ? "Clear" : "All"}
                 </Button>
-                {treatmentState[currentIndex]?.applied && (
+                {accordionView === "segment" && treatmentState[currentIndex]?.applied && (
                   <Button
                     flex="1"
                     size="xs"
@@ -1194,18 +1317,25 @@ export default function TreatmentDetailPage() {
                 size="sm"
                 width="full"
                 variant="solid"
-                colorScheme={treatmentState[currentIndex]?.applied ? "green" : "blue"}
+                colorScheme={accordionView === "segment" && treatmentState[currentIndex]?.applied ? "green" : "blue"}
                 disabled={selectedTreatments.size === 0 || applyLoading}
                 loading={applyLoading}
-                onClick={handleApplyTreatments}
+                onClick={async () => {
+                  if (accordionView === "segment") {
+                    handleApplyTreatments();
+                  } else {
+                     if (selectedTreatments.size === 0 || !currentCtx) return;
+                     setOpenConfirmAlert(true);
+                  }
+                }}
               >
-                {treatmentState[currentIndex]?.applied
+                {accordionView === "segment" && treatmentState[currentIndex]?.applied
                   ? "Applied ✓"
                   : `Apply (${selectedTreatments.size})`}
               </Button>
             </Flex>
           </Box>
-
+          </Box>
         </GridItem>
 
         {/* Middle: Image Panel + Navigation Controls */}
@@ -1384,6 +1514,37 @@ export default function TreatmentDetailPage() {
           afterBandCounts={afterBandCounts}
         />
       </Box>
+
+      {/* Confirm Apply All Dialog */}
+      <Dialog.Root open={openConfirmAlert} onOpenChange={(d) => setOpenConfirmAlert(d.open)}>
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Apply Treatments to Project</Dialog.Title>
+              </Dialog.Header>
+              <Dialog.Body>
+                Are you sure you want to logically apply <strong>{selectedTreatments.size}</strong> treatment(s) to <strong>all eligible segments</strong> across this project?
+              </Dialog.Body>
+              <Dialog.Footer>
+                <Dialog.ActionTrigger asChild>
+                  <Button variant="outline" disabled={applyLoading}>
+                    Cancel
+                  </Button>
+                </Dialog.ActionTrigger>
+                <Button colorPalette="blue" onClick={handleConfirmApplyToAll} loading={applyLoading}>
+                  Confirm
+                </Button>
+              </Dialog.Footer>
+              <Dialog.CloseTrigger asChild>
+                <CloseButton size="sm" />
+              </Dialog.CloseTrigger>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+
     </Box>
   );
 }

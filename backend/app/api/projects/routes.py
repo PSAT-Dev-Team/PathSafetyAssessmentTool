@@ -1517,6 +1517,23 @@ def get_all_treatments(project_name: str):
                 "modified_attributes": modified_attributes,
             }
 
+        if segments:
+            # Vectorized calculation of after_scores for all segments with treatments
+            modified_rows = [v["modified_attributes"] for v in segments.values()]
+            idx_keys = list(segments.keys())
+            modified_df = pd.DataFrame(modified_rows)
+            after_scores_df = calculate_cyclerap_score_native(modified_df)
+            
+            for i, idx_str in enumerate(idx_keys):
+                after_scores = {
+                    "BB": float(after_scores_df["BB"].iloc[i].item() if hasattr(after_scores_df["BB"].iloc[i], 'item') else after_scores_df["BB"].iloc[i]),
+                    "BP": float(after_scores_df["BP"].iloc[i].item() if hasattr(after_scores_df["BP"].iloc[i], 'item') else after_scores_df["BP"].iloc[i]),
+                    "SB": float(after_scores_df["SB"].iloc[i].item() if hasattr(after_scores_df["SB"].iloc[i], 'item') else after_scores_df["SB"].iloc[i]),
+                    "VB": float(after_scores_df["VB"].iloc[i].item() if hasattr(after_scores_df["VB"].iloc[i], 'item') else after_scores_df["VB"].iloc[i]),
+                    "Overall Risk Level": float(after_scores_df["Overall Risk Level"].iloc[i].item() if hasattr(after_scores_df["Overall Risk Level"].iloc[i], 'item') else after_scores_df["Overall Risk Level"].iloc[i])
+                }
+                segments[idx_str]["after_scores"] = after_scores
+
         return jsonify({"ok": True, "segments": segments})
 
     except Exception as e:
@@ -1794,6 +1811,149 @@ def apply_all_treatments(project_name: str):
         import traceback
         traceback.print_exc()
         return fail(f"Error applying all treatments: {str(e)}", 500)
+
+
+@bp.post("/<project_name>/treatments/apply-specific")
+def apply_specific_treatment(project_name: str):
+    """
+    Apply a specific treatment to all applicable segments within a project.
+
+    This endpoint analyzes each segment, checks if the given treatment_id is applicable,
+    and applies it if so.
+
+    Response:
+        {
+            "ok": true,
+            "total_segments": 50,
+            "segments_treated": 48,
+            "segments_skipped": 2,
+            "details": [ ... ]
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+        
+        data = request.get_json(silent=True) or {}
+        target_treatment_id = data.get("treatment_id")
+        if not target_treatment_id:
+            return fail("Missing treatment_id", 400)
+            
+        target_treatment = next((t for t in TREATMENTS if t["id"] == target_treatment_id), None)
+        if not target_treatment:
+            return fail(f"Invalid treatment_id: {target_treatment_id}", 400)
+
+        attrs_df = ver.attributes.df
+        treatment_df = ver.treatment.df.copy()
+
+        if len(treatment_df) < len(attrs_df):
+            new_rows = [{}] * (len(attrs_df) - len(treatment_df))
+            treatment_df = pd.concat([treatment_df, pd.DataFrame(new_rows)], ignore_index=True)
+
+        def is_treatment_applicable(attr_row, treatment):
+            for trigger_set in treatment.get("triggers", []):
+                all_match = True
+                for attr_name, required_values in trigger_set.items():
+                    if attr_name not in attr_row:
+                        all_match = False
+                        break
+                    if attr_row[attr_name] not in required_values:
+                        all_match = False
+                        break
+                if all_match:
+                    return True
+            return False
+
+        for col in attrs_df.columns:
+            if col not in treatment_df.columns:
+                treatment_df[col] = None
+
+        details = []
+        total_treated = 0
+
+        if "Treatments Applied" not in treatment_df.columns:
+            treatment_df.insert(0, "Treatments Applied", "")
+
+        for segment_index in range(len(attrs_df)):
+            try:
+                original_row = dict(attrs_df.iloc[segment_index])
+                
+                if not is_treatment_applicable(original_row, target_treatment):
+                    continue
+                
+                existing_treatments_str = treatment_df.at[segment_index, "Treatments Applied"]
+                existing_treatment_ids = []
+                if pd.notna(existing_treatments_str) and str(existing_treatments_str).strip():
+                    try:
+                        existing_treatment_ids = [int(x.strip()) for x in str(existing_treatments_str).split(",") if x.strip()]
+                    except ValueError:
+                        pass
+                
+                if target_treatment_id in existing_treatment_ids:
+                    continue # Already applied
+                
+                treatment_ids = existing_treatment_ids + [target_treatment_id]
+                
+                modified_row = original_row.copy()
+                for tid in treatment_ids:
+                    t_obj = next((t for t in TREATMENTS if t["id"] == tid), None)
+                    if t_obj:
+                        for attr_name, new_value in t_obj['effects'].items():
+                            modified_row[attr_name] = new_value
+
+                original_df = pd.DataFrame([original_row])
+                before_scores_df = calculate_cyclerap_score_native(original_df)
+                before_scores = {
+                    "BB": float(before_scores_df["BB"].iloc[0]),
+                    "BP": float(before_scores_df["BP"].iloc[0]),
+                    "SB": float(before_scores_df["SB"].iloc[0]),
+                    "VB": float(before_scores_df["VB"].iloc[0]),
+                    "Overall Risk Level": float(before_scores_df["Overall Risk Level"].iloc[0])
+                }
+
+                modified_df = pd.DataFrame([modified_row])
+                after_scores_df = calculate_cyclerap_score_native(modified_df)
+                after_scores = {
+                    "BB": float(after_scores_df["BB"].iloc[0]),
+                    "BP": float(after_scores_df["BP"].iloc[0]),
+                    "SB": float(after_scores_df["SB"].iloc[0]),
+                    "VB": float(after_scores_df["VB"].iloc[0]),
+                    "Overall Risk Level": float(after_scores_df["Overall Risk Level"].iloc[0])
+                }
+
+                for col in modified_row.keys():
+                    if col in treatment_df.columns:
+                        treatment_df.at[segment_index, col] = modified_row[col]
+
+                treatment_df.at[segment_index, "Treatments Applied"] = ",".join(str(tid) for tid in treatment_ids)
+
+                details.append({
+                    "segment_index": segment_index,
+                    "treatment_ids": treatment_ids,
+                    "before_scores": before_scores,
+                    "after_scores": after_scores
+                })
+
+                total_treated += 1
+
+            except Exception:
+                continue
+
+        ver.treatment.df = treatment_df
+
+        return jsonify({
+            "ok": True,
+            "total_segments": int(len(attrs_df)),
+            "segments_treated": int(total_treated),
+            "segments_skipped": int(len(attrs_df) - total_treated),
+            "details": details
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error applying specific treatment: {str(e)}", 500)
 
 
 @bp.post("/<project_name>/treatments/reset-all")
