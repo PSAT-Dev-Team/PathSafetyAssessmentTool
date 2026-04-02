@@ -103,10 +103,37 @@ function renderGroupedAttributes(items: any[]) {
 
 // CycleRAP Attributes with their specific possible values
 interface AttributeConfig {
-  name: string;
+  name: string;       // exact backend field name — used as data lookup key
+  label?: string;     // display name — shown in UI if different from name
   options: string[];
-  group: string; // Add group field
+  group: string;
+  type?: "numeric";
 }
+
+/** Attribute names that store raw numeric values and use range-slider filtering. */
+export const NUMERIC_FILTER_ATTRIBUTES = new Set<string>([
+  "Road AADT",
+  "Road operating speed (mean)",
+]);
+
+/**
+ * Display labels for attributes whose field name differs from the desired display name.
+ * Keys are exact backend field names; values are the desired UI labels.
+ */
+export const ATTRIBUTE_LABELS: Record<string, string> = {
+  "Area type":                "Area Type",
+  "Facility access":          "Facility Access",
+  "Loose or slippery surface": "Loose or Slippery Surface",
+  "Tram or Train Rails":       "Tram or Train Rails",
+};
+
+/**
+ * All selectable option values per attribute (excluding "Not Selected").
+ * Used so the filter panel always shows all possible options, even if the
+ * current dataset doesn't contain every value.
+ * Built lazily after cyclerapAttributes is defined — see bottom of file.
+ */
+export let ATTRIBUTE_OPTIONS: Record<string, string[]> = {};
 
 // Safety Risk Level Crash Types
 interface SafetyScoreConfig {
@@ -152,12 +179,19 @@ const safetyScoreAttributes: SafetyScoreConfig[] = [
 const cyclerapAttributes: AttributeConfig[] = [
   // Facility configuration group
   {
+    name: "Area type",
+    label: "Area Type",
+    group: "Facility configuration",
+    options: ["Not Selected", "Urban", "Suburban", "Rural", "Industrial", "Recreational"],
+  },
+  {
     name: "Facility Type",
     group: "Facility configuration",
     options: ["Not Selected", "Sidewalk", "Multi-Use Path", "Off-Road Bicycle Path", "On-road Bicycle Lane", "Road Shoulder", "Mixed Traffic Road Lane"]
   },
   {
     name: "Facility access",
+    label: "Facility Access",
     group: "Facility configuration",
     options: ["Not Selected", "Adequate", "Inadequate"]
   },
@@ -243,6 +277,23 @@ const cyclerapAttributes: AttributeConfig[] = [
     group: "Flow & Speed",
     options: ["Not Selected", "< 10km/h", "=/> 10km/h"]
   },
+  {
+    name: "Road speed limit",
+    group: "Flow & Speed",
+    options: ["Not Selected", "NA", "0 km/h", "10 km/h", "20 km/h", "30 km/h", "40 km/h", "50 km/h", "60 km/h", "70 km/h", "80 km/h", "90 km/h", "100 km/h", "110 km/h", "120 km/h"],
+  },
+  {
+    name: "Road AADT",
+    group: "Flow & Speed",
+    options: [],
+    type: "numeric",
+  },
+  {
+    name: "Road operating speed (mean)",
+    group: "Flow & Speed",
+    options: [],
+    type: "numeric",
+  },
 
   // Facility clear width group
   {
@@ -275,6 +326,12 @@ const cyclerapAttributes: AttributeConfig[] = [
     group: "Facility clear width",
     options: ["Not Selected", "Present", "Not Present"]
   },
+  {
+    name: "Facility Width Sub-category",
+    label: "Facility Width Sub-category",
+    group: "Facility clear width",
+    options: ["Not Selected", "\u22641.5m", ">1.5\u20131.8m", ">1.8\u2013<2m", "2\u2013<3.5m", "3.5\u20134m", ">4m"],
+  },
 
   // Facility surface conditions group
   {
@@ -284,6 +341,7 @@ const cyclerapAttributes: AttributeConfig[] = [
   },
   {
     name: "Loose or slippery surface",
+    label: "Loose or Slippery Surface",
     group: "Facility surface conditions",
     options: ["Not Selected", "Present", "Not Present"]
   },
@@ -306,6 +364,12 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "Curvature",
     group: "Facility surface conditions",
     options: ["Not Selected", "Sharp Turn Present", "No Sharp Turn Present"]
+  },
+  {
+    name: "Curvature Sub-category",
+    label: "Curvature Sub-category",
+    group: "Facility surface conditions",
+    options: ["Not Selected", "<6.5m", "6.5\u2013<10m", "10\u201318m", ">18m"],
   },
   {
     name: "Street Lighting",
@@ -356,6 +420,169 @@ const cyclerapAttributes: AttributeConfig[] = [
   },
 ];
 
+// Populate ATTRIBUTE_OPTIONS from cyclerapAttributes (all non-"Not Selected" options, skip numeric)
+ATTRIBUTE_OPTIONS = Object.fromEntries(
+  cyclerapAttributes
+    .filter(a => a.type !== "numeric" && a.options.length > 1)
+    .map(a => [a.name, a.options.filter(o => o !== "Not Selected")])
+);
+
+/** All CycleRAP attribute configs (exported for FilterPanel and other consumers). */
+export const CYCLERAP_ATTRIBUTE_CONFIGS: readonly AttributeConfig[] = cyclerapAttributes;
+
+/**
+ * Subcategory descriptions per attribute option.
+ * Keys are attribute names → option value → descriptive sub-text shown in the sidebar.
+ * Only attributes/options that have a meaningful sub-description are included.
+ */
+export const ATTRIBUTE_SUBCATEGORIES: Record<string, Record<string, string>> = {
+  "Facility Type": {
+    "Sidewalk": "Standalone or beside cycling path (GIS)",
+    "Off-Road Bicycle Path": "Side by side footpath (adj. sidewalk 0–1 m) or split path (adj. sidewalk 1–3 m)",
+    "Mixed Traffic Road Lane": "Shared space, side road, development access, signalised pedestrian crossing, pedestrian cum bicycle crossing, zebra crossing, kerb cut ramp",
+  },
+  "Loose or slippery surface": {
+    "Present": "Type: leaves, sand/soil, others",
+  },
+  "Major Surface Deformation or Drain Opening": {
+    "Present": "Type: potholes/cracks, drain opening/grating, no kerb cut ramps, uneven surface, others",
+  },
+  "Fixed Obstacle on Facility": {
+    "Present": "Type: lamp post, traffic light pole, covered linkway pole, bollards, VIG posts, vegetation, others",
+  },
+  "Non-Fixed Obstacle on Facility": {
+    "Present": "Type: water filled barricade, dustbin, parked bicycles/motorcycles, advertisement panels, others",
+  },
+  "Line of Sight": {
+    "Inadequate": "Location: corner, development entrance/exit, bend, driveway/sideroad, crossing — Object: vegetation, column, boundary wall/fence, structure",
+  },
+  "Delineation": {
+    "Not Present": "Faded or not present",
+  },
+  "Facility Width per Direction": {
+    "Very Narrow": "≤1.5 m · >1.5–1.8 m · >1.8–<2 m",
+    "Narrow": "2 m · >2–<3.5 m · 3.5–4 m",
+  },
+  "Width Restriction": {
+    "Present": "Type: bus stop, obstacle on path, construction, vegetation, others",
+  },
+  "Grade": {
+    "< 5 Degrees": "≤4° (1:25) · >4°–<5°",
+    "=/> 5 Degrees": "5° · 6° · 7° · 8° · >8°",
+  },
+  "Curvature": {
+    "Sharp Turn Present": "<6.5 m · 6.5–<10 m",
+    "No Sharp Turn Present": "10–18 m · >18 m",
+  },
+  "Pedestrian Crossing": {
+    "Present": "Location: MRT station, bus stop/PUDO/taxi stand, crossings (GIS)",
+  },
+  "Intersection or Road Crossing": {
+    "Present": "Type: side road, development access, signalised pedestrian crossing, pedestrian cum bicycle crossing, zebra crossing, kerb cut ramp",
+  },
+  "Crossing Facility": {
+    "Present": "Type: signalised pedestrian crossing (GIS), pedestrian cum bicycle crossing (GIS), zebra crossing (GIS), refuge island",
+  },
+  "Bicycle/LV speed – average": {
+    "=/> 20km/h": "20 · >20–25 · >25 km/h",
+  },
+};
+
+/**
+ * Returns the display hex color for a given attribute name and category value.
+ * Identical logic to the getCategoryColor function in PathAnalysisMapView.
+ * Exported here to avoid duplication and circular imports.
+ */
+export function getCategoryColor(attribute: string, category: string): string {
+  const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(attribute);
+
+  const categoryColors: Record<string, string | Record<string, string>> = {
+    "Not Selected": "#9CA3AF",
+    "Low": "#87C424",
+    "Medium": "#FFCC1A",
+    "High": "#FF5B1A",
+    "Extreme": "#CD1AFF",
+    "Adjacent Sidewalk 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Adjacent Road Lane 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Adjacent Vehicle Parking 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Adjacent Severe Hazard 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Adjacent object or level change 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Adjacent Road Lane 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Adjacent Vehicle Parking 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Adjacent Severe Hazard 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Adjacent object or level change 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Line of Sight": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
+    "Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Light Segregation": { "Present": "#16A34A", "Not Present": "#DC2626" },
+    "Facility access": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
+    "Loose or slippery surface": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Major Surface Deformation or Drain Opening": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Tram or Train Rails": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Delineation": { "Present": "#16A34A", "Not Present": "#DC2626" },
+    "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
+    "Grade": { "< 5 Degrees": "#16A34A", "=/> 5 Degrees": "#DC2626" },
+    "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
+    "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#FFCC1A", "Very Narrow": "#DC2626" },
+    "Peak pedestrian flow along or across facility": { "None": "#6B7280", "Low": "#16A34A", "Moderate to high": "#DC2626" },
+    "Peak bicycle/LV traffic flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+    "Observed proportion of cargo bikes and mopeds": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+    "Heavy vehicle flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+    "Bicycle/LV speed – average": { "< 20km/h": "#16A34A", "=/> 20km/h": "#DC2626" },
+    "Bicycle/LV speed differential": { "< 10km/h": "#16A34A", "=/> 10km/h": "#DC2626" },
+    "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
+    "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
+    "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
+    "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
+    "Property Access": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "Intersection Approach": { "Separate/NA": "#16A34A", "Shared": "#DC2626" },
+    "Number of lanes – adjacent road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+    "Number of lanes – intersecting road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+    "Flow Direction": { "One Way": "#2563EB", "Two Way": "#9333EA" },
+    "Facility Type": {
+      "Sidewalk": "#2563EB",
+      "Multi-Use Path": "#9333EA",
+      "Off-Road Bicycle Path": "#16A34A",
+      "On-road Bicycle Lane": "#CA8A04",
+      "Road Shoulder": "#F59E0B",
+      "Mixed Traffic Road Lane": "#DC2626",
+    },
+    "Facility Width Sub-category": {
+      "\u22641.5m":     "#DC2626",
+      ">1.5\u20131.8m": "#EA580C",
+      ">1.8\u2013<2m":  "#F59E0B",
+      "2\u2013<3.5m":   "#16A34A",
+      "3.5\u20134m":    "#0891B2",
+      ">4m":            "#2563EB",
+    },
+    "Curvature Sub-category": {
+      "<6.5m":          "#DC2626",
+      "6.5\u2013<10m":  "#EA580C",
+      "10\u201318m":    "#16A34A",
+      ">18m":           "#2563EB",
+    },
+    "Area type": {
+      "Urban":        "#2563EB",
+      "Suburban":     "#0891B2",
+      "Rural":        "#16A34A",
+      "Industrial":   "#EA580C",
+      "Recreational": "#9333EA",
+    },
+  };
+
+  if (isSafetyScore) {
+    return (categoryColors[category] as string) || "#6B7280";
+  }
+
+  const attributeColors = categoryColors[attribute];
+  if (typeof attributeColors === "object" && attributeColors !== null) {
+    return (attributeColors as Record<string, string>)[category] || "#6B7280";
+  }
+  if (typeof attributeColors === "string") return attributeColors;
+  return "#6B7280";
+}
+
 // All attribute names including "Not Selected" and "Project"
 const allAttributes = [
   { label: "Not Selected", value: "Not Selected", group: "Not Selected" },
@@ -366,7 +593,7 @@ const allAttributes = [
     group: attr.group,
   })),
   ...cyclerapAttributes.map((attr) => ({
-    label: attr.name,
+    label: attr.label || attr.name,
     value: attr.name,
     group: attr.group,
   })),

@@ -23,14 +23,12 @@ import { ChartTypeToggle } from "../../../components/ui/ChartTypeToggle";
 interface AttributeDistributionChartProps {
   categoryData: { category: string; count: number; color: string }[];
   selectedAttribute: string | null;
-  selectedAttributes: (string | null)[];
   categoryStatus?: { attribute: string; categories: { category: string; isActive: boolean; color: string }[] }[];
 }
 
 export default function AttributeDistributionChart({
   categoryData,
   selectedAttribute,
-  selectedAttributes,
   categoryStatus = [],
 }: AttributeDistributionChartProps) {
   const [chartType, setChartType] = useState<"pie" | "bar">("pie");

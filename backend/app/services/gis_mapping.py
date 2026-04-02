@@ -1125,9 +1125,18 @@ class GIS:
         has_angle_turn = self._check_angle_curvature(point)
 
         if is_sharp_curve or has_angle_turn:
-            return 1  # Sharp Turn Present
+            # Sub-categorise by radius when available
+            if min_radius is not None:
+                subcat = "<6.5m" if min_radius < 6.5 else "6.5\u2013<10m"
+            else:
+                subcat = None  # Angle-based detection only; no measured radius
+            return 1, subcat  # Sharp Turn Present
         else:
-            return 2  # No Sharp Turn Present
+            if min_radius is not None:
+                subcat = ">18m" if min_radius > 18 else "10\u201318m"
+            else:
+                subcat = None
+            return 2, subcat  # No Sharp Turn Present
 
     def _check_angle_curvature(self, point, collect_radius=5.0, angle_threshold=45.0, epsilon=1e-9):
         """
@@ -1550,13 +1559,21 @@ class GIS:
 
         # Categorize the found width using the same thresholds as PathAssignmentTool
         if width is None:
-            return default_value  # Default: Narrow (2)
+            return default_value, None  # Default: Narrow (2), no sub-category
         elif width > 4:
-            return 3  # Wide
+            category, subcat = 3, ">4m"
         elif width > 2:
-            return 2  # Narrow
+            category = 2
+            subcat = "3.5–4m" if width >= 3.5 else "2–<3.5m"
         else:
-            return 1  # Very Narrow
+            category = 1
+            if width <= 1.5:
+                subcat = "\u22641.5m"
+            elif width <= 1.8:
+                subcat = ">1.5\u20131.8m"
+            else:
+                subcat = ">1.8\u2013<2m"
+        return category, subcat
 
     def get_width_visualization(self, point, start_radius=1.0, max_radius=10.0, step=1.0):
         """

@@ -10,7 +10,7 @@ import {
   Portal,
 } from "@chakra-ui/react";
 import { fetchProjectList, type FileResponse } from "../../api";
-import AttributesDropdown from "./components/AttributesDropdown";
+import FilterPanel from "./components/FilterPanel";
 import PathAnalysisMapView from "./components/PathAnalysisMapView";
 import AttributeDistributionChart from "./components/AttributeDistributionChart";
 import AggregatedScoreBandPanel from "./components/AggregatedScoreBandPanel";
@@ -40,8 +40,10 @@ export default function PathAnalysisPage() {
   const [lastUpdatedTo, setLastUpdatedTo] = useState(() => loadState("lastUpdatedTo", ""));
   const [tagsFilter, setTagsFilter] = useState<string[]>(() => loadState("tagsFilter", []));
 
-  // Selected attributes for visualization (up to 5)
-  const [selectedAttributes, setSelectedAttributes] = useState<(string | null)[]>(() => loadState("selectedAttributes", [null]));
+  // Active filter attributes (passed to FilterPanel for master toggles and MapView for filtering)
+  const [activeFilters, setActiveFilters] = useState<string[]>(() =>
+    loadState("activeFilters", [])
+  );
 
   // Combobox input states for filtering
   const [projectInputValue, setProjectInputValue] = useState("");
@@ -81,7 +83,7 @@ export default function PathAnalysisPage() {
     saveState("lastUpdatedFrom", lastUpdatedFrom);
     saveState("lastUpdatedTo", lastUpdatedTo);
     saveState("tagsFilter", tagsFilter);
-    saveState("selectedAttributes", selectedAttributes);
+    saveState("activeFilters", activeFilters);
   }, [
     selectedProjects,
     loadedProjects,
@@ -90,7 +92,7 @@ export default function PathAnalysisPage() {
     lastUpdatedFrom,
     lastUpdatedTo,
     tagsFilter,
-    selectedAttributes
+    activeFilters,
   ]);
 
   // Process projects
@@ -503,11 +505,11 @@ export default function PathAnalysisPage() {
         </Box>
       )}
 
-      {/* Attributes Dropdown Section */}
+      {/* Filter Panel */}
       <Box mb="6">
-        <AttributesDropdown
-          selectedAttributes={selectedAttributes}
-          onAttributeChange={setSelectedAttributes}
+        <FilterPanel
+          activeFilters={activeFilters}
+          onActiveFiltersChange={setActiveFilters}
         />
       </Box>
 
@@ -515,7 +517,7 @@ export default function PathAnalysisPage() {
       <Box mb="6">
         <PathAnalysisMapView
           selectedProjects={loadedProjects}
-          selectedAttributes={selectedAttributes}
+          selectedAttributes={activeFilters}
           onChartDataUpdate={setChartData}
         />
       </Box>
@@ -532,7 +534,6 @@ export default function PathAnalysisPage() {
           <AttributeDistributionChart
             categoryData={chartData.categoryDistributionData}
             selectedAttribute={chartData.primaryFocusAttribute}
-            selectedAttributes={selectedAttributes}
             categoryStatus={chartData.categoryStatus}
           />
         </Box>

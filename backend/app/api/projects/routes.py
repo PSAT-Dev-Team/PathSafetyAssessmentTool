@@ -2505,13 +2505,17 @@ def autocode_gis(project_name: str):
         # Uses two-stage process from original PathAssignmentTool:
         #   Stage 1: Expanding ring (1m→5m) to find nearest path
         #   Stage 2: Fixed 5m window to calculate curvature from that path
-        curvature = _gis.get_curvature(pt, sharp_turn_threshold=10.0, default_value=2)
+        curvature, curvature_subcat = _gis.get_curvature(pt, sharp_turn_threshold=10.0, default_value=2)
         updates["Curvature"] = curvature
+        if curvature_subcat is not None:
+            updates["Curvature Sub-category"] = curvature_subcat
 
         # Added for Facility Width per Direction
         # Calculate facility width using expanding ring search on path centerline shapefiles
-        facility_width = _gis.get_facility_width(pt, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2)
+        facility_width, width_subcat = _gis.get_facility_width(pt, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2)
         updates["Facility Width per Direction"] = facility_width
+        if width_subcat is not None:
+            updates["Facility Width Sub-category"] = width_subcat
 
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
