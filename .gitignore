@@ -7,12 +7,7 @@ model/
 # Claude Code settings
 .claude/path_segmentation_inference.ipynb
 
-# Unused/duplicate ML model files and scripts
-cbam.py
-cbam.pt
-ema.py
-obstacle_detector_ema.pt
+# Unused/duplicate ML model files and scriptss
 cyclerap_output*/
-
 # Python bytecode cache
 __pycache__/
