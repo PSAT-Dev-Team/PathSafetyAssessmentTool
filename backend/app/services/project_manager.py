@@ -284,7 +284,10 @@ class Project:
             # 只有在今天目录真的不存在时，才创建新版本
             self.create_new_version(self.latest())
 
-        self.metadata.serialize(self.project_path)
+        # NOTE: metadata is NOT serialized here intentionally.
+        # Callers are responsible for setting last_updated and calling
+        # metadata.serialize() explicitly, so only the intended project
+        # gets its timestamp updated.
         if self.geo_data.df_dirty is True:
             self.geo_data.serialize(self.project_path)
         self.latest().save_all()
@@ -626,6 +629,7 @@ class Project:
         
         # Save Target
         target_project.save_all()
+        target_project.metadata.serialize(target_project.project_path)
         return count_added
         # ================================
         # Get dataframes to filter
@@ -870,6 +874,7 @@ class project_manager:
 
         # Write project to file
         new_project.save_all()
+        new_project.metadata.serialize(new_project.project_path)
 
         self.projects.append(new_project)
         

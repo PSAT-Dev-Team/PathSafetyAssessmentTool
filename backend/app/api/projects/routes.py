@@ -747,6 +747,7 @@ def copy_segments():
                 
                 # Save just to register it
                 new_proj.save_all()
+                new_proj.metadata.serialize(new_proj.project_path)
                 pm.projects.append(new_proj)
                 target_proj = new_proj
             else:
