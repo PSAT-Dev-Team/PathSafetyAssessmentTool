@@ -1,5 +1,5 @@
 import {
-  Card, CardHeader, CardBody, Heading, Text, Box, Flex, HStack, IconButton, Button,
+  Card, CardHeader, CardBody, Heading, Text, Box, Flex, IconButton, Button,
   Dialog, Portal, Menu
 } from "@chakra-ui/react";
 import { FaMousePointer, FaDrawPolygon, FaPlus, FaTrash } from "react-icons/fa";
@@ -762,8 +762,9 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
   return (
     <Card.Root display="flex" flexDirection="column" h={`${containerHeight}px`}>
       <CardHeader py="2" px="4">
-        <Flex justify="space-between" align="center">
-          <Flex align="center" gap="2">
+        <Flex direction="column" gap="3">
+          <Flex justify="space-between" align="center" wrap="wrap">
+            <Flex align="center" gap="2" wrap="wrap">
             <Heading size="sm">Map Preview</Heading>
             {subtitle && (
               <Text fontSize="sm" fontWeight="medium" color="gray.600" _dark={{ color: "gray.400" }}>
@@ -909,10 +910,11 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
               </Button>
             )}
 
+            </Flex>
           </Flex>
 
           {/* GIS Layer Toggles */}
-          <HStack gap="4">
+          <Flex wrap="wrap" gap="4">
             <Flex align="center" gap="2">
               <Text fontSize="sm" fontWeight="medium" color={showFootpath ? "blue.600" : "gray.500"}>
                 Footpath
@@ -1020,7 +1022,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
                 onCheckedChange={(e) => setShowKerbLine(e.checked)}
               />
             </Flex>
-          </HStack>
+          </Flex>
         </Flex>
       </CardHeader>
 

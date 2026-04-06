@@ -1024,7 +1024,7 @@ def load_images_from_folder_cv(folder):
     image_array = []
     
     for filename in os.listdir(folder):
-        if filename.lower().endswith(".jpg"):
+        if filename.lower().endswith((".jpg", ".jpeg")):
             image_array.append(filename)
     
     def extract_numeric_key(filename):

@@ -1,47 +1,41 @@
 from . import serializer
+import cv2
 import numpy as np
-from PIL import Image
 from pathlib import Path
 
+# Make EMA available for unpickling the obstacle model.
+from .ema import EMA  # noqa: F401
+import ultralytics.nn.modules.block as _ul_block
+_ul_block.EMA = EMA
+
+# ---------------------------------------------------------------------------
+# Obstacle class definitions
+# ---------------------------------------------------------------------------
+FIXED_OBSTACLE_CLASSES = {
+    "Pillar", "Bollards", "Fence", "Utility Box",
+    "Traffic Light", "Billboard", "Lamp Post",
+}
+NON_FIXED_OBSTACLE_CLASSES = {"Cone", "Bins", "Bicycle", "Pot", "Barrier"}
+
+
 class CycleRAP_Coding_Helper:
-    path_segmentation_model : None = None
-    road_classification_model: None = None #CY
-    off_road_bicycle_classifier : None = None
-    adj_road_lanes_classifier : None = None
-    fixed_obstacle_classifier: None = None 
-    Development_access_classifier: None = None 
-    delineation_classifier: None = None 
-
-    DEV_ACCESS_CONDITIONS = [
-        {5, 2, 1, 0},           # Textile, Buffer Zone, Road, Path
-        {5, 2, 1, 0, 4},        # Textile, Buffer Zone, Road, Path, Zebra
-        {1, 0, 2, 4},           # Road, Path, Buffer Zone, Zebra
-        {5, 1, 4}               # Textile, Road, Zebra
-    ]
-
-
-    FIXED_OBSTACLE_RELEVANT_LABELS = {1, 2, 4, 6, 7}  #CY
-
-    FIXED_OBSTACLE_BUS_RELEVANT_LABELS = {1, 4}
-    
-    FIXED_OBSTACLE_DELINEATION_RELEVANT_LABELS = {1 , 2} #CY
-
-    DELINEATION_RELEVANT_LABELS = {0, 1, 2, 5}
-
-
+    path_segmentation_model = None
+    obstacle_detector_model = None
+    class_sets: dict | None = None
 
     def __init__(self):
         raise RuntimeError("Do not create class instance, use the class methods instead")
 
-    # Load in CV models
+    # ------------------------------------------------------------------
+    # Model loading
+    # ------------------------------------------------------------------
     @classmethod
     def initialise(cls, model_dir: Path):
         from ultralytics import YOLO
         from ultralytics.nn import tasks as _ul_tasks
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Patch BaseModel.fuse() at the class level so Ultralytics >=8.x doesn't
-        # crash on older .pt files that have already-fused Conv layers (no 'bn').
+        # Patch BaseModel.fuse() so older .pt files don't crash
         _orig_fuse = _ul_tasks.BaseModel.fuse
         def _safe_fuse(self, verbose=True):
             try:
@@ -50,18 +44,12 @@ class CycleRAP_Coding_Helper:
                 return self
         _ul_tasks.BaseModel.fuse = _safe_fuse
 
-        # Map of attribute name → filename for each model
         models_to_load = {
-            "path_segmentation_model":      "path_seg.pt",
-            "off_road_bicycle_classifier":  "off_road_bicycle_path.pt",
-            "adj_road_lanes_classifier":    "adj_road_lane.pt",
-            "fixed_obstacle_classifier":    "LTA_FIXEDOBSTACLE_BEST_2.pt",
-            "Development_access_classfier": "DevelopmentAccess_last_150epochs.pt",
-            "Delineation_classfier":        "LTA_Dill_4_Best.pt",
-            "road_classification_model":    "RoadClassification_best.pt",
+            "path_segmentation_model": "path_segmentation.pt",
+            "obstacle_detector_model": "obstacle_detector_ema.pt",
         }
 
-        # Validate all files exist before spawning threads
+        # Validate files exist
         for attr, filename in models_to_load.items():
             path = model_dir / filename
             if not path.exists():
@@ -72,15 +60,14 @@ class CycleRAP_Coding_Helper:
             path = model_dir / filename
             print(f"[Autocode] Loading {filename}...", flush=True)
             t0 = time.time()
-            model = YOLO(path)
+            model = YOLO(str(path))
             elapsed = time.time() - t0
             print(f"[Autocode] Loaded  {filename} in {elapsed:.1f}s", flush=True)
             return attr, model
 
-        # Load all 7 models in parallel — IO+deserialization bound, safe to thread
         results: dict = {}
         errors: list = []
-        with ThreadPoolExecutor(max_workers=7, thread_name_prefix="model-load") as pool:
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="model-load") as pool:
             futures = {pool.submit(_load_one, attr, fn): attr for attr, fn in models_to_load.items()}
             for future in as_completed(futures):
                 try:
@@ -92,392 +79,444 @@ class CycleRAP_Coding_Helper:
         if errors:
             raise RuntimeError("Model loading failed:\n" + "\n".join(errors))
 
-        # Assign all loaded models to class attributes atomically
         for attr, model in results.items():
             setattr(cls, attr, model)
 
-    # Facility Type
-    # Adj road Lane (0-1, 1-3)
-    # Crossing Facility
-    # Intersection or Road Crossing
-    # Delineation
-    # Peak pedestrian flow across facility (only low)
-    # NoL Intersecting Road (Traffic Crossing)
-    # Adj obj/level change (0-1, 1-3)
-    # Adj Sidewalk (0-1)
-    # Light Segregation
-    # ====
+        # Cache class-ID sets from the segmentation model
+        cls.class_sets = cls._build_class_sets(cls.path_segmentation_model)
+        print(f"[Autocode] Class sets: { {k: {cls.path_segmentation_model.names[cid] for cid in v} for k, v in cls.class_sets.items()} }", flush=True)
 
+    # ------------------------------------------------------------------
+    # Class-set helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _build_class_sets(model) -> dict[str, set[int]]:
+        inv = {v: k for k, v in model.names.items()}
+
+        def _ids(*names):
+            return {inv[n] for n in names if n in inv}
+
+        return {
+            "road":              _ids("Road"),
+            "traffic_crossing":  _ids("Traffic Crossing"),
+            "zebra_crossing":    _ids("Zebra Crossing"),
+            "cycling":           _ids("Cycling Path", "Wet Cycling Path"),
+            "red_stripe":        _ids("Red Stripe", "Wet Red Stripe"),
+            "pathway":           _ids(
+                "Pathway", "Cycling Path", "Stone Pathway", "Wet Pathway",
+                "Grey Tiled Pathway", "Wet Cycling Path", "Square Pathway",
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # Mask building
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _build_masks(
+        result,
+        class_sets: dict[str, set[int]],
+        img_h: int,
+        img_w: int,
+        conf_thresh: float,
+    ) -> dict[str, np.ndarray]:
+        masks_out = {key: np.zeros((img_h, img_w), dtype=np.uint8) for key in class_sets}
+
+        boxes = result.boxes
+        seg_masks = result.masks
+        if boxes is None or seg_masks is None:
+            return masks_out
+
+        class_ids = boxes.cls.int().tolist()
+        confidences = boxes.conf.tolist()
+        polygons = seg_masks.xy
+
+        for i, (cid, conf) in enumerate(zip(class_ids, confidences)):
+            if conf < conf_thresh or i >= len(polygons):
+                continue
+            poly = polygons[i]
+            if len(poly) < 3:
+                continue
+            poly_int = np.array(poly, dtype=np.int32)
+            for key, id_set in class_sets.items():
+                if cid in id_set:
+                    cv2.fillPoly(masks_out[key], [poly_int], 1)
+                    break
+
+        return masks_out
+
+    # ------------------------------------------------------------------
+    # Obstacle detection
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _detect_obstacles(
+        img_path: Path,
+        obstacle_model,
+        conf_thresh: float,
+    ) -> tuple[str, str, list[dict]]:
+        results = obstacle_model.predict(source=str(img_path), conf=conf_thresh, verbose=False)
+        result = results[0]
+
+        boxes = result.boxes
+        if boxes is None or len(boxes) == 0:
+            return ("Not Present", "Not Present", [])
+
+        inv = {v: k for k, v in obstacle_model.names.items()}
+        fixed_ids     = {inv[n] for n in FIXED_OBSTACLE_CLASSES     if n in inv}
+        non_fixed_ids = {inv[n] for n in NON_FIXED_OBSTACLE_CLASSES if n in inv}
+        relevant_ids  = fixed_ids | non_fixed_ids
+
+        class_ids   = boxes.cls.int().tolist()
+        confidences = boxes.conf.tolist()
+        xyxy_boxes  = boxes.xyxy.cpu().numpy().astype(int)
+        img_h, img_w = result.orig_shape
+
+        detections: list[dict] = []
+        fixed_present     = False
+        non_fixed_present = False
+
+        for i, (cid, conf) in enumerate(zip(class_ids, confidences)):
+            if conf < conf_thresh or cid not in relevant_ids:
+                continue
+            x1, y1, x2, y2 = xyxy_boxes[i]
+            x1, y1 = max(x1, 0), max(y1, 0)
+            x2, y2 = min(x2, img_w - 1), min(y2, img_h - 1)
+
+            group = "fixed" if cid in fixed_ids else "non_fixed"
+            detections.append({
+                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                "class_name": obstacle_model.names[cid],
+                "group": group,
+            })
+
+            if group == "fixed":
+                fixed_present = True
+            else:
+                non_fixed_present = True
+
+        fixed_result     = "Present" if fixed_present     else "Not Present"
+        non_fixed_result = "Present" if non_fixed_present else "Not Present"
+
+        return (fixed_result, non_fixed_result, detections)
+
+    # ------------------------------------------------------------------
+    # Obstacle-width analysis
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _analyze_obstacle(obstacle_box, path_mask, threshold=0.1):
+        x_min, y_min, x_max, y_max = map(int, obstacle_box)
+        obstacle_center_x = int((x_min + x_max) / 2)
+        bottom_y = min(y_max, path_mask.shape[0] - 1)
+
+        path_row = path_mask[bottom_y, :]
+        if not np.any(path_row):
+            return False, 0.0, 0, 0
+
+        path_pixels_x = np.where(path_row > 0)[0]
+        path_center_x = int(np.median(path_pixels_x))
+        path_width = np.percentile(path_pixels_x, 95) - np.percentile(path_pixels_x, 5)
+
+        if path_width < 10:
+            return False, 0.0, 0, 0
+
+        deviation = abs(path_center_x - obstacle_center_x)
+        ratio = deviation / path_width
+        is_blocking = ratio < threshold
+        return is_blocking, ratio, path_center_x, obstacle_center_x
+
+    @classmethod
+    def _compute_width_restriction(cls, pathway_mask: np.ndarray, detections: list[dict]) -> tuple[str, str | None, str | None]:
+        blocking_fixed = []
+        blocking_non_fixed = []
+        is_restricted = False
+
+        for det in detections:
+            box = (det["x1"], det["y1"], det["x2"], det["y2"])
+            is_blocking, _, _, _ = cls._analyze_obstacle(box, pathway_mask)
+            if is_blocking:
+                is_restricted = True
+                cname = det["class_name"]
+                if det["group"] == "fixed":
+                    if cname not in blocking_fixed:
+                        blocking_fixed.append(cname)
+                else:
+                    if cname not in blocking_non_fixed:
+                        blocking_non_fixed.append(cname)
+
+        width_restriction = "Present" if is_restricted else "Not Present"
+        str_fixed = ", ".join(blocking_fixed) if blocking_fixed else None
+        str_non_fixed = ", ".join(blocking_non_fixed) if blocking_non_fixed else None
+
+        return width_restriction, str_fixed, str_non_fixed
+
+    # ------------------------------------------------------------------
+    # Adjacent-road logic
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _compute_adjroad(
+        road_mask: np.ndarray,
+        crossing_mask: np.ndarray,
+        img_h: int,
+        img_w: int,
+    ) -> tuple[str, str]:
+        # Logic 1 – bottom 20 %
+        bottom_start = int(0.8 * img_h)
+        bottom_pixels = (img_h - bottom_start) * img_w
+        bottom_road_ratio = int(np.sum(road_mask[bottom_start:, :])) / max(bottom_pixels, 1)
+        crossing_in_bottom = bool(np.any(crossing_mask[bottom_start:, :]))
+
+        if bottom_road_ratio >= 0.75 or crossing_in_bottom:
+            return ("Present", "Not Present")
+
+        # Logic 2 – half-width split
+        mid_x = img_w // 2
+        combined = np.clip(road_mask + crossing_mask, 0, 1)
+        left_ratio = int(np.sum(combined[:, :mid_x])) / max(img_h * mid_x, 1)
+        right_ratio = int(np.sum(combined[:, mid_x:])) / max(img_h * (img_w - mid_x), 1)
+        max_ratio = max(left_ratio, right_ratio)
+
+        if max_ratio > 0.07:
+            return ("Present", "Not Present")
+        elif max_ratio >= 0.05:
+            return ("Not Present", "Present")
+        else:
+            return ("Not Present", "Not Present")
+
+    # ------------------------------------------------------------------
+    # Bottom-region checks
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _check_bottom_presence(mask: np.ndarray, img_h: int, fraction: float) -> bool:
+        cutoff = int(img_h * (1.0 - fraction))
+        return bool(np.any(mask[cutoff:, :]))
+
+    @staticmethod
+    def _check_bottom_majority(
+        mask: np.ndarray,
+        img_h: int,
+        img_w: int,
+        fraction: float = 0.10,
+        threshold: float = 0.80,
+    ) -> bool:
+        cutoff = int(img_h * (1.0 - fraction))
+        region_pixels = (img_h - cutoff) * img_w
+        if region_pixels == 0:
+            return False
+        ratio = float(np.sum(mask[cutoff:, :])) / region_pixels
+        return ratio >= threshold
+
+    # ------------------------------------------------------------------
+    # Cascade attribute assignment (string values)
+    # ------------------------------------------------------------------
+    @classmethod
+    def _assign_attributes(
+        cls,
+        masks: dict[str, np.ndarray],
+        img_h: int,
+        img_w: int,
+        fixed_obstacles: str = "Not Present",
+        non_fixed_obstacles: str = "Not Present",
+        width_restriction: str = "Not Present",
+        blocking_fixed_classes: str | None = None,
+        blocking_non_fixed_classes: str | None = None,
+    ) -> dict[str, str | None]:
+        crossing_mask = np.clip(
+            masks["traffic_crossing"] + masks["zebra_crossing"], 0, 1
+        )
+        adj_01, adj_13 = cls._compute_adjroad(masks["road"], crossing_mask, img_h, img_w)
+
+        # Step 1 – Defaults (Sidewalk)
+        attrs = {
+            "Facility Type":                    "Sidewalk",
+            "Light Segregation":                "Present",
+            "Delineation":                      "Not Present",
+            "Adjacent Road Lane 0-1m":          adj_01,
+            "Adjacent Road Lane 1-3m":          adj_13,
+            "Adjacent Object/Level Change 0-1m": adj_01,
+            "Adjacent Object/Level Change 1-3m": adj_13,
+            "Adjacent Sidewalk 0-1m":           "Not Present",
+            "Crossing Facility":                "Not Present",
+            "Crossing Type":                    None,
+            "Width Restriction":               width_restriction,
+            "Peak Pedestrian Flow":            "Low",
+            "Intersection/Road Crossing":       "Not Present",
+            "No of Lanes on Intersecting Road": "1 per direction",
+        }
+
+        # Step 2 – Cycling Path in bottom 20 %
+        if cls._check_bottom_presence(masks["cycling"], img_h, fraction=0.20):
+            attrs["Facility Type"] = "Off-Road Bicycle Path"
+            attrs["Delineation"] = "Present"
+            attrs["Adjacent Sidewalk 0-1m"] = "Present"
+
+        # Step 3 – Red Stripe in bottom 20 %
+        if cls._check_bottom_presence(masks["red_stripe"], img_h, fraction=0.20):
+            attrs["Facility Type"] = "Multi-Use Path"
+            attrs["Delineation"] = "Present"
+
+        # Step 4 – Traffic Crossing >= 80 % of bottom 10 %
+        if cls._check_bottom_majority(masks["traffic_crossing"], img_h, img_w):
+            attrs.update({
+                "Facility Type":                    "Mixed Traffic Road Lane",
+                "Light Segregation":                "Not Present",
+                "Delineation":                      "Present",
+                "Adjacent Road Lane 0-1m":          "Present",
+                "Adjacent Road Lane 1-3m":          "Not Present",
+                "Adjacent Object/Level Change 0-1m": "Not Present",
+                "Adjacent Object/Level Change 1-3m": "Not Present",
+                "Adjacent Sidewalk 0-1m":           "Not Present",
+                "Crossing Facility":                "Present",
+                "Crossing Type":                    "Traffic Crossing",
+                "Peak Pedestrian Flow":             "Low",
+                "Intersection/Road Crossing":       "Present",
+                "No of Lanes on Intersecting Road": ">1 per direction",
+            })
+
+        # Step 5 – Zebra Crossing >= 80 % of bottom 10 %
+        if cls._check_bottom_majority(masks["zebra_crossing"], img_h, img_w):
+            attrs.update({
+                "Facility Type":                    "Mixed Traffic Road Lane",
+                "Light Segregation":                "Not Present",
+                "Delineation":                      "Present",
+                "Adjacent Road Lane 0-1m":          "Present",
+                "Adjacent Road Lane 1-3m":          "Not Present",
+                "Adjacent Object/Level Change 0-1m": "Not Present",
+                "Adjacent Object/Level Change 1-3m": "Not Present",
+                "Adjacent Sidewalk 0-1m":           "Not Present",
+                "Crossing Facility":                "Present",
+                "Crossing Type":                    "Zebra Crossing",
+                "Peak Pedestrian Flow":             "Low",
+                "Intersection/Road Crossing":       "Present",
+                "No of Lanes on Intersecting Road": "1 per direction",
+            })
+
+        # Step 6 – Road >= 80 % of bottom 10 %
+        if cls._check_bottom_majority(masks["road"], img_h, img_w):
+            attrs.update({
+                "Facility Type":                    "Mixed Traffic Road Lane",
+                "Light Segregation":                "Not Present",
+                "Delineation":                      "Not Present",
+                "Adjacent Road Lane 0-1m":          "Present",
+                "Adjacent Road Lane 1-3m":          "Not Present",
+                "Adjacent Object/Level Change 0-1m": "Not Present",
+                "Adjacent Object/Level Change 1-3m": "Not Present",
+                "Adjacent Sidewalk 0-1m":           "Not Present",
+                "Crossing Facility":                "Not Present",
+                "Crossing Type":                    None,
+                "Peak Pedestrian Flow":             "Low",
+                "Intersection/Road Crossing":       "Not Present",
+                "No of Lanes on Intersecting Road": ">1 per direction",
+            })
+
+        attrs["Fixed Obstacles"] = fixed_obstacles
+        attrs["Non-Fixed Obstacles"] = non_fixed_obstacles
+        attrs["FO Type"] = blocking_fixed_classes
+        attrs["NFO Type"] = blocking_non_fixed_classes
+
+        return attrs
+
+    # ------------------------------------------------------------------
+    # String → serializer integer conversion
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _convert_to_coded(attrs: dict[str, str]) -> dict[str, int | None]:
+        F = serializer.Attributes.Fields
+
+        # Map from assign_attributes keys → serializer field constants
+        field_map = {
+            "Facility Type":                    F.FACILITY_TYPE_STR,
+            "Light Segregation":                F.LIGHT_SEGREGATION_STR,
+            "Delineation":                      F.DELINEATION_STR,
+            "Adjacent Road Lane 0-1m":          F.ADJ_ROAD_LANE_01M_STR,
+            "Adjacent Road Lane 1-3m":          F.ADJ_ROAD_LANE_13M_STR,
+            "Adjacent Object/Level Change 0-1m": F.ADJ_OBJ_LVL_CHGE_01M_STR,
+            "Adjacent Object/Level Change 1-3m": F.ADJ_OBJ_LVL_CHGE_13M_STR,
+            "Adjacent Sidewalk 0-1m":           F.ADJ_SIDEWALK_01M_STR,
+            "Crossing Facility":                F.CROSS_FACILITY_STR,
+            "Crossing Type":                    F.CROSSING_TYPE_STR,
+            "Width Restriction":               F.WIDTH_RESTRICTION_STR,
+            "Peak Pedestrian Flow":            F.PEAK_PED_FLOW_STR,
+            "Intersection/Road Crossing":       F.INTERSECT_ROAD_CROSS_STR,
+            "No of Lanes on Intersecting Road": F.NOL_INTERSECT_ROAD_STR,
+            "Fixed Obstacles":                 F.FIXED_OBSTACLE_STR,
+            "Non-Fixed Obstacles":             F.NON_FIXED_OBSTACLE_STR,
+            "FO Type":                         F.FIXED_OBSTACLE_TYPE_STR,
+            "NFO Type":                        F.NON_FIXED_OBSTACLE_TYPE_STR,
+        }
+
+        # Value converters per field
+        nol_map = {
+            "1 per direction":  serializer.NoL_mapping["1 per Direction/NA"],
+            ">1 per direction": serializer.NoL_mapping["> 1 per Direction"],
+        }
+
+        coded = dict.fromkeys(serializer.Attributes.Fields.values(), None)
+
+        for raw_key, field_key in field_map.items():
+            value = attrs.get(raw_key)
+            if value is None:
+                continue
+
+            if field_key == F.FACILITY_TYPE_STR:
+                coded[field_key] = serializer.facility_type_mapping.get(value)
+            elif field_key == F.PEAK_PED_FLOW_STR:
+                coded[field_key] = serializer.none_low_modhigh_mapping.get(value)
+            elif field_key == F.NOL_INTERSECT_ROAD_STR:
+                coded[field_key] = nol_map.get(value)
+            elif field_key in [F.FIXED_OBSTACLE_TYPE_STR, F.NON_FIXED_OBSTACLE_TYPE_STR, F.CROSSING_TYPE_STR]:
+                coded[field_key] = value
+            else:
+                # All remaining fields use presence_mapping
+                coded[field_key] = serializer.presence_mapping.get(value)
+
+        return coded
+
+    # ------------------------------------------------------------------
+    # Main autocode entry point
+    # ------------------------------------------------------------------
     @classmethod
     def autocode(cls, image_path: Path) -> dict:
         if not cls.path_segmentation_model:
             raise RuntimeError("Path segmentation model is not initialised.")
-        
-        SEGMENTATION_CONFIDENCE_THRESHOLD= 0.5
-        ADJ_RD_CONF_THRESHOLD = 0.8
-        OFF_RD_CONF_THRESHOLD = 0.8
-        FIXED_OBSTACLE_CONFIDENCE_THRESHOLD= 0.6
-        DEV_ACCESS_CONFIDENCE_THRESHOLD = 0.5
-        DELINEATION_CONFIDENCE_THRESHOLD = 0.5
-        
-        
-        attribute_fields = dict.fromkeys(serializer.Attributes.Fields.values(), None)
 
-        seg_results = cls.path_segmentation_model.predict(image_path)
-        result = cls._filter_segmentation_results(seg_results[0], SEGMENTATION_CONFIDENCE_THRESHOLD)
+        CONF_THRESH = 0.5
 
-        cls_ids = result.boxes.cls.int().tolist() if result.boxes else []
-        masks_present = result.masks is not None
+        # 1. Run path segmentation
+        results = cls.path_segmentation_model.predict(
+            source=str(image_path), conf=CONF_THRESH, verbose=False
+        )
+        result = results[0]
+        img_h, img_w = result.orig_shape
 
-        if not masks_present or 0 not in cls_ids:
-            print("No path detected in the image. Manual review required.")
+        # 2. Build binary masks
+        masks = cls._build_masks(result, cls.class_sets, img_h, img_w, CONF_THRESH)
+
+        # 3. Detect obstacles
+        if cls.obstacle_detector_model is not None:
+            fixed_obs, non_fixed_obs, detections = cls._detect_obstacles(
+                image_path, cls.obstacle_detector_model, CONF_THRESH
+            )
         else:
-            # === Handle path-based logic (Default is Multi-Use Path) ===
-            #attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Multi-Use Path"] #CY
-            #attribute_fields[serializer.Attributes.Fields.DELINEATION_STR] = serializer.presence_mapping["Not Present"] #CY
-            attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Present"]
+            fixed_obs, non_fixed_obs, detections = "Not Present", "Not Present", []
 
-            image = Image.open(image_path).convert("RGB")
-            path_indices = [i for i, cls_id in enumerate(cls_ids) if cls_id == 0]
+        # 4. Compute width restriction
+        width_restriction, blocking_fixed, blocking_non_fixed = cls._compute_width_restriction(masks["pathway"], detections)
 
-            # === If road is not present (class 1) ===
-            if 1 not in cls_ids:
-                attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_01M_STR] = serializer.presence_mapping["Not Present"]
-                attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_13M_STR] = serializer.presence_mapping["Not Present"]
+        # 5. Collect all detected obstacle class names for FO Type / NFO Type
+        all_fixed_classes = sorted(set(d["class_name"] for d in detections if d["group"] == "fixed"))
+        all_non_fixed_classes = sorted(set(d["class_name"] for d in detections if d["group"] == "non_fixed"))
+        fo_type_str = ", ".join(all_fixed_classes) if all_fixed_classes else None
+        nfo_type_str = ", ".join(all_non_fixed_classes) if all_non_fixed_classes else None
 
-            # Iterate through all detected path segments
-            for i in path_indices:
-                box = result.boxes.xyxy[i].cpu().numpy().astype(int)
-                x1, y1, x2, y2 = box
-                cropped = np.array(image.crop((x1, y1, x2, y2)))[..., ::-1]  # RGB → BGR
-
-
-                # === Adjacent road lanes classification ===
-                if 1 in cls_ids: # Trigger for if road is detected
-                    adj_result = cls.adj_road_lanes_classifier.predict(cropped)[0]
-                    pred_adj_class = int(adj_result.probs.top1)
-                    adj_conf_score = float(adj_result.probs.top1conf)
-
-                    if adj_conf_score < ADJ_RD_CONF_THRESHOLD: pred_adj_class = 0
-
-                    if pred_adj_class == 0:
-                        # This case would mean that either the confidence score is too low 
-                        # or the classifier predicts no road even though the segmentation detects a road
-                        print("Adjacent road lane classifier uncertain — manual review recommended.")
-                    elif pred_adj_class == 1:
-                        attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_01M_STR] = serializer.presence_mapping["Present"]
-                        attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_13M_STR] = serializer.presence_mapping["Not Present"]
-
-                        attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_01M_STR] = serializer.presence_mapping["Present"]
-                        attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_13M_STR] = serializer.presence_mapping["Not Present"]
-                    elif pred_adj_class == 2:
-                        attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_01M_STR] = serializer.presence_mapping["Not Present"]
-                        attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_13M_STR] = serializer.presence_mapping["Present"]
-
-                        attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_01M_STR] = serializer.presence_mapping["Not Present"]
-                        attribute_fields[serializer.Attributes.Fields.ADJ_OBJ_LVL_CHGE_13M_STR] = serializer.presence_mapping["Present"]
-                
-                # === Off-road bicycle classification ===
-                cls_result = cls.off_road_bicycle_classifier.predict(cropped)[0]
-                pred_class = int(cls_result.probs.top1)
-                off_rd_conf_score = float(cls_result.probs.top1conf)
-
-                if pred_class == 0 and off_rd_conf_score >= OFF_RD_CONF_THRESHOLD:
-                    attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Off-Road Bicycle Path"]
-                    attribute_fields[serializer.Attributes.Fields.DELINEATION_STR] = serializer.presence_mapping["Present"]
-
-                    if len(path_indices) > 1:
-                        attribute_fields[serializer.Attributes.Fields.ADJ_SIDEWALK_01M_STR] = serializer.presence_mapping["Present"]
-                    break
-        
-
-        if masks_present and cls.fixed_obstacle_classifier:
-            fixed_results = cls.fixed_obstacle_classifier.predict(image_path)[0]
-            fixed_result = cls._filter_segmentation_results(
-            fixed_results, FIXED_OBSTACLE_CONFIDENCE_THRESHOLD
+        # 6. Assign attributes (string values)
+        str_attrs = cls._assign_attributes(
+            masks, img_h, img_w, fixed_obs, non_fixed_obs, width_restriction,
+            blocking_fixed_classes=fo_type_str,
+            blocking_non_fixed_classes=nfo_type_str,
         )
 
-        if fixed_result.masks is not None:
-            seg_mask_data = fixed_result.masks.data.cpu().numpy()  # (N, H, W)
-            seg_cls_ids = fixed_result.boxes.cls.int().tolist()
-            h, w = seg_mask_data.shape[1:]
-            seg_map = np.zeros((h, w), dtype=np.int32)
+        print(f"[Autocode] [{Path(image_path).name}] {str_attrs['Facility Type']} | "
+              f"Fixed: {fixed_obs} | Non-Fixed: {non_fixed_obs} | "
+              f"FO Type: {fo_type_str} | NFO Type: {nfo_type_str}", flush=True)
 
-            # Build segmentation map from classifier results
-            for mask, cid in zip(seg_mask_data, seg_cls_ids):
-                seg_map[mask > 0.5] = cid
-
-        # Area calculations
-        pathway_area = np.sum(seg_map == 0)   # pathway label = 0
-        road_area = np.sum(seg_map == 8)      # road label = 8
-
-        # Split road into left vs right halves
-        left_road_area = np.sum(seg_map[:, :w//2] == 8)
-        right_road_area = np.sum(seg_map[:, w//2:] == 8)
-
-
-        # --- New: Bottom edge check for pathway ---
-        bottom_row = seg_map[-1, :]  # last row of pixels
-        bottom_pathway_ratio = np.sum(bottom_row == 0) / w
-
-
-        # --- New: Bottom half check for pathway ---
-        bottom_half = seg_map[h//2:, :]  # bottom half of the image
-        bottom_half_area = bottom_half.size
-        bottom_half_pathway_area = np.sum(bottom_half == 0)
-        bottom_half_pathway_ratio = bottom_half_pathway_area / bottom_half_area
-
-        
-    
-
-        # Debug prints
-        print(f"Pathway area: {pathway_area}")
-        print(f"Road area: {road_area}")
-        print(f"Left road area: {left_road_area}")
-        print(f"Right road area: {right_road_area}")
-        print(f"Bottom pathway ratio: {bottom_pathway_ratio:.2f}")
-
-        # --- Decision Rule ---
-
-        if any(c in [1, 4] for c in seg_cls_ids):
-            print("Bus Fixed obstacle detected — possibly sidewalk.")
-            attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Sidewalk"]
-            attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Present"]
-            attribute_fields[serializer.Attributes.Fields.FIXED_OBSTACLE_STR] = serializer.presence_mapping["Present"]
-        
-        elif bottom_half_pathway_ratio > 0.90 and pathway_area > road_area:
-            print("Decision: pathway takes up more than 50% of bottom image")
-            attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Multi-Use Path"]
-            attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Present"]
-
-        #elif pathway_area > road_area:
-        #    print("Decision: pathway larger than Road")
-        #    attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Sidewalk"]
-        else:
-            # If road is mostly confined to one side (≥80% in left or right half), call it sidewalk
-            if (left_road_area / (road_area + 1e-6) > 0.8) or (right_road_area / (road_area + 1e-6) > 0.8):
-                print("Decision: road is mostly confined to one side")
-                attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Sidewalk"]
-                attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Present"]
-            elif bottom_pathway_ratio > 0.55 and road_area == 0:
-                print("Decision: only pathway detected")
-                attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Sidewalk"]
-                attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Present"]
-            else:
-                attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Mixed Traffic Road Lane"]
-                attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Not Present"]
-
-
-
-                # === Fixed Obstacle Detection with pathway–obstacle intersection logic ===
-        if cls.fixed_obstacle_classifier and masks_present:
-            # Reuse the fixed_result already computed above (avoid duplicate inference)
-            detected_cls_ids = fixed_result.boxes.cls.int().tolist() if fixed_result.boxes else []
-            obstacle_masks = fixed_result.masks.data.cpu().numpy() if fixed_result.masks is not None else []
-
-            # Get only delineation masks with labels {1,2}
-            path_masks = []
-            if result.masks is not None:
-                path_masks = [
-                    mask for i, (mask, cid) in enumerate(zip(result.masks.data.cpu().numpy(), cls_ids))
-                    if cid in cls.FIXED_OBSTACLE_DELINEATION_RELEVANT_LABELS
-                ]
-
-            obstacle_pathway_intersections = 0
-            non_fixed_obstacle_intersections = 0
-            
-
-            if len(path_masks) > 0 and len(obstacle_masks) > 0:
-                combined_path = np.any(path_masks, axis=0)
-
-                for obs_mask, cid in zip(obstacle_masks, detected_cls_ids):
-                    if cid in cls.FIXED_OBSTACLE_RELEVANT_LABELS:
-                        if np.any(np.logical_and(combined_path, obs_mask)):
-                            obstacle_pathway_intersections += 1
-                            
-                    # === Non-Fixed Obstacle (label 9) detection ===
-                    if cid == 9:  # check specifically for label 9
-                        if np.any(np.logical_and(combined_path, obs_mask)):
-                            non_fixed_obstacle_intersections += 1   
-
-            # Check if delineation was marked as present from earlier
-            delineation_present = (
-                attribute_fields[serializer.Attributes.Fields.DELINEATION_STR]
-                == serializer.presence_mapping["Present"]
-            )
-
-            # Apply logic:
-            if delineation_present:
-                if obstacle_pathway_intersections > 2:
-                    print("fixed obstacle have intersection - have dillineation")
-                    attribute_fields[serializer.Attributes.Fields.FIXED_OBSTACLE_STR] = serializer.presence_mapping["Present"]
-                    attribute_fields[serializer.Attributes.Fields.WIDTH_RESTRICTION_STR] = serializer.presence_mapping["Present"]
-                else:
-                    print("fixed obstacle have intersection - have dillineation, but not twice")
-                    attribute_fields[serializer.Attributes.Fields.FIXED_OBSTACLE_STR] = serializer.presence_mapping["Not Present"]
-            else:
-                if obstacle_pathway_intersections > 0:
-                    print("fixed obstacle have intersection - no dillineation")
-                    attribute_fields[serializer.Attributes.Fields.FIXED_OBSTACLE_STR] = serializer.presence_mapping["Present"]
-                    attribute_fields[serializer.Attributes.Fields.WIDTH_RESTRICTION_STR] = serializer.presence_mapping["Present"]
-                else:
-                    print("fixed obstacle no intersection - no dillineation")
-                    attribute_fields[serializer.Attributes.Fields.FIXED_OBSTACLE_STR] = serializer.presence_mapping["Not Present"]
-           
-
-            if non_fixed_obstacle_intersections > 0:
-                print("non fixed obstacle (label 9) intersects with pathway")
-                attribute_fields[serializer.Attributes.Fields.NON_FIXED_OBSTACLE_STR] = serializer.presence_mapping["Present"]
-                attribute_fields[serializer.Attributes.Fields.WIDTH_RESTRICTION_STR] = serializer.presence_mapping["Present"]
-            else:
-                attribute_fields[serializer.Attributes.Fields.NON_FIXED_OBSTACLE_STR] = serializer.presence_mapping["Not Present"]
-
-            if any(c in [1, 4] for c in detected_cls_ids):
-                print("Bus Fixed obstacle detected — possibly sidewalk.")
-                attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Sidewalk"]
-                attribute_fields[serializer.Attributes.Fields.FIXED_OBSTACLE_STR] = serializer.presence_mapping["Present"]
-                attribute_fields[serializer.Attributes.Fields.WIDTH_RESTRICTION_STR] = serializer.presence_mapping["Present"]
-                attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Present"]
-
-
-        # === Delineation Detection ===
-        if cls.Delineation_classfier:
-            delineation_results = cls.Delineation_classfier.predict(image_path)
-            delineation_result = delineation_results[0]
-            delineation_result = cls._filter_segmentation_results(delineation_result, DELINEATION_CONFIDENCE_THRESHOLD)
-
-            detected_cls_ids = delineation_result.boxes.cls.int().tolist() if delineation_result.boxes else []
-    
-            print("Delineation Detected labels:", detected_cls_ids)
-
-            
-            if any(cls_id in cls.DELINEATION_RELEVANT_LABELS for cls_id in detected_cls_ids):
-                print("dillll present")
-                attribute_fields[serializer.Attributes.Fields.DELINEATION_STR] = serializer.presence_mapping["Present"]
-                attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Multi-Use Path"]
-                attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Present"]
-
-            
-            else:
-                attribute_fields[serializer.Attributes.Fields.DELINEATION_STR] = serializer.presence_mapping["Not Present"]
-
-
-
-                # === Run Road Classification Model === #CY
-        if cls.road_classification_model:
-            road_results = cls.road_classification_model.predict(image_path)[0]
-            pred_class = int(road_results.probs.top1)
-            pred_conf = float(road_results.probs.top1conf)
-
-            print(f"Road Classification Prediction: {pred_class} (conf {pred_conf:.2f})")
-
-            # --- CASE 0: Dev Access ---
-            # (Dev access detection handled below in the unconditional block)
-            if pred_class == 0:
-                pass
-
-            # --- CASE 1: Off-Road Bicycle ---
-            elif pred_class == 1:
-                # Reuse the delineation_result already computed above (avoid duplicate inference)
-                dill_cls_ids = set(delineation_result.boxes.cls.int().tolist()) if delineation_result.boxes else set()
-
-                # Check for Red Path (label 5)
-                if 5 in dill_cls_ids:
-                    attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Off-Road Bicycle Path"]
-                    attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Present"]
-                
-                
-                else:
-                    # No red path = not considered off-road bicycle
-                    pass
-                    
-
-
-            # --- CASE 2 or 3: Skip and continue rest of code ---
-            else:
-                pass
-
-
-        # === Traffic / Zebra Crossing Detection (class 3 = traffic, 4 = zebra) ===
-        #has_traffic = 3 in cls_ids
-        #has_zebra = 4 in cls_ids
-
-        # === Traffic / Zebra Crossing Detection (class 3 = traffic, 4 = zebra) ===
-        confidences = result.boxes.conf.tolist() if result.boxes else []
-        class_ids   = result.boxes.cls.int().tolist() if result.boxes else []
-
-        traffic_conf = [conf for cid, conf in zip(class_ids, confidences) if cid == 3]
-        zebra_conf   = [conf for cid, conf in zip(class_ids, confidences) if cid == 4]
-
-        has_traffic = any(conf > 0.6 for conf in traffic_conf)
-        has_zebra   = any(conf > 0.6 for conf in zebra_conf)
-
-        
-        
-
-        if has_traffic or has_zebra:
-            print("traffic or zebra detected")
-            attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] = serializer.facility_type_mapping["Mixed Traffic Road Lane"]
-            attribute_fields[serializer.Attributes.Fields.CROSS_FACILITY_STR] = serializer.presence_mapping["Present"]
-            attribute_fields[serializer.Attributes.Fields.DELINEATION_STR] = serializer.presence_mapping["Present"]
-            attribute_fields[serializer.Attributes.Fields.PEAK_PED_FLOW_STR] = serializer.none_low_modhigh_mapping["Low"]
-            attribute_fields[serializer.Attributes.Fields.INTERSECT_ROAD_CROSS_STR] = serializer.presence_mapping["Present"]
-            attribute_fields[serializer.Attributes.Fields.LIGHT_SEGREGATION_STR] = serializer.presence_mapping["Not Present"]
-            attribute_fields[serializer.Attributes.Fields.PROP_ACCESS_STR] = serializer.presence_mapping["Not Present"]
-
-            if has_traffic:
-                print("traffic detected")
-                attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_01M_STR] = serializer.presence_mapping["Present"]
-                attribute_fields[serializer.Attributes.Fields.NOL_INTERSECT_ROAD_STR] = serializer.NoL_mapping["> 1 per Direction"]
-            elif has_zebra:
-                print("zebra detected")
-                attribute_fields[serializer.Attributes.Fields.ADJ_ROAD_LANE_13M_STR] = serializer.presence_mapping["Present"]
-                attribute_fields[serializer.Attributes.Fields.PROP_ACCESS_STR] = serializer.presence_mapping["Not Present"]
-            
-            #if attribute_fields[serializer.Attributes.Fields.FACILITY_TYPE_STR] == serializer.facility_type_mapping["Mixed Traffic Road Lane"]:
-                #attribute_fields[serializer.Attributes.Fields.DELINEATION_STR] = serializer.presence_mapping["Not Present"]
-        
-
-        # ==            = Development Access Detection ===
-        if cls.Development_access_classfier:
-            dev_results = cls.Development_access_classfier.predict(image_path)
-            dev_result = dev_results[0]
-            dev_result = cls._filter_segmentation_results(dev_result, DEV_ACCESS_CONFIDENCE_THRESHOLD)
-
-            dev_cls_ids = set(dev_result.boxes.cls.int().tolist()) if dev_result.boxes else set()
-            print("Detected labels:", dev_result.boxes.cls.int().tolist() if dev_result.boxes else [])
-            
-        for valid_set in cls.DEV_ACCESS_CONDITIONS:
-            if valid_set.issubset(dev_cls_ids):
-                if (3 not in dev_cls_ids or 4 not in cls_ids):
-                    attribute_fields[serializer.Attributes.Fields.PROP_ACCESS_STR] = serializer.presence_mapping["Present"]
-                    attribute_fields[serializer.Attributes.Fields.INTERSECT_ROAD_CROSS_STR] = serializer.presence_mapping["Present"]
-                    print("Detected labels:", dev_result.boxes.cls.int().tolist() if dev_result.boxes else [])
-                    break
-       
-        else:
-             attribute_fields[serializer.Attributes.Fields.PROP_ACCESS_STR] = serializer.presence_mapping["Not Present"]
-
-
-
-        return attribute_fields
-    
-    # Utility Methods
-    # =================================
-    @staticmethod
-    def _filter_segmentation_results(result, conf_thresh):
-        mask = result.boxes.conf > conf_thresh
-        result.boxes = result.boxes[mask]
-        if result.masks is not None:
-            result.masks.data = result.masks.data[mask]
-        return result
-
-    def _pred_facility_type():
-        pass
-
-    # 0: Not present
-    # 1: 0-1
-    # 2: 1-3
-    @classmethod
-    def _pred_adj_road_lane(cls):
-        pass
+        # 7. Convert to integer-coded dict
+        return cls._convert_to_coded(str_attrs)

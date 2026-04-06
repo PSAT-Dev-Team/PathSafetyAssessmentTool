@@ -258,7 +258,7 @@ export default function AutocodeValidation({
 
           // Handle null/undefined as equivalent
           if ((currentValue === null || currentValue === undefined) &&
-              (originalValue === null || originalValue === undefined)) {
+            (originalValue === null || originalValue === undefined)) {
             isChanged = false;
           }
           // Strict comparison first (same type, same value)
@@ -386,8 +386,8 @@ export default function AutocodeValidation({
                   stat.correctnessPercentage >= 95
                     ? 'excellent'
                     : stat.correctnessPercentage >= 75
-                    ? 'good'
-                    : 'needs-review';
+                      ? 'good'
+                      : 'needs-review';
 
                 return (
                   <div key={stat.realKey} className="autocode-card">
