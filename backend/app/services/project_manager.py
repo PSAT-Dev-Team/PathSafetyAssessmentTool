@@ -196,23 +196,6 @@ class Project:
             self._geo_data : serializer.ProjectGeoData  = serializer.ProjectGeoData()
             self.versions.insert(0, ProjectVersion())
 
-    # TODO fix project merge
-    def __add__(self, rhs : Project) -> Project:
-        raise ValueError("Does not work properly at the moment. Do not use")
-        temp_path = None
-        merged = Project(temp_path)
-        # Merge geo data
-        merged._geo_data = serializer.ProjectGeoData()
-        merged._geo_data.df = pd.concat([self.geo_data.df, rhs.geo_data.df], ignore_index=True)
-        # Merge latest version data
-        merged.versions.insert(0, self.latest())
-        merged.latest().path = temp_path
-        merged.latest()._attributes = serializer.Attributes()
-        
-        merged.latest()._attributes._df = pd.concat([self.latest().attributes.df, rhs.latest().attributes.df], ignore_index=True)
-
-        return merged
-
     # ─── Version handling ─────────────────────────────────────
     def _discover_versions(self):
         version_dir = self.project_path / "versions"

@@ -630,11 +630,6 @@ def delete_segments_batch(project_name):
     meta = project.metadata.to_dict() if project.metadata else {}
     return jsonify(meta)
 
-
-    # Return updated metadata
-    meta = project.metadata.to_dict() if project.metadata else {}
-    return jsonify(meta)
-
 @bp.post("/check-collisions")
 def check_collisions():
     try:
