@@ -383,13 +383,13 @@ def _ensure_models_ready():
 
                 model_dir = None
                 for d in candidates:
-                    if (d / "path_seg.pt").exists():
+                    if (d / "path_segmentation.pt").exists():
                         model_dir = d.resolve()
                         break
 
                 if model_dir is None:
                     tried = "\n".join(str(p) for p in candidates)
-                    raise RuntimeError(f"Cannot find model_dir (missing path_seg.pt). Tried:\n{tried}")
+                    raise RuntimeError(f"Cannot find model_dir (missing path_segmentation.pt). Tried:\n{tried}")
 
                 # YOLO models load
                 print(f"[Autocode] Loading CV models from {model_dir} — this may take several minutes on CPU...", flush=True)
@@ -2138,16 +2138,11 @@ def dms_to_decimal(dms, ref):
 
 def get_image_folder_geo(folder_path):
     records = []
-    base_path = Path(folder_path)
-    # Recursively find all jpg/jpeg files
-    for filepath in base_path.rglob("*"):
-        if not filepath.is_file() or not filepath.suffix.lower() in ('.jpg', '.jpeg'):
+    for fname in sorted(os.listdir(folder_path)):
+        if not fname.lower().endswith(('.jpg', '.jpeg')):
             continue
-            
-        # Record the relative path so we maintain directory structure when tracking images
-        rel_path = filepath.relative_to(base_path)
-        
-        with open(filepath, 'rb') as f:
+        img_path = os.path.join(folder_path, fname)
+        with open(img_path, 'rb') as f:
             tags = exifread.process_file(f, details=False)
 
         # Required GPS tags
@@ -2162,7 +2157,7 @@ def get_image_folder_geo(folder_path):
             records.append({
                 'latitude':  lat,
                 'longitude': lon,
-                'filename':  str(rel_path)  # Keep the relative path (e.g. folder/img.jpg)
+                'filename':  fname
             })
 
     df = pd.DataFrame(records)
@@ -2173,29 +2168,26 @@ def get_image_folder_geo(folder_path):
 def get_All_Img_Folder(folder_path, filename_df, imagePath):
     """
     folder_path:      Source folder containing the .jpg files to copy
-    filename_df:      DataFrame containing a FILENAME column (with potential relative paths)
+    filename_df:      DataFrame containing a FILENAME column
     imagePath:        Destination path to save; will be created if not present
     """
     # 1. Validate source folder
     if not os.path.isdir(folder_path):
         raise FileNotFoundError(f"The folder at {folder_path} does not exist or is not a directory.")
     
-    # 2. Ensure base destination folder exists
+    # 2. Ensure destination folder exists
     os.makedirs(imagePath, exist_ok=True)
     
-    # 3. Copy by names in the FILENAME column (which may include subdirectories)
+    # 3. Copy by names in the FILENAME column
     for img_name in filename_df['FILENAME']:
         src = os.path.join(folder_path, img_name)
         dst = os.path.join(imagePath, img_name)
-        
-        # Make sure destination subdirectory exists before copying
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
         
         if os.path.isfile(src):
             shutil.copy2(src, dst)
         else:
             # Similar to the Zip version: record missing files
-            pass
+            print(f"Image {img_name} not found in folder {folder_path}.")
     
     # 4. Return the original DataFrame for downstream use
     return filename_df

@@ -8,6 +8,7 @@ with its attribute table and saved to an output directory.
 Usage:
     python run_attribute_inference.py <input_dir> [--output cyclerap_output]
                                      [--model backend/models/path_segmentation.pt]
+                                     [--obstacle-model obstacle_detector_ema.pt]
                                      [--conf 0.5]
 """
 
@@ -19,6 +20,13 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from ultralytics import YOLO
 from ultralytics.nn import tasks as _ul_tasks
+
+# Make EMA available for unpickling the obstacle model.
+# The model was saved with EMA referenced as ultralytics.nn.modules.block.EMA,
+# so we inject our local EMA class into that module before loading.
+from ema import EMA  # noqa: F401 – required for torch.load to resolve the class
+import ultralytics.nn.modules.block as _ul_block
+_ul_block.EMA = EMA
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
@@ -50,6 +58,12 @@ def parse_args():
         type=Path,
         default=Path(__file__).parent / "backend" / "models" / "path_segmentation.pt",
         help="Path to path_segmentation.pt model.",
+    )
+    parser.add_argument(
+        "--obstacle-model",
+        type=Path,
+        default=Path(__file__).parent / "obstacle_detector_ema.pt",
+        help="Path to obstacle_detector_ema.pt model.",
     )
     parser.add_argument(
         "--conf",
@@ -97,7 +111,19 @@ def build_class_sets(model) -> dict[str, set[int]]:
         "zebra_crossing":    _ids("Zebra Crossing"),
         "cycling":           _ids("Cycling Path", "Wet Cycling Path"),
         "red_stripe":        _ids("Red Stripe", "Wet Red Stripe"),
+        "pathway":           _ids(
+            "Pathway", "Cycling Path", "Stone Pathway", "Wet Pathway",
+            "Grey Tiled Pathway", "Wet Cycling Path", "Square Pathway",
+        ),
     }
+
+
+# Fixed and non-fixed obstacle class names (matched against obstacle model's names dict)
+FIXED_OBSTACLE_CLASSES = {
+    "Pillar", "Bollards", "Fence", "Utility Box",
+    "Traffic Light", "Billboard", "Lamp Post",
+}
+NON_FIXED_OBSTACLE_CLASSES = {"Cone", "Bins", "Bicycle", "Pot", "Barrier"}
 
 
 def build_masks(
@@ -132,6 +158,116 @@ def build_masks(
                 break
 
     return masks_out
+
+
+# ---------------------------------------------------------------------------
+# Obstacle detection
+# ---------------------------------------------------------------------------
+
+FIXED_COLOR     = (255, 80,  80)   # red   – fixed obstacles
+NON_FIXED_COLOR = (255, 180, 50)   # amber – non-fixed obstacles
+
+
+def detect_obstacles(
+    img_path: Path,
+    obstacle_model: YOLO,
+    conf_thresh: float,
+) -> tuple[str, str, list[dict]]:
+    """
+    Run the obstacle detector on *img_path* and determine whether Fixed and
+    Non-Fixed obstacles are Present.
+
+    A group is "Present" if at least one instance of a target class is detected.
+
+    Returns (fixed_result, non_fixed_result, detections) where each detection is:
+        {x1, y1, x2, y2, class_name, group ("fixed"|"non_fixed")}
+    """
+    results = obstacle_model.predict(source=str(img_path), conf=conf_thresh, verbose=False)
+    result = results[0]
+
+    boxes = result.boxes
+    if boxes is None or len(boxes) == 0:
+        return ("Not Present", "Not Present", [])
+
+    inv = {v: k for k, v in obstacle_model.names.items()}
+    fixed_ids     = {inv[n] for n in FIXED_OBSTACLE_CLASSES     if n in inv}
+    non_fixed_ids = {inv[n] for n in NON_FIXED_OBSTACLE_CLASSES if n in inv}
+    relevant_ids  = fixed_ids | non_fixed_ids
+
+    class_ids   = boxes.cls.int().tolist()
+    confidences = boxes.conf.tolist()
+    xyxy_boxes  = boxes.xyxy.cpu().numpy().astype(int)
+    img_h, img_w = result.orig_shape
+
+    detections: list[dict] = []
+    fixed_present     = False
+    non_fixed_present = False
+
+    for i, (cid, conf) in enumerate(zip(class_ids, confidences)):
+        if conf < conf_thresh or cid not in relevant_ids:
+            continue
+        x1, y1, x2, y2 = xyxy_boxes[i]
+        x1, y1 = max(x1, 0), max(y1, 0)
+        x2, y2 = min(x2, img_w - 1), min(y2, img_h - 1)
+
+        group = "fixed" if cid in fixed_ids else "non_fixed"
+        detections.append({
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+            "class_name": obstacle_model.names[cid],
+            "group": group,
+        })
+
+        if group == "fixed":
+            fixed_present = True
+        else:
+            non_fixed_present = True
+
+    fixed_result     = "Present" if fixed_present     else "Not Present"
+    non_fixed_result = "Present" if non_fixed_present else "Not Present"
+
+    return (fixed_result, non_fixed_result, detections)
+
+
+# ---------------------------------------------------------------------------
+# Obstacle-width analysis  (mirrors obstacle-visualizer/backend/logic.py)
+# ---------------------------------------------------------------------------
+
+def analyze_obstacle(obstacle_box, path_mask, threshold=0.1):
+    """Return (is_blocking, ratio, path_center_x, obstacle_center_x).
+
+    Measures path width at the bottom edge of the obstacle bounding box using
+    the 5th–95th percentile of path-pixel x-coordinates (same technique as
+    obstacle-visualizer/backend/logic.py:analyze_obstacle).
+    """
+    x_min, y_min, x_max, y_max = map(int, obstacle_box)
+    obstacle_center_x = int((x_min + x_max) / 2)
+    bottom_y = min(y_max, path_mask.shape[0] - 1)
+
+    path_row = path_mask[bottom_y, :]
+    if not np.any(path_row):
+        return False, 0.0, 0, 0  # obstacle not on path
+
+    path_pixels_x = np.where(path_row > 0)[0]
+    path_center_x = int(np.median(path_pixels_x))
+    path_width = np.percentile(path_pixels_x, 95) - np.percentile(path_pixels_x, 5)
+
+    if path_width < 10:
+        return False, 0.0, 0, 0  # path too narrow to reliably analyse
+
+    deviation = abs(path_center_x - obstacle_center_x)
+    ratio = deviation / path_width
+    is_blocking = ratio < threshold
+    return is_blocking, ratio, path_center_x, obstacle_center_x
+
+
+def compute_width_restriction(pathway_mask: np.ndarray, detections: list[dict]) -> str:
+    """Width Restriction is Present if any detected obstacle blocks the pathway."""
+    for det in detections:
+        box = (det["x1"], det["y1"], det["x2"], det["y2"])
+        is_blocking, _, _, _ = analyze_obstacle(box, pathway_mask)
+        if is_blocking:
+            return "Present"
+    return "Not Present"
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +339,11 @@ def assign_attributes(
     masks: dict[str, np.ndarray],
     img_h: int,
     img_w: int,
+    fixed_obstacles: str = "Not Present",
+    non_fixed_obstacles: str = "Not Present",
+    width_restriction: str = "Not Present",
+    fo_type: str | None = None,
+    nfo_type: str | None = None,
 ) -> dict[str, str]:
     """Apply cascading conditions and return the 12 CycleRAP attributes."""
     # Combined crossing mask for adjroad computation
@@ -222,7 +363,9 @@ def assign_attributes(
         "Adjacent Object/Level Change 1-3m": adj_13,
         "Adjacent Sidewalk 0-1m":           "Not Present",
         "Crossing Facility":                "Not Present",
-        "Peak Pedestrian Flow":             "Low",
+        "Crossing Type":                    None,
+        "Width Restriction":               width_restriction,
+        "Peak Pedestrian Flow":            "Low",
         "Intersection/Road Crossing":       "Not Present",
         "No of Lanes on Intersecting Road": "1 per direction",
     }
@@ -250,6 +393,7 @@ def assign_attributes(
             "Adjacent Object/Level Change 1-3m": "Not Present",
             "Adjacent Sidewalk 0-1m":           "Not Present",
             "Crossing Facility":                "Present",
+            "Crossing Type":                    "Traffic Crossing",
             "Peak Pedestrian Flow":             "Low",
             "Intersection/Road Crossing":       "Present",
             "No of Lanes on Intersecting Road": ">1 per direction",
@@ -267,6 +411,7 @@ def assign_attributes(
             "Adjacent Object/Level Change 1-3m": "Not Present",
             "Adjacent Sidewalk 0-1m":           "Not Present",
             "Crossing Facility":                "Present",
+            "Crossing Type":                    "Zebra Crossing",
             "Peak Pedestrian Flow":             "Low",
             "Intersection/Road Crossing":       "Present",
             "No of Lanes on Intersecting Road": "1 per direction",
@@ -284,10 +429,17 @@ def assign_attributes(
             "Adjacent Object/Level Change 1-3m": "Not Present",
             "Adjacent Sidewalk 0-1m":           "Not Present",
             "Crossing Facility":                "Not Present",
+            "Crossing Type":                    None,
             "Peak Pedestrian Flow":             "Low",
             "Intersection/Road Crossing":       "Not Present",
             "No of Lanes on Intersecting Road": ">1 per direction",
         })
+
+    # Obstacle attributes (appended last so they appear at the bottom of the panel)
+    attrs["Fixed Obstacles"]     = fixed_obstacles
+    attrs["Non-Fixed Obstacles"] = non_fixed_obstacles
+    attrs["FO Type"]             = fo_type
+    attrs["NFO Type"]            = nfo_type
 
     return attrs
 
@@ -296,72 +448,116 @@ def assign_attributes(
 # Annotation
 # ---------------------------------------------------------------------------
 
+BLOCKING_LINE_COLOR = (255, 0, 255)   # magenta – path-centre marker and line
+PATH_CENTER_RADIUS  = 5               # pixels
+
+
 def annotate_image(
     img_path: Path,
     attrs: dict[str, str],
     output_dir: Path,
+    detections: list[dict] | None = None,
+    pathway_mask: np.ndarray | None = None,
 ) -> None:
-    """Draw a left-side attribute panel on the image and save it."""
-    img = Image.open(img_path).convert("RGB")
+    """
+    Draw obstacle annotations on the image:
+      - Bounding boxes for detected fixed/non-fixed obstacles
+      - For blocking obstacles: bottom-edge circles (obstacle centre + path centre)
+        and a connecting line, mirroring obstacle-visualizer/backend/logic.py
+      - A small panel showing Fixed/Non-Fixed Obstacle and Width Restriction status
+    """
+    img = Image.open(img_path).convert("RGBA")
     W, H = img.size
 
-    # Font setup
-    font_size = max(14, int(H / 42))
-    label_font_size = max(12, int(font_size * 0.85))
-    try:
-        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size=font_size)
-        label_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size=label_font_size)
-    except Exception:
-        font = ImageFont.load_default()
-        label_font = font
-
-    # Compute panel dimensions
-    row_height = int(font_size * 1.6)
-    num_rows = len(attrs)
-    panel_h = row_height * num_rows + int(row_height * 0.6)
-    panel_w = min(int(W * 0.55), 620)
-    panel_x = 0
-    panel_y = 0
-
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay, "RGBA")
 
-    # Semi-transparent background
-    draw.rectangle(
-        [(panel_x, panel_y), (panel_x + panel_w, panel_y + panel_h)],
-        fill=(0, 0, 0, 170),
-    )
+    # Fonts shared by both sections
+    det_font_size  = max(11, int(H / 60))
+    panel_font_size = max(14, int(H / 42))
+    try:
+        det_font   = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size=det_font_size)
+        panel_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size=panel_font_size)
+        panel_lbl_font = ImageFont.truetype(
+            "/System/Library/Fonts/Helvetica.ttc",
+            size=max(12, int(panel_font_size * 0.85)),
+        )
+    except Exception:
+        det_font = panel_font = panel_lbl_font = ImageFont.load_default()
 
-    # Facility type color bar
-    facility_type = attrs.get("Facility Type", "")
-    bar_color = FACILITY_COLORS.get(facility_type, (100, 100, 100))
-    draw.rectangle(
-        [(panel_x, panel_y), (panel_x + 6, panel_y + panel_h)],
-        fill=(*bar_color, 255),
-    )
+    r = PATH_CENTER_RADIUS
 
-    # Draw attribute rows
-    y = panel_y + int(row_height * 0.3)
-    padding_left = panel_x + 14
+    # --- 1. Obstacle bounding boxes + blocking overlay ---
+    if detections:
+        for det in detections:
+            color = FIXED_COLOR if det["group"] == "fixed" else NON_FIXED_COLOR
+            x1, y1, x2, y2 = det["x1"], det["y1"], det["x2"], det["y2"]
 
-    for attr_name, attr_value in attrs.items():
-        # Attribute name
-        draw.text((padding_left, y), f"{attr_name}:", font=label_font, fill=(180, 180, 180, 255))
-        # Value (right-aligned portion)
-        value_x = padding_left + int(panel_w * 0.65)
-        value_color = (120, 255, 120, 255) if attr_value == "Present" else (255, 255, 255, 255)
-        if attr_value == "Not Present":
+            # Bounding box border (2 px)
+            draw.rectangle([(x1, y1), (x2, y2)], outline=(*color, 255), width=2)
+
+            # Class label above the box
+            label = det["class_name"]
+            lbbox = draw.textbbox((0, 0), label, font=det_font)
+            lw, lh = lbbox[2] - lbbox[0], lbbox[3] - lbbox[1]
+            lx, ly = x1, max(y1 - lh - 4, 0)
+            draw.rectangle([(lx, ly), (lx + lw + 4, ly + lh + 4)], fill=(*color, 200))
+            draw.text((lx + 2, ly + 2), label, font=det_font, fill=(255, 255, 255, 255))
+
+            # Blocking analysis overlay (mirrors obstacle-visualizer logic.py)
+            if pathway_mask is not None:
+                box = (x1, y1, x2, y2)
+                is_blocking, _, p_cx, o_cx = analyze_obstacle(box, pathway_mask)
+                if is_blocking and p_cx > 0 and o_cx > 0:
+                    bottom_y = min(y2, H - 1)
+                    # Obstacle centre dot (detection colour)
+                    draw.ellipse(
+                        [(o_cx - r, bottom_y - r), (o_cx + r, bottom_y + r)],
+                        fill=(*color, 255),
+                    )
+                    # Path centre dot (magenta)
+                    draw.ellipse(
+                        [(p_cx - r, bottom_y - r), (p_cx + r, bottom_y + r)],
+                        fill=(*BLOCKING_LINE_COLOR, 255),
+                    )
+                    # Connecting line (magenta)
+                    draw.line(
+                        [(o_cx, bottom_y), (p_cx, bottom_y)],
+                        fill=(*BLOCKING_LINE_COLOR, 255),
+                        width=2,
+                    )
+
+    # --- 2. Small obstacle-status panel ---
+    panel_attrs = {
+        k: v for k, v in attrs.items()
+        if k in ("Fixed Obstacles", "Non-Fixed Obstacles", "Width Restriction")
+    }
+
+    row_height = int(panel_font_size * 1.6)
+    panel_h    = row_height * len(panel_attrs) + int(row_height * 0.6)
+    panel_w    = min(int(W * 0.45), 480)
+
+    draw.rectangle([(0, 0), (panel_w, panel_h)], fill=(0, 0, 0, 170))
+    # Left accent bar
+    draw.rectangle([(0, 0), (5, panel_h)], fill=(180, 180, 180, 255))
+
+    y = int(row_height * 0.3)
+    padding = 14
+    for attr_name, attr_value in panel_attrs.items():
+        draw.text((padding, y), f"{attr_name}:", font=panel_lbl_font, fill=(180, 180, 180, 255))
+        value_x = padding + int(panel_w * 0.62)
+        if attr_value == "Present":
+            value_color = (120, 255, 120, 255)
+        elif attr_value == "Not Present":
             value_color = (255, 130, 130, 255)
-        draw.text((value_x, y), attr_value, font=font, fill=value_color)
+        else:
+            value_color = (255, 255, 255, 255)
+        draw.text((value_x, y), attr_value, font=panel_font, fill=value_color)
         y += row_height
 
-    # Composite overlay onto original
-    img = img.convert("RGBA")
     img = Image.alpha_composite(img, overlay)
     img = img.convert("RGB")
-
-    out_path = output_dir / img_path.name
-    img.save(out_path)
+    img.save(output_dir / img_path.name)
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +577,17 @@ def process_images(args):
 
     print(f"Class sets: { {k: {model.names[cid] for cid in v} for k, v in class_sets.items()} }")
 
+    # Load obstacle detection model (optional — skip gracefully if missing)
+    obstacle_model = None
+    obstacle_model_path = args.obstacle_model
+    if obstacle_model_path.exists():
+        print(f"Loading obstacle model: {obstacle_model_path}")
+        obstacle_model = load_model(obstacle_model_path)
+        print(f"Obstacle model classes: {list(obstacle_model.names.values())}")
+    else:
+        print(f"Warning: obstacle model not found at '{obstacle_model_path}'. "
+              "Fixed/Non-Fixed Obstacles will default to 'Not Present'.")
+
     image_paths = sorted(
         p for p in args.input_dir.iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS
     )
@@ -395,10 +602,37 @@ def process_images(args):
         img_h, img_w = result.orig_shape
 
         masks = build_masks(result, class_sets, img_h, img_w, args.conf)
-        attrs = assign_attributes(masks, img_h, img_w)
 
-        annotate_image(img_path, attrs, args.output)
-        print(f"[{img_path.name}] {attrs['Facility Type']}")
+        # Detect obstacles against the combined pathway mask
+        if obstacle_model is not None:
+            fixed_obs, non_fixed_obs, detections = detect_obstacles(
+                img_path, obstacle_model, args.conf
+            )
+        else:
+            fixed_obs, non_fixed_obs, detections = "Not Present", "Not Present", []
+
+        width_restriction = compute_width_restriction(masks["pathway"], detections)
+
+        # Collect all detected obstacle class names for FO Type / NFO Type
+        all_fixed_classes = sorted(set(d["class_name"] for d in detections if d["group"] == "fixed"))
+        all_nf_classes = sorted(set(d["class_name"] for d in detections if d["group"] == "non_fixed"))
+        fo_type_str = ", ".join(all_fixed_classes) if all_fixed_classes else None
+        nfo_type_str = ", ".join(all_nf_classes) if all_nf_classes else None
+
+        attrs = assign_attributes(
+            masks, img_h, img_w, fixed_obs, non_fixed_obs, width_restriction,
+            fo_type=fo_type_str, nfo_type=nfo_type_str,
+        )
+
+        visible = [
+            d for d in detections
+            if (d["group"] == "fixed"     and fixed_obs     == "Present")
+            or (d["group"] == "non_fixed" and non_fixed_obs == "Present")
+        ]
+        annotate_image(img_path, attrs, args.output, detections=visible,
+                       pathway_mask=masks["pathway"])
+        print(f"[{img_path.name}] {attrs['Facility Type']} | "
+              f"Fixed: {fixed_obs} | Non-Fixed: {non_fixed_obs}")
 
     print(f"\nDone! Annotated {len(image_paths)} images.")
     print(f"Output: {args.output.resolve()}")

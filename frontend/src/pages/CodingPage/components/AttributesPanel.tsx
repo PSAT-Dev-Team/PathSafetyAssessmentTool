@@ -345,7 +345,7 @@ export default function AttributesPanel({
                     let summary = [];
                     if (r.bus_stop.found) summary.push(`Bus Stop is ${r.bus_stop.distance}m away`);
                     if (r.bus_lane.found) summary.push(`Bus Lane is ${r.bus_lane.distance}m away`);
-                    
+
                     if (summary.length > 0) {
                       toaster.create({ title: "Nearby GIS Detected", description: summary.join(". "), type: "success" });
                     } else {

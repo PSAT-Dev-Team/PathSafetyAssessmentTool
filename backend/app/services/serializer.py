@@ -129,6 +129,16 @@ class BaseTable:
         else:
             raise ValueError(f"Unsupported file type: {ext}")
 
+        # Add missing columns defined in the schema (e.g. for backward compatibility)
+        if hasattr(self, 'fields') and self.fields:
+            for count, col in enumerate(self.fields):
+                if col not in self.df.columns:
+                    # Insert missing column at the schema-defined index if possible
+                    try:
+                        self.df.insert(count, col, None)
+                    except ValueError:
+                        self.df[col] = None
+
         self.df_dirty = False
     
 class Attributes(BaseTable):
@@ -141,7 +151,9 @@ class Attributes(BaseTable):
         TRAM_TRAIN_RAIL_STR             = "Tram or Train Rails"
         DEFORMATION_DRAIN_STR           = "Major Surface Deformation or Drain Opening"
         FIXED_OBSTACLE_STR              = "Fixed Obstacle on Facility"
+        FIXED_OBSTACLE_TYPE_STR         = "FO Type"
         NON_FIXED_OBSTACLE_STR          = "Non-Fixed Obstacle on Facility"
+        NON_FIXED_OBSTACLE_TYPE_STR     = "NFO Type"
         DELINEATION_STR                 = "Delineation"
         LIGHT_SEGREGATION_STR           = "Light Segregation"
         FACILITY_WIDTH_STR              = "Facility Width per Direction"
@@ -165,6 +177,7 @@ class Attributes(BaseTable):
         INTERSECT_APPRCH_STR            = "Intersection Approach"
         INTERSECT_ROAD_CROSS_STR        = "Intersection or Road Crossing"
         CROSS_FACILITY_STR              = "Crossing Facility"
+        CROSSING_TYPE_STR               = "Crossing Type"
         NOL_ADJ_ROAD_STR                = "Number of lanes – adjacent road"
         NOL_INTERSECT_ROAD_STR          = "Number of lanes – intersecting road"
         PROP_ACCESS_STR                 = "Property Access"
@@ -192,7 +205,9 @@ class Attributes(BaseTable):
         Fields.TRAM_TRAIN_RAIL_STR:             presence_mapping,
         Fields.DEFORMATION_DRAIN_STR:           presence_mapping,
         Fields.FIXED_OBSTACLE_STR:              presence_mapping,
+        Fields.FIXED_OBSTACLE_TYPE_STR:         None,
         Fields.NON_FIXED_OBSTACLE_STR:          presence_mapping,
+        Fields.NON_FIXED_OBSTACLE_TYPE_STR:     None,
         Fields.DELINEATION_STR:                 presence_mapping,
         Fields.LIGHT_SEGREGATION_STR:           presence_mapping,
         Fields.FACILITY_WIDTH_STR:              facility_width_mapping,
@@ -216,6 +231,7 @@ class Attributes(BaseTable):
         Fields.INTERSECT_APPRCH_STR:            shared_mapping,
         Fields.INTERSECT_ROAD_CROSS_STR:        presence_mapping,
         Fields.CROSS_FACILITY_STR:              presence_mapping,
+        Fields.CROSSING_TYPE_STR:               None,
         Fields.NOL_ADJ_ROAD_STR:                NoL_mapping,
         Fields.NOL_INTERSECT_ROAD_STR:          NoL_mapping,
         Fields.PROP_ACCESS_STR:                 presence_mapping,
