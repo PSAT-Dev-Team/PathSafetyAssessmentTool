@@ -5,8 +5,7 @@ import { toaster } from "../../../components/ui/toaster";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker } from "react-leaflet";
 import { FaDrawPolygon, FaMousePointer, FaPlus, FaTrash } from "react-icons/fa";
 import { Slider } from "../../../components/ui/slider";
-import { Switch } from "../../../components/ui/switch";
-import { NUMERIC_FILTER_ATTRIBUTES, ATTRIBUTE_OPTIONS, ATTRIBUTE_LABELS, ATTRIBUTE_SUBCATEGORIES, CYCLERAP_ATTRIBUTE_CONFIGS, getCategoryColor } from "./AttributesDropdown";
+import { NUMERIC_FILTER_ATTRIBUTES, ATTRIBUTE_OPTIONS, ATTRIBUTE_LABELS, CYCLERAP_ATTRIBUTE_CONFIGS, getCategoryColor } from "./AttributesDropdown";
 import { AddSegmentsDialog } from "./AddSegmentsDialog";
 import { Menu } from "@chakra-ui/react";
 import { MapCursorController } from "../../../components/common/MapCursorController";
@@ -906,9 +905,20 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               }
 
               // Check category toggles
-              if (categoryToggles[filterAttr] && categoryToggles[filterAttr][attrValueText] === false) {
-                matchesAllFilters = false;
-                break;
+              if (categoryToggles[filterAttr]) {
+                // Multi-value attributes (e.g. "Bollards, Fence") — show segment if ANY individual value is toggled on
+                const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
+                if (MULTI_VALUE_ATTRS.has(filterAttr) && attrValueText.includes(", ")) {
+                  const parts = attrValueText.split(", ").map((s: string) => s.trim());
+                  const anyEnabled = parts.some((part: string) => categoryToggles[filterAttr][part] !== false);
+                  if (!anyEnabled) {
+                    matchesAllFilters = false;
+                    break;
+                  }
+                } else if (categoryToggles[filterAttr][attrValueText] === false) {
+                  matchesAllFilters = false;
+                  break;
+                }
               }
             }
 
@@ -999,7 +1009,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 // Use attribute color for non-safety-band attributes
                 const attrValue = attributes[primaryFocusAttribute];
                 attrValueText = getAttrText(primaryFocusAttribute, attrValue);
-                pointColor = getCategoryColor(primaryFocusAttribute, attrValueText);
+                // Multi-value attributes: use first value for color coding
+                const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
+                if (MULTI_VALUE_ATTRS.has(primaryFocusAttribute) && attrValueText.includes(", ")) {
+                  pointColor = getCategoryColor(primaryFocusAttribute, attrValueText.split(", ")[0].trim());
+                } else {
+                  pointColor = getCategoryColor(primaryFocusAttribute, attrValueText);
+                }
               }
             }
 
@@ -1181,7 +1197,15 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         if (attributes) {
           const attrValue = attributes[categoryFilterAttribute];
           const attrValueText = getAttrText(categoryFilterAttribute, attrValue);
-          if (attrValueText) categoriesInData.add(attrValueText);
+          if (attrValueText) {
+            // Multi-value attributes: split "Bollards, Fence" into individual categories
+            const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
+            if (MULTI_VALUE_ATTRS.has(categoryFilterAttribute) && attrValueText.includes(", ")) {
+              attrValueText.split(", ").forEach((part: string) => categoriesInData.add(part.trim()));
+            } else {
+              categoriesInData.add(attrValueText);
+            }
+          }
         }
       });
     });
@@ -1506,15 +1530,20 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
             });
           } else {
             // Standard attributes
+            const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
             projectData.geoFeatures.forEach((_, i) => {
               const attributes = projectData.attributes[i];
               if (attributes) {
                 const attrValue = attributes[attr];
                 if (attrValue !== undefined && attrValue !== null) {
-                  // Use getAttrText if available, otherwise raw value
-                  // Since getAttrText is defined in this file (based on usage at line 883), we can use it.
                   const text = getAttrText(attr, attrValue);
-                  if (text) categoriesSet.add(text);
+                  if (text) {
+                    if (MULTI_VALUE_ATTRS.has(attr) && text.includes(", ")) {
+                      text.split(", ").forEach((part: string) => categoriesSet.add(part.trim()));
+                    } else {
+                      categoriesSet.add(text);
+                    }
+                  }
                 }
               }
             });
@@ -2055,24 +2084,17 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                     })()}
                   </Box>
                 ) : (
-                  /* Category toggle switches */
-                  <Flex gap="2" flexWrap="wrap">
+                  /* Category toggles — click to show/hide */
+                  <Flex gap="3" flexWrap="wrap">
                     {(ATTRIBUTE_OPTIONS[categoryFilterAttribute] ?? availableCategories).map(category => {
                       const isOn = categoryToggles[categoryFilterAttribute]?.[category] ?? true;
                       const hexColor = getCategoryColor(categoryFilterAttribute, category);
-                      const subText = ATTRIBUTE_SUBCATEGORIES[categoryFilterAttribute]?.[category];
                       return (
                         <Flex
                           key={category}
-                          direction="column"
-                          bg={isOn ? hexColor + "22" : "transparent"}
-                          border="1px solid"
-                          borderColor={isOn ? hexColor : "gray.200"}
-                          borderRadius="md"
-                          px="2"
-                          py="1.5"
+                          align="center"
+                          gap="2"
                           cursor="pointer"
-                          maxW="260px"
                           onClick={() => {
                             setCategoryToggles(prev => ({
                               ...prev,
@@ -2083,37 +2105,35 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                             }));
                           }}
                         >
-                          <Flex align="center" gap="1.5">
-                            <Box w="8px" h="8px" borderRadius="full" flexShrink={0} style={{ backgroundColor: hexColor }} />
-                            <Text fontSize="xs" fontWeight={isOn ? "semibold" : "normal"} color={isOn ? "gray.800" : "gray.500"} flex="1">
-                              {category}
-                            </Text>
-                            <Switch
-                              size="sm"
-                              checked={isOn}
-                              onCheckedChange={checked => {
-                                setCategoryToggles(prev => ({
-                                  ...prev,
-                                  [categoryFilterAttribute]: {
-                                    ...prev[categoryFilterAttribute],
-                                    [category]: checked.checked,
-                                  },
-                                }));
-                              }}
+                          <Text
+                            fontSize="xs"
+                            color={isOn ? "gray.700" : "gray.400"}
+                            _dark={{ color: isOn ? "gray.200" : "gray.500" }}
+                            userSelect="none"
+                          >
+                            {category}
+                          </Text>
+                          {/* Custom colored pill toggle */}
+                          <Box
+                            w="30px"
+                            h="17px"
+                            borderRadius="full"
+                            position="relative"
+                            flexShrink={0}
+                            transition="background 0.15s"
+                            style={{ backgroundColor: isOn ? hexColor : "#CBD5E0" }}
+                          >
+                            <Box
+                              position="absolute"
+                              w="13px"
+                              h="13px"
+                              borderRadius="full"
+                              bg="white"
+                              top="2px"
+                              transition="left 0.15s"
+                              style={{ left: isOn ? "15px" : "2px" }}
                             />
-                          </Flex>
-                          {subText && (
-                            <Text
-                              fontSize="xs"
-                              color="gray.400"
-                              mt="1"
-                              pl="14px"
-                              lineClamp={2}
-                              title={subText}
-                            >
-                              {subText}
-                            </Text>
-                          )}
+                          </Box>
                         </Flex>
                       );
                     })}

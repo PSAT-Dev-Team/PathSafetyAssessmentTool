@@ -125,6 +125,9 @@ export const ATTRIBUTE_LABELS: Record<string, string> = {
   "Facility access":          "Facility Access",
   "Loose or slippery surface": "Loose or Slippery Surface",
   "Tram or Train Rails":       "Tram or Train Rails",
+  "FO Type":                   "Fixed Obstacle Type",
+  "NFO Type":                  "Non-Fixed Obstacle Type",
+  "Crossing Type":             "Crossing Type",
 };
 
 /**
@@ -312,9 +315,21 @@ const cyclerapAttributes: AttributeConfig[] = [
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
+    name: "FO Type",
+    label: "Fixed Obstacle Type",
+    group: "Facility clear width",
+    options: ["Not Selected", "Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation", "Others"],
+  },
+  {
     name: "Non-Fixed Obstacle on Facility",
     group: "Facility clear width",
     options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "NFO Type",
+    label: "Non-Fixed Obstacle Type",
+    group: "Facility clear width",
+    options: ["Not Selected", "Barrier", "Bins", "Bicycle", "Cone", "Others"],
   },
   {
     name: "Width Restriction",
@@ -392,6 +407,12 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "Crossing Facility",
     group: "Intersection",
     options: ["Not Selected", "Present", "Not Present"]
+  },
+  {
+    name: "Crossing Type",
+    label: "Crossing Type",
+    group: "Intersection",
+    options: ["Not Selected", "Traffic Crossing"],
   },
   {
     name: "Pedestrian Crossing",
@@ -513,7 +534,23 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Adjacent object or level change 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
     "Line of Sight": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
     "Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "FO Type": {
+      "Lamp Post": "#DC2626",
+      "Traffic Light": "#EA580C",
+      "Pillar": "#F59E0B",
+      "Bollards": "#CA8A04",
+      "Fence": "#0891B2",
+      "Vegetation": "#16A34A",
+      "Others": "#6B7280",
+    },
     "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+    "NFO Type": {
+      "Barrier": "#DC2626",
+      "Bins": "#EA580C",
+      "Bicycle": "#F59E0B",
+      "Cone": "#CA8A04",
+      "Others": "#6B7280",
+    },
     "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
     "Light Segregation": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Facility access": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
@@ -533,6 +570,9 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Bicycle/LV speed differential": { "< 10km/h": "#16A34A", "=/> 10km/h": "#DC2626" },
     "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
+    "Crossing Type": {
+      "Traffic Crossing": "#2563EB",
+    },
     "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Property Access": { "Present": "#DC2626", "Not Present": "#16A34A" },
