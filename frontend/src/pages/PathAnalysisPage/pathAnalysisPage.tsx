@@ -114,11 +114,11 @@ export default function PathAnalysisPage() {
       );
     }
 
-    // Filter by selected tags (if any tags are selected, show only projects that have at least one of those tags)
+    // Filter by selected tags - project must have ALL selected tags
     if (tagsFilter.length > 0) {
       result = result.filter((p) => {
         if (!p.tags || !Array.isArray(p.tags)) return false;
-        return tagsFilter.some((tag) => p.tags!.includes(tag));
+        return tagsFilter.every((tag) => p.tags!.includes(tag));
       });
     }
 

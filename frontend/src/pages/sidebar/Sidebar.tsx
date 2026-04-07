@@ -312,7 +312,7 @@ export default function Sidebar() {
         <h1 className="psat-sidebar-title">Path Safety Assessment Tool</h1>
 
         <div className="psat-actions">
-          {LINKS.map(({ to, label }) => {
+          {LINKS.filter(({ to }) => pathname !== to).map(({ to, label }) => {
             const active = pathname.startsWith(to);
             return (
               <Button
@@ -327,15 +327,6 @@ export default function Sidebar() {
             );
           })}
 
-          {/* Path Analysis Button */}
-          <Button
-            onClick={() => navigateSidebar("/analysis/path")}
-            colorPalette="gray"
-            variant={pathname === "/analysis/path" ? "solid" : "outline"}
-            size="sm"
-          >
-            Path Analysis
-          </Button>
         </div>
       </div>
 
