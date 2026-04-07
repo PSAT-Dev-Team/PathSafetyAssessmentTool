@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Box, Text, Flex, Button, Tabs, Badge } from "@chakra-ui/react";
 import { Switch } from "../../../components/ui/switch";
 import { FaFilter, FaChevronDown, FaChevronUp } from "react-icons/fa";
-import { ATTRIBUTE_LABELS, CYCLERAP_ATTRIBUTE_CONFIGS } from "./AttributesDropdown";
+import { ATTRIBUTE_LABELS, CYCLERAP_ATTRIBUTE_CONFIGS, SUBCATEGORY_CHILD_ATTRS, safetyScoreAttributes } from "./AttributesDropdown";
 
 const GROUP_ORDER = [
+  "Risk Level",
   "Facility configuration",
   "Facility clear width",
   "Facility surface conditions",
@@ -31,12 +32,19 @@ export default function FilterPanel({ activeFilters, onActiveFiltersChange }: Fi
   };
 
   const attrsByGroup = CYCLERAP_ATTRIBUTE_CONFIGS.reduce<
-    Record<string, typeof CYCLERAP_ATTRIBUTE_CONFIGS[number][]>
+    Record<string, { name: string; label?: string }[]>
   >((acc, attr) => {
+    if (SUBCATEGORY_CHILD_ATTRS.has(attr.name)) return acc; // hidden — nested under parent
     if (!acc[attr.group]) acc[attr.group] = [];
     acc[attr.group].push(attr);
     return acc;
   }, {});
+
+  // Inject safety score attributes into the "Risk Level" group
+  attrsByGroup["Risk Level"] = safetyScoreAttributes.map(a => ({
+    name: a.name,
+    label: a.displayName,
+  }));
 
   return (
     <Box borderWidth="1px" borderRadius="lg" bg="bg.panel" overflow="hidden">

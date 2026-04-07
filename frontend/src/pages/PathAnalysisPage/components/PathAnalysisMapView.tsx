@@ -5,7 +5,7 @@ import { toaster } from "../../../components/ui/toaster";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker } from "react-leaflet";
 import { FaDrawPolygon, FaMousePointer, FaPlus, FaTrash } from "react-icons/fa";
 import { Slider } from "../../../components/ui/slider";
-import { NUMERIC_FILTER_ATTRIBUTES, ATTRIBUTE_OPTIONS, ATTRIBUTE_LABELS, CYCLERAP_ATTRIBUTE_CONFIGS, getCategoryColor } from "./AttributesDropdown";
+import { NUMERIC_FILTER_ATTRIBUTES, ATTRIBUTE_OPTIONS, ATTRIBUTE_LABELS, CYCLERAP_ATTRIBUTE_CONFIGS, getCategoryColor, SUBCATEGORY_MAP, MULTI_VALUE_ATTRS, SUBCATEGORY_CHILD_ATTRS } from "./AttributesDropdown";
 import { AddSegmentsDialog } from "./AddSegmentsDialog";
 import { Menu } from "@chakra-ui/react";
 import { MapCursorController } from "../../../components/common/MapCursorController";
@@ -251,6 +251,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     } catch { return {}; }
   });
 
+  // Subcategory toggle states — tracks per-child-attr per-value visibility (Layer 3)
+  const [subcategoryToggles, setSubcategoryToggles] = useState<Record<string, Record<string, boolean>>>(() => {
+    try {
+      const stored = sessionStorage.getItem("pathAnalysisMap_subcategoryToggles");
+      return stored ? JSON.parse(stored) : {};
+    } catch { return {}; }
+  });
+
   // Range filter states for numeric attributes
   const [rangeFilters, setRangeFilters] = useState<Record<string, [number, number]>>(() => {
     try {
@@ -282,6 +290,10 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   useEffect(() => {
     sessionStorage.setItem("pathAnalysisMap_categoryToggles", JSON.stringify(categoryToggles));
   }, [categoryToggles]);
+
+  useEffect(() => {
+    sessionStorage.setItem("pathAnalysisMap_subcategoryToggles", JSON.stringify(subcategoryToggles));
+  }, [subcategoryToggles]);
 
   useEffect(() => {
     sessionStorage.setItem("pathAnalysisMap_rangeFilters", JSON.stringify(rangeFilters));
@@ -517,6 +529,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Helper function to convert numeric attribute value to text using mappings
   const getAttrText = (attrName: string, attrValue: any): string => {
+    // Subcategory child attrs: null/empty/undefined → "None"
+    if (SUBCATEGORY_CHILD_ATTRS.has(attrName)) {
+      if (attrValue === null || attrValue === undefined || attrValue === "" || attrValue === "null") {
+        return "None";
+      }
+    }
+
     // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
     // These map to exactly 4 categories based on score thresholds:
     // Low: <10, Medium: 10-25, High: 25-60, Extreme: >60
@@ -906,18 +925,31 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
               // Check category toggles
               if (categoryToggles[filterAttr]) {
-                // Multi-value attributes (e.g. "Bollards, Fence") — show segment if ANY individual value is toggled on
-                const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
-                if (MULTI_VALUE_ATTRS.has(filterAttr) && attrValueText.includes(", ")) {
-                  const parts = attrValueText.split(", ").map((s: string) => s.trim());
-                  const anyEnabled = parts.some((part: string) => categoryToggles[filterAttr][part] !== false);
-                  if (!anyEnabled) {
-                    matchesAllFilters = false;
-                    break;
-                  }
-                } else if (categoryToggles[filterAttr][attrValueText] === false) {
+                if (categoryToggles[filterAttr][attrValueText] === false) {
                   matchesAllFilters = false;
                   break;
+                }
+              }
+
+              // Check subcategory toggles (Layer 3)
+              const subcatConfig = SUBCATEGORY_MAP[filterAttr];
+              if (subcatConfig) {
+                const childOptions = subcatConfig.parentCategories[attrValueText];
+                if (childOptions && subcategoryToggles[subcatConfig.childAttr]) {
+                  const childValue = getAttrText(subcatConfig.childAttr, attributes[subcatConfig.childAttr]);
+                  if (childValue) {
+                    if (MULTI_VALUE_ATTRS.has(subcatConfig.childAttr) && childValue.includes(", ")) {
+                      const parts = childValue.split(", ").map((s: string) => s.trim());
+                      const anyEnabled = parts.some((part: string) => subcategoryToggles[subcatConfig.childAttr][part] !== false);
+                      if (!anyEnabled) {
+                        matchesAllFilters = false;
+                        break;
+                      }
+                    } else if (subcategoryToggles[subcatConfig.childAttr][childValue] === false) {
+                      matchesAllFilters = false;
+                      break;
+                    }
+                  }
                 }
               }
             }
@@ -1010,7 +1042,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 const attrValue = attributes[primaryFocusAttribute];
                 attrValueText = getAttrText(primaryFocusAttribute, attrValue);
                 // Multi-value attributes: use first value for color coding
-                const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
                 if (MULTI_VALUE_ATTRS.has(primaryFocusAttribute) && attrValueText.includes(", ")) {
                   pointColor = getCategoryColor(primaryFocusAttribute, attrValueText.split(", ")[0].trim());
                 } else {
@@ -1034,7 +1065,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
 
     return pts;
-  }, [projectsData, primaryFocusAttribute, activeFilters, attrMappings, categoryToggles, rangeFilters, dataRangeBounds]);
+  }, [projectsData, primaryFocusAttribute, activeFilters, attrMappings, categoryToggles, subcategoryToggles, rangeFilters, dataRangeBounds]);
 
   const allLatLngs = useMemo(() => allPoints.map(p => p.latlng), [allPoints]);
 
@@ -1199,7 +1230,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           const attrValueText = getAttrText(categoryFilterAttribute, attrValue);
           if (attrValueText) {
             // Multi-value attributes: split "Bollards, Fence" into individual categories
-            const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
             if (MULTI_VALUE_ATTRS.has(categoryFilterAttribute) && attrValueText.includes(", ")) {
               attrValueText.split(", ").forEach((part: string) => categoriesInData.add(part.trim()));
             } else {
@@ -1248,6 +1278,26 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       return newToggles;
     });
   }, [categoryFilterAttribute, availableCategories]);
+
+  // Initialise subcategory toggles when the sidebar attribute has subcategories
+  useEffect(() => {
+    if (!categoryFilterAttribute) return;
+    const subcatConfig = SUBCATEGORY_MAP[categoryFilterAttribute];
+    if (!subcatConfig) return;
+    setSubcategoryToggles(prev => {
+      const childAttr = subcatConfig.childAttr;
+      const allChildOptions = Object.values(subcatConfig.parentCategories).flat();
+      if (!allChildOptions.length) return prev;
+      const existing = prev[childAttr] ?? {};
+      let changed = false;
+      const updated = { ...existing };
+      allChildOptions.forEach(opt => {
+        if (!(opt in updated)) { updated[opt] = true; changed = true; }
+      });
+      if (!changed) return prev;
+      return { ...prev, [childAttr]: updated };
+    });
+  }, [categoryFilterAttribute]);
 
   // Handle column header click for sorting
   const handleHeaderClick = (columnKey: string) => {
@@ -1530,7 +1580,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
             });
           } else {
             // Standard attributes
-            const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
             projectData.geoFeatures.forEach((_, i) => {
               const attributes = projectData.attributes[i];
               if (attributes) {
@@ -2042,7 +2091,10 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                     size="xs"
                     variant={categoryFilterAttributeIndex === idx ? "solid" : "outline"}
                     colorPalette="blue"
-                    onClick={() => setCategoryFilterAttributeIndex(idx)}
+                    onClick={() => {
+                      setCategoryFilterAttributeIndex(idx);
+                      setPrimaryFocusAttribute(attr);
+                    }}
                     title={ATTRIBUTE_LABELS[attr] ?? attr}
                   >
                     {idx + 1}. {(ATTRIBUTE_LABELS[attr] ?? attr).slice(0, 20)}
@@ -2084,60 +2136,130 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                     })()}
                   </Box>
                 ) : (
-                  /* Category toggles — click to show/hide */
-                  <Flex gap="3" flexWrap="wrap">
+                  /* Category toggles — aligned vertical list with nested subcategory toggles */
+                  <Box>
                     {(ATTRIBUTE_OPTIONS[categoryFilterAttribute] ?? availableCategories).map(category => {
                       const isOn = categoryToggles[categoryFilterAttribute]?.[category] ?? true;
                       const hexColor = getCategoryColor(categoryFilterAttribute, category);
+                      const subcatConfig = SUBCATEGORY_MAP[categoryFilterAttribute];
+                      const childOptions = subcatConfig?.parentCategories[category];
                       return (
-                        <Flex
-                          key={category}
-                          align="center"
-                          gap="2"
-                          cursor="pointer"
-                          onClick={() => {
-                            setCategoryToggles(prev => ({
-                              ...prev,
-                              [categoryFilterAttribute]: {
-                                ...prev[categoryFilterAttribute],
-                                [category]: !isOn,
-                              },
-                            }));
-                          }}
-                        >
-                          <Text
-                            fontSize="xs"
-                            color={isOn ? "gray.700" : "gray.400"}
-                            _dark={{ color: isOn ? "gray.200" : "gray.500" }}
-                            userSelect="none"
+                        <Box key={category}>
+                          {/* Layer 2 row: label left, pill toggle right */}
+                          <Flex
+                            align="center"
+                            justify="space-between"
+                            py="1.5"
+                            cursor="pointer"
+                            onClick={() => {
+                              setCategoryToggles(prev => ({
+                                ...prev,
+                                [categoryFilterAttribute]: {
+                                  ...prev[categoryFilterAttribute],
+                                  [category]: !isOn,
+                                },
+                              }));
+                            }}
+                            _hover={{ bg: "gray.50", _dark: { bg: "gray.700" } }}
+                            px="1"
+                            borderRadius="sm"
                           >
-                            {category}
-                          </Text>
-                          {/* Custom colored pill toggle */}
-                          <Box
-                            w="30px"
-                            h="17px"
-                            borderRadius="full"
-                            position="relative"
-                            flexShrink={0}
-                            transition="background 0.15s"
-                            style={{ backgroundColor: isOn ? hexColor : "#CBD5E0" }}
-                          >
+                            <Text
+                              fontSize="sm"
+                              fontWeight="medium"
+                              color={isOn ? "gray.700" : "gray.400"}
+                              _dark={{ color: isOn ? "gray.200" : "gray.500" }}
+                              userSelect="none"
+                            >
+                              {category}
+                            </Text>
+                            {/* Pill toggle */}
                             <Box
-                              position="absolute"
-                              w="13px"
-                              h="13px"
+                              w="36px"
+                              h="20px"
                               borderRadius="full"
-                              bg="white"
-                              top="2px"
-                              transition="left 0.15s"
-                              style={{ left: isOn ? "15px" : "2px" }}
-                            />
-                          </Box>
-                        </Flex>
+                              position="relative"
+                              flexShrink={0}
+                              transition="background 0.15s"
+                              style={{ backgroundColor: isOn ? hexColor : "#CBD5E0" }}
+                            >
+                              <Box
+                                position="absolute"
+                                w="16px"
+                                h="16px"
+                                borderRadius="full"
+                                bg="white"
+                                top="2px"
+                                transition="left 0.15s"
+                                style={{ left: isOn ? "18px" : "2px" }}
+                              />
+                            </Box>
+                          </Flex>
+
+                          {/* Layer 3: nested subcategory toggles — same aligned layout, indented */}
+                          {isOn && childOptions && childOptions.length > 0 && (
+                            <Box pl="4" borderLeft="2px solid" borderColor="gray.200" ml="2" mb="1">
+                              {childOptions.map(sub => {
+                                const childAttr = subcatConfig!.childAttr;
+                                const subOn = subcategoryToggles[childAttr]?.[sub] ?? true;
+                                const subColor = getCategoryColor(childAttr, sub);
+                                return (
+                                  <Flex
+                                    key={sub}
+                                    align="center"
+                                    justify="space-between"
+                                    py="1"
+                                    px="1"
+                                    cursor="pointer"
+                                    borderRadius="sm"
+                                    _hover={{ bg: "gray.50", _dark: { bg: "gray.700" } }}
+                                    onClick={() => {
+                                      setSubcategoryToggles(prev => ({
+                                        ...prev,
+                                        [childAttr]: {
+                                          ...prev[childAttr],
+                                          [sub]: !subOn,
+                                        },
+                                      }));
+                                    }}
+                                  >
+                                    <Text
+                                      fontSize="xs"
+                                      color={subOn ? "gray.600" : "gray.400"}
+                                      _dark={{ color: subOn ? "gray.300" : "gray.500" }}
+                                      userSelect="none"
+                                    >
+                                      {sub}
+                                    </Text>
+                                    <Box
+                                      w="30px"
+                                      h="17px"
+                                      borderRadius="full"
+                                      position="relative"
+                                      flexShrink={0}
+                                      transition="background 0.15s"
+                                      style={{ backgroundColor: subOn ? subColor : "#CBD5E0" }}
+                                    >
+                                      <Box
+                                        position="absolute"
+                                        w="13px"
+                                        h="13px"
+                                        borderRadius="full"
+                                        bg="white"
+                                        top="2px"
+                                        transition="left 0.15s"
+                                        style={{ left: subOn ? "15px" : "2px" }}
+                                      />
+                                    </Box>
+                                  </Flex>
+                                );
+                              })}
+                            </Box>
+                          )}
+                        </Box>
                       );
                     })}
-                  </Flex>
+                  </Box>
                 )
               )}
             </Box>

@@ -146,7 +146,7 @@ interface SafetyScoreConfig {
   group: string;
 }
 
-const safetyScoreAttributes: SafetyScoreConfig[] = [
+export const safetyScoreAttributes: SafetyScoreConfig[] = [
   {
     name: "Overall Risk Level",
     displayName: "Overall Risk Level",
@@ -318,7 +318,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "FO Type",
     label: "Fixed Obstacle Type",
     group: "Facility clear width",
-    options: ["Not Selected", "Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation", "Others"],
+    options: ["Not Selected", "Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation", "Others", "None"],
   },
   {
     name: "Non-Fixed Obstacle on Facility",
@@ -329,7 +329,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "NFO Type",
     label: "Non-Fixed Obstacle Type",
     group: "Facility clear width",
-    options: ["Not Selected", "Barrier", "Bins", "Bicycle", "Cone", "Others"],
+    options: ["Not Selected", "Barrier", "Bins", "Bicycle", "Cone", "Others", "None"],
   },
   {
     name: "Width Restriction",
@@ -412,7 +412,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "Crossing Type",
     label: "Crossing Type",
     group: "Intersection",
-    options: ["Not Selected", "Traffic Crossing"],
+    options: ["Not Selected", "Traffic Crossing", "None"],
   },
   {
     name: "Pedestrian Crossing",
@@ -448,8 +448,65 @@ ATTRIBUTE_OPTIONS = Object.fromEntries(
     .map(a => [a.name, a.options.filter(o => o !== "Not Selected")])
 );
 
+// Add safety score attributes to ATTRIBUTE_OPTIONS
+safetyScoreAttributes.forEach(a => {
+  ATTRIBUTE_OPTIONS[a.name] = a.options.filter(o => o !== "Not Selected");
+});
+
 /** All CycleRAP attribute configs (exported for FilterPanel and other consumers). */
 export const CYCLERAP_ATTRIBUTE_CONFIGS: readonly AttributeConfig[] = cyclerapAttributes;
+
+/**
+ * Maps a parent attribute to its child (subcategory) attribute and
+ * the specific child options that belong under each parent category value.
+ * Used for the 3-layer conditional filter UI.
+ */
+export const SUBCATEGORY_MAP: Record<
+  string,
+  { childAttr: string; parentCategories: Record<string, string[]> }
+> = {
+  "Fixed Obstacle on Facility": {
+    childAttr: "FO Type",
+    parentCategories: {
+      "Present": ["Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation", "Others", "None"],
+    },
+  },
+  "Non-Fixed Obstacle on Facility": {
+    childAttr: "NFO Type",
+    parentCategories: {
+      "Present": ["Barrier", "Bins", "Bicycle", "Cone", "Others", "None"],
+    },
+  },
+  "Facility Width per Direction": {
+    childAttr: "Facility Width Sub-category",
+    parentCategories: {
+      "Very Narrow": ["≤1.5m", ">1.5–1.8m", ">1.8–<2m"],
+      "Narrow": ["2–<3.5m", "3.5–4m"],
+      "Wide": [">4m"],
+    },
+  },
+  "Curvature": {
+    childAttr: "Curvature Sub-category",
+    parentCategories: {
+      "Sharp Turn Present": ["<6.5m", "6.5–<10m"],
+      "No Sharp Turn Present": ["10–18m", ">18m"],
+    },
+  },
+  "Crossing Facility": {
+    childAttr: "Crossing Type",
+    parentCategories: {
+      "Present": ["Traffic Crossing"],
+    },
+  },
+};
+
+/** Set of attribute names that are subcategory children — hidden from the FilterPanel. */
+export const SUBCATEGORY_CHILD_ATTRS = new Set(
+  Object.values(SUBCATEGORY_MAP).map(v => v.childAttr)
+);
+
+/** Multi-value attributes whose CSV cells can contain comma-separated values. */
+export const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
 
 /**
  * Subcategory descriptions per attribute option.
@@ -542,6 +599,7 @@ export function getCategoryColor(attribute: string, category: string): string {
       "Fence": "#0891B2",
       "Vegetation": "#16A34A",
       "Others": "#6B7280",
+      "None": "#9CA3AF",
     },
     "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
     "NFO Type": {
@@ -550,6 +608,7 @@ export function getCategoryColor(attribute: string, category: string): string {
       "Bicycle": "#F59E0B",
       "Cone": "#CA8A04",
       "Others": "#6B7280",
+      "None": "#9CA3AF",
     },
     "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
     "Light Segregation": { "Present": "#16A34A", "Not Present": "#DC2626" },
@@ -572,6 +631,7 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Crossing Type": {
       "Traffic Crossing": "#2563EB",
+      "None": "#9CA3AF",
     },
     "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
