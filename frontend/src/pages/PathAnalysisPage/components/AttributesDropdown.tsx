@@ -128,6 +128,7 @@ export const ATTRIBUTE_LABELS: Record<string, string> = {
   "FO Type":                   "Fixed Obstacle Type",
   "NFO Type":                  "Non-Fixed Obstacle Type",
   "Crossing Type":             "Crossing Type",
+  "Facility Width per Direction": "Facility Width",
 };
 
 /**

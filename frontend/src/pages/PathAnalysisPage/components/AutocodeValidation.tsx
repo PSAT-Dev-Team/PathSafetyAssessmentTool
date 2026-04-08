@@ -2,6 +2,17 @@ import { useMemo, useEffect, useState, useCallback } from "react";
 import type { AttributeRow } from "../../../api";
 import "./AutocodeValidation.css";
 
+function getALGrade(pct: number): string {
+  if (pct >= 90) return 'AL1';
+  if (pct >= 85) return 'AL2';
+  if (pct >= 80) return 'AL3';
+  if (pct >= 75) return 'AL4';
+  if (pct >= 65) return 'AL5';
+  if (pct >= 45) return 'AL6';
+  if (pct >= 20) return 'AL7';
+  return 'AL8';
+}
+
 /** ====== Group ordering (matches AttributesPanel) ====== */
 const GROUP_ORDER = [
   "Facility configuration",
@@ -43,7 +54,7 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
     "Light segregation",
     "Fixed obstacle on facility",
     "Non-fixed obstacle on facility",
-    "Facility width per direction",
+    "Facility width",
     "Width restrictions",
     "Adjacent severe hazard 0-1m",
     "Adjacent severe hazard 1-3m",
@@ -102,7 +113,7 @@ const KEY_ALIASES: Record<string, string> = {
   "Line of Sight": "Line of Sight",
   "Fixed obstacle on facility": "Fixed Obstacle on Facility",
   "Non-fixed obstacle on facility": "Non-Fixed Obstacle on Facility",
-  "Facility width per direction": "Facility Width per Direction",
+  "Facility width": "Facility Width per Direction",
   "Width restrictions": "Width Restriction",
   "Light segregation": "Light Segregation",
   "Adjacent severe hazard 0-1m": "Adjacent Severe Hazard 0-1m",
@@ -383,9 +394,9 @@ export default function AutocodeValidation({
             <div className="autocode-grid">
               {currentStats.map((stat) => {
                 const statusClass =
-                  stat.correctnessPercentage >= 95
+                  stat.correctnessPercentage >= 80
                     ? 'excellent'
-                    : stat.correctnessPercentage >= 75
+                    : stat.correctnessPercentage >= 45
                       ? 'good'
                       : 'needs-review';
 
@@ -395,7 +406,7 @@ export default function AutocodeValidation({
 
                     <div className="autocode-card-stats">
                       <div className={`autocode-badge ${statusClass}`}>
-                        {stat.correctnessPercentage.toFixed(1)}%
+                        {getALGrade(stat.correctnessPercentage)}
                       </div>
                       <div className="autocode-changed">
                         {stat.changedCount}/{stat.totalCount} changed
@@ -411,6 +422,25 @@ export default function AutocodeValidation({
                   </div>
                 );
               })}
+            </div>
+
+            {/* AL Grade Legend */}
+            <div className="al-legend">
+              {[
+                { grade: 'AL1', range: '≥90%' },
+                { grade: 'AL2', range: '85–89%' },
+                { grade: 'AL3', range: '80–84%' },
+                { grade: 'AL4', range: '75–79%' },
+                { grade: 'AL5', range: '65–74%' },
+                { grade: 'AL6', range: '45–64%' },
+                { grade: 'AL7', range: '20–44%' },
+                { grade: 'AL8', range: '<20%' },
+              ].map(({ grade, range }) => (
+                <div key={grade} className="al-legend-item">
+                  <span className="al-legend-grade">{grade}</span>
+                  <span className="al-legend-range">{range}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>

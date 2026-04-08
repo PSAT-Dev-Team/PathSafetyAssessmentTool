@@ -311,6 +311,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     }
   }, [primaryFocusAttribute]);
 
+  // When all filters are reset, revert coloring to by-project
+  useEffect(() => {
+    if (selectedAttributes.length === 0) {
+      setPrimaryFocusAttribute("Project");
+    }
+  }, [selectedAttributes]);
+
   // Mode states (Single Point & Polygon)
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [isPointAddMode, setIsPointAddMode] = useState(false);
@@ -533,7 +540,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       { key: "Segment #", label: "Segment #" },
       { key: "Image Reference", label: "Image Reference" },
       { key: "Coordinates", label: "Coordinates" },
-      ...activeFilters.map(attr => ({ key: attr, label: attr })),
+      ...activeFilters.map(attr => ({ key: attr, label: ATTRIBUTE_LABELS[attr] ?? attr })),
       { key: "Overall Risk Score", label: "Overall Risk Score" }
     ];
     return cols;
@@ -1930,169 +1937,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 ))}
               </Flex>
 
-              {/* Primary Focus Selector - always shown when projects are loaded */}
-              {selectedProjects.length > 0 && (
-                <Box mb="3" pb="3" borderBottom="1px solid" borderColor="gray.200">
-                  <Text fontSize="sm" fontWeight="semibold" mb="2">
-                    Primary Focus:
-                  </Text>
-                  <Flex gap="2" align="center">
-                    <Box flex="1" maxW="300px">
-                      <Combobox.Root
-                        collection={createListCollection({
-                          items: [
-                            { label: "Project", value: "Project" },
-                            { label: "Overall Risk Level", value: "Overall Risk Level" },
-                            { label: "VB Band", value: "VB Band" },
-                            { label: "BB Band", value: "BB Band" },
-                            { label: "SB Band", value: "SB Band" },
-                            { label: "BP Band", value: "BP Band" },
-                            ...CYCLERAP_ATTRIBUTE_CONFIGS
-                              .filter(a => a.type !== "numeric")
-                              .map(a => ({
-                                label: ATTRIBUTE_LABELS[a.name] ?? a.label ?? a.name,
-                                value: a.name,
-                              })),
-                          ],
-                        })}
-                        value={primaryFocusAttribute ? [primaryFocusAttribute] : []}
-                        onValueChange={(e) => setPrimaryFocusAttribute(e.value[0] || null)}
-                      >
-                        <Combobox.Control>
-                          <Combobox.Input
-                            placeholder="Select attribute for map color coding"
-                            readOnly
-                          />
-                          <Combobox.IndicatorGroup>
-                            <Combobox.Trigger />
-                          </Combobox.IndicatorGroup>
-                        </Combobox.Control>
-                        <Portal>
-                          <Combobox.Positioner>
-                            <Combobox.Content>
-                              <Combobox.Item item={{ label: "Project", value: "Project" }}>
-                                Project
-                              </Combobox.Item>
-                              <Combobox.Item item={{ label: "Overall Risk Level", value: "Overall Risk Level" }}>
-                                Overall Risk Level
-                              </Combobox.Item>
-                              <Combobox.Item item={{ label: "VB Band", value: "VB Band" }}>VB Band</Combobox.Item>
-                              <Combobox.Item item={{ label: "BB Band", value: "BB Band" }}>BB Band</Combobox.Item>
-                              <Combobox.Item item={{ label: "SB Band", value: "SB Band" }}>SB Band</Combobox.Item>
-                              <Combobox.Item item={{ label: "BP Band", value: "BP Band" }}>BP Band</Combobox.Item>
-                              {CYCLERAP_ATTRIBUTE_CONFIGS
-                                .filter(a => a.type !== "numeric")
-                                .map(a => (
-                                  <Combobox.Item key={a.name} item={{ label: ATTRIBUTE_LABELS[a.name] ?? a.name, value: a.name }}>
-                                    {ATTRIBUTE_LABELS[a.name] ?? a.label ?? a.name}
-                                  </Combobox.Item>
-                                ))}
-                            </Combobox.Content>
-                          </Combobox.Positioner>
-                        </Portal>
-                      </Combobox.Root>
-                    </Box>
-                    {primaryFocusAttribute && (
-                      <Text fontSize="xs" color="gray.500">
-                        Coloring by: <Text as="span" fontWeight="semibold">{ATTRIBUTE_LABELS[primaryFocusAttribute] ?? primaryFocusAttribute}</Text>
-                      </Text>
-                    )}
-                  </Flex>
-                </Box>
-              )}
-
-              {/* Legend */}
-              <Box>
-                {primaryFocusAttribute === "Project" ? (
-                  <>
-                    <Text fontSize="xs" fontWeight="semibold" mb="1" color="gray.600" _dark={{ color: "gray.300" }}>
-                      Project Colors:
-                    </Text>
-                    <Flex gap="3" flexWrap="wrap">
-                      {selectedProjects.map((proj) => (
-                        <Flex key={proj} align="center" gap="1.5">
-                          <Box
-                            w="12px"
-                            h="12px"
-                            borderRadius="full"
-                            bg={projectColors[proj]}
-                          />
-                          <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
-                            {proj}
-                          </Text>
-                        </Flex>
-                      ))}
-                    </Flex>
-                  </>
-                ) : primaryFocusAttribute ? (
-                  <>
-                    <Text fontSize="xs" fontWeight="semibold" mb="1" color="gray.600" _dark={{ color: "gray.300" }}>
-                      {primaryFocusAttribute} Categories:
-                    </Text>
-                    <Flex gap="3" flexWrap="wrap">
-                      {/* Get unique attribute values from allPoints */}
-                      {(() => {
-                        let categories = Array.from(new Set(allPoints.map(p => p.attributeValue)))
-                          .filter(val => val); // Remove empty values
-
-                        // Special sorting for safety score attributes and Overall Risk Level
-                        const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(primaryFocusAttribute || "");
-                        if (isSafetyScore) {
-                          const riskOrder = ["Low", "Medium", "High", "Extreme"];
-                          categories.sort((a, b) => {
-                            const aIndex = riskOrder.indexOf(a);
-                            const bIndex = riskOrder.indexOf(b);
-                            if (aIndex === -1 && bIndex === -1) return 0;
-                            if (aIndex === -1) return 1;
-                            if (bIndex === -1) return -1;
-                            return aIndex - bIndex;
-                          });
-                        } else {
-                          categories.sort();
-                        }
-
-                        return categories.map((category) => {
-                          const hexColor = getCategoryColor(primaryFocusAttribute || "", category);
-                          return (
-                            <Flex key={category} align="center" gap="1.5">
-                              <Box
-                                w="12px"
-                                h="12px"
-                                borderRadius="full"
-                                style={{ backgroundColor: hexColor }}
-                              />
-                              <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
-                                {category}
-                              </Text>
-                            </Flex>
-                          );
-                        });
-                      })()}
-                    </Flex>
-                  </>
-                ) : (
-                  <>
-                    <Text fontSize="xs" fontWeight="semibold" mb="1" color="gray.600" _dark={{ color: "gray.300" }}>
-                      Project Colors:
-                    </Text>
-                    <Flex gap="3" flexWrap="wrap">
-                      {selectedProjects.map((proj) => (
-                        <Flex key={proj} align="center" gap="1.5">
-                          <Box
-                            w="12px"
-                            h="12px"
-                            borderRadius="full"
-                            bg={projectColors[proj]}
-                          />
-                          <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
-                            {proj}
-                          </Text>
-                        </Flex>
-                      ))}
-                    </Flex>
-                  </>
-                )}
-              </Box>
             </Box>
           )}
 

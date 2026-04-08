@@ -255,6 +255,15 @@ export default function Home() {
     navigate(`/treatment/${encodedNames.join(',')}`);
   };
 
+  // Load path analysis for selected projects
+  const loadPathAnalysis = () => {
+    if (selected.size === 0) return;
+    const projectNames = Array.from(selected);
+    sessionStorage.setItem("pathAnalysis_selectedProjects", JSON.stringify(projectNames));
+    sessionStorage.setItem("pathAnalysis_loadedProjects", JSON.stringify(projectNames));
+    navigate("/analysis/path");
+  };
+
   // Edit success callback
   const handleEditSuccess = (newName: string, newTags: string[]) => {
     if (!editingProject) return;
@@ -477,6 +486,9 @@ export default function Home() {
             </Button>
             <Button onClick={loadProject} colorPalette="blue" disabled={!selected || selected.size === 0}>
               Coding
+            </Button>
+            <Button onClick={loadPathAnalysis} style={{ backgroundColor: "#a220e3", color: "white" }} disabled={!selected || selected.size === 0}>
+              Analyse Projects
             </Button>
             <Button onClick={loadTreatment} colorPalette="green" disabled={!selected || selected.size === 0}>
               Treatment Application
