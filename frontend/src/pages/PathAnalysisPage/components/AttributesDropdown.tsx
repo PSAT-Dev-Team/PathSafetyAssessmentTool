@@ -318,7 +318,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "FO Type",
     label: "Fixed Obstacle Type",
     group: "Facility clear width",
-    options: ["Not Selected", "Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation", "Others", "None"],
+    options: ["Not Selected", "Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation", "Others"],
   },
   {
     name: "Non-Fixed Obstacle on Facility",
@@ -329,7 +329,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "NFO Type",
     label: "Non-Fixed Obstacle Type",
     group: "Facility clear width",
-    options: ["Not Selected", "Barrier", "Bins", "Bicycle", "Cone", "Others", "None"],
+    options: ["Not Selected", "Barrier", "Bins", "Bicycle", "Cone", "Others"],
   },
   {
     name: "Width Restriction",
@@ -412,7 +412,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "Crossing Type",
     label: "Crossing Type",
     group: "Intersection",
-    options: ["Not Selected", "Traffic Crossing", "None"],
+    options: ["Not Selected", "Traffic Crossing"],
   },
   {
     name: "Pedestrian Crossing",
@@ -468,13 +468,13 @@ export const SUBCATEGORY_MAP: Record<
   "Fixed Obstacle on Facility": {
     childAttr: "FO Type",
     parentCategories: {
-      "Present": ["Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation", "Others", "None"],
+      "Present": ["Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation", "Others"],
     },
   },
   "Non-Fixed Obstacle on Facility": {
     childAttr: "NFO Type",
     parentCategories: {
-      "Present": ["Barrier", "Bins", "Bicycle", "Cone", "Others", "None"],
+      "Present": ["Barrier", "Bins", "Bicycle", "Cone", "Others"],
     },
   },
   "Facility Width per Direction": {
@@ -599,7 +599,6 @@ export function getCategoryColor(attribute: string, category: string): string {
       "Fence": "#0891B2",
       "Vegetation": "#16A34A",
       "Others": "#6B7280",
-      "None": "#9CA3AF",
     },
     "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
     "NFO Type": {
@@ -608,7 +607,6 @@ export function getCategoryColor(attribute: string, category: string): string {
       "Bicycle": "#F59E0B",
       "Cone": "#CA8A04",
       "Others": "#6B7280",
-      "None": "#9CA3AF",
     },
     "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
     "Light Segregation": { "Present": "#16A34A", "Not Present": "#DC2626" },
@@ -631,7 +629,6 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Crossing Type": {
       "Traffic Crossing": "#2563EB",
-      "None": "#9CA3AF",
     },
     "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },

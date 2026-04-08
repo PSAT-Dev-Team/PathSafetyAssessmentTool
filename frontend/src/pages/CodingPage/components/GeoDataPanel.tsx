@@ -1,5 +1,5 @@
 import {
-  Card, CardHeader, CardBody, Heading, Text, Box, Flex, IconButton, Button,
+  Card, CardBody, Text, Box, Flex, IconButton, Button,
   Dialog, Portal, Menu
 } from "@chakra-ui/react";
 import { FaMousePointer, FaDrawPolygon, FaPlus, FaTrash } from "react-icons/fa";
@@ -264,6 +264,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [fc, setFc] = useState<GJ | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Use external geofeatures if provided (for multi-project display), otherwise use fetched data
   const hasExternalGeoFeatures = externalGeoFeatures !== undefined;
@@ -760,161 +761,177 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
 
 
   return (
-    <Card.Root display="flex" flexDirection="column" h={`${containerHeight}px`}>
-      <CardHeader py="2" px="4">
-        <Flex direction="column" gap="3">
-          <Flex justify="space-between" align="center" wrap="wrap">
-            <Flex align="center" gap="2" wrap="wrap">
-            <Heading size="sm">Map Preview</Heading>
-            {subtitle && (
-              <Text fontSize="sm" fontWeight="medium" color="gray.600" _dark={{ color: "gray.400" }}>
-                - {subtitle}
-              </Text>
-            )}
-            {/* Delete Mode Toggle */}
-            {/* Single Point Modes */}
-            <Menu.Root positioning={{ placement: "bottom-end", strategy: "fixed" }}>
-              <Menu.Trigger asChild>
-                <IconButton
-                  aria-label="Single Point Tools"
+    <Card.Root display="flex" flexDirection="column" h={isCollapsed ? "auto" : `${containerHeight}px`}>
+      {/* Clickable title bar — full width, matches AnalysisPanel header style */}
+      <Box
+        onClick={() => setIsCollapsed(c => !c)}
+        cursor="pointer"
+        userSelect="none"
+        px="4"
+        py="3"
+        borderBottom="1px solid"
+        borderColor="gray.200"
+        _dark={{ borderColor: "gray.700" }}
+        _hover={{ bg: "gray.50", _dark: { bg: "gray.800" } }}
+        display="flex"
+        alignItems="center"
+        gap="2"
+      >
+        <Text fontSize="md" fontWeight="bold" color="gray.800" _dark={{ color: "gray.100" }}>
+          Map Preview&nbsp;{isCollapsed ? "▶" : "▼"}
+        </Text>
+        {subtitle && (
+          <Text fontSize="sm" fontWeight="medium" color="gray.600" _dark={{ color: "gray.400" }}>
+            - {subtitle}
+          </Text>
+        )}
+      </Box>
+
+      {!isCollapsed && (
+        <>
+          {/* Tools + GIS layer toggles */}
+          <Box px="4" pt="2" pb="2" borderBottom="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.700" }}>
+            {/* Tool icon buttons */}
+            <Flex align="center" gap="2" wrap="wrap" mb="2" onClick={(e) => e.stopPropagation()}>
+              <Menu.Root positioning={{ placement: "bottom-end", strategy: "fixed" }}>
+                <Menu.Trigger asChild>
+                  <IconButton
+                    aria-label="Single Point Tools"
+                    size="xs"
+                    variant={(isDeleteMode || isPointAddMode) ? "solid" : "ghost"}
+                    colorPalette={(isDeleteMode || isPointAddMode) ? (isDeleteMode ? "red" : "blue") : "gray"}
+                    onClick={(e) => {
+                      if (isDeleteMode || isPointAddMode) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(false);
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(false);
+                        setPolygonPoints([]);
+                      }
+                    }}
+                    title="Single Point Tools"
+                  >
+                    {isPointAddMode ? <FaPlus /> : (isDeleteMode ? <FaTrash /> : <FaMousePointer />)}
+                  </IconButton>
+                </Menu.Trigger>
+                <Menu.Positioner>
+                  <Menu.Content zIndex={1500}>
+                    <Menu.Item
+                      value="delete"
+                      onClick={() => {
+                        setIsDeleteMode(true);
+                        setIsPointAddMode(false);
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(false);
+                        setPolygonPoints([]);
+                      }}
+                    >
+                      <FaMousePointer /> Single Point Delete
+                    </Menu.Item>
+                    <Menu.Item
+                      value="add"
+                      onClick={() => {
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(true);
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(false);
+                        setPolygonPoints([]);
+                      }}
+                    >
+                      <FaPlus /> Single Point Copy
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu.Positioner>
+              </Menu.Root>
+
+              <Menu.Root positioning={{ placement: "bottom-start", strategy: "fixed" }}>
+                <Menu.Trigger asChild>
+                  <IconButton
+                    aria-label="Polygon Tools"
+                    variant={(isPolygonMode || isPolygonAddMode) ? "solid" : "ghost"}
+                    size="xs"
+                    colorPalette={(isPolygonMode || isPolygonAddMode) ? (isPolygonMode ? "orange" : "blue") : "gray"}
+                    title="Polygon Tools"
+                    onClick={(e) => {
+                      if (isPolygonMode || isPolygonAddMode) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(false);
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(false);
+                        setPolygonPoints([]);
+                      }
+                    }}
+                  >
+                    {isPolygonAddMode ? <FaPlus /> : (isPolygonMode ? <FaTrash /> : <FaDrawPolygon />)}
+                  </IconButton>
+                </Menu.Trigger>
+                <Menu.Positioner>
+                  <Menu.Content zIndex={1500}>
+                    <Menu.Item
+                      value="delete"
+                      onClick={() => {
+                        setIsPolygonMode(true);
+                        setIsPolygonAddMode(false);
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(false);
+                        setPolygonPoints([]);
+                        setDeleteConfirmationOpen(false);
+                      }}
+                    >
+                      <FaTrash /> Delete Segments
+                    </Menu.Item>
+                    <Menu.Item
+                      value="add"
+                      onClick={() => {
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(true);
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(false);
+                        setPolygonPoints([]);
+                        setDeleteConfirmationOpen(false);
+                      }}
+                    >
+                      <FaPlus /> Copy/Add Segments
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu.Positioner>
+              </Menu.Root>
+
+              {isPolygonMode && (
+                <Button
                   size="xs"
-                  variant={(isDeleteMode || isPointAddMode) ? "solid" : "ghost"}
-                  colorPalette={(isDeleteMode || isPointAddMode) ? (isDeleteMode ? "red" : "blue") : "gray"}
-                  onClick={(e) => {
-                    if (isDeleteMode || isPointAddMode) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(false);
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(false);
-                      setPolygonPoints([]);
-                    }
-                  }}
-                  title="Single Point Tools"
+                  variant="outline"
+                  colorPalette="orange"
+                  disabled={polygonPoints.length < 3}
+                  onClick={finishPolygonSelection}
                 >
-                  {isPointAddMode ? <FaPlus /> : (isDeleteMode ? <FaTrash /> : <FaMousePointer />)}
-                </IconButton>
-              </Menu.Trigger>
-              <Menu.Positioner>
-                <Menu.Content zIndex={1500}>
-                  <Menu.Item
-                    value="delete"
-                    onClick={() => {
-                      setIsDeleteMode(true);
-                      setIsPointAddMode(false);
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(false);
-                      setPolygonPoints([]);
-                    }}
-                  >
-                    <FaMousePointer /> Single Point Delete
-                  </Menu.Item>
-                  <Menu.Item
-                    value="add"
-                    onClick={() => {
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(true);
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(false);
-                      setPolygonPoints([]);
-                    }}
-                  >
-                    <FaPlus /> Single Point Copy
-                  </Menu.Item>
-                </Menu.Content>
-              </Menu.Positioner>
-            </Menu.Root>
+                  Delete Selected ({
+                    points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
+                  } segments)
+                </Button>
+              )}
 
-            {/* Polygon Mode Toggle */}
-            <Menu.Root positioning={{ placement: "bottom-start", strategy: "fixed" }}>
-              <Menu.Trigger asChild>
-                <IconButton
-                  aria-label="Polygon Tools"
-                  variant={(isPolygonMode || isPolygonAddMode) ? "solid" : "ghost"}
+              {isPolygonAddMode && (
+                <Button
                   size="xs"
-                  colorPalette={(isPolygonMode || isPolygonAddMode) ? (isPolygonMode ? "orange" : "blue") : "gray"}
-                  title="Polygon Tools"
-                  onClick={(e) => {
-                    if (isPolygonMode || isPolygonAddMode) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(false);
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(false);
-                      setPolygonPoints([]);
-                    }
-                  }}
+                  variant="outline"
+                  colorPalette="blue"
+                  disabled={polygonPoints.length < 3}
+                  onClick={finishAddSegmentsSelection}
                 >
-                  {isPolygonAddMode ? <FaPlus /> : (isPolygonMode ? <FaTrash /> : <FaDrawPolygon />)}
-                </IconButton>
-              </Menu.Trigger>
-              <Menu.Positioner>
-                <Menu.Content zIndex={1500}>
-                  <Menu.Item
-                    value="delete"
-                    onClick={() => {
-                      setIsPolygonMode(true);
-                      setIsPolygonAddMode(false);
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(false);
-                      setPolygonPoints([]);
-                      setDeleteConfirmationOpen(false);
-                    }}
-                  >
-                    <FaTrash /> Delete Segments
-                  </Menu.Item>
-                  <Menu.Item
-                    value="add"
-                    onClick={() => {
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(true);
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(false);
-                      setPolygonPoints([]);
-                      setDeleteConfirmationOpen(false);
-                    }}
-                  >
-                    <FaPlus /> Copy/Add Segments
-                  </Menu.Item>
-                </Menu.Content>
-              </Menu.Positioner>
-            </Menu.Root>
-
-            {isPolygonMode && (
-              <Button
-                size="xs"
-                variant="outline"
-                colorPalette="orange"
-                disabled={polygonPoints.length < 3}
-                onClick={finishPolygonSelection}
-              >
-                Delete Selected ({
-                  points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
-                } segments)
-              </Button>
-            )}
-
-            {isPolygonAddMode && (
-              <Button
-                size="xs"
-                variant="outline"
-                colorPalette="blue"
-                disabled={polygonPoints.length < 3}
-                onClick={finishAddSegmentsSelection}
-              >
-                Copy Selected ({
-                  points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
-                } segments)
-              </Button>
-            )}
-
+                  Copy Selected ({
+                    points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
+                  } segments)
+                </Button>
+              )}
             </Flex>
-          </Flex>
 
-          {/* GIS Layer Toggles */}
-          <Flex wrap="wrap" gap="4">
+            {/* GIS Layer Toggles */}
+            <Flex wrap="wrap" gap="4" onClick={(e) => e.stopPropagation()}>
             <Flex align="center" gap="2">
               <Text fontSize="sm" fontWeight="medium" color={showFootpath ? "blue.600" : "gray.500"}>
                 Footpath
@@ -1023,10 +1040,11 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
               />
             </Flex>
           </Flex>
-        </Flex>
-      </CardHeader>
+        </Box>
+        </>
+      )}
 
-      <CardBody flex="1" minH={0} p={0}>
+      <CardBody flex="1" minH={0} p={0} display={isCollapsed ? "none" : undefined}>
         {loading && <Text color="gray.500">Loading map…</Text>}
         {err && <Text color="red.600">Failed: {err}</Text>}
 

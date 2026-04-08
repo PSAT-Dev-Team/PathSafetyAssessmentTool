@@ -451,6 +451,19 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // Active filters = the attributes selected via FilterPanel (passed as prop)
   const activeFilters = useMemo(() => selectedAttributes, [selectedAttributes]);
 
+  // Auto-focus the newest filter when one is added
+  const prevFiltersRef = useRef<string[]>([]);
+  useEffect(() => {
+    const prev = prevFiltersRef.current;
+    const added = activeFilters.find(f => !prev.includes(f));
+    if (added) {
+      const idx = activeFilters.indexOf(added);
+      setCategoryFilterAttributeIndex(idx);
+      setPrimaryFocusAttribute(added);
+    }
+    prevFiltersRef.current = activeFilters;
+  }, [activeFilters]);
+
   // Reset sidebar index if out of bounds
   useEffect(() => {
     if (categoryFilterAttributeIndex >= activeFilters.length) {
@@ -534,6 +547,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       if (attrValue === null || attrValue === undefined || attrValue === "" || attrValue === "null") {
         return "None";
       }
+    }
+
+    // Generic null/empty handling — map to "Not Present" if the attribute supports it
+    if (attrValue === null || attrValue === undefined || attrValue === "" || String(attrValue).toLowerCase() === "null") {
+      const opts = ATTRIBUTE_OPTIONS[attrName];
+      if (opts && opts.includes("Not Present")) return "Not Present";
+      return ""; // no valid category — exclude this segment from toggle counts
     }
 
     // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
@@ -2078,79 +2098,119 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
           {/* Filter attribute selector + per-category toggles */}
           {selectedProjects.length > 0 && selectedAttributes.length > 0 && (
-            <Box p="4" borderBottom="1px solid" borderColor="gray.200">
-              <Text fontSize="sm" fontWeight="semibold" mb="2">
-                Filter Categories:
-              </Text>
+            <Box borderBottom="1px solid" borderColor="gray.200">
+              {/* Tabs: one per active filter — matches FilterPanel tab style */}
+              <Tabs.Root
+                value={String(categoryFilterAttributeIndex)}
+                onValueChange={e => {
+                  const idx = Number(e.value);
+                  setCategoryFilterAttributeIndex(idx);
+                  setPrimaryFocusAttribute(activeFilters[idx]);
+                }}
+                variant="line"
+              >
+                <Box overflowX="auto">
+                  <Tabs.List px="4" minW="max-content">
+                    {selectedAttributes.map((attr, idx) => (
+                      <Tabs.Trigger key={attr} value={String(idx)} fontSize="sm" whiteSpace="nowrap">
+                        {idx + 1}. {(ATTRIBUTE_LABELS[attr] ?? attr).slice(0, 22)}
+                      </Tabs.Trigger>
+                    ))}
+                  </Tabs.List>
+                </Box>
 
-              {/* Numbered buttons: one per active filter attribute */}
-              <Flex gap="1.5" mb="3" flexWrap="wrap">
                 {selectedAttributes.map((attr, idx) => (
-                  <Button
-                    key={attr}
-                    size="xs"
-                    variant={categoryFilterAttributeIndex === idx ? "solid" : "outline"}
-                    colorPalette="blue"
-                    onClick={() => {
-                      setCategoryFilterAttributeIndex(idx);
-                      setPrimaryFocusAttribute(attr);
-                    }}
-                    title={ATTRIBUTE_LABELS[attr] ?? attr}
-                  >
-                    {idx + 1}. {(ATTRIBUTE_LABELS[attr] ?? attr).slice(0, 20)}
-                  </Button>
-                ))}
-              </Flex>
-
-              {/* Per-category toggles for the selected attribute */}
-              {categoryFilterAttribute && (
-                NUMERIC_FILTER_ATTRIBUTES.has(categoryFilterAttribute) ? (
-                  /* Numeric range filter: slider inputs */
-                  <Box>
-                    <Text fontSize="xs" color="gray.500" mb="2">
-                      Range filter for {ATTRIBUTE_LABELS[categoryFilterAttribute] ?? categoryFilterAttribute}:
+                  <Tabs.Content key={attr} value={String(idx)} p="4">
+                    {/* Per-category toggles for the selected attribute */}
+                    {categoryFilterAttribute && (
+                      <>
+                        {/* Header row: label + reset button */}
+                  <Flex align="center" justify="space-between" mb="2">
+                    <Text fontSize="xs" fontWeight="semibold" color="gray.500" _dark={{ color: "gray.400" }}>
+                      {ATTRIBUTE_LABELS[categoryFilterAttribute] ?? categoryFilterAttribute}
                     </Text>
-                    {(() => {
-                      const bounds = dataRangeBounds[categoryFilterAttribute];
-                      const [rMin, rMax] = rangeFilters[categoryFilterAttribute] ?? [bounds?.min ?? 0, bounds?.max ?? 100];
-                      return (
-                        <Box px="2">
-                          <Slider
-                            min={bounds?.min ?? 0}
-                            max={bounds?.max ?? 100}
-                            step={1}
-                            value={[rMin, rMax]}
-                            onValueChange={({ value }) => {
-                              setRangeFilters(prev => ({
-                                ...prev,
-                                [categoryFilterAttribute]: [value[0], value[1]] as [number, number],
-                              }));
-                            }}
-                          />
-                          <Flex justify="space-between" mt="1">
-                            <Text fontSize="xs" color="gray.500">{rMin}</Text>
-                            <Text fontSize="xs" color="gray.500">{rMax}</Text>
-                          </Flex>
-                        </Box>
-                      );
-                    })()}
-                  </Box>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      colorPalette="gray"
+                      onClick={() => {
+                        const opts = ATTRIBUTE_OPTIONS[categoryFilterAttribute] ?? availableCategories;
+                        setCategoryToggles(prev => ({
+                          ...prev,
+                          [categoryFilterAttribute]: Object.fromEntries(opts.map(c => [c, true])),
+                        }));
+                        const subcatConfig = SUBCATEGORY_MAP[categoryFilterAttribute];
+                        if (subcatConfig) {
+                          const allChildOpts = Object.values(subcatConfig.parentCategories).flat();
+                          setSubcategoryToggles(prev => ({
+                            ...prev,
+                            [subcatConfig.childAttr]: Object.fromEntries(allChildOpts.map(c => [c, true])),
+                          }));
+                        }
+                      }}
+                    >
+                      Reset
+                    </Button>
+                  </Flex>
+                  {NUMERIC_FILTER_ATTRIBUTES.has(categoryFilterAttribute) ? (
+                    /* Numeric range filter: slider inputs */
+                    <Box>
+                      <Text fontSize="xs" color="gray.500" mb="2">
+                        Range filter for {ATTRIBUTE_LABELS[categoryFilterAttribute] ?? categoryFilterAttribute}:
+                      </Text>
+                      {(() => {
+                        const bounds = dataRangeBounds[categoryFilterAttribute];
+                        const [rMin, rMax] = rangeFilters[categoryFilterAttribute] ?? [bounds?.min ?? 0, bounds?.max ?? 100];
+                        return (
+                          <Box px="2">
+                            <Slider
+                              min={bounds?.min ?? 0}
+                              max={bounds?.max ?? 100}
+                              step={1}
+                              value={[rMin, rMax]}
+                              onValueChange={({ value }) => {
+                                setRangeFilters(prev => ({
+                                  ...prev,
+                                  [categoryFilterAttribute]: [value[0], value[1]] as [number, number],
+                                }));
+                              }}
+                            />
+                            <Flex justify="space-between" mt="1">
+                              <Text fontSize="xs" color="gray.500">{rMin}</Text>
+                              <Text fontSize="xs" color="gray.500">{rMax}</Text>
+                            </Flex>
+                          </Box>
+                        );
+                      })()}
+                    </Box>
                 ) : (
-                  /* Category toggles — aligned vertical list with nested subcategory toggles */
-                  <Box>
+                  /* Layer 2 chips each followed immediately by their Layer 3 children */
+                  <Flex direction="column" gap="2">
                     {(ATTRIBUTE_OPTIONS[categoryFilterAttribute] ?? availableCategories).map(category => {
                       const isOn = categoryToggles[categoryFilterAttribute]?.[category] ?? true;
                       const hexColor = getCategoryColor(categoryFilterAttribute, category);
                       const subcatConfig = SUBCATEGORY_MAP[categoryFilterAttribute];
-                      const childOptions = subcatConfig?.parentCategories[category];
+                      const childAttr = subcatConfig?.childAttr;
+                      const subcats = subcatConfig?.parentCategories[category];
+                      const hasSubcats = isOn && subcats?.length;
                       return (
                         <Box key={category}>
-                          {/* Layer 2 row: label left, pill toggle right */}
+                          {/* Layer 2 chip */}
                           <Flex
+                            as="button"
                             align="center"
-                            justify="space-between"
+                            gap="2"
+                            px="3"
                             py="1.5"
+                            borderWidth="1px"
+                            borderRadius="md"
                             cursor="pointer"
+                            userSelect="none"
+                            transition="all 0.15s"
+                            style={isOn
+                              ? { backgroundColor: hexColor + "22", borderColor: hexColor }
+                              : { backgroundColor: "transparent", borderColor: "#E2E8F0" }
+                            }
                             onClick={() => {
                               setCategoryToggles(prev => ({
                                 ...prev,
@@ -2160,23 +2220,19 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                                 },
                               }));
                             }}
-                            _hover={{ bg: "gray.50", _dark: { bg: "gray.700" } }}
-                            px="1"
-                            borderRadius="sm"
                           >
                             <Text
                               fontSize="sm"
-                              fontWeight="medium"
-                              color={isOn ? "gray.700" : "gray.400"}
-                              _dark={{ color: isOn ? "gray.200" : "gray.500" }}
+                              fontWeight={isOn ? "semibold" : "normal"}
+                              color={isOn ? "gray.800" : "gray.400"}
+                              _dark={{ color: isOn ? "gray.100" : "gray.500" }}
                               userSelect="none"
                             >
                               {category}
                             </Text>
-                            {/* Pill toggle */}
                             <Box
-                              w="36px"
-                              h="20px"
+                              w="30px"
+                              h="17px"
                               borderRadius="full"
                               position="relative"
                               flexShrink={0}
@@ -2185,83 +2241,102 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                             >
                               <Box
                                 position="absolute"
-                                w="16px"
-                                h="16px"
+                                w="13px"
+                                h="13px"
                                 borderRadius="full"
                                 bg="white"
                                 top="2px"
                                 transition="left 0.15s"
-                                style={{ left: isOn ? "18px" : "2px" }}
+                                style={{ left: isOn ? "15px" : "2px" }}
                               />
                             </Box>
                           </Flex>
 
-                          {/* Layer 3: nested subcategory toggles — same aligned layout, indented */}
-                          {isOn && childOptions && childOptions.length > 0 && (
-                            <Box pl="4" borderLeft="2px solid" borderColor="gray.200" ml="2" mb="1">
-                              {childOptions.map(sub => {
-                                const childAttr = subcatConfig!.childAttr;
-                                const subOn = subcategoryToggles[childAttr]?.[sub] ?? true;
-                                const subColor = getCategoryColor(childAttr, sub);
-                                return (
-                                  <Flex
-                                    key={sub}
-                                    align="center"
-                                    justify="space-between"
-                                    py="1"
-                                    px="1"
-                                    cursor="pointer"
-                                    borderRadius="sm"
-                                    _hover={{ bg: "gray.50", _dark: { bg: "gray.700" } }}
-                                    onClick={() => {
-                                      setSubcategoryToggles(prev => ({
-                                        ...prev,
-                                        [childAttr]: {
-                                          ...prev[childAttr],
-                                          [sub]: !subOn,
-                                        },
-                                      }));
-                                    }}
-                                  >
-                                    <Text
-                                      fontSize="xs"
-                                      color={subOn ? "gray.600" : "gray.400"}
-                                      _dark={{ color: subOn ? "gray.300" : "gray.500" }}
+                          {/* Layer 3 chips — only visible when parent is ON */}
+                          {hasSubcats && childAttr && (
+                            <Box
+                              mt="1.5"
+                              ml="3"
+                              pl="3"
+                              borderLeft="2px solid"
+                              style={{ borderColor: hexColor + "66" }}
+                            >
+                              <Flex gap="1.5" flexWrap="wrap">
+                                {subcats!.map(sub => {
+                                  const subOn = subcategoryToggles[childAttr]?.[sub] ?? true;
+                                  const subColor = getCategoryColor(childAttr, sub);
+                                  return (
+                                    <Flex
+                                      key={sub}
+                                      as="button"
+                                      align="center"
+                                      gap="1.5"
+                                      px="2.5"
+                                      py="1"
+                                      borderWidth="1px"
+                                      borderRadius="md"
+                                      cursor="pointer"
                                       userSelect="none"
+                                      transition="all 0.15s"
+                                      style={subOn
+                                        ? { backgroundColor: subColor + "22", borderColor: subColor }
+                                        : { backgroundColor: "transparent", borderColor: "#E2E8F0" }
+                                      }
+                                      onClick={() => {
+                                        setSubcategoryToggles(prev => ({
+                                          ...prev,
+                                          [childAttr]: {
+                                            ...prev[childAttr],
+                                            [sub]: !subOn,
+                                          },
+                                        }));
+                                      }}
                                     >
-                                      {sub}
-                                    </Text>
-                                    <Box
-                                      w="30px"
-                                      h="17px"
-                                      borderRadius="full"
-                                      position="relative"
-                                      flexShrink={0}
-                                      transition="background 0.15s"
-                                      style={{ backgroundColor: subOn ? subColor : "#CBD5E0" }}
-                                    >
+                                      <Text
+                                        fontSize="xs"
+                                        fontWeight={subOn ? "semibold" : "normal"}
+                                        color={subOn ? "gray.700" : "gray.400"}
+                                        _dark={{ color: subOn ? "gray.200" : "gray.500" }}
+                                        userSelect="none"
+                                      >
+                                        {sub}
+                                      </Text>
                                       <Box
-                                        position="absolute"
-                                        w="13px"
-                                        h="13px"
+                                        w="24px"
+                                        h="14px"
                                         borderRadius="full"
-                                        bg="white"
-                                        top="2px"
-                                        transition="left 0.15s"
-                                        style={{ left: subOn ? "15px" : "2px" }}
-                                      />
-                                    </Box>
-                                  </Flex>
-                                );
-                              })}
+                                        position="relative"
+                                        flexShrink={0}
+                                        transition="background 0.15s"
+                                        style={{ backgroundColor: subOn ? subColor : "#CBD5E0" }}
+                                      >
+                                        <Box
+                                          position="absolute"
+                                          w="10px"
+                                          h="10px"
+                                          borderRadius="full"
+                                          bg="white"
+                                          top="2px"
+                                          transition="left 0.15s"
+                                          style={{ left: subOn ? "12px" : "2px" }}
+                                        />
+                                      </Box>
+                                    </Flex>
+                                  );
+                                })}
+                              </Flex>
                             </Box>
                           )}
                         </Box>
                       );
                     })}
-                  </Box>
-                )
+                  </Flex>
+                  )}
+                </>
               )}
+                  </Tabs.Content>
+                ))}
+              </Tabs.Root>
             </Box>
           )}
 
