@@ -1,3 +1,4 @@
+import ThemeAwareTileLayer from "../../../components/common/ThemeAwareTileLayer";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
@@ -2218,11 +2219,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   />
 
                   {/* Tile Layer */}
-                  <TileLayer
-                    url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                    attribution='&copy; OpenStreetMap contributors & CARTO'
-                    maxZoom={22}
-                  />
+                  <ThemeAwareTileLayer />
 
                   {/* Auto-fit bounds if data is available and shouldAutoFit is true */}
                   {allLatLngs.length > 0 && <FitBounds points={allLatLngs} shouldFit={shouldAutoFit} />}

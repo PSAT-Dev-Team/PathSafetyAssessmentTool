@@ -1546,16 +1546,26 @@ class GIS:
             cycling_path = self.store.paths["cycling_path"]
             base_dir = str(cycling_path.parent.parent)
 
-        # Use the PathAssignmentTool's utility function to get radius and width
-        # radius is not used here but returned for potential future use
+        # Step 1: Check for cycling path within 2.5m specifically
         _radius, width = get_radius_and_width_at_point(
             pt,
-            start_radius=start_radius,
-            max_radius=max_radius,
-            step=step_size,
-            priority=["cycling", "shared", "footpath"],
+            start_radius=2.5,
+            max_radius=2.5,
+            step=2.5,
+            priority=["cycling"],
             base_dir=base_dir
         )
+
+        # Step 2: If no cycling path within 2.5m, run the full expanding search
+        if width is None:
+            _radius, width = get_radius_and_width_at_point(
+                pt,
+                start_radius=start_radius,
+                max_radius=max_radius,
+                step=step_size,
+                priority=["cycling", "shared", "footpath"],
+                base_dir=base_dir
+            )
 
         # Categorize the found width using the same thresholds as PathAssignmentTool
         if width is None:
@@ -1705,10 +1715,10 @@ class GIS:
                 "width_locked": found_width is not None
             })
 
-        # SPECIAL LOGIC: If on/near footpath, check if cycling path is within 1.5m
+        # SPECIAL LOGIC: If on/near footpath, check if cycling path is within 2.5m
         # If so, use the cycling path width instead
         if footpath_detected and found_layer == "footpath":
-            cycling_override_radius = 1.5  # meters
+            cycling_override_radius = 2.5  # meters
             cycling_gdf = layers.get("cycling")
 
             if cycling_gdf is not None and not cycling_gdf.empty:

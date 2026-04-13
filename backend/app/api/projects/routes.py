@@ -1599,25 +1599,29 @@ def get_segment_treatments(project_name: str, segment_index: int):
         # Extract modified attributes from row
         modified_attributes = {}
         attrs_df = ver.attributes.df
+        original_row = dict(attrs_df.iloc[segment_index])
 
         for col in attrs_df.columns:
+            val_treatment = None
             if col in treatment_df.columns and col != "Treatments Applied":
-                val = row.get(col)
+                val_treatment = row.get(col)
+                
+            # If value in treatment_df is not null and not empty string, use it
+            if pd.notna(val_treatment) and str(val_treatment).strip() != "":
                 # Convert pandas types to Python native types for JSON serialization
-                if pd.notna(val):
-                    # Handle numpy/pandas numeric types
-                    try:
-                        if hasattr(val, 'item'):  # numpy/pandas scalar
-                            val = val.item()
-                        # Ensure we get a Python native type
-                        if isinstance(val, (int, float, bool)):
-                            modified_attributes[col] = val
-                        else:
-                            modified_attributes[col] = float(val)
-                    except (ValueError, TypeError):
-                        modified_attributes[col] = None
-                else:
-                    modified_attributes[col] = None
+                try:
+                    if hasattr(val_treatment, 'item'):  # numpy/pandas scalar
+                        val_treatment = val_treatment.item()
+                    # Ensure we get a Python native type
+                    if isinstance(val_treatment, (int, float, bool)):
+                        modified_attributes[col] = val_treatment
+                    else:
+                        modified_attributes[col] = float(val_treatment)
+                except (ValueError, TypeError):
+                    modified_attributes[col] = original_row.get(col)
+            else:
+                # Fallback to the original baseline attributes if this column was untouched
+                modified_attributes[col] = original_row.get(col)
 
         # Calculate after scores from modified attributes
         modified_df = pd.DataFrame([modified_attributes])
@@ -1681,10 +1685,16 @@ def apply_all_treatments(project_name: str):
         attrs_df = ver.attributes.df
         treatment_df = ver.treatment.df.copy()
 
+        # Ensure treatment dataframe has all attribute columns
+        for col in attrs_df.columns:
+            if col not in treatment_df.columns:
+                # Initialize column with None for all rows
+                treatment_df[col] = None  # Use None first for proper pandas handling
+
         # Ensure treatment dataframe has same number of rows as attributes dataframe
         if len(treatment_df) < len(attrs_df):
             # Expand treatment dataframe to match attributes size
-            new_rows = [{}] * (len(attrs_df) - len(treatment_df))
+            new_rows = [treatment_df.iloc[0].copy() if len(treatment_df) > 0 else {}] * (len(attrs_df) - len(treatment_df))
             treatment_df = pd.concat([treatment_df, pd.DataFrame(new_rows)], ignore_index=True)
 
         # Helper function to get applicable treatments for a segment
@@ -1707,12 +1717,6 @@ def apply_all_treatments(project_name: str):
                         applicable.append(treatment)
                         break  # Only need one trigger set to match
             return applicable
-
-        # Ensure treatment dataframe has all attribute columns
-        for col in attrs_df.columns:
-            if col not in treatment_df.columns:
-                # Initialize column with empty string for all rows
-                treatment_df[col] = None  # Use None first for proper pandas handling
 
         # Process each segment
         details = []

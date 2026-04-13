@@ -1,3 +1,4 @@
+import ThemeAwareTileLayer from "../../../components/common/ThemeAwareTileLayer";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Box, Text, Tabs } from "@chakra-ui/react";
 
@@ -100,10 +101,7 @@ export default function TreatmentMapView() {
               >
 
                 {/* Tile Layer */}
-                <TileLayer
-                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                  attribution='&copy; OpenStreetMap contributors & CARTO'
-                />
+                <ThemeAwareTileLayer />
 
                 {/* Auto-fit bounds if data is available */}
                 {allLatLngs.length > 0 && <FitBounds points={allLatLngs} />}

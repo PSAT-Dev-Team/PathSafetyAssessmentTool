@@ -1,3 +1,4 @@
+import ThemeAwareTileLayer from "../../common/ThemeAwareTileLayer";
 import { MapContainer, TileLayer, Polyline, CircleMarker, Circle, useMap, Popup } from 'react-leaflet';
 import { useEffect } from 'react';
 import 'leaflet/dist/leaflet.css';
@@ -32,11 +33,7 @@ export function WidthVisualization({ data }: WidthVisualizationProps) {
         scrollWheelZoom={true}
       >
         {/* CartoDB Light basemap - same as Curvature and Map Preview */}
-        <TileLayer
-          attribution='&copy; OpenStreetMap contributors & CARTO'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          maxZoom={22}
-        />
+        <ThemeAwareTileLayer />
 
         {/* Fit bounds on load */}
         <FitBounds center={center} />
