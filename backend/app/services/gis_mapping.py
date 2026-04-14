@@ -43,6 +43,14 @@ def _load_gdf_cached(path_str: str, metric_crs: str, src_mtime: float):
 CRS_WGS84 = "EPSG:4326"
 CRS_METRIC = "EPSG:3414"
 
+CURVATURE_FINE_STEP_M = 0.5
+CURVATURE_DEDUP_TOLERANCE_M = 0.10
+CURVATURE_MIN_TRIPLET_LEG_M = 0.35
+CURVATURE_MIN_PLAUSIBLE_RADIUS_M = 1.0
+CURVATURE_MIN_KINK_LEG_M = 1.0
+CURVATURE_JUNCTION_SNAP_TOL_M = 0.75
+CURVATURE_MIN_JUNCTION_LEG_M = 1.5
+
 class LayerStore:
     """Lazy-loading shapefile store with parquet caching."""
     def __init__(self, metric_crs=CRS_METRIC):
@@ -819,8 +827,9 @@ class GIS:
                                     if len(original_coords) < 2:
                                         continue
 
-                                    # Use finer densification step (0.25m instead of 1.0m)
-                                    fine_step = 0.25
+                                    # Use moderate densification to preserve bends without
+                                    # overreacting to tiny geometry artifacts.
+                                    fine_step = CURVATURE_FINE_STEP_M
 
                                     # Build combined coordinate list: original vertices + interpolated points
                                     combined_coords = []
@@ -845,12 +854,12 @@ class GIS:
                                     # Add the final original vertex
                                     combined_coords.append(original_coords[-1])
 
-                                    # Remove duplicate consecutive points (within epsilon tolerance)
+                                    # Remove duplicate/near-duplicate consecutive points.
                                     deduped_coords = [combined_coords[0]]
                                     for coord in combined_coords[1:]:
                                         prev = deduped_coords[-1]
                                         dist_sq = (coord[0] - prev[0])**2 + (coord[1] - prev[1])**2
-                                        if dist_sq > epsilon * epsilon:
+                                        if dist_sq > CURVATURE_DEDUP_TOLERANCE_M * CURVATURE_DEDUP_TOLERANCE_M:
                                             deduped_coords.append(coord)
 
                                     # Mark which coordinates are within the analysis window
@@ -882,8 +891,12 @@ class GIS:
                                             b = B.distance(C)
                                             c = A.distance(C)
 
-                                            # Skip degenerate triangles
-                                            if a < epsilon or b < epsilon or c < epsilon:
+                                            # Skip degenerate and micro-scale triangles.
+                                            if (
+                                                a < CURVATURE_MIN_TRIPLET_LEG_M
+                                                or b < CURVATURE_MIN_TRIPLET_LEG_M
+                                                or c < CURVATURE_MIN_TRIPLET_LEG_M
+                                            ):
                                                 continue
 
                                             # Calculate using Heron's formula
@@ -894,6 +907,8 @@ class GIS:
                                                 continue  # Nearly collinear
 
                                             R = (a * b * c) / (4.0 * area_sq**0.5)
+                                            if R < CURVATURE_MIN_PLAUSIBLE_RADIUS_M:
+                                                continue
                                             if R < min_triplet_radius:
                                                 min_triplet_radius = R
 
@@ -950,8 +965,12 @@ class GIS:
             b = np.sqrt((C[0] - B[0])**2 + (C[1] - B[1])**2)  # dist(B, C)
             c = np.sqrt((C[0] - A[0])**2 + (C[1] - A[1])**2)  # dist(A, C)
 
-            # Skip degenerate cases (zero-length segments)
-            if a < epsilon or b < epsilon or c < epsilon:
+            # Skip degenerate and micro-scale triangles.
+            if (
+                a < CURVATURE_MIN_TRIPLET_LEG_M
+                or b < CURVATURE_MIN_TRIPLET_LEG_M
+                or c < CURVATURE_MIN_TRIPLET_LEG_M
+            ):
                 if return_details:
                     all_triplets.append({
                         "index": i,
@@ -983,6 +1002,16 @@ class GIS:
 
             # Calculate circumradius: R = (a * b * c) / (4 * area)
             R = (a * b * c) / (4.0 * area)
+
+            if R < CURVATURE_MIN_PLAUSIBLE_RADIUS_M:
+                if return_details:
+                    all_triplets.append({
+                        "index": i,
+                        "points": [A, B, C],
+                        "skipped": "implausible_radius",
+                        "reason": f"Radius below plausible minimum ({CURVATURE_MIN_PLAUSIBLE_RADIUS_M}m)",
+                    })
+                continue
 
             if return_details:
                 all_triplets.append({
@@ -1119,17 +1148,19 @@ class GIS:
         # Check 1 (along-path curve): circumradius < 10 m → sharp turn
         is_sharp_curve = (min_radius is not None) and (min_radius < sharp_turn_threshold)
 
-        # Check 2 (kink) + Check 3 (side-path junction): angle-based detections
-        # - Sudden kink: any vertex on a path within the window deflects > 45°
-        # - Non-parallel junction: any joining path meets the main path at > 45°
-        has_angle_turn = self._check_angle_curvature(point)
+        # Angle-based detections are split between sharp kinks on one path and
+        # true branch junctions between separate path segments.
+        has_kink, has_path_junction = self._check_angle_curvature(point)
+        is_sharp_bend = is_sharp_curve or has_kink
 
-        if is_sharp_curve or has_angle_turn:
-            # Sub-categorise by radius when available
-            if min_radius is not None:
-                subcat = "<6.5m" if min_radius < 6.5 else "6.5\u2013<10m"
+        if is_sharp_bend or has_path_junction:
+            # Determine detection type sub-category
+            if is_sharp_bend and has_path_junction:
+                subcat = "Both"
+            elif is_sharp_bend:
+                subcat = "Sharp Bend"
             else:
-                subcat = None  # Angle-based detection only; no measured radius
+                subcat = "Path Junction"
             return 1, subcat  # Sharp Turn Present
         else:
             if min_radius is not None:
@@ -1143,12 +1174,11 @@ class GIS:
         Check for two angle-based curvature conditions over all path layers within the window:
 
         1. KINK (along-path): Any original vertex on a path whose deflection angle exceeds
-           `angle_threshold` degrees. This catches sudden direction changes in a single path
-           that are too abrupt to be detected as a small circumradius (e.g. a hard kink
-           encoded as a single vertex rather than a tight curve).
+           `angle_threshold` degrees, with both adjacent legs long enough to represent a
+           meaningful bend rather than micro-geometry noise.
 
         2. NON-PARALLEL JUNCTION (side-path): Any point where two path endpoints meet (within
-           0.5 m tolerance) and the angle between their outgoing directions — normalised to
+           a small tolerance) and the angle between their outgoing directions — normalised to
            [0°, 90°] so direction of traversal does not matter — exceeds `angle_threshold`.
            An exactly parallel continuation scores 0°; a T-junction scores 90°.
 
@@ -1162,7 +1192,7 @@ class GIS:
             epsilon:          Minimum length threshold to skip degenerate segments.
 
         Returns:
-            bool: True if any kink or non-parallel junction is found, False otherwise.
+            tuple[bool, bool]: (has_kink, has_junction)
         """
         import math
 
@@ -1175,7 +1205,7 @@ class GIS:
             "footpath": "footpath",
         }
 
-        # Collect original vertex lists for every segment near the point
+        # Collect original vertex lists for every segment near the point.
         all_segments = []
         for store_key in all_layer_names.values():
             try:
@@ -1196,17 +1226,23 @@ class GIS:
                     continue
                 subset = gdf.iloc[cands]
                 subset = subset[subset.intersects(buf)]
-                for geom in subset.geometry:
+                for feature_idx, geom in zip(subset.index, subset.geometry):
                     if geom.geom_type == "LineString":
-                        all_segments.append(list(geom.coords))
+                        all_segments.append({
+                            "segment_id": f"{store_key}:{feature_idx}:0",
+                            "coords": list(geom.coords),
+                        })
                     elif geom.geom_type == "MultiLineString":
-                        for part in geom.geoms:
-                            all_segments.append(list(part.coords))
+                        for part_idx, part in enumerate(geom.geoms):
+                            all_segments.append({
+                                "segment_id": f"{store_key}:{feature_idx}:{part_idx}",
+                                "coords": list(part.coords),
+                            })
             except Exception:
                 continue
 
         if not all_segments:
-            return False
+            return False, False
 
         # ------------------------------------------------------------------
         # Helper: deflection angle at vertex B along A→B→C (0° = straight)
@@ -1225,19 +1261,89 @@ class GIS:
         # CHECK 1 — Sudden kink on original vertices
         # A vertex is only tested when it lies inside the analysis window.
         # ------------------------------------------------------------------
-        for coords in all_segments:
+        has_kink = False
+        for segment in all_segments:
+            coords = segment["coords"]
             if len(coords) < 3:
                 continue
             for i in range(len(coords) - 2):
-                bx, by = coords[i + 1]
+                ax, ay = coords[i][:2]
+                bx, by = coords[i + 1][:2]
+                cx, cy = coords[i + 2][:2]
                 if (bx - pt.x) ** 2 + (by - pt.y) ** 2 > collect_radius ** 2:
                     continue  # middle vertex outside window
-                ax, ay = coords[i]
-                cx, cy = coords[i + 2]
+                leg_ab = math.sqrt((bx - ax) ** 2 + (by - ay) ** 2)
+                leg_bc = math.sqrt((cx - bx) ** 2 + (cy - by) ** 2)
+                if leg_ab < CURVATURE_MIN_KINK_LEG_M or leg_bc < CURVATURE_MIN_KINK_LEG_M:
+                    continue
                 if deflection_angle(ax, ay, bx, by, cx, cy) > angle_threshold:
-                    return True
+                    has_kink = True
+                    break
+            if has_kink:
+                break
 
-        return False
+        # ------------------------------------------------------------------
+        # CHECK 2 — True branch junctions between separate path endpoints.
+        # ------------------------------------------------------------------
+        endpoint_vectors = []
+        endpoint_search_radius = collect_radius + CURVATURE_JUNCTION_SNAP_TOL_M
+
+        for segment in all_segments:
+            coords = segment["coords"]
+            if len(coords) < 2:
+                continue
+
+            start = coords[0][:2]
+            next_coord = coords[1][:2]
+            end = coords[-1][:2]
+            prev_coord = coords[-2][:2]
+
+            start_leg = math.sqrt((next_coord[0] - start[0]) ** 2 + (next_coord[1] - start[1]) ** 2)
+            end_leg = math.sqrt((end[0] - prev_coord[0]) ** 2 + (end[1] - prev_coord[1]) ** 2)
+
+            if ((start[0] - pt.x) ** 2 + (start[1] - pt.y) ** 2) <= endpoint_search_radius ** 2 and start_leg >= CURVATURE_MIN_JUNCTION_LEG_M:
+                endpoint_vectors.append({
+                    "segment_id": segment["segment_id"],
+                    "point": start,
+                    "vector": (next_coord[0] - start[0], next_coord[1] - start[1]),
+                })
+
+            if ((end[0] - pt.x) ** 2 + (end[1] - pt.y) ** 2) <= endpoint_search_radius ** 2 and end_leg >= CURVATURE_MIN_JUNCTION_LEG_M:
+                endpoint_vectors.append({
+                    "segment_id": segment["segment_id"],
+                    "point": end,
+                    "vector": (prev_coord[0] - end[0], prev_coord[1] - end[1]),
+                })
+
+        has_junction = False
+        for i in range(len(endpoint_vectors)):
+            endpoint_a = endpoint_vectors[i]
+            for j in range(i + 1, len(endpoint_vectors)):
+                endpoint_b = endpoint_vectors[j]
+                if endpoint_a["segment_id"] == endpoint_b["segment_id"]:
+                    continue
+
+                dx = endpoint_a["point"][0] - endpoint_b["point"][0]
+                dy = endpoint_a["point"][1] - endpoint_b["point"][1]
+                if dx * dx + dy * dy > CURVATURE_JUNCTION_SNAP_TOL_M ** 2:
+                    continue
+
+                v1x, v1y = endpoint_a["vector"]
+                v2x, v2y = endpoint_b["vector"]
+                m1 = math.sqrt(v1x * v1x + v1y * v1y)
+                m2 = math.sqrt(v2x * v2x + v2y * v2y)
+                if m1 < epsilon or m2 < epsilon:
+                    continue
+
+                cos_a = max(-1.0, min(1.0, (v1x * v2x + v1y * v2y) / (m1 * m2)))
+                normalized_angle = math.degrees(math.acos(abs(cos_a)))
+                if normalized_angle > angle_threshold:
+                    has_junction = True
+                    break
+            if has_junction:
+                break
+
+        return has_kink, has_junction
 
     def get_curvature_visualization(self, point, collect_radius=5.0):
         """
@@ -1546,26 +1652,16 @@ class GIS:
             cycling_path = self.store.paths["cycling_path"]
             base_dir = str(cycling_path.parent.parent)
 
-        # Step 1: Check for cycling path within 2.5m specifically
+        # Use the PathAssignmentTool's utility function to get radius and width
+        # radius is not used here but returned for potential future use
         _radius, width = get_radius_and_width_at_point(
             pt,
-            start_radius=2.5,
-            max_radius=2.5,
-            step=2.5,
-            priority=["cycling"],
+            start_radius=start_radius,
+            max_radius=max_radius,
+            step=step_size,
+            priority=["cycling", "shared", "footpath"],
             base_dir=base_dir
         )
-
-        # Step 2: If no cycling path within 2.5m, run the full expanding search
-        if width is None:
-            _radius, width = get_radius_and_width_at_point(
-                pt,
-                start_radius=start_radius,
-                max_radius=max_radius,
-                step=step_size,
-                priority=["cycling", "shared", "footpath"],
-                base_dir=base_dir
-            )
 
         # Categorize the found width using the same thresholds as PathAssignmentTool
         if width is None:
@@ -1715,10 +1811,10 @@ class GIS:
                 "width_locked": found_width is not None
             })
 
-        # SPECIAL LOGIC: If on/near footpath, check if cycling path is within 2.5m
+        # SPECIAL LOGIC: If on/near footpath, check if cycling path is within 1.5m
         # If so, use the cycling path width instead
         if footpath_detected and found_layer == "footpath":
-            cycling_override_radius = 2.5  # meters
+            cycling_override_radius = 1.5  # meters
             cycling_gdf = layers.get("cycling")
 
             if cycling_gdf is not None and not cycling_gdf.empty:

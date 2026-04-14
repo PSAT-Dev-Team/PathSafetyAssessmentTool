@@ -12,6 +12,7 @@ from flask import (
 )
 import zipfile
 import io
+import time
 from pathlib import Path
 import urllib.parse
 import traceback
@@ -326,6 +327,38 @@ def df_to_records(df) -> list:
 
 # Process-level context (replaces Streamlit's session_state)
 _CTX = {"ready": False, "pm": None}
+
+
+def _autocode_debug_log_path() -> Path:
+    """Path to dedicated autocode debug log file."""
+    return Path(__file__).resolve().parents[3] / "autocode_debug.txt"
+
+
+def _append_autocode_debug_log(
+    *,
+    project_name: str,
+    mode: str,
+    image_count: int,
+    elapsed_seconds: float,
+    status: str = "ok",
+    details: str = "",
+) -> None:
+    """Append one debug line for an autocode run. Logging failures are ignored."""
+    try:
+        ts = datetime.datetime.now().isoformat(timespec="seconds")
+        line = (
+            f"{ts}\tmode={mode}\tproject={project_name}\timages={image_count}"
+            f"\telapsed_s={elapsed_seconds:.3f}\tstatus={status}"
+        )
+        if details:
+            line += f"\tdetails={details}"
+        log_path = _autocode_debug_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        # Logging should never affect endpoint behavior.
+        pass
 
 
 
@@ -1599,29 +1632,25 @@ def get_segment_treatments(project_name: str, segment_index: int):
         # Extract modified attributes from row
         modified_attributes = {}
         attrs_df = ver.attributes.df
-        original_row = dict(attrs_df.iloc[segment_index])
 
         for col in attrs_df.columns:
-            val_treatment = None
             if col in treatment_df.columns and col != "Treatments Applied":
-                val_treatment = row.get(col)
-                
-            # If value in treatment_df is not null and not empty string, use it
-            if pd.notna(val_treatment) and str(val_treatment).strip() != "":
+                val = row.get(col)
                 # Convert pandas types to Python native types for JSON serialization
-                try:
-                    if hasattr(val_treatment, 'item'):  # numpy/pandas scalar
-                        val_treatment = val_treatment.item()
-                    # Ensure we get a Python native type
-                    if isinstance(val_treatment, (int, float, bool)):
-                        modified_attributes[col] = val_treatment
-                    else:
-                        modified_attributes[col] = float(val_treatment)
-                except (ValueError, TypeError):
-                    modified_attributes[col] = original_row.get(col)
-            else:
-                # Fallback to the original baseline attributes if this column was untouched
-                modified_attributes[col] = original_row.get(col)
+                if pd.notna(val):
+                    # Handle numpy/pandas numeric types
+                    try:
+                        if hasattr(val, 'item'):  # numpy/pandas scalar
+                            val = val.item()
+                        # Ensure we get a Python native type
+                        if isinstance(val, (int, float, bool)):
+                            modified_attributes[col] = val
+                        else:
+                            modified_attributes[col] = float(val)
+                    except (ValueError, TypeError):
+                        modified_attributes[col] = None
+                else:
+                    modified_attributes[col] = None
 
         # Calculate after scores from modified attributes
         modified_df = pd.DataFrame([modified_attributes])
@@ -1685,16 +1714,10 @@ def apply_all_treatments(project_name: str):
         attrs_df = ver.attributes.df
         treatment_df = ver.treatment.df.copy()
 
-        # Ensure treatment dataframe has all attribute columns
-        for col in attrs_df.columns:
-            if col not in treatment_df.columns:
-                # Initialize column with None for all rows
-                treatment_df[col] = None  # Use None first for proper pandas handling
-
         # Ensure treatment dataframe has same number of rows as attributes dataframe
         if len(treatment_df) < len(attrs_df):
             # Expand treatment dataframe to match attributes size
-            new_rows = [treatment_df.iloc[0].copy() if len(treatment_df) > 0 else {}] * (len(attrs_df) - len(treatment_df))
+            new_rows = [{}] * (len(attrs_df) - len(treatment_df))
             treatment_df = pd.concat([treatment_df, pd.DataFrame(new_rows)], ignore_index=True)
 
         # Helper function to get applicable treatments for a segment
@@ -1717,6 +1740,12 @@ def apply_all_treatments(project_name: str):
                         applicable.append(treatment)
                         break  # Only need one trigger set to match
             return applicable
+
+        # Ensure treatment dataframe has all attribute columns
+        for col in attrs_df.columns:
+            if col not in treatment_df.columns:
+                # Initialize column with empty string for all rows
+                treatment_df[col] = None  # Use None first for proper pandas handling
 
         # Process each segment
         details = []
@@ -2540,6 +2569,7 @@ def update_project_metadata(project_name: str):
 @bp.post("/<project_name>/autocode/image")
 def autocode_image(project_name: str):
     print(f"[Autocode] >>> autocode_image called for project='{project_name}'", flush=True)
+    _started = time.perf_counter()
     try:
         _ensure_models_ready()
 
@@ -2572,17 +2602,43 @@ def autocode_image(project_name: str):
         resp: dict = {"updates": updates, "changed_fields": list(updates.keys())}
         if gradient_pct is not None:
             resp["gradient_pct"] = round(gradient_pct, 3)
+
+        _append_autocode_debug_log(
+            project_name=project_name,
+            mode="single_image",
+            image_count=1,
+            elapsed_seconds=time.perf_counter() - _started,
+            status="ok",
+            details=f"imageRef={image_ref}",
+        )
         return ok(resp)
 
     except ServiceUnavailable as e:
+        _append_autocode_debug_log(
+            project_name=project_name,
+            mode="single_image",
+            image_count=1,
+            elapsed_seconds=time.perf_counter() - _started,
+            status="error",
+            details=f"service_unavailable={e}",
+        )
         return fail(str(e), 503)
     except Exception as e:
         traceback.print_exc()
+        _append_autocode_debug_log(
+            project_name=project_name,
+            mode="single_image",
+            image_count=1,
+            elapsed_seconds=time.perf_counter() - _started,
+            status="error",
+            details=f"error={e}",
+        )
         return fail(f"autocode_image error: {e}", 500)
 
 
 @bp.post("/<project_name>/autocode/gis")
 def autocode_gis(project_name: str):
+    _started = time.perf_counter()
     try:
         payload = request.get_json(force=True, silent=True) or {}
         coords = payload.get("coords")  # [[lon, lat], ...]
@@ -2671,12 +2727,35 @@ def autocode_gis(project_name: str):
 
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
+        _append_autocode_debug_log(
+            project_name=project_name,
+            mode="single_gis",
+            image_count=1,
+            elapsed_seconds=time.perf_counter() - _started,
+            status="ok",
+        )
         return ok({"updates": updates, "changed_fields": list(updates.keys())})
 
     except ServiceUnavailable as e:
+        _append_autocode_debug_log(
+            project_name=project_name,
+            mode="single_gis",
+            image_count=1,
+            elapsed_seconds=time.perf_counter() - _started,
+            status="error",
+            details=f"service_unavailable={e}",
+        )
         return fail(str(e), 503)
     except Exception as e:
         traceback.print_exc()
+        _append_autocode_debug_log(
+            project_name=project_name,
+            mode="single_gis",
+            image_count=1,
+            elapsed_seconds=time.perf_counter() - _started,
+            status="error",
+            details=f"error={e}",
+        )
         return fail(f"autocode_gis error: {e}", 500)
 
 
@@ -3124,6 +3203,9 @@ def autocode_all(project_name: str):
           errors: [{ index, reason }],
         }
     """
+    _started = time.perf_counter()
+    _log_mode = "bulk"
+    _log_images = 0
     try:
         payload = request.get_json(force=True, silent=True) or {}
 
@@ -3131,6 +3213,12 @@ def autocode_all(project_name: str):
         run_all: bool = bool(payload.get("all"))
         indices = payload.get("indices")
         has_single_fields = ("imageRef" in payload) or ("coords" in payload) or ("index" in payload)
+        if run_all:
+            _log_mode = "bulk_all"
+        elif isinstance(indices, list):
+            _log_mode = "bulk_selected"
+        elif has_single_fields:
+            _log_mode = "bulk_single"
 
         # Always ensure models/layers first
         _ensure_models_ready()
@@ -3252,6 +3340,7 @@ def autocode_all(project_name: str):
             coords = payload.get("coords")
             if not image_ref or not coords:
                 return fail("imageRef and coords are required", 400)
+            _log_images = 1
 
             # Call CV + GIS autocoding
             merged, sources, err = _call_autocode_pair(image_ref, coords)
@@ -3277,6 +3366,15 @@ def autocode_all(project_name: str):
                 # Save immediately for single-image autocoding
                 ver.save_all()
 
+                _append_autocode_debug_log(
+                    project_name=project_name,
+                    mode=_log_mode,
+                    image_count=_log_images,
+                    elapsed_seconds=time.perf_counter() - _started,
+                    status="ok",
+                    details="save=true",
+                )
+
                 return ok({
                     "updates": merged,
                     "saved": True,
@@ -3285,6 +3383,14 @@ def autocode_all(project_name: str):
                 })
 
             # No index provided - return updates without saving
+            _append_autocode_debug_log(
+                project_name=project_name,
+                mode=_log_mode,
+                image_count=_log_images,
+                elapsed_seconds=time.perf_counter() - _started,
+                status="ok",
+                details="save=false",
+            )
             return ok({
                 "updates": merged,
                 "saved": False,
@@ -3307,6 +3413,7 @@ def autocode_all(project_name: str):
         else:
             # Sanitize provided indices (remove invalid values)
             indices = [i for i in indices if isinstance(i, int) and 0 <= i < len(ver.attributes.df)]
+        _log_images = len(indices)
 
         # Check if we should save to disk (default: True, but UI passes False for temp changes)
         save = bool(payload.get("save", True))
@@ -3405,6 +3512,15 @@ def autocode_all(project_name: str):
         # This enables temporary (in-memory) changes that aren't persisted until Save is clicked
         updated_attributes = df_to_records(ver.attributes.df)
 
+        _append_autocode_debug_log(
+            project_name=project_name,
+            mode=_log_mode,
+            image_count=_log_images,
+            elapsed_seconds=time.perf_counter() - _started,
+            status="ok",
+            details=f"ok={ok_count},fail={len(errors)},save={bool(save and ok_count > 0)}",
+        )
+
         return ok({
             "saved": bool(save and ok_count > 0),      # Whether changes were persisted to disk
             "total": len(indices),                      # Total rows attempted
@@ -3417,9 +3533,25 @@ def autocode_all(project_name: str):
         })
 
     except ServiceUnavailable as e:
+        _append_autocode_debug_log(
+            project_name=project_name,
+            mode=_log_mode,
+            image_count=_log_images,
+            elapsed_seconds=time.perf_counter() - _started,
+            status="error",
+            details=f"service_unavailable={e}",
+        )
         return fail(str(e), 503)
     except Exception as e:
         traceback.print_exc()
+        _append_autocode_debug_log(
+            project_name=project_name,
+            mode=_log_mode,
+            image_count=_log_images,
+            elapsed_seconds=time.perf_counter() - _started,
+            status="error",
+            details=f"error={e}",
+        )
         return fail(f"autocode_all error: {e}", 500)
 
 
