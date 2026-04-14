@@ -72,7 +72,7 @@ export default function Sidebar() {
       return;
     }
 
-    const projects = projectName.split(',').filter(Boolean);
+    const projects = projectName.split(',').map(s => s.trim()).filter(Boolean);
     const allDetails: any[] = [];
     let totalTreated = 0;
     let totalSkipped = 0;
@@ -126,7 +126,7 @@ export default function Sidebar() {
 
     try {
       setIsResetting(true);
-      const projects = projectName.split(',').filter(Boolean);
+      const projects = projectName.split(',').map(s => s.trim()).filter(Boolean);
       let totalReset = 0;
       let errors: string[] = [];
 
@@ -243,7 +243,7 @@ export default function Sidebar() {
     }
 
     try {
-      const projects = projectName.split(',').filter(Boolean);
+      const projects = projectName.split(',').map(s => s.trim()).filter(Boolean);
       let errors: string[] = [];
 
       for (const proj of projects) {

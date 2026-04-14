@@ -1,3 +1,4 @@
+import ThemeAwareTileLayer from "../../components/common/ThemeAwareTileLayer";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { listShapefiles, type ShapefileInfo } from "../../api";
 import { Spinner, Text, Badge, Box, Flex, HStack } from "@chakra-ui/react";
@@ -271,10 +272,7 @@ export default function GisLayersPage() {
             style={{ width: "100%", height: "100%" }}
             scrollWheelZoom
           >
-            <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-              attribution='&copy; OpenStreetMap contributors & CARTO'
-            />
+            <ThemeAwareTileLayer />
 
             {mapFeatures?.bounds && (
               <FitBounds bounds={mapFeatures.bounds} />
