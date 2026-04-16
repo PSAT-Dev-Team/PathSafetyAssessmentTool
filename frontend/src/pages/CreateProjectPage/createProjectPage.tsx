@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, useCallback, type KeyboardEvent } from "react";
 import {
   Box,
   Button,
@@ -11,10 +11,12 @@ import {
   Portal,
   Combobox,
   createListCollection,
+  Separator,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { listSourceFolders, createProjectFromFolder, fetchProjectList } from "../../api";
 import ImageUploadModal from "../sidebar/components/ImageUploadModal";
+import SelectRoadsMap, { type SelectedRoad } from "./SelectRoadsMap";
 import "../Projects/components/EditProjectModal.css";
 
 // Generate a consistent, bright, varied color for each unique tag (same as EditProjectModal)
@@ -51,6 +53,11 @@ export default function CreateProjectPage() {
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
+  const [selectedRoads, setSelectedRoads] = useState<SelectedRoad[]>([]);
+
+  const handleRoadSelectionChange = useCallback((roads: SelectedRoad[]) => {
+    setSelectedRoads(roads);
+  }, []);
 
   const loadFolders = async (ctrl?: AbortController) => {
     try {
@@ -123,7 +130,7 @@ export default function CreateProjectPage() {
 
 
   return (
-    <Box p={4} maxW="700px" mx="auto">
+    <Box p={4} maxW="900px" mx="auto">
       <Card.Root>
         <CardHeader>
           <Heading size="md">Create Project from Folder</Heading>
@@ -286,6 +293,19 @@ export default function CreateProjectPage() {
                 {err}
               </Text>
             )}
+          </Box>
+
+          <Separator />
+
+          {/* Select Roads map */}
+          <Box>
+            <Text fontSize="sm" fontWeight="medium" mb={2}>
+              Select Roads
+            </Text>
+            <Text color="gray.500" fontSize="xs" mb={3}>
+              Draw a polygon on the map to see which road image folders are needed for the selected area.
+            </Text>
+            <SelectRoadsMap onSelectionChange={handleRoadSelectionChange} />
           </Box>
 
           <Box display="flex" gap={3}>

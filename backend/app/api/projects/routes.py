@@ -2239,6 +2239,71 @@ def list_input_folders():
     items.sort()
     return ok({"items": items})
 
+
+@bp.post("/roads-in-polygon")
+def roads_in_polygon():
+    """
+    Given a polygon (list of [lat, lon] vertices in WGS84), return the road
+    folders whose reference GPS points fall inside the polygon.
+
+    Body: { "polygon": [[lat1, lon1], [lat2, lon2], ...] }
+    Response: { "roads": [ { "name": "AMK AVE 1", "points": 24, "exists": true }, ... ] }
+    """
+    import csv
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    data = request.get_json(silent=True) or {}
+    polygon_coords = data.get("polygon")
+    if not polygon_coords or len(polygon_coords) < 3:
+        return fail("polygon must have at least 3 vertices", 400)
+
+    # Build shapely polygon (lon, lat order for shapely)
+    try:
+        ring = [(pt[1], pt[0]) for pt in polygon_coords]  # swap to (lon, lat)
+        poly = ShapelyPolygon(ring)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+    except Exception as e:
+        return fail(f"Invalid polygon: {e}", 400)
+
+    # Load reference CSV
+    backend_root = Path(__file__).resolve().parents[3]
+    ref_csv_candidates = [
+        backend_root / "shapefiles" / "road_reference.csv",
+        backend_root / "app" / "shapefiles" / "road_reference.csv",
+    ]
+    ref_csv = next((candidate for candidate in ref_csv_candidates if candidate.exists()), None)
+    if ref_csv is None:
+        return fail("road_reference.csv not found. Run generate_road_reference.py first.", 500)
+
+    # Check which folders already exist locally
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    in_path: Path = pm.in_path
+
+    # Read CSV and test containment
+    road_counts: dict[str, int] = {}
+    with open(ref_csv, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            pt = Point(float(row["lon"]), float(row["lat"]))
+            if poly.contains(pt):
+                name = row["road_name"]
+                road_counts[name] = road_counts.get(name, 0) + 1
+
+    # Build response with existence check
+    roads = []
+    for name in sorted(road_counts):
+        exists = in_path.exists() and (in_path / name).is_dir()
+        roads.append({
+            "name": name,
+            "points": road_counts[name],
+            "exists": exists,
+        })
+
+    return ok({"roads": roads})
+
+
 @bp.post("/folders")
 def create_project_from_folder():
     """

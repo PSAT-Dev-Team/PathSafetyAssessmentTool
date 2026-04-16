@@ -98,6 +98,23 @@ export async function listSourceFolders(opts?: { signal?: AbortSignal }) {
   return (data?.items ?? []) as string[];
 }
 
+export interface RoadInPolygon {
+  name: string;
+  points: number;
+  exists: boolean;
+}
+
+export async function queryRoadsInPolygon(polygon: [number, number][]): Promise<RoadInPolygon[]> {
+  const res = await fetch("/api/projects/roads-in-polygon", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ polygon }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return (data?.roads ?? []) as RoadInPolygon[];
+}
+
 export async function createProjectFromFolder(project_name: string, folder_name: string, tags: string[] = []) {
   const res = await fetch("/api/projects/folders", {
     method: "POST",
