@@ -11,3 +11,6 @@ model/
 cyclerap_output*/
 # Python bytecode cache
 __pycache__/
+
+# Helper
+Gradient Calculation/
