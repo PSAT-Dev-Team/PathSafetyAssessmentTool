@@ -1,143 +1,20 @@
 import { useMemo, useEffect, useState, useCallback } from "react";
 import type { AttributeRow } from "../../../api";
+import { GROUP_ORDER, GROUP_RULES, KEY_ALIASES } from "../../../constants/autocodeAttributes";
 import "./AutocodeValidation.css";
 
-function getALGrade(pct: number): string {
-  if (pct >= 90) return 'AL1';
-  if (pct >= 85) return 'AL2';
-  if (pct >= 80) return 'AL3';
-  if (pct >= 75) return 'AL4';
-  if (pct >= 65) return 'AL5';
-  if (pct >= 45) return 'AL6';
-  if (pct >= 20) return 'AL7';
-  return 'AL8';
+function getValidationColor(pct: number): string {
+  if (pct >= 90) return '#87C424';
+  if (pct >= 85) return '#FFCC1A';
+  if (pct >= 80) return '#FF5B1A';
+  if (pct >= 75) return '#c11e38';
+  return '#CD1AFF';
 }
 
-/** ====== Group ordering (matches AttributesPanel) ====== */
-const GROUP_ORDER = [
-  "Facility configuration",
-  "Facility clear width",
-  "Facility surface conditions",
-  "Intersection",
-  "Flow & Speed",
-] as const;
-
-/** ====== Display fields under each group ====== */
-const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
-  "Facility configuration": [
-    "Area type",
-    "Facility type",
-    "Adjacent sidewalk 0-1m",
-    "Adjacent sidewalk 1-3m",
-    "Adjacent road lane 0-1m",
-    "Adjacent road lane 1-3m",
-    "Adjacent vehicle parking 0-1m",
-    "Adjacent vehicle parking 1-3m",
-    "Adjacent object or level change 0-1m",
-    "Adjacent object or level change 1-3m",
-  ],
-  "Flow & Speed": [
-    "Flow direction",
-    "Peak pedestrian flow along or across",
-    "Peak bicycle/LV traffic flow",
-    "Obs proportion of cargo bikes",
-    "Heavy vehicle flow",
-    "Bicycle/LV speed average",
-    "Bicycle/LV speed differential",
-    "Road AADT",
-    "Road Operating speed (mean)",
-    "Road Operating speed (unit)",
-    "Road speed limit",
-  ],
-  "Facility clear width": [
-    "Facility Access",
-    "Light segregation",
-    "Fixed obstacle on facility",
-    "Non-fixed obstacle on facility",
-    "Facility width",
-    "Width restrictions",
-    "Adjacent severe hazard 0-1m",
-    "Adjacent severe hazard 1-3m",
-    "Line of Sight",
-  ],
-  "Facility surface conditions": [
-    "Delineation",
-    "Major surface road deformation",
-    "Loose or slippery surface",
-    "Grade",
-    "Curvature",
-    "Tram or train rails",
-    "Street lighting",
-  ],
-  "Intersection": [
-    "Intersection approach",
-    "Intersection or road crossing",
-    "Crossing facility",
-    "Property access",
-    "Pedestrian crossing",
-    "Intersecting bicycle facility",
-    "Number of lanes – adjacent road",
-    "Number of lanes – intersecting road",
-  ],
-};
-
-/** ====== Aliases: display name -> real key in row ====== */
-const KEY_ALIASES: Record<string, string> = {
-  // Facility configuration
-  "Area type": "Area type",
-  "Facility type": "Facility Type",
-  "Adjacent sidewalk 0-1m": "Adjacent Sidewalk 0-1m",
-  "Adjacent sidewalk 1-3m": "Adjacent Sidewalk 1-3m",
-  "Adjacent road lane 0-1m": "Adjacent Road Lane 0-1m",
-  "Adjacent road lane 1-3m": "Adjacent Road Lane 1-3m",
-  "Adjacent vehicle parking 0-1m": "Adjacent Vehicle Parking 0-1m",
-  "Adjacent vehicle parking 1-3m": "Adjacent Vehicle Parking 1-3m",
-  "Adjacent object or level change 0-1m": "Adjacent object or level change 0-1m",
-  "Adjacent object or level change 1-3m": "Adjacent object or level change 1-3m",
-
-  // Flow & Speed
-  "Flow direction": "Flow Direction",
-  "Peak pedestrian flow along or across": "Peak pedestrian flow along or across facility",
-  "Peak bicycle/LV traffic flow": "Peak bicycle/LV traffic flow",
-  "Obs proportion of cargo bikes": "Observed proportion of cargo bikes and mopeds",
-  "Heavy vehicle flow": "Heavy vehicle flow",
-  "Bicycle/LV speed average": "Bicycle/LV speed – average",
-  "Bicycle/LV speed differential": "Bicycle/LV speed differential",
-  "Road AADT": "Road AADT",
-  "Road Operating speed (mean)": "Road operating speed (mean)",
-  "Road Operating speed (unit)": "Road operating speed (unit)",
-  "Road speed limit": "Road speed limit",
-
-  // Facility clear width
-  "Facility Access": "Facility access",
-  "Line of Sight": "Line of Sight",
-  "Fixed obstacle on facility": "Fixed Obstacle on Facility",
-  "Non-fixed obstacle on facility": "Non-Fixed Obstacle on Facility",
-  "Facility width": "Facility Width per Direction",
-  "Width restrictions": "Width Restriction",
-  "Light segregation": "Light Segregation",
-  "Adjacent severe hazard 0-1m": "Adjacent Severe Hazard 0-1m",
-  "Adjacent severe hazard 1-3m": "Adjacent Severe Hazard 1-3m",
-
-  // Facility surface conditions
-  "Delineation": "Delineation",
-  "Major surface road deformation": "Major Surface Deformation or Drain Opening",
-  "Loose or slippery surface": "Loose or slippery surface",
-  "Grade": "Grade",
-  "Curvature": "Curvature",
-  "Tram or train rails": "Tram or Train Rails",
-  "Street lighting": "Street Lighting",
-
-  // Intersection
-  "Intersection approach": "Intersection Approach",
-  "Intersection or road crossing": "Intersection or Road Crossing",
-  "Crossing facility": "Crossing Facility",
-  "Property access": "Property Access",
-  "Pedestrian crossing": "Pedestrian Crossing",
-  "Intersecting bicycle facility": "Intersecting Bicycle Facility",
-  "Number of lanes – adjacent road": "Number of lanes – adjacent road",
-  "Number of lanes – intersecting road": "Number of lanes – intersecting road",
-};
+function getValidationTextColor(pct: number): string {
+  if (pct >= 85 && pct < 90) return '#000';
+  return '#fff';
+}
 
 type ValidationStats = {
   displayName: string;
@@ -393,20 +270,16 @@ export default function AutocodeValidation({
           <div className="autocode-tab-content">
             <div className="autocode-grid">
               {currentStats.map((stat) => {
-                const statusClass =
-                  stat.correctnessPercentage >= 80
-                    ? 'excellent'
-                    : stat.correctnessPercentage >= 45
-                      ? 'good'
-                      : 'needs-review';
+                const badgeColor = getValidationColor(stat.correctnessPercentage);
+                const textColor = getValidationTextColor(stat.correctnessPercentage);
 
                 return (
                   <div key={stat.realKey} className="autocode-card">
                     <div className="autocode-card-title">{stat.displayName}</div>
 
                     <div className="autocode-card-stats">
-                      <div className={`autocode-badge ${statusClass}`}>
-                        {getALGrade(stat.correctnessPercentage)}
+                      <div className="autocode-badge" style={{ backgroundColor: badgeColor, color: textColor }}>
+                        {Math.round(stat.correctnessPercentage)}%
                       </div>
                       <div className="autocode-changed">
                         {stat.changedCount}/{stat.totalCount} changed
@@ -415,8 +288,8 @@ export default function AutocodeValidation({
 
                     <div className="autocode-progress-bar">
                       <div
-                        className={`autocode-progress-fill ${statusClass}`}
-                        style={{ width: `${stat.correctnessPercentage}%` }}
+                        className="autocode-progress-fill"
+                        style={{ width: `${stat.correctnessPercentage}%`, backgroundColor: badgeColor }}
                       />
                     </div>
                   </div>
@@ -426,18 +299,19 @@ export default function AutocodeValidation({
 
             {/* AL Grade Legend */}
             <div className="al-legend">
+              <div className="al-legend-title">Automation Retention Rate:</div>
               {[
-                { grade: 'AL1', range: '≥90%' },
-                { grade: 'AL2', range: '85–89%' },
-                { grade: 'AL3', range: '80–84%' },
-                { grade: 'AL4', range: '75–79%' },
-                { grade: 'AL5', range: '65–74%' },
-                { grade: 'AL6', range: '45–64%' },
-                { grade: 'AL7', range: '20–44%' },
-                { grade: 'AL8', range: '<20%' },
-              ].map(({ grade, range }) => (
-                <div key={grade} className="al-legend-item">
-                  <span className="al-legend-grade">{grade}</span>
+                { range: '≥90%', pct: 95 },
+                { range: '85–89%', pct: 87 },
+                { range: '80–84%', pct: 82 },
+                { range: '75–79%', pct: 77 },
+                { range: '45–64%', pct: 55 },
+              ].map(({ range, pct }) => (
+                <div key={range} className="al-legend-item">
+                  <div 
+                    className="al-legend-color" 
+                    style={{ backgroundColor: getValidationColor(pct) }}
+                  />
                   <span className="al-legend-range">{range}</span>
                 </div>
               ))}

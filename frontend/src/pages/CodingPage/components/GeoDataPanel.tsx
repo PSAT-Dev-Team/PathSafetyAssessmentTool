@@ -324,14 +324,15 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [showBusLane, setShowBusLane] = useState(cachedLayers.showBusLane ?? false);     // Yellow
   const [showParkingLot, setShowParkingLot] = useState(cachedLayers.showParkingLot ?? false); // Gold
   const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Deep Pink
+  const [showBicycleCrossing, setShowBicycleCrossing] = useState(cachedLayers.showBicycleCrossing ?? false); // Orange
 
   // Update localStorage whenever these toggles change
   useEffect(() => {
     if (!projectName) return;
     localStorage.setItem(`gisLayerToggles_${projectName}`, JSON.stringify({
-      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine
+      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing
     }));
-  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, projectName]);
+  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, projectName]);
 
 // Sub-component to pan map to current selection.
 // When panKey changes (project tab clicked), MapAutoCenter suppresses its setView
@@ -412,6 +413,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
     shared: GISLayerFeature[];
     roadcrossing: GISLayerFeature[];
     mrt_exit: GISLayerFeature[];
+    bicycle_crossing: GISLayerFeature[];
     bus_stop: GISLayerFeature[];
     bus_lane: GISLayerFeature[];
     parking_lot: GISLayerFeature[];
@@ -545,7 +547,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
 
     if (!decodedName || activeGisLat === null || activeGisLon === null) return;
 
-    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine;
+    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing;
     if (!anyLayerEnabled) {
       setGisLayers(null);
       return;
@@ -563,6 +565,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
         if (showFootpath) layers.push('footpath');
         if (showRoadcrossing) layers.push('roadcrossing');
         if (showMrtExit) layers.push('mrt_exit');
+        if (showBicycleCrossing) layers.push('bicycle_crossing');
         if (showBusStop) layers.push('bus_stop');
         if (showBusLane) layers.push('bus_lane');
         if (showParkingLot) layers.push('parking_lot');
@@ -594,7 +597,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
     })();
 
     return () => { controller.abort(); };
-  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
+  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, hasExternalGeoFeatures]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
@@ -603,6 +606,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
     shared: "#A855F7",      // Purple
     roadcrossing: "#10B981", // Emerald/Green
     mrt_exit: "#06B6D4",    // Cyan
+    bicycle_crossing: "#F97316", // Orange
     bus_stop: "#8B5CF6",    // Purple
     bus_lane: "#EAB308",    // Yellow
     parking_lot: "#D97706", // Amber/Gold
@@ -1026,6 +1030,18 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
             </Flex>
 
             <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showBicycleCrossing ? "orange.600" : "gray.500"}>
+                Bicycle Crossing
+              </Text>
+              <Switch
+                colorPalette="orange"
+                size="sm"
+                checked={showBicycleCrossing}
+                onCheckedChange={(e) => setShowBicycleCrossing(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
               <Text fontSize="sm" fontWeight="medium" color={showMrtExit ? "cyan.600" : "gray.500"}>
                 MRT Exit
               </Text>
@@ -1114,13 +1130,13 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
               {/* Auto-zoom to current point when GIS layers active */}
               <ZoomToGIS
                 center={activeQueryPoint}
-                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing}
               />
 
               {/* 自动跟随当前选中点 */}
               <MapAutoCenter
                 center={current?.latlng ?? null}
-                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing}
                 panKey={panKey}
               />
 
@@ -1352,6 +1368,25 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                       opacity: 0.8
                     }}
                   />
+                ))
+              )}
+
+              {/* Bicycle Crossing - Point layer rendered as CircleMarkers */}
+              {gisLayers && showBicycleCrossing && gisLayers.bicycle_crossing && (
+                gisLayers.bicycle_crossing.map((feature, i) => (
+                  <CircleMarker
+                    key={`bicycle_crossing-${i}`}
+                    center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
+                    radius={6}
+                    pathOptions={{
+                      color: layerColors.bicycle_crossing,
+                      weight: 2,
+                      opacity: 0.9,
+                      fillOpacity: 0.7
+                    }}
+                  >
+                    <Tooltip>Bicycle Crossing</Tooltip>
+                  </CircleMarker>
                 ))
               )}
 

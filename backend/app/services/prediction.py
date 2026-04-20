@@ -45,7 +45,7 @@ class CycleRAP_Coding_Helper:
         _ul_tasks.BaseModel.fuse = _safe_fuse
 
         models_to_load = {
-            "path_segmentation_model": "path_segmentation.pt",
+            "path_segmentation_model": "path_segmentation_v2.pt",
             "obstacle_detector_model": "obstacle_detector_ema.pt",
         }
 
@@ -474,7 +474,7 @@ class CycleRAP_Coding_Helper:
     # Main autocode entry point
     # ------------------------------------------------------------------
     @classmethod
-    def autocode(cls, image_path: Path) -> dict:
+    def autocode(cls, image_path: Path, skip_obstacles: bool = False) -> dict:
         if not cls.path_segmentation_model:
             raise RuntimeError("Path segmentation model is not initialised.")
 
@@ -490,16 +490,20 @@ class CycleRAP_Coding_Helper:
         # 2. Build binary masks
         masks = cls._build_masks(result, cls.class_sets, img_h, img_w, CONF_THRESH)
 
-        # 3. Detect obstacles
-        if cls.obstacle_detector_model is not None:
+        # 3. Detect obstacles (skip when no obstacle-related fields are requested)
+        if skip_obstacles:
+            fixed_obs, non_fixed_obs, detections = "Not Present", "Not Present", []
+            width_restriction, blocking_fixed, blocking_non_fixed = "Not Present", None, None
+        elif cls.obstacle_detector_model is not None:
             fixed_obs, non_fixed_obs, detections = cls._detect_obstacles(
                 image_path, cls.obstacle_detector_model, CONF_THRESH
             )
+            # 4. Compute width restriction
+            width_restriction, blocking_fixed, blocking_non_fixed = cls._compute_width_restriction(masks["pathway"], detections)
         else:
             fixed_obs, non_fixed_obs, detections = "Not Present", "Not Present", []
-
-        # 4. Compute width restriction
-        width_restriction, blocking_fixed, blocking_non_fixed = cls._compute_width_restriction(masks["pathway"], detections)
+            # 4. Compute width restriction (empty detections → Not Present)
+            width_restriction, blocking_fixed, blocking_non_fixed = cls._compute_width_restriction(masks["pathway"], detections)
 
         # 5. Collect all detected obstacle class names for FO Type / NFO Type
         all_fixed_classes = sorted(set(d["class_name"] for d in detections if d["group"] == "fixed"))

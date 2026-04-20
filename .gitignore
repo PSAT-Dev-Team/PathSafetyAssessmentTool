@@ -11,3 +11,7 @@ model/
 cyclerap_output*/
 # Python bytecode cache
 __pycache__/
+# Added by code-review-graph
+.code-review-graph/
+# Obsidian vault generated from graph.db (regenerable)
+obsidian-vault/

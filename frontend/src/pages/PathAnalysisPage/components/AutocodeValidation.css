@@ -174,35 +174,15 @@
   flex-wrap: wrap;
 }
 
-/* Badge */
+/* Badge base style - used with inline background-color/color */
 .autocode-badge {
   display: inline-block;
   padding: 4px 10px;
   border-radius: 4px;
   font-size: 11px;
   font-weight: 700;
-  color: white;
   text-align: center;
   min-width: 50px;
-}
-
-.autocode-badge.excellent {
-  background-color: #4caf50;
-}
-
-.autocode-badge.good {
-  background-color: #ffc107;
-  color: #333;
-}
-
-@media (prefers-color-scheme: dark) {
-  .autocode-badge.good {
-    color: #000;
-  }
-}
-
-.autocode-badge.needs-review {
-  background-color: #f44336;
 }
 
 /* Changed Count */
@@ -239,18 +219,6 @@
   transition: width 0.3s ease;
 }
 
-.autocode-progress-fill.excellent {
-  background-color: #4caf50;
-}
-
-.autocode-progress-fill.good {
-  background-color: #ffc107;
-}
-
-.autocode-progress-fill.needs-review {
-  background-color: #f44336;
-}
-
 /* Mobile Responsive */
 @media (max-width: 768px) {
   .autocode-panel-content {
@@ -275,36 +243,57 @@
   }
 }
 
-/* AL Grade Legend */
+/* Agreement Level Legend */
 .al-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
   font-size: 11px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .al-legend {
+    border-top-color: #3e3e3e;
+  }
+}
+
+.al-legend-title {
+  font-weight: 600;
+  color: #666;
+  margin-right: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .al-legend-title {
+    color: #aaa;
+  }
 }
 
 .al-legend-item {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 4px 8px;
-  background-color: #f5f5f5;
-  border-radius: 4px;
-  min-width: 52px;
+  gap: 6px;
+  padding: 2px 4px;
 }
 
-@media (prefers-color-scheme: dark) {
-  .al-legend-item {
-    background-color: #2a2a2a;
-  }
-}
-
-.al-legend-grade {
-  font-weight: 700;
+.al-legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
 }
 
 .al-legend-range {
-  font-size: 10px;
-  color: #888;
+  font-size: 11px;
+  font-weight: 500;
+  color: #444;
+}
+
+@media (prefers-color-scheme: dark) {
+  .al-legend-range {
+    color: #ccc;
+  }
 }

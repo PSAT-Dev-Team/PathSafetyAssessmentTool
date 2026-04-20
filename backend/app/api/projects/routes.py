@@ -9,6 +9,8 @@ from flask import (
     send_file,
     make_response,
     current_app,
+    Response,
+    stream_with_context,
 )
 import zipfile
 import io
@@ -383,13 +385,13 @@ def _ensure_models_ready():
 
                 model_dir = None
                 for d in candidates:
-                    if (d / "path_segmentation.pt").exists():
+                    if (d / "path_segmentation_v2.pt").exists():
                         model_dir = d.resolve()
                         break
 
                 if model_dir is None:
                     tried = "\n".join(str(p) for p in candidates)
-                    raise RuntimeError(f"Cannot find model_dir (missing path_segmentation.pt). Tried:\n{tried}")
+                    raise RuntimeError(f"Cannot find model_dir (missing path_segmentation_v2.pt). Tried:\n{tried}")
 
                 # YOLO models load
                 print(f"[Autocode] Loading CV models from {model_dir} — this may take several minutes on CPU...", flush=True)
@@ -2554,11 +2556,12 @@ def autocode_image(project_name: str):
         if not img_path.exists():
             return fail(f"image not found: {img_path.name}", 404)
 
-        print(f"[Autocode] CV inference: {image_ref}", flush=True)
+        skip_obstacles = bool(payload.get("skipObstacles", False))
+        print(f"[Autocode] CV inference: {image_ref} (skip_obstacles={skip_obstacles})", flush=True)
         global _INFERENCE_DEPTH
         _INFERENCE_DEPTH += 1
         try:
-            updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path) or {}
+            updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path, skip_obstacles=skip_obstacles) or {}
         finally:
             _INFERENCE_DEPTH -= 1
         updates = {k: v for k, v in updates.items() if v is not None}
@@ -2595,79 +2598,104 @@ def autocode_gis(project_name: str):
         from shapely.geometry import Point
         pt = Point(start_lon, start_lat)
 
+        # Optional field filter: when provided (bulk per-attribute mode), skip GIS queries
+        # whose output field is not in the set. None means run everything (full autocode,
+        # single-segment manual button from the frontend).
+        fields_filter = payload.get("fields")
+        if fields_filter and not isinstance(fields_filter, list):
+            fields_filter = None
+        _needs = lambda *flds: not fields_filter or any(f in fields_filter for f in flds)
+
         _gis = _get_gis()
 
         updates: dict[str, int | float] = {}
 
         # Rules
-        if _gis.is_mrt(pt):
+        if _needs("Peak pedestrian flow along or across facility") and _gis.is_mrt(pt):
             updates["Peak pedestrian flow along or across facility"] = 3
-        if _gis.is_bus_lane(pt):
+        if _needs("Heavy vehicle flow") and _gis.is_bus_lane(pt):
             updates["Heavy vehicle flow"] = 2
-        if _gis.is_parking(pt):
+        if _needs("Adjacent Vehicle Parking 0-1m") and _gis.is_parking(pt):
             updates["Adjacent Vehicle Parking 0-1m"] = 1
-        if _gis.is_bus_stop(pt):
+        if _needs("Peak pedestrian flow along or across facility") and _gis.is_bus_stop(pt):
             # overrides 3 → 2
             updates["Peak pedestrian flow along or across facility"] = 2
 
         # Pedestrian Crossing Detection
         # Set to Present (1) if within 5m of bus stop OR road crossing
-        if _gis.is_bus_stop(pt, dist=5) or _gis.is_road_crossing(pt, dist=5):
+        if _needs("Pedestrian Crossing") and (
+            _gis.is_bus_stop(pt, dist=5) or _gis.is_road_crossing(pt, dist=5)
+        ):
             updates["Pedestrian Crossing"] = 1  # 1 = Present
 
-        area = _gis.get_area_type(pt)
-        updates["Area type"] = int(area)
+        # Bicycle Crossing Facility Detection
+        # Set Crossing Facility = Present (1) and Crossing Type = "Bicycle Crossing"
+        # if within 2m of a known bicycle crossing point (AMG_BC2025_shp)
+        if _needs("Crossing Facility", "Crossing Type") and _gis.is_bicycle_crossing(pt, dist=20):
+            updates["Crossing Facility"] = 1          # 1 = Present
+            updates["Crossing Type"] = "Bicycle Crossing"
 
-        updates["Road AADT"] = 6000
+        if _needs("Area type"):
+            area = _gis.get_area_type(pt)
+            updates["Area type"] = int(area)
 
-        res = _gis.get_peak_pedestrian_flow(pt, dist=10)
-        bpks = (res or {}).get("before_peaks")
-        spks = (res or {}).get("sensor_peaks")
+        if _needs("Road AADT"):
+            updates["Road AADT"] = 6000
 
-        def apply_peak(peaks):
-            if not peaks:
-                return
-            if int(peaks.get("MICROMOBILITY", 0)) > 50:
-                updates["Peak bicycle/LV traffic flow"] = 2
-            if int(peaks.get("OTHER", 0)) > 50:
-                updates["Peak pedestrian flow along or across facility"] = 3
+        if _needs("Peak bicycle/LV traffic flow", "Peak pedestrian flow along or across facility"):
+            res = _gis.get_peak_pedestrian_flow(pt, dist=10)
+            bpks = (res or {}).get("before_peaks")
+            spks = (res or {}).get("sensor_peaks")
 
-        if spks:
-            apply_peak(spks)
-        elif bpks:
-            apply_peak(bpks)
+            def apply_peak(peaks):
+                if not peaks:
+                    return
+                if int(peaks.get("MICROMOBILITY", 0)) > 50:
+                    updates["Peak bicycle/LV traffic flow"] = 2
+                if int(peaks.get("OTHER", 0)) > 50:
+                    updates["Peak pedestrian flow along or across facility"] = 3
+
+            if spks:
+                apply_peak(spks)
+            elif bpks:
+                apply_peak(bpks)
 
         # Added for Road Operating Speed (mean)
         # Calculate road operating speed based on nearest road link
-        road_speed = _gis.get_road_operating_speed(pt, buffer_dist=20, max_dist=30, default_speed=30.0)
-        updates["Road operating speed (mean)"] = road_speed
+        if _needs("Road operating speed (mean)"):
+            road_speed = _gis.get_road_operating_speed(pt, buffer_dist=20, max_dist=30, default_speed=30.0)
+            updates["Road operating speed (mean)"] = road_speed
 
         # Added for Road Speed Limit
         # Calculate road speed limit based on nearest speed limit segment
-        speed_limit = _gis.get_road_speed_limit(pt, buffer_dist=20, max_dist=30, default_limit=10)
-        updates["Road speed limit"] = speed_limit
+        if _needs("Road speed limit"):
+            speed_limit = _gis.get_road_speed_limit(pt, buffer_dist=20, max_dist=30, default_limit=10)
+            updates["Road speed limit"] = speed_limit
 
         # Added for Heavy Vehicle Flow
         # Calculate heavy vehicle flow based on proximity to bus lanes
-        heavy_vehicle_flow = _gis.get_heavy_vehicle_flow(pt, buffer_dist=15, max_dist=15, default_value=1)
-        updates["Heavy vehicle flow"] = heavy_vehicle_flow
+        if _needs("Heavy vehicle flow"):
+            heavy_vehicle_flow = _gis.get_heavy_vehicle_flow(pt, buffer_dist=15, max_dist=15, default_value=1)
+            updates["Heavy vehicle flow"] = heavy_vehicle_flow
 
         # Added for Curvature
         # Calculate curvature using actual path centerline shapefiles
         # Uses two-stage process from original PathAssignmentTool:
         #   Stage 1: Expanding ring (1m→5m) to find nearest path
         #   Stage 2: Fixed 5m window to calculate curvature from that path
-        curvature, curvature_subcat = _gis.get_curvature(pt, sharp_turn_threshold=10.0, default_value=2)
-        updates["Curvature"] = curvature
-        if curvature_subcat is not None:
-            updates["Curvature Sub-category"] = curvature_subcat
+        if _needs("Curvature", "Curvature Sub-category"):
+            curvature, curvature_subcat = _gis.get_curvature(pt, sharp_turn_threshold=10.0, default_value=2)
+            updates["Curvature"] = curvature
+            if curvature_subcat is not None:
+                updates["Curvature Sub-category"] = curvature_subcat
 
         # Added for Facility Width per Direction
         # Calculate facility width using expanding ring search on path centerline shapefiles
-        facility_width, width_subcat = _gis.get_facility_width(pt, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2)
-        updates["Facility Width per Direction"] = facility_width
-        if width_subcat is not None:
-            updates["Facility Width Sub-category"] = width_subcat
+        if _needs("Facility Width per Direction", "Facility Width Sub-category"):
+            facility_width, width_subcat = _gis.get_facility_width(pt, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2)
+            updates["Facility Width per Direction"] = facility_width
+            if width_subcat is not None:
+                updates["Facility Width Sub-category"] = width_subcat
 
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
@@ -2915,7 +2943,8 @@ def get_gis_layers(project_name: str):
             "bus_stop": ["bus_stop", "bus_shelter"], # Try both
             "bus_lane": "bus_lane",
             "parking_lot": "parking",
-            "kerb_line": "kerb_line"
+            "kerb_line": "kerb_line",
+            "bicycle_crossing": "bicycle_crossing"
         }
 
         result_layers = {}
@@ -3126,6 +3155,7 @@ def autocode_all(project_name: str):
     """
     try:
         payload = request.get_json(force=True, silent=True) or {}
+        want_stream: bool = bool(payload.get("stream", False))
 
         # ---------- detect mode ----------
         run_all: bool = bool(payload.get("all"))
@@ -3193,19 +3223,45 @@ def autocode_all(project_name: str):
                     return [list(c) for c in list(geom.coords)]
             return None
 
-        def _call_autocode_pair(image_ref: str, coords):
+        # Fields produced EXCLUSIVELY by GIS (autocode_gis). CV never produces these.
+        # Safe to skip CV inference when ALL requested fields are in this set.
+        # NOTE: "Peak pedestrian flow along or across facility" is intentionally EXCLUDED —
+        # GIS conditionally overrides CV for that field; if GIS doesn't fire (not near MRT/bus
+        # stop), the CV-computed default is the correct final value, so CV must still run.
+        _GIS_ONLY_FIELDS: frozenset = frozenset({
+            "Area type",
+            "Road AADT",
+            "Road operating speed (mean)",
+            "Road speed limit",
+            "Curvature",
+            "Curvature Sub-category",
+            "Facility Width per Direction",
+            "Facility Width Sub-category",
+            "Heavy vehicle flow",
+            "Adjacent Vehicle Parking 0-1m",
+            "Pedestrian Crossing",
+            "Peak bicycle/LV traffic flow",
+            "Grade",  # from LAZ gradient lookup, not from CV
+        })
+
+        def _call_autocode_pair(image_ref: str, coords, skip_cv: bool = False, skip_gis: bool = False, skip_obstacles: bool = False, fields_filter: "list | None" = None):
             """
-            Call both CV and GIS autocoding for a single image and merge results.
+            Call CV and/or GIS autocoding for a single image and merge results.
 
             This function orchestrates the complete auto-coding process:
-            1. Calls autocode_image (CV model) to analyze the photo
-            2. Calls autocode_gis (GIS rules) to analyze the location
+            1. Calls autocode_image (CV model) to analyze the photo   [skippable]
+            2. Calls autocode_gis (GIS rules) to analyze the location [skippable]
             3. Merges updates (GIS overrides CV if both set the same field)
             4. Tracks the source (CV or GIS) for each updated field
 
             Args:
                 image_ref: Image filename (e.g., "ProjectName_IMG_001.jpg")
                 coords: LineString coordinates as [[lon, lat], ...] for GIS analysis
+                skip_cv: If True, skip CV inference entirely (safe when all requested
+                         fields are in _GIS_ONLY_FIELDS — CV never produces them)
+                skip_gis: If True, skip GIS queries entirely
+                skip_obstacles: If True, skip the obstacle detector model (second YOLO
+                         pass) — safe when no obstacle-related fields are requested
 
             Returns:
                 tuple: (merged_updates, sources, error)
@@ -3213,27 +3269,34 @@ def autocode_all(project_name: str):
                     - sources: dict of {field_name: "CV" or "GIS"}
                     - error: None if success, error message string if failed
             """
-            # Call CV auto-coding endpoint
-            with current_app.test_request_context(method="POST", json={"imageRef": image_ref}):
-                img_resp, img_code = autocode_image(project_name)
-            if img_code >= 400:
-                return None, None, img_resp.get_json().get("error", f"/image {img_code}")
+            img_updates: dict = {}
+            if not skip_cv:
+                # Call CV auto-coding endpoint
+                with current_app.test_request_context(method="POST", json={"imageRef": image_ref, "skipObstacles": skip_obstacles}):
+                    img_resp, img_code = autocode_image(project_name)
+                if img_code >= 400:
+                    return None, None, img_resp.get_json().get("error", f"/image {img_code}")
+                img_updates = (img_resp.get_json() or {}).get("updates", {})
 
-            # Call GIS auto-coding endpoint
-            with current_app.test_request_context(method="POST", json={"coords": coords}):
-                gis_resp, gis_code = autocode_gis(project_name)
-            if gis_code >= 400:
-                return None, None, gis_resp.get_json().get("error", f"/gis {gis_code}")
-
-            img_data = img_resp.get_json() or {}
-            gis_data = gis_resp.get_json() or {}
-
-            img_updates = img_data.get("updates", {})
-            gis_updates = gis_data.get("updates", {})
+            gis_updates: dict = {}
+            if not skip_gis:
+                # Call GIS auto-coding endpoint
+                with current_app.test_request_context(method="POST", json={"coords": coords, "fields": fields_filter}):
+                    gis_resp, gis_code = autocode_gis(project_name)
+                if gis_code >= 400:
+                    return None, None, gis_resp.get_json().get("error", f"/gis {gis_code}")
+                gis_updates = (gis_resp.get_json() or {}).get("updates", {})
 
             # Merge updates: GIS overrides CV if both set the same field
             # Example: If CV sets "Area type"=2 and GIS sets "Area type"=1, final value is 1
             merged = {**img_updates, **gis_updates}
+
+            # Special case: "Crossing Type" — append GIS value to CV value instead of override
+            # e.g. CV="Traffic Crossing" + GIS="Bicycle Crossing" → "Traffic Crossing, Bicycle Crossing"
+            if "Crossing Type" in img_updates and "Crossing Type" in gis_updates:
+                cv_type = img_updates["Crossing Type"]   # may be None
+                gis_type = gis_updates["Crossing Type"]
+                merged["Crossing Type"] = f"{cv_type}, {gis_type}" if cv_type else gis_type
 
             # Track which fields came from CV vs GIS for UI highlighting badges
             sources = {}
@@ -3299,122 +3362,172 @@ def autocode_all(project_name: str):
         # Payload options:
         #   - { all: true, save?: false }              -> Process all rows
         #   - { indices: [0,2,5], save?: false }       -> Process specific rows
+        #   - { ..., stream: true }                    -> SSE streaming (yields progress per row)
 
         # Determine which rows to process
         if not indices:
-            # Process all rows in the project
             indices = list(range(len(ver.attributes.df)))
         else:
-            # Sanitize provided indices (remove invalid values)
             indices = [i for i in indices if isinstance(i, int) and 0 <= i < len(ver.attributes.df)]
 
         # Check if we should save to disk (default: True, but UI passes False for temp changes)
         save = bool(payload.get("save", True))
 
-        # Tracking variables
-        errors = []           # List of {index, reason} for failed rows
-        ok_count = 0          # Number of successfully processed rows
-        changed_by_row = {}   # {row_index: [field_names]} - which fields changed per row
-        sources_by_row = {}   # {row_index: {field_name: "CV"|"GIS"}} - source per field per row
+        # Optional field filter: only apply updates for these specific field names
+        fields_filter = payload.get("fields")  # list[str] | None
+        if fields_filter and not isinstance(fields_filter, list):
+            fields_filter = None  # Ignore malformed value
 
-        # Pre-compute images directory path for performance
-        images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
+        # Determine whether CV inference can be skipped for this batch.
+        # CV is safe to skip only when ALL requested fields are exclusively
+        # produced by GIS (never by CV). This avoids running expensive YOLO
+        # inference when the user selects e.g. only "Area type" or "Curvature".
+        skip_cv = bool(fields_filter and all(f in _GIS_ONLY_FIELDS for f in fields_filter))
+        if skip_cv:
+            print(f"[Autocode] Skipping CV inference — all requested fields are GIS-only: {fields_filter}", flush=True)
 
-        # Process each row
-        # Hold _INFERENCE_DEPTH for the entire bulk loop so PATCH handlers
-        # short-circuit instead of competing for the GIL between images.
-        global _INFERENCE_DEPTH
-        _INFERENCE_DEPTH += 1
-        total = len(indices)
-        print(f"[Autocode] Bulk starting: {total} rows for project '{project_name}'", flush=True)
-        try:
-          for idx in indices:
-            try:
-                # Resolve image filename and coordinates for this row
-                image_ref = _resolve_image_ref(idx)
-                coords = _resolve_coords(idx)
-
-                # Validate we have the required data
-                if not image_ref:
-                    # Provide detailed error message for debugging
-                    geo_row = proj.geo_data.df.iloc[idx] if idx < len(proj.geo_data.df) else None
-                    if geo_row is not None:
-                        img_col = "Image Reference"
-                        img_val = geo_row.get(img_col) if img_col in geo_row else None
-                        errors.append({"index": idx, "reason": f"missing or invalid imageRef (geo_data['{img_col}'] = {repr(img_val)})"})
-                    else:
-                        errors.append({"index": idx, "reason": "missing imageRef (row not in geo_data)"})
-                    continue
-
-                if not coords:
-                    errors.append({"index": idx, "reason": "missing LineString coords"})
-                    continue
-
-                # Run CV + GIS autocoding for this row
-                merged, sources, err = _call_autocode_pair(image_ref, coords)
-                if err:
-                    errors.append({"index": idx, "reason": err})
-                    continue
-
-                # Inject Grade from pre-computed LAZ gradient lookup
-                _inject_grade(image_ref, merged, sources, project_name=project_name)
-
-                # Track which fields actually changed (for UI highlighting)
-                changed_fields = []  # List of field names that changed
-                field_sources = {}   # {field_name: "CV"|"GIS"} for changed fields
-
-                for field, code in (merged or {}).items():
-                    # Get the old value before autocoding
-                    old_val = ver.attributes.df.at[idx, field] if field in ver.attributes.df.columns else None
-
-                    # Only track as "changed" if value actually differs
-                    if old_val != code:
-                        changed_fields.append(field)
-                        field_sources[field] = sources.get(field, "Unknown")
-
-                    # Update the DataFrame with new value
-                    ver.attributes.df.at[idx, field] = code
-
-                # Store tracking info for this row
-                changed_by_row[idx] = changed_fields
-                sources_by_row[idx] = field_sources
-                ok_count += 1
-
-                # Progress every 10 rows
-                if ok_count % 10 == 0:
-                    print(f"[Autocode] Bulk progress: {ok_count}/{total} done ({len(errors)} errors so far)", flush=True)
-
-            except Exception as e:
-                # Catch and log any unexpected errors
-                traceback.print_exc()
-                errors.append({"index": idx, "reason": str(e)})
-        finally:
-          _INFERENCE_DEPTH -= 1
-
-        # Save to disk only if requested and at least one row succeeded
-        # Note: UI typically passes save=False to keep changes temporary until user clicks Save
-        if save and ok_count > 0:
-            print(f"[Autocode] Bulk complete: {ok_count}/{total} OK, {len(errors)} failed. Saving...", flush=True)
-            ver.save_all()
-
-            # Update last_updated
-            proj.metadata.last_updated = datetime.datetime.now()
-            proj.metadata.serialize(proj.project_path)
-
-        # Return the updated attributes DataFrame so frontend can update UI without refetching
-        # This enables temporary (in-memory) changes that aren't persisted until Save is clicked
-        updated_attributes = df_to_records(ver.attributes.df)
-
-        return ok({
-            "saved": bool(save and ok_count > 0),      # Whether changes were persisted to disk
-            "total": len(indices),                      # Total rows attempted
-            "ok": ok_count,                             # Number of rows successfully processed
-            "fail": len(errors),                        # Number of rows that failed
-            "errors": errors,                           # Detailed error info: [{index, reason}, ...]
-            "changed_by_row": changed_by_row,          # {row_idx: [field_names]} for UI highlighting
-            "sources_by_row": sources_by_row,          # {row_idx: {field: "CV"|"GIS"}} for badges
-            "updated_attributes": updated_attributes,   # Complete attributes table with updates applied
+        # Fields that require the obstacle detector model (second YOLO pass).
+        # Safe to skip when none of these are in the requested fields.
+        _CV_OBSTACLE_FIELDS: frozenset = frozenset({
+            "Fixed Obstacle on Facility",
+            "Non-Fixed Obstacle on Facility",
+            "Width Restriction",
+            "FO Type",
+            "NFO Type",
         })
+        skip_obstacles = bool(
+            not skip_cv  # obstacle skip only relevant when CV runs at all
+            and fields_filter
+            and not any(f in _CV_OBSTACLE_FIELDS for f in fields_filter)
+        )
+        if skip_obstacles:
+            print(f"[Autocode] Skipping obstacle detection — no obstacle fields requested: {fields_filter}", flush=True)
+
+        def _bulk_gen():
+            """
+            Generator that processes all rows and yields dicts:
+              {"type": "progress", "processed": N, "total": M, "errors": E}  — after each row
+              {"type": "done", "saved": bool, "total": M, "ok": K, ...}       — after completion
+
+            Streaming mode (want_stream=True): events are serialised to SSE and returned as a
+            Flask streaming Response so the frontend can update the progress counter per segment.
+            Non-streaming mode: events are consumed internally and the "done" event is returned
+            as a normal JSON response (backward-compatible).
+            """
+            import json as _json  # noqa: F401 — used by caller's SSE wrapper
+            global _INFERENCE_DEPTH
+
+            errors: list = []
+            ok_count: int = 0
+            changed_by_row: dict = {}
+            sources_by_row: dict = {}
+
+            total_count = len(indices)
+            print(f"[Autocode] Bulk starting: {total_count} rows for project '{project_name}'", flush=True)
+            _INFERENCE_DEPTH += 1
+            try:
+                for idx in indices:
+                    try:
+                        # Resolve image filename and coordinates for this row
+                        image_ref = _resolve_image_ref(idx)
+                        coords = _resolve_coords(idx)
+
+                        # Validate we have the required data
+                        if not image_ref:
+                            geo_row = proj.geo_data.df.iloc[idx] if idx < len(proj.geo_data.df) else None
+                            if geo_row is not None:
+                                img_col = "Image Reference"
+                                img_val = geo_row.get(img_col) if img_col in geo_row else None
+                                errors.append({"index": idx, "reason": f"missing or invalid imageRef (geo_data['{img_col}'] = {repr(img_val)})"})
+                            else:
+                                errors.append({"index": idx, "reason": "missing imageRef (row not in geo_data)"})
+                            continue
+
+                        if not coords:
+                            errors.append({"index": idx, "reason": "missing LineString coords"})
+                            continue
+
+                        # Run CV + GIS autocoding for this row
+                        merged, sources, err = _call_autocode_pair(image_ref, coords, skip_cv=skip_cv, skip_obstacles=skip_obstacles, fields_filter=fields_filter)
+                        if err:
+                            errors.append({"index": idx, "reason": err})
+                            continue
+
+                        # Inject Grade from pre-computed LAZ gradient lookup
+                        if not skip_cv or (fields_filter and "Grade" in fields_filter):
+                            _inject_grade(image_ref, merged, sources, project_name=project_name)
+
+                        # Apply per-attribute filter: only keep requested fields
+                        if fields_filter:
+                            merged = {k: v for k, v in (merged or {}).items() if k in fields_filter}
+                            sources = {k: v for k, v in (sources or {}).items() if k in fields_filter}
+
+                        # Track which fields actually changed (for UI highlighting)
+                        changed_fields: list = []
+                        field_sources: dict = {}
+                        for field, code in (merged or {}).items():
+                            old_val = ver.attributes.df.at[idx, field] if field in ver.attributes.df.columns else None
+                            if old_val != code:
+                                changed_fields.append(field)
+                                field_sources[field] = sources.get(field, "Unknown")
+                            ver.attributes.df.at[idx, field] = code
+
+                        changed_by_row[idx] = changed_fields
+                        sources_by_row[idx] = field_sources
+                        ok_count += 1
+
+                        # Yield per-row progress event (consumed by SSE wrapper or discarded)
+                        yield {"type": "progress", "processed": ok_count, "total": total_count, "errors": len(errors)}
+
+                        if ok_count % 10 == 0:
+                            print(f"[Autocode] Bulk progress: {ok_count}/{total_count} done ({len(errors)} errors so far)", flush=True)
+
+                    except Exception as e:
+                        traceback.print_exc()
+                        errors.append({"index": idx, "reason": str(e)})
+            finally:
+                _INFERENCE_DEPTH -= 1
+
+            # Save to disk (runs only when the loop completes; skipped on generator abandon/disconnect)
+            if save and ok_count > 0:
+                print(f"[Autocode] Bulk complete: {ok_count}/{total_count} OK, {len(errors)} failed. Saving...", flush=True)
+                ver.save_all()
+                proj.metadata.last_updated = datetime.datetime.now()
+                proj.metadata.serialize(proj.project_path)
+
+            updated_attributes = df_to_records(ver.attributes.df)
+            yield {
+                "type": "done",
+                "saved": bool(save and ok_count > 0),
+                "total": len(indices),
+                "ok": ok_count,
+                "fail": len(errors),
+                "errors": errors,
+                "changed_by_row": changed_by_row,
+                "sources_by_row": sources_by_row,
+                "updated_attributes": updated_attributes,
+            }
+
+        # ── Streaming mode: return SSE response ──────────────────────────────
+        if want_stream:
+            import json as _json
+
+            def _sse():
+                for event in _bulk_gen():
+                    yield f"data: {_json.dumps(event)}\n\n"
+
+            return Response(
+                stream_with_context(_sse()),
+                mimetype="text/event-stream",
+                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+            )
+
+        # ── Non-streaming mode: consume generator, return JSON ───────────────
+        final_event = None
+        for event in _bulk_gen():
+            if event["type"] == "done":
+                final_event = event
+        return ok({k: v for k, v in (final_event or {}).items() if k != "type"})
 
     except ServiceUnavailable as e:
         return fail(str(e), 503)

@@ -239,12 +239,14 @@ export type AutoCodeSinglePayload = {
 export type AutoCodeBulkAllPayload = {
   all: true;               // Flag to process all rows
   save?: boolean;          // Whether to save to disk (default: false for temp changes)
+  fields?: string[];       // Optional: only update these specific field names (real keys)
 };
 
 // Bulk mode (selected rows): Auto-code specific images
 export type AutoCodeBulkIndicesPayload = {
   indices: number[];       // Row indices to process
   save?: boolean;          // Whether to save to disk (default: false for temp changes)
+  fields?: string[];       // Optional: only update these specific field names (real keys)
 };
 
 // ---------- Response Types ----------
@@ -318,6 +320,57 @@ export async function autocodeAll(project: string, payload: AutoCodeAllPayload):
     throw new Error(await readError(res));
   }
   return (await res.json()) as AutoCodeAllResult;
+}
+
+/**
+ * Streaming variant of autocodeAll — uses SSE to report per-row progress.
+ *
+ * The backend yields one SSE event per processed segment so the UI counter
+ * can tick up in real time (1/412, 2/412, …).
+ *
+ * @param project    - Project name
+ * @param payload    - Same payload as autocodeAll (stream:true is injected automatically)
+ * @param onProgress - Called after each segment: (processed, total, errorCount)
+ * @returns          - The final AutoCodeBulkResult (same shape as autocodeAll bulk response)
+ */
+export async function autocodeAllStream(
+  project: string,
+  payload: AutoCodeAllPayload,
+  onProgress: (processed: number, total: number, errors: number) => void,
+): Promise<AutoCodeBulkResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/all`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, stream: true }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE events are separated by double newlines
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop()!; // keep incomplete trailing chunk
+
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      const event = JSON.parse(line.slice(5).trim());
+      if (event.type === "progress") {
+        onProgress(event.processed, event.total, event.errors ?? 0);
+      } else if (event.type === "done") {
+        const { type: _type, ...result } = event;
+        return result as AutoCodeBulkResult;
+      }
+    }
+  }
+  throw new Error("SSE stream ended without a 'done' event");
 }
 
 // ---------- Calculate Score ----------
