@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
+import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog, Spinner } from "@chakra-ui/react";
 import { toaster } from "../../../components/ui/toaster";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker } from "react-leaflet";
 import { FaDrawPolygon, FaMousePointer, FaPlus, FaTrash } from "react-icons/fa";
@@ -2207,9 +2207,10 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
           <Box h="650px">
             {loading && (
-              <Box p="6">
-                <Text color="gray.500">Loading map…</Text>
-              </Box>
+              <Flex p="6" direction="column" align="center" justify="center" h="100%">
+                <Spinner size="xl" color="blue.500" borderWidth="4px" />
+                <Text color="gray.500" mt="4" fontWeight="500">Loading map and computing scores... This might take a while for large projects.</Text>
+              </Flex>
             )}
             {err && (
               <Box p="6">
@@ -2225,6 +2226,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   maxZoom={22}
                   style={{ width: "100%", height: "100%" }}
                   scrollWheelZoom
+                  preferCanvas={true}
                 >
                   <MapCursorController
                     mode={(isDeleteMode || isPolygonMode) ? 'delete' : (isPointAddMode || isPolygonAddMode) ? 'add' : 'default'}
@@ -2443,7 +2445,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                           </td>
                         </tr>
                       ) : (
-                        sortedData.map(({ idx, latlng, f, projectName, color, attributes }, globalIdx) => (
+                        sortedData.slice(0, 100).map(({ idx, latlng, f, projectName, color, attributes }, globalIdx) => (
                           <tr key={`${projectName}-${idx}-${globalIdx}`}>
                             {tableColumns.map(col => {
                               const value = getColumnValue(
@@ -2470,6 +2472,15 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                             })}
                           </tr>
                         ))
+                      )}
+                      {sortedData.length > 100 && (
+                        <tr>
+                          <td colSpan={tableColumns.length} style={{ padding: "16px", textAlign: "center", borderBottom: "1px solid #e2e8f0", backgroundColor: "#f8fafc" }}>
+                            <Text color="gray.600" fontSize="sm" fontWeight="500">
+                              Showing top 100 results for performance. Please use the "Download CSV" button to view all {sortedData.length} records.
+                            </Text>
+                          </td>
+                        </tr>
                       )}
                     </tbody>
                   </table>
