@@ -146,6 +146,7 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
   const [roads, setRoads] = useState<SelectedRoad[]>([]);
   const [querying, setQuerying] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [isFallback, setIsFallback] = useState(false);
 
   // Vertex icon
   const vertexIcon = useMemo(
@@ -186,6 +187,7 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
     setPolygonPoints([]);
     setRoads([]);
     setQueryError(null);
+    setIsFallback(false);
     onSelectionChange([]);
   }, [onSelectionChange]);
 
@@ -202,11 +204,12 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
       setQuerying(true);
       setQueryError(null);
       try {
-        const result = await queryRoadsInPolygon(polygonPoints);
+        const { roads: result, fallback } = await queryRoadsInPolygon(polygonPoints);
         if (cancelled) return;
+        setIsFallback(fallback);
         const mapped: SelectedRoad[] = result.map((r) => ({
           ...r,
-          selected: true, // default all selected
+          selected: !fallback, // don't pre-select planning area fallback results
         }));
         setRoads(mapped);
         onSelectionChange(mapped);
@@ -325,7 +328,7 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
         </Text>
       )}
 
-      {roads.length > 0 && (
+      {roads.length > 0 && !isFallback && (
         <Box mt={3}>
           <Flex justifyContent="space-between" alignItems="center" mb={2}>
             <Text fontSize="sm" fontWeight="bold">
@@ -377,6 +380,37 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
                     <Badge colorPalette="orange" size="sm">Not Downloaded</Badge>
                   )}
                 </HStack>
+              </Flex>
+            ))}
+          </Box>
+        </Box>
+      )}
+
+      {roads.length > 0 && isFallback && (
+        <Box mt={3}>
+          <Text fontSize="sm" fontWeight="bold" color="orange.600" mb={1}>
+            No road image data in this area
+          </Text>
+          <Text fontSize="xs" color="gray.500" mb={2}>
+            The following planning areas overlap your selection, but no image folders have been downloaded for them. Project creation is not possible until images are available.
+          </Text>
+          <Box
+            maxH="200px"
+            overflowY="auto"
+            border="1px solid"
+            borderColor="orange.200"
+            borderRadius="md"
+          >
+            {roads.map((area) => (
+              <Flex
+                key={area.name}
+                px={3}
+                py={2}
+                alignItems="center"
+                borderBottom="1px solid"
+                borderColor="gray.100"
+              >
+                <Text fontSize="sm" color="gray.600">{area.name}</Text>
               </Flex>
             ))}
           </Box>

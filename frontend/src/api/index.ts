@@ -104,7 +104,12 @@ export interface RoadInPolygon {
   exists: boolean;
 }
 
-export async function queryRoadsInPolygon(polygon: [number, number][]): Promise<RoadInPolygon[]> {
+export interface RoadsInPolygonResult {
+  roads: RoadInPolygon[];
+  fallback: boolean;
+}
+
+export async function queryRoadsInPolygon(polygon: [number, number][]): Promise<RoadsInPolygonResult> {
   const res = await fetch("/api/projects/roads-in-polygon", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -112,7 +117,7 @@ export async function queryRoadsInPolygon(polygon: [number, number][]): Promise<
   });
   if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
   const data = await res.json();
-  return (data?.roads ?? []) as RoadInPolygon[];
+  return { roads: (data?.roads ?? []) as RoadInPolygon[], fallback: data?.fallback ?? false };
 }
 
 export async function createProjectFromFolder(project_name: string, folder_name: string, tags: string[] = []) {
