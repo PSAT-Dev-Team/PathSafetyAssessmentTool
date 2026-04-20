@@ -155,6 +155,8 @@ class LayerStore:
         store.add_path("shared_path", base / "path" / "Sharedpathcentreline.shp")
         # Added for Road Crossing Layer
         store.add_path("roadcrossing", base / "roadcrossinglayer" / "ROADCROSSING.shp")
+        # Added for Bicycle Crossing Facility (AMG BC 2025)
+        store.add_path("bicycle_crossing", base / "AMG_BC2025_shp" / "AMG_BC2025_shp.shp")
 
         # Load speed CSV if it exists
         speed_csv_path = base / "LinkID_Shape_File" / "TSE_AdHocReq_ERP2AverageSpeedData_250425.csv"
@@ -258,6 +260,10 @@ class GIS:
         pt = self.store.to_metric_point(point)
         return self._near("roadcrossing", pt, dist)
 
+    def is_bicycle_crossing(self, point, dist=2):
+        pt = self.store.to_metric_point(point)
+        return self._near("bicycle_crossing", pt, dist)
+
     def is_parking(self, point, dist=20):
         pt = self.store.to_metric_point(point)
         return self._near("parking", pt, dist)
@@ -327,10 +333,13 @@ class GIS:
             "sensor_peaks": sensor_peaks,   # {'MICROMOBILITY': x, 'OTHER': y}
         }
 
-    def get_number_of_lane(self, point, dist=10):
+    def get_number_of_lane(self, point, dist=20):
         """
-        在 kerb_line 中寻找距 point 最近的一条（仅在 dist 米内，找不到返回 None）
-        返回：GeoSeries（该要素整行）或 None
+        Find the nearest kerb line within dist metres of point and return the
+        CycleRAP lane code for "Number of lanes – adjacent road":
+            1 = "1 per Direction/NA"  (LANES == "1")
+            2 = "> 1 per Direction"   (LANES >= 2)
+        Returns None if no kerb line is found within dist or LANES is missing/unparseable.
         """
         pt = self.store.to_metric_point(point)
 
@@ -339,28 +348,26 @@ class GIS:
             return None
         gdf = gdf[gdf.geometry.notna()].copy()
 
-        # 优先用 sindex.nearest，兼容不同版本；失败就全量算
-        nearest_pos = None
-        try:
-            gen = gdf.sindex.nearest(pt)          # 有些版本支持几何
-            nearest_pos = next(iter(gen))
-        except Exception:
-            try:
-                gen = gdf.sindex.nearest(pt.bounds)  # 有些只支持 bounds
-                nearest_pos = next(iter(gen))
-            except Exception:
-                pass
-
-        if nearest_pos is not None and np.isscalar(nearest_pos):
-            # 明确是单个位置索引
-            geom = gdf.geometry.iloc[int(nearest_pos)]
-            return float(geom.distance(pt))
-
-        # 兜底：对全表算距离 -> 直接取最小值
-        dists = gdf.geometry.distance(pt)  # 这是一个 Series
-        if dists.empty:
+        candidates_idx = list(gdf.sindex.query(pt.buffer(dist)))
+        if not candidates_idx:
             return None
-        return float(dists.min())
+
+        candidates = gdf.iloc[candidates_idx]
+        dists = candidates.geometry.distance(pt)
+        within = dists[dists <= dist]
+        if within.empty:
+            return None
+
+        nearest_row = candidates.loc[within.idxmin()]
+        lanes_str = str(nearest_row.get("LANES", "") or "").strip()
+        if not lanes_str:
+            return None
+        try:
+            lanes_count = int(lanes_str)
+        except ValueError:
+            return None
+
+        return 1 if lanes_count <= 1 else 2
 
     # Added for Road Operating Speed (mean)
     def get_road_operating_speed(self, point, buffer_dist=20, max_dist=30, default_speed=30.0):

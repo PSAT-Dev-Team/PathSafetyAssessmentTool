@@ -177,6 +177,10 @@ export default function Sidebar() {
     window.dispatchEvent(new CustomEvent("psat:autocode:all-projects"));
   }, []);
 
+  const onAutoCodeByAttribute = useCallback((fields: string[]) => {
+    window.dispatchEvent(new CustomEvent("psat:autocode:by-field", { detail: { fields } }));
+  }, []);
+
   const onSave = async () => {
     // 发出保存请求；让 CodingPage 去真正保存
     window.dispatchEvent(new CustomEvent("psat:save"));
@@ -342,6 +346,7 @@ export default function Sidebar() {
             onAutoCodeOne={onAutoCodeOne}
             onAutoCodeAll={onAutoCodeAll}
             onAutoCodeAllProjects={onAutoCodeAllProjects}
+            onAutoCodeByAttribute={onAutoCodeByAttribute}
           />
         )}
       </div>

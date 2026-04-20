@@ -1,13 +1,13 @@
 """
 run_attribute_inference.py
 
-Runs path_segmentation.pt on a folder of images and assigns 12 CycleRAP
+Runs path_segmentation_v2.pt on a folder of images and assigns 12 CycleRAP
 attributes per image using cascading conditions.  Each image is annotated
 with its attribute table and saved to an output directory.
 
 Usage:
     python run_attribute_inference.py <input_dir> [--output cyclerap_output]
-                                     [--model backend/models/path_segmentation.pt]
+                                     [--model backend/models/path_segmentation_v2.pt]
                                      [--obstacle-model obstacle_detector_ema.pt]
                                      [--conf 0.5]
 """
@@ -56,8 +56,8 @@ def parse_args():
     parser.add_argument(
         "--model",
         type=Path,
-        default=Path(__file__).parent / "backend" / "models" / "path_segmentation.pt",
-        help="Path to path_segmentation.pt model.",
+        default=Path(__file__).parent / "backend" / "models" / "path_segmentation_v2.pt",
+        help="Path to path_segmentation_v2.pt model.",
     )
     parser.add_argument(
         "--obstacle-model",

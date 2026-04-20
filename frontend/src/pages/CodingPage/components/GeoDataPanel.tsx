@@ -1,3 +1,4 @@
+import ThemeAwareTileLayer from "../../../components/common/ThemeAwareTileLayer";
 import {
   Card, CardBody, Text, Box, Flex, IconButton, Button,
   Dialog, Portal, Menu
@@ -30,6 +31,8 @@ type Props = {
   geoFeatures?: Feature<LineString, any>[];  // Optional pre-loaded geofeatures (for multi-project display)
   startIndex?: number;                       // Start index in global segments array (used with geoFeatures for multi-project)
   onDataChange?: () => void;                 // Callback when data is modified (e.g. deleted)
+  panToBounds?: L.LatLngBounds | null;       // When set, immediately flies map to these bounds (e.g. on project tab switch)
+  panKey?: number;                           // Monotonic counter to force PanToBounds effect re-fire
 };
 
 type GJ = FeatureCollection<LineString, any>;
@@ -59,7 +62,7 @@ const to4326 = (p: Position): [number, number] => {
   return [lat, lon];
 };
 
-// 小组件：根据点集自动 fit bounds (only on first load)
+// 小组件：根据点集自动 fit bounds (only on initial load)
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
   const hasFitRef = useRef(false);
@@ -69,6 +72,29 @@ function FitBounds({ points }: { points: [number, number][] }) {
     map.fitBounds(bounds, { padding: [24, 24] });
     hasFitRef.current = true;
   }, [points, map]);
+  return null;
+}
+
+// Flies map to given bounds whenever bounds/panKey change (not null).
+// panKey is a monotonic counter that forces React to re-fire the effect even when the
+// bounds reference hasn't changed (e.g. clicking the same project tab twice).
+// The fitBounds call is deferred by one tick (setTimeout 0) so that ALL other React
+// effects from the same render commit (MapAutoCenter, ZoomToGIS, etc.) have already
+// completed — preventing any animation race conditions.
+function PanToBounds({ bounds, panKey }: { bounds: L.LatLngBounds | null; panKey: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!bounds) return;
+    const timerId = setTimeout(() => {
+      // Re-measure the container size — critical for small / side-by-side panels
+      // where the layout may have shifted between renders.
+      map.invalidateSize();
+      // Cancel any in-flight Leaflet animation (setView / flyTo) so fitBounds wins.
+      map.stop();
+      map.fitBounds(bounds, { padding: [20, 20], maxZoom: 18 });
+    }, 0);
+    return () => clearTimeout(timerId);
+  }, [bounds, panKey, map]);
   return null;
 }
 
@@ -255,7 +281,7 @@ const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
 // No global cache needed anymore as we use localStorage
 
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, panToBounds, panKey = 0 }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
@@ -298,31 +324,51 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [showBusLane, setShowBusLane] = useState(cachedLayers.showBusLane ?? false);     // Yellow
   const [showParkingLot, setShowParkingLot] = useState(cachedLayers.showParkingLot ?? false); // Gold
   const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Deep Pink
+  const [showBicycleCrossing, setShowBicycleCrossing] = useState(cachedLayers.showBicycleCrossing ?? false); // Orange
 
   // Update localStorage whenever these toggles change
   useEffect(() => {
     if (!projectName) return;
     localStorage.setItem(`gisLayerToggles_${projectName}`, JSON.stringify({
-      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine
+      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing
     }));
-  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, projectName]);
+  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, projectName]);
 
-// Sub-component to pan map to current selection
-function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null; anyLayerOn?: boolean }) {
+// Sub-component to pan map to current selection.
+// When panKey changes (project tab clicked), MapAutoCenter suppresses its setView
+// for a 800ms window. This prevents async treatment-fetch callbacks from causing
+// a re-render that overrides PanToBounds' fitBounds.
+function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number] | null; anyLayerOn?: boolean; panKey?: number }) {
   const map = useMap();
   const prevCenterRef = useRef<[number, number] | null>(null);
+  const prevPanKeyRef = useRef(panKey ?? 0);
+  const suppressUntilRef = useRef(0);
   useEffect(() => {
     if (!center) return;
     const prevCenter = prevCenterRef.current;
     const centerChanged = !prevCenter || prevCenter[0] !== center[0] || prevCenter[1] !== center[1];
     prevCenterRef.current = center;
+
+    // If panKey just changed, start a suppression window.
+    const currentPanKey = panKey ?? 0;
+    if (currentPanKey !== prevPanKeyRef.current) {
+      prevPanKeyRef.current = currentPanKey;
+      suppressUntilRef.current = Date.now() + 800;
+      return;
+    }
+
+    // Still within the suppression window — let PanToBounds' fitBounds stand.
+    if (Date.now() < suppressUntilRef.current) {
+      return;
+    }
+
     if (centerChanged) {
       // When navigating to a new segment, pan to it
       // If GIS layers are on, zoom in close enough to see them
       const targetZoom = anyLayerOn ? Math.max(map.getZoom(), 17) : map.getZoom();
       map.setView(center, targetZoom, { animate: true });
     }
-  }, [center, anyLayerOn, map]);
+  }, [center, anyLayerOn, map, panKey]);
   return null;
 }
 
@@ -367,6 +413,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
     shared: GISLayerFeature[];
     roadcrossing: GISLayerFeature[];
     mrt_exit: GISLayerFeature[];
+    bicycle_crossing: GISLayerFeature[];
     bus_stop: GISLayerFeature[];
     bus_lane: GISLayerFeature[];
     parking_lot: GISLayerFeature[];
@@ -500,7 +547,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
 
     if (!decodedName || activeGisLat === null || activeGisLon === null) return;
 
-    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine;
+    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing;
     if (!anyLayerEnabled) {
       setGisLayers(null);
       return;
@@ -518,6 +565,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
         if (showFootpath) layers.push('footpath');
         if (showRoadcrossing) layers.push('roadcrossing');
         if (showMrtExit) layers.push('mrt_exit');
+        if (showBicycleCrossing) layers.push('bicycle_crossing');
         if (showBusStop) layers.push('bus_stop');
         if (showBusLane) layers.push('bus_lane');
         if (showParkingLot) layers.push('parking_lot');
@@ -549,7 +597,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
     })();
 
     return () => { controller.abort(); };
-  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
+  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, hasExternalGeoFeatures]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
@@ -558,6 +606,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
     shared: "#A855F7",      // Purple
     roadcrossing: "#10B981", // Emerald/Green
     mrt_exit: "#06B6D4",    // Cyan
+    bicycle_crossing: "#F97316", // Orange
     bus_stop: "#8B5CF6",    // Purple
     bus_lane: "#EAB308",    // Yellow
     parking_lot: "#D97706", // Amber/Gold
@@ -981,6 +1030,18 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
             </Flex>
 
             <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showBicycleCrossing ? "orange.600" : "gray.500"}>
+                Bicycle Crossing
+              </Text>
+              <Switch
+                colorPalette="orange"
+                size="sm"
+                checked={showBicycleCrossing}
+                onCheckedChange={(e) => setShowBicycleCrossing(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
               <Text fontSize="sm" fontWeight="medium" color={showMrtExit ? "cyan.600" : "gray.500"}>
                 MRT Exit
               </Text>
@@ -1061,11 +1122,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
                 mode={(isDeleteMode || isPolygonMode) ? 'delete' : (isPointAddMode || isPolygonAddMode) ? 'add' : 'default'}
               />
               {/* CartoDB Light basemap - same as Curvature Analysis */}
-              <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                attribution='&copy; OpenStreetMap contributors & CARTO'
-                maxZoom={22}
-              />
+              <ThemeAwareTileLayer />
 
               {/* 数据范围自适应 (first load only) */}
               {allLatLngs.length > 0 && <FitBounds points={allLatLngs} />}
@@ -1073,14 +1130,18 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
               {/* Auto-zoom to current point when GIS layers active */}
               <ZoomToGIS
                 center={activeQueryPoint}
-                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing}
               />
 
               {/* 自动跟随当前选中点 */}
               <MapAutoCenter
                 center={current?.latlng ?? null}
-                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing}
+                panKey={panKey}
               />
+
+              {/* Fly to specific project bounds when tab is clicked — MUST be last so it overrides MapAutoCenter */}
+              <PanToBounds bounds={panToBounds ?? null} panKey={panKey} />
 
 
 
@@ -1307,6 +1368,25 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
                       opacity: 0.8
                     }}
                   />
+                ))
+              )}
+
+              {/* Bicycle Crossing - Point layer rendered as CircleMarkers */}
+              {gisLayers && showBicycleCrossing && gisLayers.bicycle_crossing && (
+                gisLayers.bicycle_crossing.map((feature, i) => (
+                  <CircleMarker
+                    key={`bicycle_crossing-${i}`}
+                    center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
+                    radius={6}
+                    pathOptions={{
+                      color: layerColors.bicycle_crossing,
+                      weight: 2,
+                      opacity: 0.9,
+                      fillOpacity: 0.7
+                    }}
+                  >
+                    <Tooltip>Bicycle Crossing</Tooltip>
+                  </CircleMarker>
                 ))
               )}
 

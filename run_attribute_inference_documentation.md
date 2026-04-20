@@ -27,7 +27,7 @@
 
 `run_attribute_inference.py` is a command-line Python script that automates the assignment of **12 CycleRAP (Cycling Road Assessment Programme) safety attributes** to street-level images of pedestrian and cycling infrastructure. It is part of the PathSafetyAssessmentTool project developed for the Land Transport Authority (LTA) of Singapore.
 
-The script loads a pre-trained YOLO segmentation model (`path_segmentation.pt`), runs inference on every image in a specified input folder, evaluates a hierarchy of cascading detection conditions to assign the correct facility type and safety attributes, and saves a copy of each image annotated with the resulting attribute table.
+The script loads a pre-trained YOLO segmentation model (`path_segmentation_v2.pt`), runs inference on every image in a specified input folder, evaluates a hierarchy of cascading detection conditions to assign the correct facility type and safety attributes, and saves a copy of each image annotated with the resulting attribute table.
 
 ### 1.1 Purpose
 
@@ -40,14 +40,14 @@ The script loads a pre-trained YOLO segmentation model (`path_segmentation.pt`),
 Run from the project root:
 
 ```
-python run_attribute_inference.py <input_dir> [--output cyclerap_output] [--model backend/models/path_segmentation.pt] [--conf 0.5]
+python run_attribute_inference.py <input_dir> [--output cyclerap_output] [--model backend/models/path_segmentation_v2.pt] [--conf 0.5]
 ```
 
 | Argument | Default | Description |
 |---|---|---|
 | `input_dir` | *(required)* | Path to the folder containing `.jpg` / `.jpeg` / `.png` images to process. |
 | `--output` | `cyclerap_output` | Directory where annotated output images are saved. Created automatically if it does not exist. |
-| `--model` | `backend/models/path_segmentation.pt` | Path to the YOLO segmentation model `.pt` file. |
+| `--model` | `backend/models/path_segmentation_v2.pt` | Path to the YOLO segmentation model `.pt` file. |
 | `--conf` | `0.5` | Minimum detection confidence threshold. Detections below this value are ignored during mask building. |
 
 ---
@@ -81,7 +81,7 @@ Input image folder
                     │
        ┌────────────▼─────────────┐
        │ 2. YOLO inference        │  ← one call per image
-       │    (path_segmentation.pt)│
+       │    (path_segmentation_v2.pt)│
        └────────────┬─────────────┘
                     │  polygons + class IDs + confidences
        ┌────────────▼─────────────┐
@@ -99,7 +99,7 @@ Input image folder
 
 ---
 
-## 4. Segmentation Model (`path_segmentation.pt`)
+## 4. Segmentation Model (`path_segmentation_v2.pt`)
 
 The model is a YOLO instance segmentation model trained on Singapore street-level imagery to identify surface materials and road features. For each detected region it returns:
 
@@ -123,7 +123,7 @@ The script uses five semantic groups. All other model classes (e.g. pathway surf
 
 ### 4.2 Safe Model Loading (`load_model`)
 
-`load_model()` patches `ultralytics`' `BaseModel.fuse()` with a `try/except` wrapper **before** loading the `.pt` file. This is necessary because `path_segmentation.pt` was trained with an older version of Ultralytics and its internal layer-fusion step raises an `AttributeError` on newer library versions. The patch silently skips fusion if the error occurs, returning the unfused but fully functional model.
+`load_model()` patches `ultralytics`' `BaseModel.fuse()` with a `try/except` wrapper **before** loading the `.pt` file. This is necessary because `path_segmentation_v2.pt` was trained with an older version of Ultralytics and its internal layer-fusion step raises an `AttributeError` on newer library versions. The patch silently skips fusion if the error occurs, returning the unfused but fully functional model.
 
 ```python
 def _safe_fuse(self, verbose=True):
@@ -352,7 +352,7 @@ The script creates the output directory if it does not exist. For each processed
 Console output reports the detected Facility Type for each image, allowing progress to be monitored and results spot-checked without opening every annotated image:
 
 ```
-Loading model: backend/models/path_segmentation.pt
+Loading model: backend/models/path_segmentation_v2.pt
 Class sets: {'road': {'Road'}, 'traffic_crossing': {'Traffic Crossing'}, ...}
 Processing 4 images...
 

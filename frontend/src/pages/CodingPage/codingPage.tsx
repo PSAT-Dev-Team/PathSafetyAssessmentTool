@@ -32,7 +32,7 @@ import {
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
-import { autocodeImage, autocodeGIS, autocodeAll } from "../../api";
+import { autocodeImage, autocodeGIS, autocodeAll, autocodeAllStream } from "../../api";
 
 
 import ImagePanel from "./components/ImagePanel";
@@ -698,6 +698,102 @@ export default function CodingPage() {
     window.addEventListener("psat:autocode:all", handler);
     return () => window.removeEventListener("psat:autocode:all", handler);
   }, [currentProjectName, attrs.length, updateAutocodeBaseline, updateAutocodedSegmentCount]);
+
+  // Auto-code all segments for selected attributes only
+  useEffect(() => {
+    if (!currentProjectName) return;
+
+    const handler = async (e: Event) => {
+      const fields: string[] = (e as CustomEvent).detail?.fields ?? [];
+      if (fields.length === 0) return;
+      if (autoCodingRef.current) return;
+      try {
+        setAutoCoding(true);
+        autoCodingRef.current = true;
+        setAutoCodeMsg(`Autocoding ${fields.length} attribute(s) for all records…`);
+        setProgress(10);
+        const attrLength = attrs.length;
+        setProjectProgress({ [currentProjectName]: { processed: 0, total: attrLength } });
+
+        // Streaming call — progress counter updates as each segment completes
+        const r = await autocodeAllStream(
+          currentProjectName,
+          { all: true, fields, save: false },
+          (processed, total, _errors) => {
+            setProjectProgress({ [currentProjectName]: { processed, total } });
+            setProgress(10 + Math.round((processed / total) * 75)); // 10% → 85%
+          },
+        );
+
+        const allChangedFieldsByRow: Record<number, string[]> =
+          ("changed_by_row" in r && r.changed_by_row) ? r.changed_by_row : {};
+        const allSourcesByRow: Record<number, Record<string, string>> =
+          ("sources_by_row" in r && r.sources_by_row) ? r.sources_by_row : {};
+        const totalOk = ("ok" in r ? r.ok : 0) || 0;
+        const totalFail = ("fail" in r ? r.fail : 0) || 0;
+        const errors: any[] = ("errors" in r && r.errors) ? r.errors : [];
+
+        setProgress(85);
+        try {
+          // Use updated_attributes returned by the batch call — avoids an extra fetchProjectAttributes round trip
+          const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
+          if (rows) {
+            updateProjectData(currentProjectName, {
+              attrs: rows,
+              changedFieldsByRow: allChangedFieldsByRow,
+              fieldSourcesByRow: allSourcesByRow,
+              isDirty: true,
+            });
+
+            saveAutocodeMetadata(currentProjectName, allChangedFieldsByRow, allSourcesByRow);
+            updateAutocodeBaseline(rows);
+
+            const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/score`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ attributes: rows }),
+            });
+
+            if (res.ok) {
+              const result = await res.json();
+              if (result.ok && Array.isArray(result.result_rows)) {
+                updateProjectData(currentProjectName, { scores: result.result_rows });
+              }
+            }
+          }
+        } catch {
+          // score recalculation failure is non-fatal
+        }
+
+        setProgress(100);
+        setAutoCodeMsg("Completed");
+
+        const totalProcessed = totalOk + totalFail;
+        toaster.create({
+          title: "Auto-code (by attribute) done",
+          description: `Total: ${totalProcessed}, OK: ${totalOk}, Failed: ${totalFail}${totalFail > 0 ? " (check console for details)" : ""}`,
+          type: totalFail > 0 ? "warning" : "success",
+        });
+
+      } catch (e: any) {
+        toaster.create({
+          title: "Auto-code failed",
+          description: String(e?.message ?? e),
+          type: "error",
+        });
+      } finally {
+        if (cleanupTimeoutRef.current !== null) {
+          clearTimeout(cleanupTimeoutRef.current);
+        }
+        cleanupTimeoutRef.current = window.setTimeout(() => {
+          clearAutoCodingState();
+        }, 300);
+      }
+    };
+
+    window.addEventListener("psat:autocode:by-field", handler);
+    return () => window.removeEventListener("psat:autocode:by-field", handler);
+  }, [currentProjectName, attrs.length, updateAutocodeBaseline]);
 
   // Auto-code all segments in all loaded projects
   useEffect(() => {
