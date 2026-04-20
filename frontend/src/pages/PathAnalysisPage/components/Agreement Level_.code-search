@@ -1,0 +1,9 @@
+# Query: Agreement Level:
+# ContextLines: 1
+
+1 result - 1 file
+
+frontend/src/pages/PathAnalysisPage/components/AutocodeValidation.tsx:
+  427              <div className="al-legend">
+  428:               <div className="al-legend-title">Automation Retention Rate:</div>
+  429                {[

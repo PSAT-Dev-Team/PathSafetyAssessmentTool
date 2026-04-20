@@ -2624,7 +2624,9 @@ def autocode_gis(project_name: str):
         # Pedestrian Crossing Detection
         # Set to Present (1) if within 5m of bus stop OR road crossing
         if _needs("Pedestrian Crossing") and (
-            _gis.is_bus_stop(pt, dist=5) or _gis.is_road_crossing(pt, dist=5)
+            _gis.is_bus_stop(pt, dist=10)
+            or _gis.is_road_crossing(pt, dist=10)
+            or _gis.is_mrt(pt, dist=10)
         ):
             updates["Pedestrian Crossing"] = 1  # 1 = Present
 
@@ -2696,6 +2698,13 @@ def autocode_gis(project_name: str):
             updates["Facility Width per Direction"] = facility_width
             if width_subcat is not None:
                 updates["Facility Width Sub-category"] = width_subcat
+
+        # Added for Number of lanes – adjacent road
+        # Look up the LANES attribute from the nearest kerb line within 20 m
+        if _needs("Number of lanes – adjacent road"):
+            nol = _gis.get_number_of_lane(pt, dist=20)
+            if nol is not None:
+                updates["Number of lanes – adjacent road"] = nol
 
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
@@ -3242,6 +3251,7 @@ def autocode_all(project_name: str):
             "Pedestrian Crossing",
             "Peak bicycle/LV traffic flow",
             "Grade",  # from LAZ gradient lookup, not from CV
+            "Number of lanes – adjacent road",  # from kerb_line shapefile LANES column
         })
 
         def _call_autocode_pair(image_ref: str, coords, skip_cv: bool = False, skip_gis: bool = False, skip_obstacles: bool = False, fields_filter: "list | None" = None):

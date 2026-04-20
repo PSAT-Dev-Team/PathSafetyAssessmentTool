@@ -154,6 +154,8 @@ reduce per-segment time from ~2.5 s to <0.5 s and is the highest-impact remainin
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
+**IMPORTANT: After completing any code edits, ALWAYS call `build_or_update_graph_tool` (incremental, no args needed) to keep the knowledge graph in sync.**
+
 **IMPORTANT: This project has a knowledge graph. ALWAYS use the
 code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
 the codebase.** The graph is faster, cheaper (fewer tokens), and gives
