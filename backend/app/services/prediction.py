@@ -229,7 +229,13 @@ class CycleRAP_Coding_Helper:
         blocking_non_fixed = []
         is_restricted = False
 
+        img_w = pathway_mask.shape[1]
+        img_cx = img_w / 2
+
         for det in detections:
+            obj_cx = (det["x1"] + det["x2"]) / 2
+            if abs(obj_cx - img_cx) / img_w > 0.15:
+                continue
             box = (det["x1"], det["y1"], det["x2"], det["y2"])
             is_blocking, _, _, _ = cls._analyze_obstacle(box, pathway_mask)
             if is_blocking:
