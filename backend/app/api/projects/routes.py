@@ -2301,7 +2301,82 @@ def roads_in_polygon():
             "exists": exists,
         })
 
-    return ok({"roads": roads})
+    if roads:
+        return ok({"roads": roads, "fallback": False})
+
+    # Fallback 1: road sections shapefile (named roads from GIS, no image dependency)
+    try:
+        import geopandas as gpd
+
+        road_shp_candidates = [
+            backend_root / "shapefiles" / "planningareas" / "ROADSECTIONLINE.shp",
+            backend_root / "shapefiles" / "Road_name" / "ROADSECTIONLINE.shp",
+            backend_root / "shapefiles" / "Road_name" / "ROADNETWORKLINE.shp",
+        ]
+        road_shp = next((candidate for candidate in road_shp_candidates if candidate.exists()), None)
+        if road_shp is not None:
+            road_gdf = gpd.read_file(str(road_shp))
+            if road_gdf.crs and road_gdf.crs.to_epsg() != 4326:
+                road_gdf = road_gdf.to_crs(epsg=4326)
+
+            intersecting_roads = road_gdf[road_gdf.geometry.intersects(poly)]
+            road_name_col = next(
+                (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in intersecting_roads.columns),
+                None,
+            )
+
+            if road_name_col is not None and not intersecting_roads.empty:
+                road_counts: dict[str, int] = {}
+                for raw_name in intersecting_roads[road_name_col].dropna().astype(str):
+                    name = raw_name.strip()
+                    if not name:
+                        continue
+                    if not any(ch.isalnum() for ch in name):
+                        continue
+                    road_counts[name] = road_counts.get(name, 0) + 1
+
+                if road_counts:
+                    roads = []
+                    for name in sorted(road_counts):
+                        exists = in_path.exists() and (in_path / name).is_dir()
+                        roads.append({
+                            "name": name,
+                            "points": road_counts[name],
+                            "exists": exists,
+                        })
+                    return ok({"roads": roads, "fallback": False})
+    except Exception:
+        pass
+
+    # ── Fallback: no road data — intersect against planning polygons ──
+    try:
+        import geopandas as gpd
+        backend_root = Path(__file__).resolve().parents[3]
+        planning_dir = backend_root / "shapefiles" / "planningareas"
+
+        pa_shp = planning_dir / "G_MP25_PLNG_AREA_NO_SEA_PL.shp"
+        if not pa_shp.exists():
+            return ok({"roads": [], "fallback": False})
+
+        gdf = gpd.read_file(str(pa_shp))
+        # Reproject to WGS84 if needed
+        if gdf.crs and gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(epsg=4326)
+
+        intersecting = gdf[gdf.geometry.intersects(poly)]
+        # Try common field names for the area name
+        name_col = next(
+            (c for c in ("PLN_AREA_N", "REGION_N", "NAME", "SUBZONE_N", "PLANNING_A") if c in intersecting.columns),
+            intersecting.columns[0],
+        )
+        pa_roads = [
+            {"name": row[name_col].title(), "points": 0, "exists": False}
+            for _, row in intersecting.iterrows()
+        ]
+        pa_roads.sort(key=lambda r: r["name"])
+        return ok({"roads": pa_roads, "fallback": True})
+    except Exception as e:
+        return ok({"roads": [], "fallback": False})
 
 
 @bp.post("/folders")
