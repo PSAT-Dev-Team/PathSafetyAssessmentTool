@@ -19,7 +19,7 @@ geopy>=2.3
 
 # --- Excel / Windows COM ---
 openpyxl>=3.1
-pywin32>=306   # 提供 pythoncom / win32com
+pywin32>=306; sys_platform == 'win32'   # 提供 pythoncom / win32com
 
 # --- Networking ---
 requests>=2.31
