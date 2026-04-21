@@ -1,7 +1,6 @@
-import ThemeAwareTileLayer from "../../../components/common/ThemeAwareTileLayer";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
+import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog, Spinner } from "@chakra-ui/react";
 import { toaster } from "../../../components/ui/toaster";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker } from "react-leaflet";
 import { FaDrawPolygon, FaMousePointer, FaPlus, FaTrash } from "react-icons/fa";
@@ -483,9 +482,19 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   useEffect(() => {
     fetchAttributeMappings()
       .then(mappings => {
+        // Ensure adequacy-mapped attributes are always present (backend may omit them)
+        const adequacyMap: Record<string, string> = { "1": "Adequate", "2": "Inadequate" };
+        if (!mappings["Line of Sight"]) mappings["Line of Sight"] = adequacyMap;
+        if (!mappings["Facility access"]) mappings["Facility access"] = adequacyMap;
         setAttrMappings(mappings);
       })
-      .catch(() => { });
+      .catch(() => {
+        // Minimal fallback so at least adequacy attributes work offline
+        setAttrMappings({
+          "Line of Sight": { "1": "Adequate", "2": "Inadequate" },
+          "Facility access": { "1": "Adequate", "2": "Inadequate" },
+        });
+      });
   }, []);
 
   // Get color for a specific crash type score based on thresholds
@@ -557,8 +566,11 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       }
     }
 
-    // Generic null/empty handling — map to "Not Present" if the attribute supports it
+    // Generic null/empty handling
     if (attrValue === null || attrValue === undefined || attrValue === "" || String(attrValue).toLowerCase() === "null") {
+      // Adequacy attributes: null means Adequate (scoring engine defaults to 1 = Adequate)
+      const ADEQUACY_ATTRS = new Set(["Line of Sight", "Facility access"]);
+      if (ADEQUACY_ATTRS.has(attrName)) return "Adequate";
       const opts = ATTRIBUTE_OPTIONS[attrName];
       if (opts && opts.includes("Not Present")) return "Not Present";
       return ""; // no valid category — exclude this segment from toggle counts
@@ -2031,7 +2043,12 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 ) : (
                   /* Layer 2 chips each followed immediately by their Layer 3 children */
                   <Flex direction="column" gap="2">
-                    {(ATTRIBUTE_OPTIONS[categoryFilterAttribute] ?? availableCategories).map(category => {
+                    {(() => {
+                      const options = (ATTRIBUTE_OPTIONS[categoryFilterAttribute] ?? availableCategories).filter(o => o !== "Not Selected");
+                      // Compute a shared chip width from the longest label so all chips match
+                      const longestLen = Math.max(...options.map(o => o.length));
+                      const chipW = `${longestLen * 9 + 64}px`;
+                      return options.map(category => {
                       const isOn = categoryToggles[categoryFilterAttribute]?.[category] ?? true;
                       const hexColor = getCategoryColor(categoryFilterAttribute, category);
                       const subcatConfig = SUBCATEGORY_MAP[categoryFilterAttribute];
@@ -2044,7 +2061,9 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                           <Flex
                             as="button"
                             align="center"
+                            justify="space-between"
                             gap="2"
+                            w={chipW}
                             px="3"
                             py="1.5"
                             borderWidth="1px"
@@ -2174,7 +2193,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                           )}
                         </Box>
                       );
-                    })}
+                    });
+                    })()}
                   </Flex>
                   )}
                 </>
@@ -2187,9 +2207,10 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
           <Box h="650px">
             {loading && (
-              <Box p="6">
-                <Text color="gray.500">Loading map…</Text>
-              </Box>
+              <Flex p="6" direction="column" align="center" justify="center" h="100%">
+                <Spinner size="xl" color="blue.500" borderWidth="4px" />
+                <Text color="gray.500" mt="4" fontWeight="500">Loading map and computing scores... This might take a while for large projects.</Text>
+              </Flex>
             )}
             {err && (
               <Box p="6">
@@ -2205,6 +2226,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   maxZoom={22}
                   style={{ width: "100%", height: "100%" }}
                   scrollWheelZoom
+                  preferCanvas={true}
                 >
                   <MapCursorController
                     mode={(isDeleteMode || isPolygonMode) ? 'delete' : (isPointAddMode || isPolygonAddMode) ? 'add' : 'default'}
@@ -2219,7 +2241,11 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   />
 
                   {/* Tile Layer */}
-                  <ThemeAwareTileLayer />
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                    attribution='&copy; OpenStreetMap contributors & CARTO'
+                    maxZoom={22}
+                  />
 
                   {/* Auto-fit bounds if data is available and shouldAutoFit is true */}
                   {allLatLngs.length > 0 && <FitBounds points={allLatLngs} shouldFit={shouldAutoFit} />}
@@ -2419,7 +2445,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                           </td>
                         </tr>
                       ) : (
-                        sortedData.map(({ idx, latlng, f, projectName, color, attributes }, globalIdx) => (
+                        sortedData.slice(0, 100).map(({ idx, latlng, f, projectName, color, attributes }, globalIdx) => (
                           <tr key={`${projectName}-${idx}-${globalIdx}`}>
                             {tableColumns.map(col => {
                               const value = getColumnValue(
@@ -2446,6 +2472,15 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                             })}
                           </tr>
                         ))
+                      )}
+                      {sortedData.length > 100 && (
+                        <tr>
+                          <td colSpan={tableColumns.length} style={{ padding: "16px", textAlign: "center", borderBottom: "1px solid #e2e8f0", backgroundColor: "#f8fafc" }}>
+                            <Text color="gray.600" fontSize="sm" fontWeight="500">
+                              Showing top 100 results for performance. Please use the "Download CSV" button to view all {sortedData.length} records.
+                            </Text>
+                          </td>
+                        </tr>
                       )}
                     </tbody>
                   </table>

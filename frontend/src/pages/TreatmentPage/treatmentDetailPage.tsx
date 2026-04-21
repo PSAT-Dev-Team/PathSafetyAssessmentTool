@@ -15,22 +15,7 @@ import {
 } from "@chakra-ui/react";
 import { Switch } from "../../components/ui/switch";
 
-import type { Feature, FeatureCollection, LineString, Position } from "geojson";
-import L from "leaflet";
-import proj4 from "proj4";
-
-// SVY21 -> WGS84 projection (same as GeoDataPanel and PathAnalysisMapView)
-proj4.defs(
-  "EPSG:3414",
-  "+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 +ellps=WGS84 +units=m +no_defs"
-);
-const to4326 = (p: Position): [number, number] => {
-  const x = p[0];
-  const y = p[1];
-  if (x >= 90 && x <= 120 && y >= -10 && y <= 20) return [y, x]; // already WGS84
-  const [lon, lat] = proj4("EPSG:3414", "EPSG:4326", p as [number, number]) as [number, number];
-  return [lat, lon];
-};
+import type { Feature, FeatureCollection, LineString } from "geojson";
 
 import {
   fetchProjectDetail,
@@ -460,12 +445,6 @@ export default function TreatmentDetailPage() {
   const [showPostTreatment, setShowPostTreatment] = useState<boolean>(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Map zoom state - set to project bounds when user clicks a project tab.
-  // panKey is a monotonic counter that forces the PanToBounds effect to re-fire
-  // even when clicking the same project tab (same bounds ref from useMemo).
-  const [panToBounds, setPanToBounds] = useState<L.LatLngBounds | null>(null);
-  const [panKey, setPanKey] = useState(0);
-
   // Treatment application state
   const [treatmentState, setTreatmentState] = useState<Record<number, {
     applied: boolean;
@@ -524,26 +503,6 @@ export default function TreatmentDetailPage() {
     }
     return null;
   }, [projectMap]);
-
-  // Pre-compute Leaflet LatLngBounds for each project (used for tab-click map zoom)
-  // Mirrors PathAnalysisMapView's projectBounds pattern
-  const projectBounds = useMemo(() => {
-    const boundsMap: Record<string, L.LatLngBounds> = {};
-    for (const p of projectMap) {
-      const pts: [number, number][] = [];
-      for (let i = p.startIndex; i < p.startIndex + p.count; i++) {
-        const feat = geoFeatures[i] as any;
-        const coords = feat?.geometry?.coordinates;
-        if (Array.isArray(coords) && coords.length > 0) {
-          pts.push(to4326(coords[0] as Position));
-        }
-      }
-      if (pts.length > 0) {
-        boundsMap[p.name] = L.latLngBounds(pts.map(([lat, lng]) => L.latLng(lat, lng)));
-      }
-    }
-    return boundsMap;
-  }, [projectMap, geoFeatures]);
 
   // Get segment count for a specific project
   const getProjectSegmentCount = useCallback((projectName: string): number => {
@@ -683,17 +642,7 @@ export default function TreatmentDetailPage() {
         newMap.push({ name: res.name, startIndex: start, count, detail: res.detail });
         newAttrs.push(...res.attrs);
         newGeo.push(...res.geo);
-        
-        // Pad scores correctly in case a project doesn't have computed scores yet
-        // Missing this will misalign the activeScores array index against geoFeatures index
-        const paddedScores = [...res.scores];
-        if (paddedScores.length < count) {
-          const emptyScore = {};
-          while (paddedScores.length < count) {
-            paddedScores.push(emptyScore);
-          }
-        }
-        newScores.push(...paddedScores);
+        newScores.push(...res.scores);
         start += count;
       }
 
@@ -942,24 +891,17 @@ export default function TreatmentDetailPage() {
   }, [resolveIndex, currentIndex, selectedTreatments, imgRef]);
 
   const handleConfirmApplyToAll = async () => {
-    if (selectedTreatments.size === 0) return;
+    if (selectedTreatments.size === 0 || !currentCtx) return;
     setApplyLoading(true);
     setOpenConfirmAlert(false);
     try {
         const allDetails: any[] = [];
-        // Apply selected treatments across ALL loaded projects
-        for (const proj of projectNames) {
-          for (const id of Array.from(selectedTreatments)) {
-            try {
-              const res = await applySpecificTreatment(proj, id);
-              if (res.details) {
-                res.details.forEach((d: any) => d.projectName = proj);
+        for (const id of Array.from(selectedTreatments)) {
+            const res = await applySpecificTreatment(currentCtx.name, id);
+            if (res.details) {
+                res.details.forEach((d: any) => d.projectName = currentCtx.name);
                 allDetails.push(...res.details);
-              }
-            } catch (e: any) {
-              console.error(`Apply treatment ${id} to ${proj} failed:`, e);
             }
-          }
         }
         window.dispatchEvent(new CustomEvent("psat:treat:all:completed", { detail: allDetails }));
         setSelectedTreatments(new Set());
@@ -1117,14 +1059,6 @@ export default function TreatmentDetailPage() {
                   const firstSegmentPage = getProjectFirstSegmentIndex(proj) + 1;
                   setCurrentPage(firstSegmentPage);
                   setPageInput(String(firstSegmentPage));
-                  // Zoom both maps to this project's geographic extent.
-                  // Incrementing panKey forces PanToBounds' useEffect to re-fire
-                  // even if the bounds object reference is the same (useMemo cache hit).
-                  const bounds = projectBounds[proj];
-                  if (bounds) {
-                    setPanToBounds(bounds);
-                    setPanKey(k => k + 1);
-                  }
                 }}
                 variant={isActive ? "solid" : "outline"}
                 colorPalette={isActive ? "blue" : "gray"}
@@ -1190,10 +1124,8 @@ export default function TreatmentDetailPage() {
             containerHeight={MAP_HEIGHT}
             subtitle="Before Treatment"
             geoFeatures={geoFeatures as Feature<LineString, any>[]}
-            startIndex={0}
+            startIndex={currentCtx ? getProjectFirstSegmentIndex(currentCtx.name) : 0}
             scores={scores as any}
-            panToBounds={panToBounds}
-            panKey={panKey}
           />
         </GridItem>
 
@@ -1212,9 +1144,7 @@ export default function TreatmentDetailPage() {
             scores={afterTreatmentScores as any}
             subtitle="After Treatment"
             geoFeatures={geoFeatures as Feature<LineString, any>[]}
-            startIndex={0}
-            panToBounds={panToBounds}
-            panKey={panKey}
+            startIndex={currentCtx ? getProjectFirstSegmentIndex(currentCtx.name) : 0}
           />
         </GridItem>
       </Grid>
@@ -1229,42 +1159,38 @@ export default function TreatmentDetailPage() {
             display="flex"
             flexDirection="column"
             bg="gray.50"
-            _dark={{ bg: "gray.800", borderColor: "gray.600" }}
+            _dark={{ bg: "gray.800" }}
             borderWidth="1px"
             borderColor="gray.200"
             borderRadius="md"
             overflow="hidden"
           >
-          <Box p="3" borderBottomWidth="1px" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
+          <Box p="3" borderBottomWidth="1px" borderColor="gray.200" _dark={{ borderColor: "gray.700" }}>
             <Text fontSize="sm" fontWeight="bold" color="gray.700" _dark={{ color: "gray.200" }}>
               Treatment Options
             </Text>
             <Box mt="2">
-              <Box
-                as="select"
+              <select
                 value={accordionView}
-                onChange={(e: any) => {
+                onChange={(e) => {
                   setAccordionView(e.target.value as any);
                   setSelectedTreatments(new Set());
                 }}
-                w="100%"
-                p="6px"
-                borderRadius="md"
-                borderWidth="1px"
-                borderColor="gray.300"
-                bg="white"
-                color="gray.900"
-                fontSize="sm"
-                cursor="pointer"
-                _dark={{
-                  bg: "gray.700",
-                  borderColor: "gray.600",
-                  color: "white"
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  borderRadius: '4px',
+                  border: '1px solid var(--chakra-colors-gray-300)',
+                  backgroundColor: 'white',
+                  color: 'inherit',
+                  fontSize: '14px',
+                  cursor: 'pointer'
                 }}
+                className="theme-select"
               >
                 <option value="segment">By Segment</option>
                 <option value="treatment">By Treatment</option>
-              </Box>
+              </select>
             </Box>
           </Box>
 
@@ -1388,7 +1314,7 @@ export default function TreatmentDetailPage() {
           </Box>
 
           {/* Action Buttons Footer */}
-          <Box p="3" borderTopWidth="1px" borderColor="gray.200" bg="white" _dark={{ borderColor: "gray.600", bg: "gray.800" }}>
+          <Box p="3" borderTopWidth="1px" borderColor="gray.200" bg="white" _dark={{ borderColor: "gray.700", bg: "gray.800" }}>
             <Flex direction="column" gap="2">
               <Flex gap="2">
                 <Button
@@ -1595,7 +1521,7 @@ export default function TreatmentDetailPage() {
               p="2"
               borderBottomWidth="1px"
               borderColor="gray.200"
-              _dark={{ borderColor: "gray.600" }}
+              _dark={{ borderColor: "gray.700" }}
               align="center"
               justify="space-between"
             >
@@ -1648,10 +1574,10 @@ export default function TreatmentDetailPage() {
           <Dialog.Positioner>
             <Dialog.Content>
               <Dialog.Header>
-                <Dialog.Title>Apply Treatments to {projectNames.length > 1 ? "All Projects" : "Project"}</Dialog.Title>
+                <Dialog.Title>Apply Treatments to Project</Dialog.Title>
               </Dialog.Header>
               <Dialog.Body>
-                Are you sure you want to apply <strong>{selectedTreatments.size}</strong> treatment(s) to <strong>all eligible segments</strong> across {projectNames.length > 1 ? (<><strong>{projectNames.length}</strong> loaded projects</>) : "this project"}?
+                Are you sure you want to logically apply <strong>{selectedTreatments.size}</strong> treatment(s) to <strong>all eligible segments</strong> across this project?
               </Dialog.Body>
               <Dialog.Footer>
                 <Dialog.ActionTrigger asChild>

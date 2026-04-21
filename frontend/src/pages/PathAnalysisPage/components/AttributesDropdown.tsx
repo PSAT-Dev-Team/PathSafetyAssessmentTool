@@ -489,7 +489,7 @@ export const SUBCATEGORY_MAP: Record<
   "Curvature": {
     childAttr: "Curvature Sub-category",
     parentCategories: {
-      "Sharp Turn Present": ["<6.5m", "6.5–<10m"],
+      "Sharp Turn Present": ["Sharp Bend", "Path Junction", "Both"],
       "No Sharp Turn Present": ["10–18m", ">18m"],
     },
   },
@@ -655,8 +655,9 @@ export function getCategoryColor(attribute: string, category: string): string {
       ">4m":            "#2563EB",
     },
     "Curvature Sub-category": {
-      "<6.5m":          "#DC2626",
-      "6.5\u2013<10m":  "#EA580C",
+      "Sharp Bend":     "#DC2626",
+      "Path Junction":  "#EA580C",
+      "Both":           "#9333EA",
       "10\u201318m":    "#16A34A",
       ">18m":           "#2563EB",
     },

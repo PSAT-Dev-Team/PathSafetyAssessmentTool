@@ -1866,18 +1866,6 @@ export default function CodingPage() {
           </Box>
         </GridItem>
 
-        {currentFeature?.geometry?.type === "LineString" && (
-          <GridItem colSpan={{ base: 1, md: 2 }}>
-            <AnalysisPanel
-              projectName={currentProjectName!}
-              coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
-              segmentIndex={currentIndex}
-              grade={currentAttr?.["Grade"] as number | null}
-              gradientPct={currentAttr?.["Gradient %"] as number | null}
-            />
-          </GridItem>
-        )}
-
         <GridItem colSpan={{ base: 1, md: 2 }}>
           <GeoDataPanel
             projectName={currentProjectName!}
@@ -1892,6 +1880,18 @@ export default function CodingPage() {
             onDataChange={refreshCurrentProject}
           />
         </GridItem>
+
+        {currentFeature?.geometry?.type === "LineString" && (
+          <GridItem colSpan={{ base: 1, md: 2 }}>
+            <AnalysisPanel
+              projectName={currentProjectName!}
+              coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
+              segmentIndex={currentIndex}
+              grade={currentAttr?.["Grade"] as number | null}
+              gradientPct={currentAttr?.["Gradient %"] as number | null}
+            />
+          </GridItem>
+        )}
 
         <GridItem colSpan={{ base: 1, md: 2 }}>
           <AutocodeValidation
