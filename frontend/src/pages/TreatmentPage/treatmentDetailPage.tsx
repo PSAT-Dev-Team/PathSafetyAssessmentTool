@@ -42,6 +42,7 @@ import {
   fetchAttributeMappings,
   previewTreatments,
   applySpecificTreatment,
+  getTreatmentEffectiveness,
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
@@ -418,9 +419,16 @@ export default function TreatmentDetailPage() {
   const [attrs, setAttrs] = useState<AttributeRow[]>([]);
   const [accordionView, setAccordionView] = useState<"segment" | "treatment">("segment");
 
+  // Effectiveness = # of segments (across all loaded projects) whose Overall
+  // Risk Level Band improves when the treatment is applied in isolation.
+  // Keyed by treatment id; populated asynchronously from the backend once per
+  // project set, used to rank the "By Treatment" list top-down.
+  const [effectivenessCounts, setEffectivenessCounts] = useState<Record<number, number>>({});
+  const [effectivenessLoading, setEffectivenessLoading] = useState<boolean>(false);
+
   const allApplicableTreatments = useMemo(() => {
     if (!attrs || attrs.length === 0) return [];
-    
+
     const uniqueMap = new Map<number, Treatment>();
     attrs.forEach(row => {
       // getApplicableTreatments expects a dict. It's safe to cast row.
@@ -431,9 +439,14 @@ export default function TreatmentDetailPage() {
         }
       });
     });
-    
-    return Array.from(uniqueMap.values()).sort((a,b) => a.id - b.id);
-  }, [attrs]);
+
+    return Array.from(uniqueMap.values()).sort((a, b) => {
+      const ea = effectivenessCounts[a.id] ?? 0;
+      const eb = effectivenessCounts[b.id] ?? 0;
+      if (eb !== ea) return eb - ea;
+      return a.id - b.id;
+    });
+  }, [attrs, effectivenessCounts]);
 
   const [geoFeatures, setGeoFeatures] = useState<Feature[]>([]);
   const [scores, setScores] = useState<Record<string, any>[]>([]);
@@ -735,6 +748,38 @@ export default function TreatmentDetailPage() {
 
     return () => { cancelled = true; };
   }, [projectNames, projectMap]);
+
+  // Fetch per-treatment effectiveness counts aggregated across loaded projects,
+  // used to rank the "By Treatment" list top-down by most segments improved.
+  useEffect(() => {
+    if (projectMap.length === 0) return;
+
+    let cancelled = false;
+    setEffectivenessLoading(true);
+    (async () => {
+      try {
+        const results = await Promise.all(
+          projectMap.map(p => getTreatmentEffectiveness(p.name).catch(() => null))
+        );
+        if (cancelled) return;
+
+        const aggregated: Record<number, number> = {};
+        for (const r of results) {
+          if (!r || !r.ok) continue;
+          for (const [tidStr, count] of Object.entries(r.counts)) {
+            const tid = parseInt(tidStr, 10);
+            if (!Number.isFinite(tid)) continue;
+            aggregated[tid] = (aggregated[tid] ?? 0) + (count ?? 0);
+          }
+        }
+        setEffectivenessCounts(aggregated);
+      } finally {
+        if (!cancelled) setEffectivenessLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [projectMap]);
 
   useEffect(() => {
     fetchData();
@@ -1321,6 +1366,13 @@ export default function TreatmentDetailPage() {
                             {t.name}
                             {isApplied && " ✓"}
                           </Text>
+                          {accordionView === "treatment" && (
+                            <Text fontSize="2xs" color="blue.600" _dark={{ color: "blue.300" }} mt="1" fontWeight="semibold">
+                              {effectivenessLoading && effectivenessCounts[t.id] === undefined
+                                ? "Improves …/…"
+                                : `Improves ${effectivenessCounts[t.id] ?? 0}/${attrs.length} segments`}
+                            </Text>
+                          )}
                           {t.description && (
                             <Text fontSize="2xs" color="gray.500" _dark={{ color: "gray.400" }} mt="1">
                               {t.description}

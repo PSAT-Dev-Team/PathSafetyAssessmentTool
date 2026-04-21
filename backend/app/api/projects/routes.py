@@ -1452,6 +1452,95 @@ def preview_treatments(project_name: str):
         return fail(f"Error previewing treatments: {str(e)}", 500)
 
 
+@bp.post("/<project_name>/treatments/effectiveness")
+def treatment_effectiveness(project_name: str):
+    """
+    Count, per treatment, how many segments in the project would have their
+    Overall Risk Level Band *improve* (band decreases) if that treatment
+    were applied in isolation. Used by the frontend to rank the
+    "By Treatment" list top-down by effectiveness.
+
+    Request body (optional):
+        { "treatment_ids": [1, 2, 3, ...] }   # defaults to all 25
+
+    Response:
+        {
+            "ok": true,
+            "total_segments": 412,
+            "counts": { "1": 180, "2": 0, "3": 45, ... }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        data = request.get_json(silent=True) or {}
+        requested_ids = data.get("treatment_ids")
+        if requested_ids is None:
+            requested_ids = [t["id"] for t in TREATMENTS]
+        if not isinstance(requested_ids, list):
+            return fail("treatment_ids must be a list", 400)
+
+        attrs_df = ver.attributes.df
+        n = len(attrs_df)
+        if n == 0:
+            return jsonify({"ok": True, "total_segments": 0, "counts": {str(tid): 0 for tid in requested_ids}})
+
+        # Baseline scoring once
+        before_df = calculate_cyclerap_score_native(attrs_df)
+        before_band = before_df["Overall Risk Level Band"].to_numpy()
+
+        treatment_map = {t["id"]: t for t in TREATMENTS}
+        counts: dict[str, int] = {}
+
+        for tid in requested_ids:
+            if tid not in treatment_map:
+                counts[str(tid)] = 0
+                continue
+            treatment = treatment_map[tid]
+
+            # Applicability mask (vectorized): OR of trigger sets, AND within a set
+            mask = pd.Series(False, index=attrs_df.index)
+            for trigger_set in treatment.get("triggers", []):
+                set_mask = pd.Series(True, index=attrs_df.index)
+                for attr_name, valid_values in trigger_set.items():
+                    if attr_name not in attrs_df.columns:
+                        set_mask = pd.Series(False, index=attrs_df.index)
+                        break
+                    set_mask &= attrs_df[attr_name].isin(valid_values)
+                mask |= set_mask
+
+            if not mask.any():
+                counts[str(tid)] = 0
+                continue
+
+            modified = attrs_df.copy()
+            for attr_name, new_value in treatment.get("effects", {}).items():
+                if attr_name in modified.columns:
+                    modified.loc[mask, attr_name] = new_value
+                else:
+                    modified[attr_name] = None
+                    modified.loc[mask, attr_name] = new_value
+
+            after_df = calculate_cyclerap_score_native(modified)
+            after_band = after_df["Overall Risk Level Band"].to_numpy()
+
+            improved = ((after_band < before_band) & mask.to_numpy()).sum()
+            counts[str(tid)] = int(improved)
+
+        return jsonify({
+            "ok": True,
+            "total_segments": int(n),
+            "counts": counts,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error computing treatment effectiveness: {str(e)}", 500)
+
+
 @bp.get("/<project_name>/treatments/all")
 def get_all_treatments(project_name: str):
     """
