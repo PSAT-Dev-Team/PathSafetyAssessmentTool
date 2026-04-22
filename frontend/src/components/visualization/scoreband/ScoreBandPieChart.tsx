@@ -200,7 +200,7 @@ export default function ScoreBandPieChart({
               _dark={{ color: "white" }}
             >
               <Box w="12px" h="12px" borderRadius="full" bg={item.color} flexShrink={0} />
-              <Text fontSize="xs" fontWeight="bold">{item.label} {item.percentage.toFixed(0)}%</Text>
+              <Text fontSize="xs" fontWeight="bold">{item.label}: {item.count}</Text>
             </Flex>
           ))}
         </Flex>

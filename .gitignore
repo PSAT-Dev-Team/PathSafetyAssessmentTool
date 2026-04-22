@@ -44,3 +44,7 @@ CycleRAP - model - generation v2.13 - to suppliers.xlsm
 Obstacles 2/
 completed.csv
 
+
+# OS specific files
+.DS_Store
+**/.DS_Store

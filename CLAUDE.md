@@ -1,5 +1,9 @@
 # CLAUDE.md - PathSafetyAssessmentTool
 
+## Standard Protocols
+
+- **Read actions (Grep, Glob, Read, Bash reads):** Execute without asking for permission — never prompt the user before reading files or searching the codebase.
+
 ## Project Overview
 Path Safety Assessment Tool for LTA - a React + Python (Flask) application for analyzing cycling path safety using CycleRAP methodology.
 

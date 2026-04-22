@@ -505,23 +505,40 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
         lookup = _load_gradient_lookup()
         if not lookup:
             return None
-        # Try exact match first, then strip project prefix, then suffix match
         key = image_ref
         if key not in lookup and project_name:
             prefix = project_name + "_"
             if key.startswith(prefix):
                 key = key[len(prefix):]
-        if key not in lookup:
-            # Last resort: find any CSV entry whose key is a suffix of image_ref
-            bare = image_ref.split("_", 1)[-1] if "_" in image_ref else image_ref
+
+        import os
+        key_stem = os.path.splitext(key)[0]
+        
+        matched_key = None
+        if key in lookup:
+            matched_key = key
+        else:
+            # Check by exact stem (extension-agnostic)
             for k in lookup:
-                if image_ref.endswith(k) or k.endswith(bare):
-                    key = k
+                if os.path.splitext(k)[0] == key_stem:
+                    matched_key = k
                     break
-        if key not in lookup:
+
+        if not matched_key:
+            # Last resort: find any CSV entry whose stem is a suffix
+            bare = key.split("_", 1)[-1] if "_" in key else key
+            bare_stem = os.path.splitext(bare)[0]
+            for k in lookup:
+                k_stem = os.path.splitext(k)[0]
+                if key_stem.endswith(k_stem) or k_stem.endswith(bare_stem):
+                    matched_key = k
+                    break
+
+        if not matched_key:
             print(f"[Gradient] no entry for '{image_ref}' — skipping", flush=True)
             return None
-        grade_coded, grade_pct = lookup[key]
+            
+        grade_coded, grade_pct = lookup[matched_key]
         print(f"[Gradient] {image_ref}: {grade_pct:+.2f}% → Grade {grade_coded}", flush=True)
         if grade_coded not in (1, 2):
             print(f"[Gradient] WARNING: unexpected Grade value {grade_coded!r} for {image_ref} — skipping")
@@ -1539,6 +1556,73 @@ def treatment_effectiveness(project_name: str):
         import traceback
         traceback.print_exc()
         return fail(f"Error computing treatment effectiveness: {str(e)}", 500)
+
+
+@bp.get("/<project_name>/treatments/effectiveness/segment/<int:segment_index>")
+def treatment_segment_effectiveness(project_name: str, segment_index: int):
+    """
+    For a single segment, compute the Overall Risk Level score drop for each
+    treatment applied in isolation. Used by the frontend to rank the
+    "By Segment" treatment list top-down by per-segment effectiveness.
+
+    Response:
+        {
+            "ok": true,
+            "score_drops": { "1": 4.2, "3": 0.0, ... }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        attrs_df = ver.attributes.df
+        n = len(attrs_df)
+        if segment_index < 0 or segment_index >= n:
+            return fail(f"segment_index {segment_index} out of range [0, {n})", 400)
+
+        row_df = attrs_df.iloc[[segment_index]]
+        before_score = float(calculate_cyclerap_score_native(row_df)["Overall Risk Level"].iloc[0])
+
+        score_drops: dict[str, float] = {}
+        for treatment in TREATMENTS:
+            tid = treatment["id"]
+
+            applicable = True
+            for trigger_set in treatment.get("triggers", []):
+                set_ok = True
+                for attr_name, valid_values in trigger_set.items():
+                    if attr_name not in row_df.columns:
+                        set_ok = False
+                        break
+                    if row_df[attr_name].iloc[0] not in valid_values:
+                        set_ok = False
+                        break
+                if set_ok:
+                    break
+            else:
+                applicable = False
+
+            if not applicable:
+                score_drops[str(tid)] = 0.0
+                continue
+
+            modified = row_df.copy()
+            for attr_name, new_value in treatment.get("effects", {}).items():
+                if attr_name in modified.columns:
+                    modified[attr_name] = new_value
+                else:
+                    modified[attr_name] = new_value
+
+            after_score = float(calculate_cyclerap_score_native(modified)["Overall Risk Level"].iloc[0])
+            score_drops[str(tid)] = round(before_score - after_score, 4)
+
+        return jsonify({"ok": True, "score_drops": score_drops})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error computing segment treatment effectiveness: {str(e)}", 500)
 
 
 @bp.get("/<project_name>/treatments/all")
@@ -2722,7 +2806,7 @@ def autocode_gis(project_name: str):
         # Bicycle Crossing Facility Detection
         # Set Crossing Facility = Present (1) and Crossing Type = "Bicycle Crossing"
         # if within 2m of a known bicycle crossing point (AMG_BC2025_shp)
-        if _needs("Crossing Facility", "Crossing Type") and _gis.is_bicycle_crossing(pt, dist=20):
+        if _needs("Crossing Facility", "Crossing Type") and _gis.is_bicycle_crossing(pt, dist=2):
             updates["Crossing Facility"] = 1          # 1 = Present
             updates["Crossing Type"] = "Bicycle Crossing"
 
@@ -3558,8 +3642,9 @@ def autocode_all(project_name: str):
 
                         # Apply per-attribute filter: only keep requested fields
                         if fields_filter:
-                            merged = {k: v for k, v in (merged or {}).items() if k in fields_filter}
-                            sources = {k: v for k, v in (sources or {}).items() if k in fields_filter}
+                            actual_filter = fields_filter + ["Gradient %"] if "Grade" in fields_filter else fields_filter
+                            merged = {k: v for k, v in (merged or {}).items() if k in actual_filter}
+                            sources = {k: v for k, v in (sources or {}).items() if k in actual_filter}
 
                         # Track which fields actually changed (for UI highlighting)
                         changed_fields: list = []

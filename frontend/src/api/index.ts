@@ -829,6 +829,22 @@ export async function getTreatmentEffectiveness(
   return res.json();
 }
 
+export type TreatmentSegmentEffectivenessResult = {
+  ok: boolean;
+  score_drops: Record<string, number>;
+};
+
+export async function getTreatmentSegmentEffectiveness(
+  project: string,
+  segmentIndex: number
+): Promise<TreatmentSegmentEffectivenessResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/effectiveness/segment/${segmentIndex}`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 /**
  * Apply all applicable recommended treatments to all segments in a project
  * @param project - Project name
