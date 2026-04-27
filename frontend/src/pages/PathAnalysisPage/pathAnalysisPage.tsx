@@ -40,10 +40,8 @@ export default function PathAnalysisPage() {
   const [lastUpdatedTo, setLastUpdatedTo] = useState(() => loadState("lastUpdatedTo", ""));
   const [tagsFilter, setTagsFilter] = useState<string[]>(() => loadState("tagsFilter", []));
 
-  // Active filter attributes (passed to FilterPanel for master toggles and MapView for filtering)
-  const [activeFilters, setActiveFilters] = useState<string[]>(() =>
-    loadState("activeFilters", [])
-  );
+  // Selected attributes for visualization (up to 5)
+  const [selectedAttributes, setSelectedAttributes] = useState<(string | null)[]>(() => loadState("selectedAttributes", [null]));
 
   // Combobox input states for filtering
   const [projectInputValue, setProjectInputValue] = useState("");
@@ -83,7 +81,7 @@ export default function PathAnalysisPage() {
     saveState("lastUpdatedFrom", lastUpdatedFrom);
     saveState("lastUpdatedTo", lastUpdatedTo);
     saveState("tagsFilter", tagsFilter);
-    saveState("activeFilters", activeFilters);
+    saveState("selectedAttributes", selectedAttributes);
   }, [
     selectedProjects,
     loadedProjects,
@@ -92,7 +90,7 @@ export default function PathAnalysisPage() {
     lastUpdatedFrom,
     lastUpdatedTo,
     tagsFilter,
-    activeFilters,
+    selectedAttributes
   ]);
 
   // Process projects
@@ -505,11 +503,11 @@ export default function PathAnalysisPage() {
         </Box>
       )}
 
-      {/* Filter Panel */}
+      {/* Attributes Dropdown Section */}
       <Box mb="6">
-        <FilterPanel
-          activeFilters={activeFilters}
-          onActiveFiltersChange={setActiveFilters}
+        <AttributesDropdown
+          selectedAttributes={selectedAttributes}
+          onAttributeChange={setSelectedAttributes}
         />
       </Box>
 
@@ -517,7 +515,7 @@ export default function PathAnalysisPage() {
       <Box mb="6">
         <PathAnalysisMapView
           selectedProjects={loadedProjects}
-          selectedAttributes={activeFilters}
+          selectedAttributes={selectedAttributes}
           onChartDataUpdate={setChartData}
         />
       </Box>
@@ -534,6 +532,7 @@ export default function PathAnalysisPage() {
           <AttributeDistributionChart
             categoryData={chartData.categoryDistributionData}
             selectedAttribute={chartData.primaryFocusAttribute}
+            selectedAttributes={selectedAttributes}
             categoryStatus={chartData.categoryStatus}
           />
         </Box>

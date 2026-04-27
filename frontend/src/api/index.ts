@@ -109,6 +109,19 @@ export interface RoadsInPolygonResult {
   fallback: boolean;
 }
 
+export interface RoadInBounds {
+  name: string;
+  exists: boolean;
+  coords: [number, number][];
+}
+
+export interface PlanningAreaInBounds {
+  name: string;
+  region?: string | null;
+  partIndex: number;
+  coords: [number, number][];
+}
+
 export async function queryRoadsInPolygon(polygon: [number, number][]): Promise<RoadsInPolygonResult> {
   const res = await fetch("/api/projects/roads-in-polygon", {
     method: "POST",
@@ -120,11 +133,52 @@ export async function queryRoadsInPolygon(polygon: [number, number][]): Promise<
   return { roads: (data?.roads ?? []) as RoadInPolygon[], fallback: data?.fallback ?? false };
 }
 
-export async function createProjectFromFolder(project_name: string, folder_name: string, tags: string[] = []) {
+export async function queryRoadsInBounds(
+  bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number },
+  limit = 2000
+): Promise<RoadInBounds[]> {
+  const params = new URLSearchParams({
+    minLat: String(bounds.minLat),
+    minLng: String(bounds.minLng),
+    maxLat: String(bounds.maxLat),
+    maxLng: String(bounds.maxLng),
+    limit: String(limit),
+  });
+  const res = await fetch(`/api/projects/roads-in-bounds?${params.toString()}`);
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return (data?.roads ?? []) as RoadInBounds[];
+}
+
+export async function queryPlanningAreasInBounds(
+  bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number },
+  limit = 500
+): Promise<PlanningAreaInBounds[]> {
+  const params = new URLSearchParams({
+    minLat: String(bounds.minLat),
+    minLng: String(bounds.minLng),
+    maxLat: String(bounds.maxLat),
+    maxLng: String(bounds.maxLng),
+    limit: String(limit),
+  });
+  const res = await fetch(`/api/projects/planning-areas-in-bounds?${params.toString()}`);
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return (data?.areas ?? []) as PlanningAreaInBounds[];
+}
+
+export async function createProjectFromFolder(
+  project_name: string,
+  folder_name: string | string[],
+  tags: string[] = [],
+  polygon?: [number, number][]
+) {
+  const folder_names = Array.isArray(folder_name) ? folder_name : undefined;
+  const single_folder_name = Array.isArray(folder_name) ? undefined : folder_name;
   const res = await fetch("/api/projects/folders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_name, folder_name, tags }),
+    body: JSON.stringify({ project_name, folder_name: single_folder_name, folder_names, tags, polygon }),
   });
   if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
   // 返回形如 { ok: true, name: "<project>" }

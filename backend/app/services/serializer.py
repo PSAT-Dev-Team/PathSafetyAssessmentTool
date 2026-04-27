@@ -384,6 +384,7 @@ class ProjectMetadata:
         self.progress     : int             = None
         self.size         : int             = None
         self.tags         : list[str]       = None
+        self.path_key     : str             = None
         self.verified     : bool            = False
         self.verified_segment_count : int   = 0
         self.autocoded_segment_count : int  = 0
@@ -411,6 +412,7 @@ class ProjectMetadata:
             self.progress   = data.get("progress")
             self.size       = data.get("size")
             self.tags       = data.get("tags")
+            self.path_key   = data.get("path_key")
             self.verified   = data.get("verified", False)
             self.verified_segment_count = data.get("verified_segment_count", 0)
             self.autocoded_segment_count = data.get("autocoded_segment_count", 0)
@@ -425,6 +427,7 @@ class ProjectMetadata:
             "progress": self.progress,
             "size": self.size,
             "tags": self.tags,
+            "path_key": self.path_key,
             "verified": self.verified,
             "verified_segment_count": self.verified_segment_count,
             "autocoded_segment_count": self.autocoded_segment_count

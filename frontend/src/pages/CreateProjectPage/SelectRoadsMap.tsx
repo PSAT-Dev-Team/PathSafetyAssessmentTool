@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Box,
   Button,
@@ -11,51 +11,22 @@ import {
   MapContainer,
   Polyline as LeafletPolyline,
   Polygon as LeafletPolygon,
-  Marker,
+  Popup,
   useMap,
   useMapEvents,
 } from "react-leaflet";
-import { FaDrawPolygon, FaMousePointer, FaTrash } from "react-icons/fa";
+import { FaDrawPolygon, FaMapMarkedAlt, FaRoad, FaTrash } from "react-icons/fa";
 import ThemeAwareTileLayer from "../../components/common/ThemeAwareTileLayer";
 import { MapCursorController } from "../../components/common/MapCursorController";
-import { queryRoadsInPolygon, type RoadInPolygon } from "../../api";
+import {
+  queryPlanningAreasInBounds,
+  queryRoadsInBounds,
+  queryRoadsInPolygon,
+  type PlanningAreaInBounds,
+  type RoadInBounds,
+} from "../../api";
 import "leaflet/dist/leaflet.css";
-import L, { divIcon } from "leaflet";
-
-// ── Draggable marker for polygon vertices ──────────────────────────
-interface DraggableVertexProps {
-  position: [number, number];
-  index: number;
-  icon: L.DivIcon;
-  onDrag: (index: number, latlng: L.LatLng) => void;
-  onDragEnd: (index: number, latlng: L.LatLng) => void;
-}
-
-function DraggableVertex({ position, index, icon, onDrag, onDragEnd }: DraggableVertexProps) {
-  const eventHandlers = useMemo(
-    () => ({
-      drag: (e: L.LeafletEvent) => {
-        const pos = (e.target as L.Marker).getLatLng();
-        onDrag(index, pos);
-      },
-      dragend: (e: L.LeafletEvent) => {
-        const pos = (e.target as L.Marker).getLatLng();
-        onDragEnd(index, pos);
-      },
-      click: (e: L.LeafletEvent) => L.DomEvent.stopPropagation(e as any),
-    }),
-    [index, onDrag, onDragEnd]
-  );
-
-  return (
-    <Marker
-      position={position}
-      draggable
-      icon={icon}
-      eventHandlers={eventHandlers}
-    />
-  );
-}
+import L from "leaflet";
 
 // ── Map click handler ──────────────────────────────────────────────
 function MapClickHandler({
@@ -76,43 +47,67 @@ function MapClickHandler({
   return null;
 }
 
+function MapViewportWatcher({
+  onViewportChange,
+}: {
+  onViewportChange: (bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number; zoom: number }) => void;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    const b = map.getBounds();
+    onViewportChange({
+      minLat: b.getSouth(),
+      minLng: b.getWest(),
+      maxLat: b.getNorth(),
+      maxLng: b.getEast(),
+      zoom: map.getZoom(),
+    });
+  }, [map, onViewportChange]);
+
+  useMapEvents({
+    moveend(e) {
+      const m = e.target;
+      const b = m.getBounds();
+      onViewportChange({
+        minLat: b.getSouth(),
+        minLng: b.getWest(),
+        maxLat: b.getNorth(),
+        maxLng: b.getEast(),
+        zoom: m.getZoom(),
+      });
+    },
+    zoomend(e) {
+      const m = e.target;
+      const b = m.getBounds();
+      onViewportChange({
+        minLat: b.getSouth(),
+        minLng: b.getWest(),
+        maxLat: b.getNorth(),
+        maxLng: b.getEast(),
+        zoom: m.getZoom(),
+      });
+    },
+  });
+
+  return null;
+}
+
 // ── Polygon overlay ────────────────────────────────────────────────
 function PolygonOverlay({
   points,
-  polygonRef,
-  polylineRef,
-  icon,
-  onDrag,
-  onDragEnd,
 }: {
   points: [number, number][];
-  polygonRef: React.RefObject<L.Polygon | null>;
-  polylineRef: React.RefObject<L.Polyline | null>;
-  icon: L.DivIcon;
-  onDrag: (i: number, ll: L.LatLng) => void;
-  onDragEnd: (i: number, ll: L.LatLng) => void;
 }) {
   if (points.length === 0) return null;
   return (
     <>
-      {points.map((pt, i) => (
-        <DraggableVertex
-          key={`v-${i}`}
-          position={pt}
-          index={i}
-          icon={icon}
-          onDrag={onDrag}
-          onDragEnd={onDragEnd}
-        />
-      ))}
       <LeafletPolyline
-        ref={polylineRef}
         positions={points}
         pathOptions={{ color: "red", dashArray: "5, 5" }}
       />
       {points.length >= 3 && (
         <LeafletPolygon
-          ref={polygonRef}
           positions={points}
           pathOptions={{ color: "red", fillOpacity: 0.15 }}
         />
@@ -131,56 +126,32 @@ export interface SelectedRoad {
 
 interface SelectRoadsMapProps {
   onSelectionChange: (roads: SelectedRoad[]) => void;
+  onPolygonChange: (polygon: [number, number][]) => void;
 }
 
-export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProps) {
+export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: SelectRoadsMapProps) {
   // Polygon state
   const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
-  const polygonRef = useRef<L.Polygon>(null);
-  const polylineRef = useRef<L.Polyline>(null);
-  const pointsRef = useRef(polygonPoints);
-  useEffect(() => { pointsRef.current = polygonPoints; }, [polygonPoints]);
 
   // Road results
   const [roads, setRoads] = useState<SelectedRoad[]>([]);
   const [querying, setQuerying] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [isFallback, setIsFallback] = useState(false);
-
-  // Vertex icon
-  const vertexIcon = useMemo(
-    () =>
-      divIcon({
-        className: "polygon-vertex",
-        html: `<div style="
-          background:red; width:10px; height:10px; border-radius:50%;
-          border:2px solid white; box-shadow:0 0 4px rgba(0,0,0,0.4); cursor:grab;
-        "></div>`,
-        iconSize: [20, 20],
-        iconAnchor: [10, 10],
-      }),
-    []
-  );
+  const [showRoadOverlay, setShowRoadOverlay] = useState(false);
+  const [viewportState, setViewportState] = useState<{ minLat: number; minLng: number; maxLat: number; maxLng: number; zoom: number } | null>(null);
+  const [overlayRoads, setOverlayRoads] = useState<RoadInBounds[]>([]);
+  const [overlayLoading, setOverlayLoading] = useState(false);
+  const [highlightRoadName, setHighlightRoadName] = useState<string | null>(null);
+  const [showPlanningAreaOverlay, setShowPlanningAreaOverlay] = useState(false);
+  const [overlayPlanningAreas, setOverlayPlanningAreas] = useState<PlanningAreaInBounds[]>([]);
+  const [planningAreaLoading, setPlanningAreaLoading] = useState(false);
+  const [highlightPlanningAreaKey, setHighlightPlanningAreaKey] = useState<string | null>(null);
 
   // ─ Handlers ─────────────────────────────────────────────────────
   const addPoint = useCallback((latlng: L.LatLng) => {
     setPolygonPoints((prev) => [...prev, [latlng.lat, latlng.lng]]);
-  }, []);
-
-  const handleDrag = useCallback((index: number, latlng: L.LatLng) => {
-    const pts = [...pointsRef.current];
-    pts[index] = [latlng.lat, latlng.lng];
-    if (polygonRef.current) polygonRef.current.setLatLngs(pts.map((p) => L.latLng(p[0], p[1])));
-    if (polylineRef.current) polylineRef.current.setLatLngs(pts.map((p) => L.latLng(p[0], p[1])));
-  }, []);
-
-  const handleDragEnd = useCallback((index: number, latlng: L.LatLng) => {
-    setPolygonPoints((prev) => {
-      const pts = [...prev];
-      pts[index] = [latlng.lat, latlng.lng];
-      return pts;
-    });
   }, []);
 
   const clearPolygon = useCallback(() => {
@@ -188,16 +159,107 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
     setRoads([]);
     setQueryError(null);
     setIsFallback(false);
+    setHighlightPlanningAreaKey(null);
     onSelectionChange([]);
-  }, [onSelectionChange]);
+    onPolygonChange([]);
+  }, [onPolygonChange, onSelectionChange]);
+
+  const selectPlanningArea = useCallback((area: PlanningAreaInBounds) => {
+    setIsDrawing(false);
+    setQueryError(null);
+    setIsFallback(false);
+    setHighlightPlanningAreaKey(`${area.name}-${area.partIndex}`);
+    setPolygonPoints(area.coords);
+  }, []);
+
+  useEffect(() => {
+    if (!showRoadOverlay || !viewportState || viewportState.zoom < 13) {
+      setOverlayRoads([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      setOverlayLoading(true);
+      try {
+        const result = await queryRoadsInBounds(
+          {
+            minLat: viewportState.minLat,
+            minLng: viewportState.minLng,
+            maxLat: viewportState.maxLat,
+            maxLng: viewportState.maxLng,
+          },
+          2500
+        );
+        if (!cancelled) {
+          setOverlayRoads(result);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setOverlayRoads([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setOverlayLoading(false);
+        }
+      }
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [showRoadOverlay, viewportState]);
+
+  useEffect(() => {
+    if (!showPlanningAreaOverlay || !viewportState || viewportState.zoom < 10) {
+      setOverlayPlanningAreas([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      setPlanningAreaLoading(true);
+      try {
+        const result = await queryPlanningAreasInBounds(
+          {
+            minLat: viewportState.minLat,
+            minLng: viewportState.minLng,
+            maxLat: viewportState.maxLat,
+            maxLng: viewportState.maxLng,
+          },
+          300
+        );
+        if (!cancelled) {
+          setOverlayPlanningAreas(result);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setOverlayPlanningAreas([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setPlanningAreaLoading(false);
+        }
+      }
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [showPlanningAreaOverlay, viewportState]);
 
   // ─ Query backend when polygon has ≥3 points ─────────────────────
   useEffect(() => {
     if (polygonPoints.length < 3) {
       setRoads([]);
       onSelectionChange([]);
+      onPolygonChange([]);
       return;
     }
+
+    onPolygonChange(polygonPoints);
 
     let cancelled = false;
     const timeout = setTimeout(async () => {
@@ -224,7 +286,7 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [polygonPoints]); // intentionally omitting onSelectionChange to avoid loop
+  }, [onPolygonChange, onSelectionChange, polygonPoints]);
 
   // ─ Selection helpers ────────────────────────────────────────────
   const toggleRoad = useCallback(
@@ -285,6 +347,34 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
             Click on the map to place vertices. Draw at least 3 points.
           </Text>
         )}
+
+        <Button
+          size="sm"
+          variant={showRoadOverlay ? "solid" : "outline"}
+          colorPalette={showRoadOverlay ? "blue" : "gray"}
+          onClick={() => setShowRoadOverlay((v) => !v)}
+        >
+          <FaRoad />
+          <Text ml={1}>{showRoadOverlay ? "Hide Roads" : "Show Roads"}</Text>
+        </Button>
+
+        {showRoadOverlay && overlayLoading && (
+          <Text fontSize="xs" color="gray.500">Loading roads…</Text>
+        )}
+
+        <Button
+          size="sm"
+          variant={showPlanningAreaOverlay ? "solid" : "outline"}
+          colorPalette={showPlanningAreaOverlay ? "teal" : "gray"}
+          onClick={() => setShowPlanningAreaOverlay((v) => !v)}
+        >
+          <FaMapMarkedAlt />
+          <Text ml={1}>{showPlanningAreaOverlay ? "Hide Planning Areas" : "Show Planning Areas"}</Text>
+        </Button>
+
+        {showPlanningAreaOverlay && planningAreaLoading && (
+          <Text fontSize="xs" color="gray.500">Loading planning areas…</Text>
+        )}
       </Flex>
 
       {/* Map */}
@@ -298,13 +388,63 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
           <ThemeAwareTileLayer />
           <MapCursorController mode={isDrawing ? "add" : "default"} />
           <MapClickHandler active={isDrawing} onPoint={addPoint} />
+          <MapViewportWatcher onViewportChange={setViewportState} />
+          {showPlanningAreaOverlay && overlayPlanningAreas.map((area) => {
+            const areaKey = `${area.name}-${area.partIndex}`;
+            const isHighlighted = highlightPlanningAreaKey === areaKey;
+            return (
+              <LeafletPolygon
+                key={areaKey}
+                positions={area.coords}
+                pathOptions={{
+                  color: isHighlighted ? "#0F766E" : "#0D9488",
+                  weight: isHighlighted ? 3 : 1.5,
+                  opacity: 0.9,
+                  fillColor: isHighlighted ? "#14B8A6" : "#5EEAD4",
+                  fillOpacity: isHighlighted ? 0.28 : 0.12,
+                }}
+                eventHandlers={{
+                  click: (e) => {
+                    L.DomEvent.stopPropagation(e as any);
+                    selectPlanningArea(area);
+                  },
+                }}
+              >
+                <Popup>
+                  <Text fontSize="sm" fontWeight="semibold">{area.name}</Text>
+                </Popup>
+              </LeafletPolygon>
+            );
+          })}
+          {showRoadOverlay && overlayRoads.map((road, idx) => (
+            <LeafletPolyline
+              key={`${road.name}-${idx}`}
+              positions={road.coords}
+              pathOptions={{
+                color: highlightRoadName === road.name ? "#1D4ED8" : (road.exists ? "#16A34A" : "#6B7280"),
+                weight: highlightRoadName === road.name ? 4 : 2,
+                opacity: 0.75,
+              }}
+              eventHandlers={{
+                click: () => {
+                  setHighlightRoadName(road.name);
+                  const hit = roads.find((r) => r.name === road.name);
+                  if (hit && !hit.selected) {
+                    toggleRoad(road.name);
+                  }
+                },
+              }}
+            >
+              <Popup>
+                <Text fontSize="xs" fontWeight="bold">{road.name}</Text>
+                <Text fontSize="xs" color={road.exists ? "green.600" : "orange.600"}>
+                  {road.exists ? "Available" : "Not Downloaded"}
+                </Text>
+              </Popup>
+            </LeafletPolyline>
+          ))}
           <PolygonOverlay
             points={polygonPoints}
-            polygonRef={polygonRef}
-            polylineRef={polylineRef}
-            icon={vertexIcon}
-            onDrag={handleDrag}
-            onDragEnd={handleDragEnd}
           />
         </MapContainer>
       </Box>
@@ -325,6 +465,12 @@ export default function SelectRoadsMap({ onSelectionChange }: SelectRoadsMapProp
       {!querying && polygonPoints.length >= 3 && roads.length === 0 && !queryError && (
         <Text fontSize="sm" color="gray.500" mt={2}>
           No roads found in selected area.
+        </Text>
+      )}
+
+      {showPlanningAreaOverlay && !planningAreaLoading && viewportState && viewportState.zoom < 10 && (
+        <Text fontSize="sm" color="gray.500" mt={2}>
+          Zoom in to level 10 or above to view planning areas.
         </Text>
       )}
 

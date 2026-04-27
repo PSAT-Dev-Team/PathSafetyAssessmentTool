@@ -14,6 +14,9 @@ from flask import (
 )
 import zipfile
 import io
+import json
+import re
+from bisect import bisect_left
 from pathlib import Path
 import urllib.parse
 import traceback
@@ -23,7 +26,7 @@ import app.services.global_var as global_var
 import pandas as pd
 import os
 import exifread
-from shapely.geometry import Point,LineString
+from shapely.geometry import Point,LineString,Polygon,box
 import geopandas as gpd
 import shutil
 import datetime
@@ -37,6 +40,49 @@ _INIT_LOCK = threading.Lock()
 _INIT_ERR = {"cv": None}
 
 _GIS_INSTANCE: "gis.GIS | None" = None
+_ROAD_SECTIONS_GDF: gpd.GeoDataFrame | None = None
+_PLANNING_AREAS_GDF: gpd.GeoDataFrame | None = None
+
+
+def _get_road_sections_gdf() -> gpd.GeoDataFrame:
+    global _ROAD_SECTIONS_GDF
+    if _ROAD_SECTIONS_GDF is not None:
+        return _ROAD_SECTIONS_GDF
+
+    backend_root = Path(__file__).resolve().parents[3]
+    road_shp_candidates = [
+        backend_root / "shapefiles" / "planningareas" / "ROADSECTIONLINE.shp",
+        backend_root / "shapefiles" / "Road_name" / "ROADSECTIONLINE.shp",
+        backend_root / "shapefiles" / "Road_name" / "ROADNETWORKLINE.shp",
+    ]
+    road_shp = next((candidate for candidate in road_shp_candidates if candidate.exists()), None)
+    if road_shp is None:
+        raise FileNotFoundError("No road sections shapefile found")
+
+    gdf = gpd.read_file(str(road_shp))
+    if gdf.crs and gdf.crs.to_epsg() != 4326:
+        gdf = gdf.to_crs(epsg=4326)
+
+    _ROAD_SECTIONS_GDF = gdf
+    return _ROAD_SECTIONS_GDF
+
+
+def _get_planning_areas_gdf() -> gpd.GeoDataFrame:
+    global _PLANNING_AREAS_GDF
+    if _PLANNING_AREAS_GDF is not None:
+        return _PLANNING_AREAS_GDF
+
+    backend_root = Path(__file__).resolve().parents[3]
+    planning_shp = backend_root / "shapefiles" / "planningareas" / "G_MP25_PLNG_AREA_NO_SEA_PL.shp"
+    if not planning_shp.exists():
+        raise FileNotFoundError("Planning areas shapefile not found")
+
+    gdf = gpd.read_file(str(planning_shp))
+    if gdf.crs and gdf.crs.to_epsg() != 4326:
+        gdf = gdf.to_crs(epsg=4326)
+
+    _PLANNING_AREAS_GDF = gdf
+    return _PLANNING_AREAS_GDF
 
 def _get_gis() -> "gis.GIS":
     global _GIS_INSTANCE
@@ -454,83 +500,323 @@ _warmup_thread.start()
 
 # ───────────────────────── Gradient lookup (module-level) ─────────────────────
 # Loaded once and cached for the lifetime of the server process.
-# Works for any project — the CSV accumulates entries across all project areas.
+_GRADIENT_PROFILE_CATALOG: "dict[str, dict] | None" = None
+_PROJECT_GRADIENT_CACHE: dict[str, dict[str, tuple[int, float]]] = {}
 
-_GRADIENT_LOOKUP: "dict | None" = None
+
+def _normalize_gradient_token(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", str(value or "")).strip("_").lower()
 
 
-def _load_gradient_lookup() -> dict:
-    """Load (and cache) the gradient lookup CSV. Returns {} if unavailable."""
-    global _GRADIENT_LOOKUP
-    if _GRADIENT_LOOKUP is not None:
-        return _GRADIENT_LOOKUP
-    lookup_path = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_lookup.csv"
-    if not lookup_path.exists():
-        _GRADIENT_LOOKUP = {}
-        return _GRADIENT_LOOKUP
+def _strip_survey_suffix(value: str) -> str:
+    return re.sub(r"(?:\d*q\d{2,4})$", "", _normalize_gradient_token(value), flags=re.IGNORECASE)
+
+
+def _rect_distance(bounds_a, bounds_b) -> float:
+    ax1, ay1, ax2, ay2 = bounds_a
+    bx1, by1, bx2, by2 = bounds_b
+    dx = max(bx1 - ax2, ax1 - bx2, 0.0)
+    dy = max(by1 - ay2, ay1 - by2, 0.0)
+    return math.hypot(dx, dy)
+
+
+def _same_xy(a, b, tol: float = 1e-3) -> bool:
+    return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
+
+
+def _stitch_gradient_centerline(gdf: gpd.GeoDataFrame) -> "LineString | None":
+    stitched = []
+    for geom in gdf.geometry:
+        if geom is None or geom.is_empty:
+            continue
+        if geom.geom_type == "MultiLineString":
+            parts = list(geom.geoms)
+            if not parts:
+                continue
+            geom = max(parts, key=lambda g: g.length)
+        if geom.geom_type != "LineString":
+            continue
+
+        coords = list(geom.coords)
+        if len(coords) < 2:
+            continue
+        if not stitched:
+            stitched.extend(coords)
+            continue
+
+        end_pt = stitched[-1]
+        start_dist = math.hypot(end_pt[0] - coords[0][0], end_pt[1] - coords[0][1])
+        reverse_dist = math.hypot(end_pt[0] - coords[-1][0], end_pt[1] - coords[-1][1])
+        if reverse_dist < start_dist:
+            coords = list(reversed(coords))
+
+        if _same_xy(stitched[-1], coords[0]):
+            stitched.extend(coords[1:])
+        else:
+            stitched.extend(coords)
+
+    if len(stitched) < 2:
+        return None
+    return LineString(stitched)
+
+
+def _load_gradient_profile_catalog() -> dict[str, dict]:
+    global _GRADIENT_PROFILE_CATALOG
+    if _GRADIENT_PROFILE_CATALOG is not None:
+        return _GRADIENT_PROFILE_CATALOG
+
+    base_dir = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_profiles"
+    result: dict[str, dict] = {}
+    if not base_dir.exists():
+        _GRADIENT_PROFILE_CATALOG = result
+        return result
+
+    for meta_path in sorted(base_dir.glob("*/metadata.json")):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            profile_path = meta_path.parent / "gradient_profile.csv"
+            if not profile_path.exists():
+                continue
+            if int(meta.get("valid_gradient_count") or 0) <= 0:
+                print(f"[Gradient] skipping profile '{meta_path.parent.name}' with no valid gradients")
+                continue
+            bounds = meta.get("path_bounds_svy21") or {}
+            meta["_bounds"] = None
+            if {"min_x", "min_y", "max_x", "max_y"} <= set(bounds):
+                meta["_bounds"] = (
+                    float(bounds["min_x"]),
+                    float(bounds["min_y"]),
+                    float(bounds["max_x"]),
+                    float(bounds["max_y"]),
+                )
+            aliases = {
+                _normalize_gradient_token(meta.get("path_key", "")),
+                _normalize_gradient_token(meta.get("display_name", "")),
+                _normalize_gradient_token(meta.get("source_project", "")),
+                _strip_survey_suffix(meta.get("path_key", "")),
+                _strip_survey_suffix(meta.get("display_name", "")),
+                _strip_survey_suffix(meta.get("source_project", "")),
+            }
+            aliases.discard("")
+            meta["_aliases"] = aliases
+            meta["_profile_path"] = str(profile_path)
+            result[str(meta.get("path_key") or meta_path.parent.name)] = meta
+        except Exception as exc:
+            print(f"[Gradient] WARNING: failed to read profile metadata {meta_path}: {exc}")
+
+    _GRADIENT_PROFILE_CATALOG = result
+    return result
+
+
+
+def _resolve_gradient_profile_for_project(project_name: str, centerline: LineString) -> "dict | None":
+    catalog = _load_gradient_profile_catalog()
+    if not catalog or centerline is None:
+        return None
+
+    project_path_key = None
     try:
-        import csv as _csv
-        result = {}
-        with open(lookup_path, newline="", encoding="utf-8") as f:
-            reader = _csv.DictReader(f)
-            if "Image Reference" not in (reader.fieldnames or []):
-                print("[Gradient] WARNING: gradient_lookup.csv missing 'Image Reference' column — skipping")
-                _GRADIENT_LOOKUP = {}
-                return _GRADIENT_LOOKUP
-            for row in reader:
-                try:
-                    img = row.get("Image Reference", "").strip()
-                    grade_pct_raw = row.get("gradient_pct", "").strip()
-                    grade_coded_raw = row.get("Grade", "").strip()
-                    if img and grade_coded_raw:
-                        grade_coded = int(float(grade_coded_raw))
-                        grade_pct = float(grade_pct_raw) if grade_pct_raw else float("nan")
-                        result[img] = (grade_coded, grade_pct)
-                except (ValueError, TypeError):
+        proj = get_ctx()["pm"].project(project_name)
+        project_path_key = getattr(proj.metadata, "path_key", None)
+    except Exception:
+        project_path_key = None
+
+    if project_path_key:
+        direct_match = catalog.get(project_path_key)
+        if direct_match:
+            return direct_match
+
+        normalized_override = _normalize_gradient_token(project_path_key)
+        for meta in catalog.values():
+            aliases = meta.get("_aliases") or set()
+            if normalized_override in aliases:
+                return meta
+
+    project_aliases = {_normalize_gradient_token(project_name), _strip_survey_suffix(project_name)}
+    project_bounds = centerline.bounds
+    project_length = float(centerline.length)
+
+    exact_matches = []
+    fallback_matches = []
+    for meta in catalog.values():
+        aliases = meta.get("_aliases") or set()
+        meta_len = float(meta.get("centerline_length_m") or 0.0)
+        len_diff = abs(project_length - meta_len) if meta_len else float("inf")
+
+        if aliases & project_aliases:
+            exact_matches.append((len_diff, meta))
+            continue
+
+        bounds = meta.get("_bounds")
+        if bounds is None:
+            continue
+        dist = _rect_distance(project_bounds, bounds)
+        fallback_matches.append((dist, len_diff, meta))
+
+    if exact_matches:
+        exact_matches.sort(key=lambda item: item[0])
+        return exact_matches[0][1]
+
+    if fallback_matches:
+        fallback_matches.sort(key=lambda item: (item[0], item[1]))
+        best_dist, best_len_diff, best_meta = fallback_matches[0]
+        best_len = float(best_meta.get("centerline_length_m") or project_length)
+        if best_dist <= 50.0 and best_len_diff <= max(75.0, 0.35 * best_len):
+            return best_meta
+
+    return None
+
+
+def _nearest_chainage_index(chainages: list[float], target: float) -> "int | None":
+    if not chainages:
+        return None
+    idx = bisect_left(chainages, target)
+    if idx <= 0:
+        return 0
+    if idx >= len(chainages):
+        return len(chainages) - 1
+    left = chainages[idx - 1]
+    right = chainages[idx]
+    return idx - 1 if abs(target - left) <= abs(right - target) else idx
+
+
+def _get_project_gradient_mapping(project_name: str) -> dict[str, tuple[int, float]]:
+    if project_name in _PROJECT_GRADIENT_CACHE:
+        return _PROJECT_GRADIENT_CACHE[project_name]
+
+    mapping: dict[str, tuple[int, float]] = {}
+    _PROJECT_GRADIENT_CACHE[project_name] = mapping
+
+    if not project_name:
+        return mapping
+
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        gpkg_path = proj.project_path / "geo_data.gpkg"
+        if not gpkg_path.exists():
+            print(f"[Gradient] no geo_data.gpkg for project '{project_name}'")
+            return mapping
+
+        gdf = gpd.read_file(gpkg_path)
+        if gdf.empty or "Image Reference" not in gdf.columns:
+            print(f"[Gradient] project '{project_name}' has no usable Image Reference column in geo_data.gpkg")
+            return mapping
+
+        if gdf.crs is None:
+            gdf = gdf.set_crs("EPSG:3414")
+        elif gdf.crs.to_epsg() != 3414:
+            gdf = gdf.to_crs(epsg=3414)
+
+        centerline = _stitch_gradient_centerline(gdf)
+        if centerline is None:
+            print(f"[Gradient] project '{project_name}' has no usable centerline for gradient lookup")
+            return mapping
+
+        meta = _resolve_gradient_profile_for_project(project_name, centerline)
+        if not meta:
+            print(f"[Gradient] no matching profile found for project '{project_name}'")
+            return mapping
+
+        profile_df = pd.read_csv(meta["_profile_path"])
+        if profile_df.empty or "chainage_m" not in profile_df.columns:
+            print(f"[Gradient] profile CSV missing chainage_m for '{meta.get('path_key')}'")
+            return mapping
+
+        profile_df = profile_df.sort_values("chainage_m").reset_index(drop=True)
+        chainages = [float(v) for v in profile_df["chainage_m"].tolist()]
+        if len(chainages) > 1:
+            diffs = [chainages[i] - chainages[i - 1] for i in range(1, len(chainages))]
+            step = float(pd.Series(diffs).median())
+        else:
+            step = 0.0
+        tolerance = max(step * 1.5, 1.0)
+
+        for _, row in gdf.iterrows():
+            image_ref = str(row.get("Image Reference") or "").strip()
+            geom = row.geometry
+            if not image_ref or geom is None or geom.is_empty:
+                continue
+            if geom.geom_type == "MultiLineString":
+                parts = list(geom.geoms)
+                if not parts:
                     continue
-        _GRADIENT_LOOKUP = result
-        print(f"[Gradient] Loaded {len(_GRADIENT_LOOKUP)} entries from gradient_lookup.csv")
-    except Exception as _e:
-        print(f"[Gradient] WARNING: could not load gradient_lookup.csv: {_e} — Grade will not be set")
-        _GRADIENT_LOOKUP = {}
-    return _GRADIENT_LOOKUP
+                geom = max(parts, key=lambda g: g.length)
+            if geom.geom_type != "LineString":
+                continue
+
+            midpoint = geom.interpolate(0.5, normalized=True)
+            chainage = float(centerline.project(midpoint))
+            idx = _nearest_chainage_index(chainages, chainage)
+            if idx is None:
+                continue
+            profile_row = profile_df.iloc[idx]
+            profile_chainage = float(profile_row.get("chainage_m", float("nan")))
+            if math.isnan(profile_chainage) or abs(profile_chainage - chainage) > tolerance:
+                continue
+
+            grade_raw = profile_row.get("Grade")
+            grad_raw = profile_row.get("gradient_pct")
+            if pd.isna(grade_raw) or pd.isna(grad_raw):
+                continue
+
+            grade_coded = int(float(grade_raw))
+            gradient_pct = float(grad_raw)
+            if grade_coded in (1, 2):
+                mapping[image_ref] = (grade_coded, gradient_pct)
+
+        print(
+            f"[Gradient] project '{project_name}' -> profile '{meta.get('path_key')}' mapped {len(mapping)} image refs",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[Gradient] WARNING: failed to build project gradient cache for '{project_name}': {exc}", flush=True)
+
+    return mapping
+
+
+def _lookup_project_gradient(project_name: str, image_ref: str) -> "tuple[int, float] | None":
+    mapping = _get_project_gradient_mapping(project_name)
+    if not mapping:
+        return None
+    if image_ref in mapping:
+        return mapping[image_ref]
+
+    if project_name and not image_ref.startswith(project_name + "_"):
+        prefixed = f"{project_name}_{image_ref}"
+        if prefixed in mapping:
+            return mapping[prefixed]
+
+    bare = image_ref.split("_", 1)[-1] if "_" in image_ref else image_ref
+    for key, value in mapping.items():
+        if key.endswith(bare) or bare.endswith(key):
+            return value
+    return None
 
 
 def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
                    project_name: str = "") -> "float | None":
-    """Inject Grade from the gradient lookup into *updates* (in-place).
+    """Inject Grade from the master gradient profile into *updates* (in-place).
+    The master profile is keyed by path_key + chainage; image refs are only used
+    inside a per-project cache built from the current project's geometry.
     Returns grade_pct if found, else None.
     """
     try:
-        lookup = _load_gradient_lookup()
-        if not lookup:
+        hit = _lookup_project_gradient(project_name, image_ref)
+        if not hit:
+            print(f"[Gradient] no profile entry for '{image_ref}' in project '{project_name}' — skipping", flush=True)
             return None
-        # Try exact match first, then strip project prefix, then suffix match
-        key = image_ref
-        if key not in lookup and project_name:
-            prefix = project_name + "_"
-            if key.startswith(prefix):
-                key = key[len(prefix):]
-        if key not in lookup:
-            # Last resort: find any CSV entry whose key is a suffix of image_ref
-            bare = image_ref.split("_", 1)[-1] if "_" in image_ref else image_ref
-            for k in lookup:
-                if image_ref.endswith(k) or k.endswith(bare):
-                    key = k
-                    break
-        if key not in lookup:
-            print(f"[Gradient] no entry for '{image_ref}' — skipping", flush=True)
-            return None
-        grade_coded, grade_pct = lookup[key]
-        print(f"[Gradient] {image_ref}: {grade_pct:+.2f}% → Grade {grade_coded}", flush=True)
+
+        grade_coded, grade_pct = hit
+        print(f"[Gradient] {image_ref}: {grade_pct:+.2f}% -> Grade {grade_coded}", flush=True)
         if grade_coded not in (1, 2):
             print(f"[Gradient] WARNING: unexpected Grade value {grade_coded!r} for {image_ref} — skipping")
             return None
         updates["Grade"] = grade_coded
         updates["Gradient %"] = round(grade_pct, 2)
         if sources is not None:
-            sources["Grade"] = "LAZ"
-            sources["Gradient %"] = "LAZ"
+            sources["Grade"] = "Gradient Profile"
+            sources["Gradient %"] = "Gradient Profile"
         return grade_pct
     except Exception as _e:
         print(f"[Gradient] WARNING: error injecting Grade for {image_ref}: {_e}")
@@ -816,6 +1102,7 @@ def get_project_metadata(project_name: str):
         "verified": getattr(proj.metadata, 'verified', False),
         "verified_segment_count": getattr(proj.metadata, 'verified_segment_count', 0),
         "autocoded_segment_count": getattr(proj.metadata, 'autocoded_segment_count', 0),
+        "path_key": getattr(proj.metadata, 'path_key', None),
         "date_created": proj.metadata.date_created.isoformat() if hasattr(proj.metadata, 'date_created') and proj.metadata.date_created else None,
         "last_updated": proj.metadata.last_updated.isoformat() if hasattr(proj.metadata, 'last_updated') and proj.metadata.last_updated else None
     })
@@ -2194,6 +2481,53 @@ def get_All_Img_Folder(folder_path, filename_df, imagePath):
     # 4. Return the original DataFrame for downstream use
     return filename_df
 
+def copy_project_images(folder_path, filename_df, imagePath, filename_prefix=None):
+    """
+    Copy images referenced by FILENAME into the project image folder.
+    When combining multiple source folders, prefix file names to avoid collisions.
+    """
+    if not os.path.isdir(folder_path):
+        raise FileNotFoundError(f"The folder at {folder_path} does not exist or is not a directory.")
+
+    os.makedirs(imagePath, exist_ok=True)
+    result_df = filename_df.copy()
+
+    for idx, img_name in result_df['FILENAME'].items():
+        src = os.path.join(folder_path, img_name)
+        dst_name = img_name if not filename_prefix else f"{filename_prefix}__{img_name}"
+        dst = os.path.join(imagePath, dst_name)
+
+        if os.path.isfile(src):
+            shutil.copy2(src, dst)
+            result_df.at[idx, 'FILENAME'] = dst_name
+        else:
+            print(f"Image {img_name} not found in folder {folder_path}.")
+
+    return result_df
+
+def build_project_geo_data(src_dir: Path, selection_polygon: Polygon | None = None):
+    df = get_image_folder_geo(str(src_dir))
+    if df.empty:
+        raise ValueError(f"No geotagged images found in folder '{src_dir.name}'")
+
+    if selection_polygon is not None:
+        df = df[df.geometry.apply(selection_polygon.covers)].reset_index(drop=True)
+        if df.empty:
+            return gpd.GeoDataFrame(columns=["LATITUDE", "LONGITUDE", "FILENAME", "geometry"], geometry="geometry", crs="EPSG:4326")
+
+    df = df.rename(columns={"latitude": "LATITUDE", "longitude": "LONGITUDE", "filename": "FILENAME"})
+    df = cycleRAP_VA.geoCode(df)
+    df = cycleRAP_VA.get_geo_points_by_distance(df, min_distance=10)
+    if "geometry" not in df.columns:
+        raise ValueError(f"Missing 'geometry' after geocoding for folder '{src_dir.name}'")
+
+    gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+    return cycleRAP_VA.convert_points_to_linestrings(gdf)
+
+def make_image_namespace(source_name: str) -> str:
+    namespace = "".join(ch if ch.isalnum() else "_" for ch in source_name).strip("_")
+    return namespace or "source"
+
 @bp.get("/folders")
 def list_input_folders():
     """
@@ -2212,68 +2546,414 @@ def list_input_folders():
     items.sort()
     return ok({"items": items})
 
+
+@bp.post("/roads-in-polygon")
+def roads_in_polygon():
+    """
+    Given a polygon (list of [lat, lon] vertices in WGS84), return the road
+    folders whose reference GPS points fall inside the polygon, or road sections,
+    or planning areas as fallback.
+
+    Body: { "polygon": [[lat1, lon1], [lat2, lon2], ...] }
+    Response: { "roads": [ { "name": "AMK AVE 1", "points": 24, "exists": true }, ... ], "fallback": false }
+    """
+    import csv
+    from shapely.geometry import Polygon as ShapelyPolygon, Point
+
+    data = request.get_json(silent=True) or {}
+    polygon_coords = data.get("polygon")
+    if not polygon_coords or len(polygon_coords) < 3:
+        return fail("polygon must have at least 3 vertices", 400)
+
+    # Build shapely polygon (lon, lat order for shapely)
+    try:
+        ring = [(pt[1], pt[0]) for pt in polygon_coords]  # swap to (lon, lat)
+        poly = ShapelyPolygon(ring)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+    except Exception as e:
+        return fail(f"Invalid polygon: {e}", 400)
+
+    # Check which folders already exist locally
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    in_path: Path = pm.in_path
+    backend_root = Path(__file__).resolve().parents[3]
+
+    # Merged result: roads from shapefile with exists flag from CSV + folder check
+    all_road_names: dict[str, dict] = {}  # { "ROAD NAME": { "points": count, "exists": bool } }
+
+    # Attempt 1: Load reference CSV (EXIF points) to mark which roads have images
+    csv_roads = set()
+    ref_csv_candidates = [
+        backend_root / "shapefiles" / "road_reference.csv",
+        backend_root / "app" / "shapefiles" / "road_reference.csv",
+    ]
+    ref_csv = next((candidate for candidate in ref_csv_candidates if candidate.exists()), None)
+
+    if ref_csv is not None:
+        with open(ref_csv, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                pt = Point(float(row["lon"]), float(row["lat"]))
+                if poly.contains(pt):
+                    name = row["road_name"]
+                    csv_roads.add(name)
+                    if name not in all_road_names:
+                        all_road_names[name] = {"points": 0, "exists": False}
+                    all_road_names[name]["points"] += 1
+
+    # Mark which CSV roads have folders
+    for name in csv_roads:
+        exists = in_path.exists() and (in_path / name).is_dir()
+        all_road_names[name]["exists"] = exists
+
+    # Fallback 1: road sections shapefile (add roads not in CSV)
+    try:
+        import geopandas as gpd
+        
+        print(f"[DEBUG] Querying road sections shapefile...")
+
+        road_shp_candidates = [
+            backend_root / "shapefiles" / "planningareas" / "ROADSECTIONLINE.shp",
+            backend_root / "shapefiles" / "Road_name" / "ROADSECTIONLINE.shp",
+            backend_root / "shapefiles" / "Road_name" / "ROADNETWORKLINE.shp",
+        ]
+        
+        road_shp = next((candidate for candidate in road_shp_candidates if candidate.exists()), None)
+        print(f"[DEBUG] Found road shapefile: {road_shp}")
+        
+        if road_shp is not None:
+            print(f"[DEBUG] Reading {road_shp}...")
+            road_gdf = gpd.read_file(str(road_shp))
+            print(f"[DEBUG] Loaded {len(road_gdf)} road features, columns: {road_gdf.columns.tolist()}")
+            
+            if road_gdf.crs and road_gdf.crs.to_epsg() != 4326:
+                print(f"[DEBUG] Reprojecting from {road_gdf.crs.to_epsg()} to EPSG:4326...")
+                road_gdf = road_gdf.to_crs(epsg=4326)
+
+            intersecting_roads = road_gdf[road_gdf.geometry.intersects(poly)]
+            print(f"[DEBUG] Found {len(intersecting_roads)} intersecting road features")
+            
+            road_name_col = next(
+                (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in intersecting_roads.columns),
+                None,
+            )
+            print(f"[DEBUG] Using column '{road_name_col}' for road names")
+
+            if road_name_col is not None and not intersecting_roads.empty:
+                road_counts: dict[str, int] = {}
+                for raw_name in intersecting_roads[road_name_col].dropna().astype(str):
+                    name = raw_name.strip()
+                    if not name:
+                        continue
+                    if not any(ch.isalnum() for ch in name):
+                        continue
+                    road_counts[name] = road_counts.get(name, 0) + 1
+
+                print(f"[DEBUG] Extracted {len(road_counts)} unique road names from shapefile")
+                
+                # Merge shapefile roads into all_road_names
+                for name, count in road_counts.items():
+                    if name not in all_road_names:
+                        # Not in CSV; check if folder exists anyway
+                        exists = in_path.exists() and (in_path / name).is_dir()
+                        all_road_names[name] = {"points": count, "exists": exists}
+                    else:
+                        # Already in CSV; just add the point count
+                        all_road_names[name]["points"] += count
+                
+                print(f"[DEBUG] Total merged roads: {len(all_road_names)}")
+    except Exception as e:
+        print(f"[WARN] Road sections fallback failed: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # If we have any road data (CSV or shapefile), return it
+    if all_road_names:
+        roads = []
+        for name in sorted(all_road_names):
+            roads.append({
+                "name": name,
+                "points": all_road_names[name]["points"],
+                "exists": all_road_names[name]["exists"],
+            })
+        print(f"[DEBUG] Returning {len(roads)} merged roads (fallback=False)")
+        return ok({"roads": roads, "fallback": False})
+
+    # ── Fallback 2: planning areas shapefile (town names only as last resort) ──
+    try:
+        import geopandas as gpd
+        planning_dir = backend_root / "shapefiles" / "planningareas"
+
+        pa_shp = planning_dir / "G_MP25_PLNG_AREA_NO_SEA_PL.shp"
+        if not pa_shp.exists():
+            return ok({"roads": [], "fallback": False})
+
+        gdf = gpd.read_file(str(pa_shp))
+        # Reproject to WGS84 if needed
+        if gdf.crs and gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(epsg=4326)
+
+        intersecting = gdf[gdf.geometry.intersects(poly)]
+        # Try common field names for the area name
+        name_col = next(
+            (c for c in ("PLN_AREA_N", "REGION_N", "NAME", "SUBZONE_N", "PLANNING_A") if c in intersecting.columns),
+            intersecting.columns[0],
+        )
+        pa_roads = [
+            {"name": row[name_col].title(), "points": 0, "exists": False}
+            for _, row in intersecting.iterrows()
+        ]
+        pa_roads.sort(key=lambda r: r["name"])
+        return ok({"roads": pa_roads, "fallback": True})
+    except Exception as e:
+        return ok({"roads": [], "fallback": False})
+
+
+@bp.get("/roads-in-bounds")
+def roads_in_bounds():
+    """
+    Return road line segments for a visible map viewport.
+    Query params:
+      minLat, minLng, maxLat, maxLng (required)
+      limit (optional, default 2000)
+    """
+    try:
+        min_lat = float(request.args.get("minLat"))
+        min_lng = float(request.args.get("minLng"))
+        max_lat = float(request.args.get("maxLat"))
+        max_lng = float(request.args.get("maxLng"))
+        limit = int(request.args.get("limit", 2000))
+    except (TypeError, ValueError):
+        return fail("Invalid or missing bounds query params", 400)
+
+    limit = max(100, min(limit, 5000))
+
+    try:
+        gdf = _get_road_sections_gdf()
+        bbox_poly = box(min_lng, min_lat, max_lng, max_lat)
+
+        view = gdf[gdf.geometry.intersects(bbox_poly)].head(limit)
+        name_col = next(
+            (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in view.columns),
+            None,
+        )
+
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        in_path: Path = pm.in_path
+
+        roads = []
+        for _, row in view.iterrows():
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+
+            road_name = "Unknown Road"
+            if name_col is not None and row.get(name_col) is not None:
+                candidate = str(row.get(name_col)).strip()
+                if candidate:
+                    road_name = candidate
+
+            exists = in_path.exists() and (in_path / road_name).is_dir()
+
+            if geom.geom_type == "LineString":
+                coords = [[lat, lng] for lng, lat in list(geom.coords)]
+                roads.append({"name": road_name, "exists": exists, "coords": coords})
+            elif geom.geom_type == "MultiLineString":
+                for line in geom.geoms:
+                    coords = [[lat, lng] for lng, lat in list(line.coords)]
+                    roads.append({"name": road_name, "exists": exists, "coords": coords})
+
+        return ok({"roads": roads})
+    except Exception as e:
+        return fail(f"roads-in-bounds failed: {e}", 500)
+
+
+@bp.get("/planning-areas-in-bounds")
+def planning_areas_in_bounds():
+    """
+    Return planning-area polygon parts for a visible map viewport.
+    Query params:
+      minLat, minLng, maxLat, maxLng (required)
+      limit (optional, default 500)
+    """
+    try:
+        min_lat = float(request.args.get("minLat"))
+        min_lng = float(request.args.get("minLng"))
+        max_lat = float(request.args.get("maxLat"))
+        max_lng = float(request.args.get("maxLng"))
+        limit = int(request.args.get("limit", 500))
+    except (TypeError, ValueError):
+        return fail("Invalid or missing bounds query params", 400)
+
+    limit = max(25, min(limit, 1000))
+
+    try:
+        gdf = _get_planning_areas_gdf()
+        bbox_poly = box(min_lng, min_lat, max_lng, max_lat)
+        view = gdf[gdf.geometry.intersects(bbox_poly)].head(limit)
+
+        name_col = next(
+            (c for c in ("PLN_AREA_N", "PLANNING_A", "NAME", "SUBZONE_N") if c in view.columns),
+            None,
+        )
+        region_col = next((c for c in ("REGION_N", "REGION") if c in view.columns), None)
+
+        areas = []
+        for _, row in view.iterrows():
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+
+            area_name = "Unknown Planning Area"
+            if name_col is not None and row.get(name_col) is not None:
+                candidate = str(row.get(name_col)).strip()
+                if candidate:
+                    area_name = candidate.title()
+
+            region_name = None
+            if region_col is not None and row.get(region_col) is not None:
+                candidate = str(row.get(region_col)).strip()
+                if candidate:
+                    region_name = candidate.title()
+
+            geoms = [geom] if geom.geom_type == "Polygon" else list(geom.geoms) if geom.geom_type == "MultiPolygon" else []
+            for part_index, poly in enumerate(geoms):
+                exterior = poly.exterior
+                if exterior is None:
+                    continue
+                coords = [[lat, lng] for lng, lat in list(exterior.coords)]
+                if len(coords) < 4:
+                    continue
+                areas.append({
+                    "name": area_name,
+                    "region": region_name,
+                    "partIndex": part_index,
+                    "coords": coords,
+                })
+
+        return ok({"areas": areas})
+    except Exception as e:
+        return fail(f"planning-areas-in-bounds failed: {e}", 500)
+
+
 @bp.post("/folders")
 def create_project_from_folder():
     """
-    Create a new project based on an input directory (folder):
+    Create a new project from one or more input directories.
     Body: { "project_name": "My Project", "folder_name": "SomeFolder", "tags": ["tag1", "tag2"] }
+    or   { "project_name": "My Project", "folder_names": ["Road A", "Road B"], "tags": ["tag1", "tag2"] }
     """
     data = request.get_json(silent=True) or {}
     project_name = (data.get("project_name") or "").strip()
     folder_name = data.get("folder_name")
+    folder_names = data.get("folder_names")
+    polygon_coords = data.get("polygon")
     tags = data.get("tags", [])
 
     if not project_name:
         return fail("project_name is required", 400)
     if "_" in project_name:
         return fail("Project name cannot contain underscores (_)", 400)
-    if not folder_name:
-        return fail("folder_name is required", 400)
 
     # Validate tags is a list
     if not isinstance(tags, list):
         return fail("tags must be an array", 400)
+
+    if folder_names is None:
+        folder_names = [folder_name] if folder_name else []
+    elif not isinstance(folder_names, list):
+        return fail("folder_names must be an array", 400)
+
+    normalized_folder_names = []
+    seen_folder_names = set()
+    for raw_name in folder_names:
+        if not isinstance(raw_name, str):
+            return fail("folder_names must contain strings", 400)
+        clean_name = raw_name.strip()
+        if not clean_name or clean_name in seen_folder_names:
+            continue
+        normalized_folder_names.append(clean_name)
+        seen_folder_names.add(clean_name)
+
+    if not normalized_folder_names:
+        return fail("folder_name or folder_names is required", 400)
+
+    selection_polygon = None
+    if polygon_coords is not None:
+        if not isinstance(polygon_coords, list) or len(polygon_coords) < 3:
+            return fail("polygon must have at least 3 vertices", 400)
+        try:
+            ring = [(pt[1], pt[0]) for pt in polygon_coords]
+            selection_polygon = Polygon(ring)
+            if not selection_polygon.is_valid:
+                selection_polygon = selection_polygon.buffer(0)
+        except Exception as e:
+            return fail(f"Invalid polygon: {e}", 400)
 
     ctx = get_ctx()                 # ← Use your existing get_ctx()
     pm = ctx["pm"]
     in_path: Path = pm.in_path
     out_path: Path = pm.des_path
 
-    src_dir: Path = in_path / folder_name
-    if not src_dir.exists() or not src_dir.is_dir():
-        return fail("folder not found", 404)
-
     project_path = out_path / project_name
     if project_path.exists():
         return fail("Project already exists", 409)
 
-    # 1) Extract EXIF coordinates
-    df = get_image_folder_geo(str(src_dir))
-    df = df.rename(columns={"latitude": "LATITUDE", "longitude": "LONGITUDE", "filename": "FILENAME"})
+    src_dirs = []
+    missing_folders = []
+    for selected_folder_name in normalized_folder_names:
+        src_dir = in_path / selected_folder_name
+        if not src_dir.exists() or not src_dir.is_dir():
+            missing_folders.append(selected_folder_name)
+        else:
+            src_dirs.append((selected_folder_name, src_dir))
 
-    # 2) Geocoding + sampling
-    df = cycleRAP_VA.geoCode(df)
-    df = cycleRAP_VA.get_geo_points_by_distance(df, min_distance=10)
-    if "geometry" not in df.columns:
-        return fail("Missing 'geometry' after geocoding", 500)
+    if missing_folders:
+        return fail(f"folders not found: {', '.join(missing_folders)}", 404)
 
-    gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
-
-    # 3) Convert to LineString
-    extracted_geo_data = cycleRAP_VA.convert_points_to_linestrings(gdf)
-    
-    # 4) Initialize project directory structure (create locally)
     project_path.mkdir(parents=True, exist_ok=True)
-
-    # 5) Copy/link images into the project's images/ directory
     images_dir = project_path / global_var.PROJECT_IMAGES_FOLDER
     images_dir.mkdir(parents=True, exist_ok=True)
-    extracted_geo_data = get_All_Img_Folder(src_dir, extracted_geo_data, images_dir)
 
-    # 6) Register project
-    pm.create_project(project_name, extracted_geo_data, folder_name, tags=tags)
+    extracted_geo_data_parts = []
+    use_image_prefix = len(src_dirs) > 1
+    skipped_sources = []
 
-    return ok({"ok": True, "name": project_name})
+    try:
+        for selected_folder_name, src_dir in src_dirs:
+            extracted_geo_data = build_project_geo_data(src_dir, selection_polygon)
+            if extracted_geo_data.empty:
+                skipped_sources.append(selected_folder_name)
+                continue
+            filename_prefix = make_image_namespace(selected_folder_name) if use_image_prefix else None
+            extracted_geo_data = copy_project_images(src_dir, extracted_geo_data, images_dir, filename_prefix)
+            extracted_geo_data_parts.append(extracted_geo_data)
+    except Exception as e:
+        shutil.rmtree(project_path, ignore_errors=True)
+        return fail(str(e), 400)
+
+    if not extracted_geo_data_parts:
+        shutil.rmtree(project_path, ignore_errors=True)
+        return fail("No geotagged images found inside the selected polygon for the chosen roads", 400)
+
+    combined_geo_data = gpd.GeoDataFrame(
+        pd.concat(extracted_geo_data_parts, ignore_index=True),
+        geometry="geometry",
+        crs=extracted_geo_data_parts[0].crs,
+    )
+
+    dataset_name = normalized_folder_names[0] if len(normalized_folder_names) == 1 else "MULTI_FOLDER_SELECTION"
+    pm.create_project(project_name, combined_geo_data, dataset_name, tags=tags)
+
+    return ok({
+        "ok": True,
+        "name": project_name,
+        "source_count": len(normalized_folder_names),
+        "skipped_sources": skipped_sources,
+    })
 
 @bp.post("/folders/upload-images")
 def upload_images_to_source_folder():
@@ -2370,9 +3050,9 @@ def delete_project(project_name: str):
 @bp.patch("/<project_name>")
 def update_project_metadata(project_name: str):
     """
-    Update project metadata (name, tags, verified status, and/or verified segment count):
+    Update project metadata (name, tags, path_key, verified status, and/or counters):
     PATCH /api/projects/<project_name>
-    Body: { "new_name": "...", "tags": [...], "verified": true/false, "verified_segment_count": 0 }
+    Body: { "new_name": "...", "tags": [...], "path_key": "...", "verified": true/false, "verified_segment_count": 0 }
     """
     ctx = get_ctx()
     pm = ctx["pm"]
@@ -2381,6 +3061,7 @@ def update_project_metadata(project_name: str):
         payload = request.get_json(force=True, silent=True) or {}
         new_name = payload.get("new_name")
         new_tags = payload.get("tags")
+        new_path_key = payload.get("path_key")
         new_verified = payload.get("verified")
         new_verified_segment_count = payload.get("verified_segment_count")
         new_autocoded_segment_count = payload.get("autocoded_segment_count")
@@ -2406,6 +3087,13 @@ def update_project_metadata(project_name: str):
             if not isinstance(new_tags, list):
                 return fail("Tags must be an array", 400)
             proj.metadata.tags = new_tags
+            metadata_updated = True
+
+        # Update path_key override if provided. Empty string clears the override.
+        if new_path_key is not None:
+            if not isinstance(new_path_key, str):
+                return fail("path_key must be a string", 400)
+            proj.metadata.path_key = new_path_key.strip() or None
             metadata_updated = True
 
         # Update verified status if provided

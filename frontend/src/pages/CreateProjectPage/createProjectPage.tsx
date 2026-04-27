@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import {
   Box,
   Button,
@@ -54,10 +54,17 @@ export default function CreateProjectPage() {
   const [err, setErr] = useState<string | null>(null);
   const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
   const [selectedRoads, setSelectedRoads] = useState<SelectedRoad[]>([]);
+  const [selectedPolygon, setSelectedPolygon] = useState<[number, number][]>([]);
 
-  const handleRoadSelectionChange = useCallback((roads: SelectedRoad[]) => {
-    setSelectedRoads(roads);
-  }, []);
+  const selectedRoadFolders = useMemo(
+    () => selectedRoads.filter((road) => road.selected),
+    [selectedRoads]
+  );
+  const unavailableSelectedRoads = useMemo(
+    () => selectedRoadFolders.filter((road) => !road.exists),
+    [selectedRoadFolders]
+  );
+  const usingRoadSelection = selectedRoadFolders.length > 0;
 
   const loadFolders = async (ctrl?: AbortController) => {
     try {
@@ -88,12 +95,23 @@ export default function CreateProjectPage() {
     return () => ctrl.abort();
   }, []);
 
+  const handleRoadSelectionChange = (roads: SelectedRoad[]) => {
+    setSelectedRoads(roads);
+  };
+
+  const handlePolygonChange = (polygon: [number, number][]) => {
+    setSelectedPolygon(polygon);
+  };
+
   const canCreate = useMemo(() => {
     if (!name.trim()) return false;
     if (name.includes("_")) return false;
+    if (usingRoadSelection) {
+      return unavailableSelectedRoads.length === 0;
+    }
     if (!folder) return false;
     return true;
-  }, [name, folder]);
+  }, [name, folder, unavailableSelectedRoads.length, usingRoadSelection]);
 
   const handleTagInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "," || e.key === "Enter") {
@@ -118,7 +136,15 @@ export default function CreateProjectPage() {
     try {
       setCreating(true);
       setErr(null);
-      const data = await createProjectFromFolder(name.trim(), folder, tags);
+      const sourceSelection = usingRoadSelection
+        ? selectedRoadFolders.map((road) => road.name)
+        : folder;
+      const data = await createProjectFromFolder(
+        name.trim(),
+        sourceSelection,
+        tags,
+        usingRoadSelection ? selectedPolygon : undefined
+      );
       const proj = data?.name ?? name.trim();
       nav(`/coding/${encodeURIComponent(proj)}`);
     } catch (e: any) {
@@ -135,7 +161,7 @@ export default function CreateProjectPage() {
         <CardHeader>
           <Heading size="md">Create Project from Folder</Heading>
           <Text mt="1" color="gray.500" fontSize="sm">
-            Choose a source folder under backend input path, then create a new project.
+            Use either a single source folder or a polygon-selected set of roads to create a project.
           </Text>
         </CardHeader>
         <CardBody display="grid" gap={4}>
@@ -293,19 +319,36 @@ export default function CreateProjectPage() {
                 {err}
               </Text>
             )}
+
+            {!usingRoadSelection && (
+              <Text color="gray.500" fontSize="xs" mt={1}>
+                This is used when no roads are selected from the polygon map.
+              </Text>
+            )}
           </Box>
 
           <Separator />
 
-          {/* Select Roads map */}
           <Box>
             <Text fontSize="sm" fontWeight="medium" mb={2}>
               Select Roads
             </Text>
             <Text color="gray.500" fontSize="xs" mb={3}>
-              Draw a polygon on the map to see which road image folders are needed for the selected area.
+              Draw a polygon or click a planning area to select multiple roads. Project creation uses only nodes inside the selected boundary.
             </Text>
-            <SelectRoadsMap onSelectionChange={handleRoadSelectionChange} />
+            <SelectRoadsMap onSelectionChange={handleRoadSelectionChange} onPolygonChange={handlePolygonChange} />
+
+            {usingRoadSelection && unavailableSelectedRoads.length > 0 && (
+              <Text color="orange.600" fontSize="xs" mt={3}>
+                Deselect unavailable roads to create the project. {unavailableSelectedRoads.length} selected road{unavailableSelectedRoads.length === 1 ? " is" : "s are"} missing local files.
+              </Text>
+            )}
+
+            {usingRoadSelection && unavailableSelectedRoads.length === 0 && (
+              <Text color="green.600" fontSize="xs" mt={3}>
+                Project will be created from nodes inside the boundary across {selectedRoadFolders.length} selected road{selectedRoadFolders.length === 1 ? "" : "s"}.
+              </Text>
+            )}
           </Box>
 
           <Box display="flex" gap={3}>
