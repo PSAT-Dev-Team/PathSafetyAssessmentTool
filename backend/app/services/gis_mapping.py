@@ -87,6 +87,10 @@ class LayerStore:
             if name not in self.paths:
                 raise KeyError(f"未注册图层: {name}")
             shp_path: Path = self.paths[name]
+            if not shp_path.exists() and not shp_path.with_name(shp_path.stem + ".cache.parquet").exists():
+                print(f"Warning: neither {shp_path} nor its parquet cache exists. Returning empty GeoDataFrame.")
+                self.layers[name] = gpd.GeoDataFrame(geometry=[], crs=self.metric_crs)
+                return self.layers[name]
             mtime = shp_path.stat().st_mtime if shp_path.exists() else 0.0
             gdf = _load_gdf_cached(str(shp_path), self.metric_crs, mtime)
             self.layers[name] = gdf
@@ -142,6 +146,7 @@ class LayerStore:
         store.add_path("inner", base / "area_type" / "CentralMB2025.shp")
         store.add_path("industrial", base / "area_type" / "LanduseIndustrial2025.shp")
         store.add_path("rural", base / "area_type" / "LanduseRural2025.shp")
+        store.add_path("recreation", base / "area_type" / "LanduseRecreation2025.shp")
         store.add_path("beforeCount", base / "AMGbeforeCount" / "AMGbeforeCount_export.shp")
         store.add_path("sensorCount", base / "AMGsensorCount" / "AMGsensorCount_export.shp")
         store.add_path("kerb_line", base / "kerb_line" / "kerbline.shp")
@@ -273,6 +278,7 @@ class GIS:
         if self._poly("inner", pt, tol): return 1
         if self._poly("industrial", pt, tol): return 4
         if self._poly("rural", pt, tol): return 3
+        if self._poly("recreation", pt, tol): return 5
         return 2
     
     def get_peak_pedestrian_flow(self, pt, dist=20):

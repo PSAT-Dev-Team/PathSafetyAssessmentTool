@@ -385,13 +385,13 @@ def _ensure_models_ready():
 
                 model_dir = None
                 for d in candidates:
-                    if (d / "path_segmentation_v2.pt").exists():
+                    if (d / "path_segmentation.pt").exists():
                         model_dir = d.resolve()
                         break
 
                 if model_dir is None:
                     tried = "\n".join(str(p) for p in candidates)
-                    raise RuntimeError(f"Cannot find model_dir (missing path_segmentation_v2.pt). Tried:\n{tried}")
+                    raise RuntimeError(f"Cannot find model_dir (missing path_segmentation.pt). Tried:\n{tried}")
 
                 # YOLO models load
                 print(f"[Autocode] Loading CV models from {model_dir} — this may take several minutes on CPU...", flush=True)
@@ -3497,6 +3497,60 @@ def autocode_all(project_name: str):
                         errors.append({"index": idx, "reason": str(e)})
             finally:
                 _INFERENCE_DEPTH -= 1
+
+            # --- Area Type Smoothing (100m rule) ---
+            try:
+                area_col = "Area type"
+                if len(indices) > 1 and area_col in ver.attributes.df.columns and (not fields_filter or area_col in fields_filter):
+                    import pandas as pd
+                    df_len = len(ver.attributes.df)
+                    area_vals = ver.attributes.df[area_col].copy()
+                    
+                    lengths = pd.Series([10.0] * df_len)
+                    if getattr(proj, "geo_data", None) and getattr(proj.geo_data, "df", None) is not None and "Length" in proj.geo_data.df.columns:
+                        lengths = pd.to_numeric(proj.geo_data.df["Length"], errors='coerce').fillna(10.0)
+                    elif "Length" in ver.attributes.df.columns:
+                        lengths = pd.to_numeric(ver.attributes.df["Length"], errors='coerce').fillna(10.0)
+                    elif "Distance" in ver.attributes.df.columns:
+                        lengths = pd.to_numeric(ver.attributes.df["Distance"], errors='coerce').fillna(10.0)
+                    
+                    i = 0
+                    while i < df_len:
+                        curr_val = area_vals.iloc[i]
+                        run_len = 0.0
+                        j = i
+                        while j < df_len and area_vals.iloc[j] == curr_val:
+                            run_len += lengths.iloc[j]
+                            j += 1
+                        
+                        if run_len < 100.0:
+                            prev_val = area_vals.iloc[i-1] if i > 0 else None
+                            next_val = area_vals.iloc[j] if j < df_len else None
+                            replace_val = curr_val
+                            if prev_val is not None:
+                                replace_val = prev_val
+                            elif next_val is not None:
+                                replace_val = next_val
+                                
+                            for k in range(i, j):
+                                area_vals.iloc[k] = replace_val
+                        i = j
+                        
+                    for idx_ in range(df_len):
+                        new_val = area_vals.iloc[idx_]
+                        if ver.attributes.df.at[idx_, area_col] != new_val:
+                            ver.attributes.df.at[idx_, area_col] = new_val
+                            if idx_ in changed_by_row:
+                                if area_col not in changed_by_row[idx_]:
+                                    changed_by_row[idx_].append(area_col)
+                            else:
+                                changed_by_row[idx_] = [area_col]
+                                
+                            if idx_ not in sources_by_row:
+                                sources_by_row[idx_] = {}
+                            sources_by_row[idx_][area_col] = "GIS (Smoothed)"
+            except Exception as e:
+                print(f"[Autocode] Area type smoothing failed: {e}", flush=True)
 
             # Save to disk (runs only when the loop completes; skipped on generator abandon/disconnect)
             if save and ok_count > 0:
