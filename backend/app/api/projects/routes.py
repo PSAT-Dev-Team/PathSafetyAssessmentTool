@@ -3660,7 +3660,11 @@ def autocode_all(project_name: str):
 
                         # Apply per-attribute filter: only keep requested fields
                         if fields_filter:
-                            actual_filter = fields_filter + ["Gradient %"] if "Grade" in fields_filter else fields_filter
+                            actual_filter = list(fields_filter)
+                            if "Grade" in actual_filter:
+                                actual_filter.append("Gradient %")
+                            if "Delineation" in actual_filter:
+                                actual_filter.append("Delineation Type")
                             merged = {k: v for k, v in (merged or {}).items() if k in actual_filter}
                             sources = {k: v for k, v in (sources or {}).items() if k in actual_filter}
 

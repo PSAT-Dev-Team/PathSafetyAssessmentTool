@@ -356,6 +356,12 @@ const cyclerapAttributes: AttributeConfig[] = [
     options: ["Not Selected", "Present", "Not Present"]
   },
   {
+    name: "Delineation Type",
+    label: "Delineation Type",
+    group: "Facility surface conditions",
+    options: ["Not Selected", "Cycling Path", "Red Stripe", "Traffic Crossing", "Zebra Crossing"],
+  },
+  {
     name: "Loose or slippery surface",
     label: "Loose or Slippery Surface",
     group: "Facility surface conditions",
@@ -499,6 +505,12 @@ export const SUBCATEGORY_MAP: Record<
       "Present": ["Traffic Crossing"],
     },
   },
+  "Delineation": {
+    childAttr: "Delineation Type",
+    parentCategories: {
+      "Present": ["Cycling Path", "Red Stripe", "Traffic Crossing", "Zebra Crossing"],
+    },
+  },
 };
 
 /** Set of attribute names that are subcategory children — hidden from the FilterPanel. */
@@ -507,7 +519,7 @@ export const SUBCATEGORY_CHILD_ATTRS = new Set(
 );
 
 /** Multi-value attributes whose CSV cells can contain comma-separated values. */
-export const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type"]);
+export const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type", "Delineation Type"]);
 
 /**
  * Subcategory descriptions per attribute option.
@@ -616,6 +628,12 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Major Surface Deformation or Drain Opening": { "Present": "#DC2626", "Not Present": "#16A34A" },
     "Tram or Train Rails": { "Present": "#DC2626", "Not Present": "#16A34A" },
     "Delineation": { "Present": "#16A34A", "Not Present": "#DC2626" },
+    "Delineation Type": {
+      "Cycling Path":     "#2563EB",
+      "Red Stripe":       "#DC2626",
+      "Traffic Crossing": "#EA580C",
+      "Zebra Crossing":   "#CA8A04",
+    },
     "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Grade": { "< 5 Degrees": "#16A34A", "=/> 5 Degrees": "#DC2626" },
     "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
