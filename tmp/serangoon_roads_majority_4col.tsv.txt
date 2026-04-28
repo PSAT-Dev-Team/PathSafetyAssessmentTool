@@ -1,0 +1,255 @@
+Name	Status	Percentage	Coverage
+ALNWICK ROAD			excellent
+ANG MO KIO AVENUE 12			excellent
+ANG MO KIO INDUSTRIAL PARK 2			excellent
+ANG MO KIO INDUSTRIAL PARK 2A			excellent
+BARTLEY ROAD			excellent
+BEGONIA CRESCENT			excellent
+BEGONIA DRIVE			excellent
+BEGONIA LANE			excellent
+BEGONIA ROAD			excellent
+BEGONIA TERRACE			excellent
+BEGONIA WALK			excellent
+BELGRAVIA DRIVE			excellent
+BERWICK DRIVE			excellent
+BISHOPS PLACE			excellent
+BLANDFORD DRIVE			excellent
+BLOXHOME DRIVE			excellent
+BODMIN DRIVE			excellent
+BORTHWICK DRIVE			excellent
+BOUNDARY ROAD			excellent
+BRAEMAR DRIVE			excellent
+BRIDPORT AVENUE			excellent
+BRIGHTON AVENUE			excellent
+BRIGHTON CRESCENT			excellent
+BROCKHAMPTON DRIVE			excellent
+BUKIT ARANG ROAD			excellent
+BURGHLEY DRIVE			excellent
+CARDIFF GROVE			excellent
+CARISBROOKE GROVE			excellent
+CHARTWELL DRIVE			excellent
+CHEPSTOW CLOSE			excellent
+CHILTERN DRIVE			excellent
+CHISELHURST GROVE			excellent
+CHUAN CLOSE			excellent
+CHUAN DRIVE			excellent
+CHUAN GARDEN			excellent
+CHUAN LANE			excellent
+CHUAN LINK			excellent
+CHUAN PLACE			excellent
+CHUAN TERRACE			excellent
+CHUAN VIEW			excellent
+CHUAN WALK			excellent
+CLIFTON VALE			excellent
+COLCHESTER GROVE			excellent
+CONISTON GROVE			excellent
+CONWAY CIRCLE			excellent
+CONWAY GROVE			excellent
+COOLING CLOSE			excellent
+CORFE PLACE			excellent
+COTSWOLD CLOSE			excellent
+COURT ROAD			excellent
+COWDRAY AVENUE			excellent
+CRICHTON CLOSE			excellent
+CROUCHER ROAD			excellent
+CROWHURST DRIVE			excellent
+DAISY AVENUE			excellent
+DAISY ROAD			excellent
+DEDAP LINK			excellent
+DEDAP PLACE			excellent
+DEDAP ROAD			excellent
+DUNSFOLD DRIVE			excellent
+EDEN GROVE			excellent
+FARLEIGH AVENUE			excellent
+GAMBIR WALK			excellent
+GOLDEN DRIVE			excellent
+GOLDEN RISE			excellent
+GOLDEN WALK			excellent
+GRACE PARK			excellent
+GRACE WALK			excellent
+HEMSLEY AVENUE			excellent
+HOW SUN AVENUE			excellent
+HOW SUN CLOSE			excellent
+HOW SUN DRIVE			excellent
+HOW SUN ROAD			excellent
+HOW SUN WALK			excellent
+HUDDINGTON AVENUE			excellent
+HYTHE ROAD			excellent
+JALAN ANTOI			excellent
+JALAN BANGAU			excellent
+JALAN CHERMAI			excellent
+JALAN CHERMAT			excellent
+JALAN CHULEK			excellent
+JALAN GIRANG			excellent
+JALAN HWI YOH			excellent
+JALAN JARAK			excellent
+JALAN JITONG			excellent
+JALAN JORAN			excellent
+JALAN KELULUT			excellent
+JALAN KENARAH			excellent
+JALAN KERUING			excellent
+JALAN KESOMA			excellent
+JALAN KETUMBIT			excellent
+JALAN LABU AYER			excellent
+JALAN LABU MANIS			excellent
+JALAN LABU MERAH			excellent
+JALAN LAKUM			excellent
+JALAN LATEH			excellent
+JALAN LEBAT DAUN			excellent
+JALAN LEKUB			excellent
+JALAN NIRA			excellent
+JALAN PACHELI			excellent
+JALAN PELAJAU			excellent
+JALAN PERADUN			excellent
+JALAN REDOP			excellent
+JALAN RENGAS			excellent
+JALAN RESAK			excellent
+JALAN RIA			excellent
+JALAN RIANG			excellent
+JALAN RINDU			excellent
+JALAN SELASEH			excellent
+JALAN SINDOR			excellent
+JALAN SUKACHITA			excellent
+JALAN TECK KEE			excellent
+JOON HIANG ROAD			excellent
+KASAI ROAD			excellent
+KELULUT HILL			excellent
+KENSINGTON PARK ROAD			excellent
+KINGSWEAR AVENUE			excellent
+LEW LIAN VALE			excellent
+LI HWAN CLOSE			excellent
+LI HWAN DRIVE			excellent
+LI HWAN PLACE			excellent
+LI HWAN TERRACE			excellent
+LI HWAN VIEW			excellent
+LI HWAN WALK			excellent
+LICHFIELD ROAD			excellent
+LILAC DRIVE			excellent
+LILAC ROAD			excellent
+LILAC WALK			excellent
+LIM TUA TOW ROAD			excellent
+LORONG BIAWAK			excellent
+LORONG CHUAN			excellent
+LORONG GAMBIR			excellent
+LORONG HOW SUN			excellent
+LORONG LEW LIAN			excellent
+LORONG ONG LYE			excellent
+LORONG PENCHALAK			excellent
+LORONG SELANGAT			excellent
+LUDLOW PLACE			excellent
+LUXUS HILL AVENUE			excellent
+LUXUS HILL DRIVE			excellent
+LUXUS HILL HEIGHTS			excellent
+LUXUS HILL ROAD			excellent
+LUXUS HILL VIEW			excellent
+LYNWOOD GROVE			excellent
+MACKERROW ROAD			excellent
+MAJU AVENUE			excellent
+MARLENE AVENUE			excellent
+MATLOCK RISE			excellent
+MEDWAY DRIVE			excellent
+MEI HWAN CRESCENT			excellent
+MEI HWAN DRIVE			excellent
+MEI HWAN ROAD			excellent
+MELROSE DRIVE			excellent
+MIMOSA CRESCENT			excellent
+MIMOSA DRIVE			excellent
+MIMOSA PLACE			excellent
+MIMOSA ROAD			excellent
+MIMOSA TERRACE			excellent
+MIMOSA VALE			excellent
+MIMOSA VIEW			excellent
+MIMOSA WALK			excellent
+MORETON CLOSE			excellent
+MUSWELL HILL			excellent
+NERAM CRESCENT			excellent
+NERAM ROAD			excellent
+NIM CRESCENT			excellent
+NIM DRIVE			excellent
+NIM GREEN			excellent
+NIM RISE			excellent
+NIM ROAD			excellent
+NIM TERRACE			excellent
+PENSHURST PLACE			excellent
+PILLAI ROAD			excellent
+PLANTATION AVENUE			excellent
+PORTCHESTER AVENUE			excellent
+QUEMOY ROAD			excellent
+RAGLAN GROVE			excellent
+RECREATION LANE			excellent
+RECREATION ROAD			excellent
+RIPLEY CRESCENT			excellent
+SANDOWN PLACE			excellent
+SARACA DRIVE			excellent
+SARACA HILL			excellent
+SARACA PLACE			excellent
+SARACA ROAD			excellent
+SARACA TERRACE			excellent
+SARACA VIEW			excellent
+SARACA WALK			excellent
+SELETAR CLOSE			excellent
+SELETAR COURT			excellent
+SELETAR CRESCENT			excellent
+SELETAR GREEN AVENUE			excellent
+SELETAR GREEN VIEW			excellent
+SELETAR GREEN WALK			excellent
+SELETAR HILLS DRIVE			excellent
+SELETAR ROAD			excellent
+SELETAR TERRACE			excellent
+SERANGOON AVENUE 1			excellent
+SERANGOON AVENUE 2			excellent
+SERANGOON AVENUE 3			excellent
+SERANGOON AVENUE 4			excellent
+SERANGOON CENTRAL			excellent
+SERANGOON CENTRAL DRIVE			excellent
+SERANGOON GARDEN CLOSE			excellent
+SERANGOON GARDEN DRIVE			excellent
+SERANGOON GARDEN PLACE			excellent
+SERANGOON GARDEN RISE			excellent
+SERANGOON GARDEN TERRACE			excellent
+SERANGOON GARDEN WAY			excellent
+SERANGOON LANE			excellent
+SERANGOON LINK			excellent
+SERANGOON NORTH AVENUE 1			excellent
+SERANGOON NORTH AVENUE 2			excellent
+SERANGOON NORTH AVENUE 3			excellent
+SERANGOON NORTH AVENUE 4			excellent
+SERANGOON NORTH AVENUE 5			excellent
+SERANGOON NORTH AVENUE 6			excellent
+SERANGOON NORTH VIEW			excellent
+SERANGOON TERRACE			excellent
+SOMMERVILLE ROAD			excellent
+SOMMERVILLE WALK			excellent
+ST. HELIER'S AVENUE			excellent
+STOKESAY DRIVE			excellent
+STRATTON DRIVE			excellent
+STRATTON GREEN			excellent
+STRATTON PLACE			excellent
+STRATTON ROAD			excellent
+STRATTON WALK			excellent
+SUMMER PLACE			excellent
+SUNDRIDGE PARK ROAD			excellent
+SUNSHINE TERRACE			excellent
+TAI HWAN AVENUE			excellent
+TAI HWAN CLOSE			excellent
+TAI HWAN CRESCENT			excellent
+TAI HWAN DRIVE			excellent
+TAI HWAN GROVE			excellent
+TAI HWAN HEIGHTS			excellent
+TAI HWAN LANE			excellent
+TAI HWAN PLACE			excellent
+TAI HWAN TERRACE			excellent
+TAI HWAN WALK			excellent
+TAI YUAN HEIGHTS			excellent
+TAMARIND ROAD			excellent
+TAVISTOCK AVENUE			excellent
+UPPER NERAM ROAD			excellent
+UPPER PAYA LEBAR ROAD			excellent
+VAUGHAN ROAD			excellent
+WALMER DRIVE			excellent
+WOLSKEL ROAD			excellent
+WORTHING ROAD			excellent
+YIO CHU KANG LINK			excellent
+YORK PLACE			excellent
+CHUAN GROVE			excellent
+BOUNDARY CLOSE			weak
