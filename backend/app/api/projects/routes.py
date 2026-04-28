@@ -2810,6 +2810,15 @@ def autocode_gis(project_name: str):
             updates["Crossing Facility"] = 1          # 1 = Present
             updates["Crossing Type"] = "Bicycle Crossing"
 
+        # Intersecting Bicycle Facility Detection
+        # Present (1) if within 5m of a road crossing; Not Present (2) otherwise.
+        # CV will override to Not Present (2) if a dominant traffic/zebra crossing mask is detected.
+        if _needs("Intersecting Bicycle Facility"):
+            if _gis.is_road_crossing(pt, dist=5):
+                updates["Intersecting Bicycle Facility"] = 1  # 1 = Present
+            else:
+                updates["Intersecting Bicycle Facility"] = 2  # 2 = Not Present
+
         if _needs("Area type"):
             area = _gis.get_area_type(pt)
             updates["Area type"] = int(area)
@@ -3487,6 +3496,15 @@ def autocode_all(project_name: str):
                 sources[field] = "CV"
             for field in gis_updates:
                 sources[field] = "GIS"  # GIS overrides CV source if both set the same field
+
+            # Special case: "Intersecting Bicycle Facility" — CV wins over GIS only when CV
+            # explicitly detected a dominant traffic/zebra crossing (value is not None).
+            # GIS says Present when a road crossing is within 5 m, but if CV saw a pedestrian
+            # crossing dominating the image it overrides to Not Present.
+            ibf_key = "Intersecting Bicycle Facility"
+            if img_updates.get(ibf_key) is not None and ibf_key in gis_updates:
+                merged[ibf_key] = img_updates[ibf_key]
+                sources[ibf_key] = "CV"
 
             return merged, sources, None
 
