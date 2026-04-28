@@ -870,6 +870,50 @@ export async function previewTreatments(
 }
 
 /**
+ * Fetch per-treatment effectiveness counts for a project. Effectiveness is the
+ * number of segments whose Overall Risk Level Band improves (band decreases)
+ * when that treatment is applied in isolation. Used to rank the "By Treatment"
+ * list top-down by effectiveness.
+ */
+export type TreatmentEffectivenessResult = {
+  ok: boolean;
+  total_segments: number;
+  counts: Record<string, number>;
+};
+
+export async function getTreatmentEffectiveness(
+  project: string,
+  treatmentIds?: number[]
+): Promise<TreatmentEffectivenessResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/effectiveness`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(treatmentIds ? { treatment_ids: treatmentIds } : {}),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export type TreatmentSegmentEffectivenessResult = {
+  ok: boolean;
+  score_drops: Record<string, number>;
+};
+
+export async function getTreatmentSegmentEffectiveness(
+  project: string,
+  segmentIndex: number
+): Promise<TreatmentSegmentEffectivenessResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/effectiveness/segment/${segmentIndex}`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
  * Apply all applicable recommended treatments to all segments in a project
  * @param project - Project name
  * @returns Result with details on how many segments were treated

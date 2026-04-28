@@ -376,6 +376,7 @@ class CycleRAP_Coding_Helper:
                 "Peak Pedestrian Flow":             "Low",
                 "Intersection/Road Crossing":       "Present",
                 "No of Lanes on Intersecting Road": ">1 per direction",
+                "Intersecting Bicycle Facility":    "Not Present",
             })
 
         # Step 5 – Zebra Crossing >= 80 % of bottom 10 %
@@ -394,6 +395,7 @@ class CycleRAP_Coding_Helper:
                 "Peak Pedestrian Flow":             "Low",
                 "Intersection/Road Crossing":       "Present",
                 "No of Lanes on Intersecting Road": "1 per direction",
+                "Intersecting Bicycle Facility":    "Not Present",
             })
 
         # Step 6 – Road >= 80 % of bottom 10 %
@@ -444,6 +446,7 @@ class CycleRAP_Coding_Helper:
             "Peak Pedestrian Flow":            F.PEAK_PED_FLOW_STR,
             "Intersection/Road Crossing":       F.INTERSECT_ROAD_CROSS_STR,
             "No of Lanes on Intersecting Road": F.NOL_INTERSECT_ROAD_STR,
+            "Intersecting Bicycle Facility":    F.INTERSECT_FACILITY_STR,
             "Fixed Obstacles":                 F.FIXED_OBSTACLE_STR,
             "Non-Fixed Obstacles":             F.NON_FIXED_OBSTACLE_STR,
             "FO Type":                         F.FIXED_OBSTACLE_TYPE_STR,

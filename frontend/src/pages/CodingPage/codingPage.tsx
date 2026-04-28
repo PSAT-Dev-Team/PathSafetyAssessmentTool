@@ -39,8 +39,12 @@ import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
 import GeoDataPanel from "./components/GeoDataPanel";
 import { saveAttributes } from "../../api";
-import { AnalysisPanel } from "../../components/visualization/AnalysisPanel";
+import { AnalysisSidebar } from "../../components/visualization/AnalysisSidebar";
 import "../../components/visualization/AnalysisPanel.css";
+import { fetchWidthVisualization } from "../../api/widthVisualization";
+import type { WidthVisualizationResponse } from "../../api/widthVisualization";
+import { fetchCurvatureVisualization } from "../../api/curvatureVisualization";
+import type { CurvatureVisualizationResponse } from "../../api/curvatureVisualization";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
 import AutocodeValidation from "../PathAnalysisPage/components/AutocodeValidation";
 
@@ -155,6 +159,16 @@ export default function CodingPage() {
   // Save confirmation dialog state
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Analysis sidebar state (lifted from AnalysisPanel)
+  const [widthData, setWidthData] = useState<WidthVisualizationResponse | null>(null);
+  const [widthLoading, setWidthLoading] = useState(false);
+  const [widthError, setWidthError] = useState<string | null>(null);
+  const [curvData, setCurvData] = useState<CurvatureVisualizationResponse | null>(null);
+  const [curvLoading, setCurvLoading] = useState(false);
+  const [curvError, setCurvError] = useState<string | null>(null);
+  const [isAnalysisSidebarOpen, setIsAnalysisSidebarOpen] = useState(false);
+  const [showCurvatureOverlay, setShowCurvatureOverlay] = useState(false);
 
   useEffect(() => {
     if (!initialSegment || !currentProjectName || hasInitializedSegmentRef.current) return;
@@ -1160,6 +1174,30 @@ export default function CodingPage() {
     return baselineRows[currentIndex] || null;
   }, [currentIndex, baselineRows]);
 
+  // Fetch width and curvature data when project or segment changes
+  useEffect(() => {
+    if (!currentProjectName || !currentFeature || currentFeature.geometry?.type !== "LineString") {
+      setWidthData(null);
+      setCurvData(null);
+      return;
+    }
+    const coords = (currentFeature.geometry as LineString).coordinates as [number, number][];
+
+    setWidthLoading(true);
+    setWidthError(null);
+    fetchWidthVisualization(currentProjectName, coords, currentIndex)
+      .then(setWidthData)
+      .catch(e => setWidthError(e instanceof Error ? e.message : 'Failed'))
+      .finally(() => setWidthLoading(false));
+
+    setCurvLoading(true);
+    setCurvError(null);
+    fetchCurvatureVisualization(currentProjectName, coords, currentIndex)
+      .then(setCurvData)
+      .catch(e => setCurvError(e instanceof Error ? e.message : 'Failed'))
+      .finally(() => setCurvLoading(false));
+  }, [currentProjectName, currentIndex, currentFeature]);
+
   // Auto-calculate scores on project load
   useEffect(() => {
     if (!currentProjectName || attrs.length === 0) return;
@@ -1878,20 +1916,28 @@ export default function CodingPage() {
             onJump={(i) => gotoPage(i + 1)}
             scores={scores}
             onDataChange={refreshCurrentProject}
+            curvData={curvData}
+            widthM={widthData?.width ?? null}
+            grade={(currentAttr?.["Grade"] as number | null) ?? null}
+            gradientPct={(currentAttr?.["Gradient %"] as number | null) ?? null}
+            showCurvatureOverlay={showCurvatureOverlay}
+            onToggleCurvatureOverlay={() => setShowCurvatureOverlay(v => !v)}
+            overlayContent={
+              <AnalysisSidebar
+                isOpen={isAnalysisSidebarOpen}
+                onToggle={() => setIsAnalysisSidebarOpen(v => !v)}
+                widthData={widthData}
+                widthLoading={widthLoading}
+                widthError={widthError}
+                curvData={curvData}
+                curvLoading={curvLoading}
+                curvError={curvError}
+                grade={currentAttr?.["Grade"] as number | null}
+                gradientPct={currentAttr?.["Gradient %"] as number | null}
+              />
+            }
           />
         </GridItem>
-
-        {currentFeature?.geometry?.type === "LineString" && (
-          <GridItem colSpan={{ base: 1, md: 2 }}>
-            <AnalysisPanel
-              projectName={currentProjectName!}
-              coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
-              segmentIndex={currentIndex}
-              grade={currentAttr?.["Grade"] as number | null}
-              gradientPct={currentAttr?.["Gradient %"] as number | null}
-            />
-          </GridItem>
-        )}
 
         <GridItem colSpan={{ base: 1, md: 2 }}>
           <AutocodeValidation

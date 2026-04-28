@@ -806,7 +806,6 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
         if not hit:
             print(f"[Gradient] no profile entry for '{image_ref}' in project '{project_name}' — skipping", flush=True)
             return None
-
         grade_coded, grade_pct = hit
         print(f"[Gradient] {image_ref}: {grade_pct:+.2f}% -> Grade {grade_coded}", flush=True)
         if grade_coded not in (1, 2):
@@ -1737,6 +1736,162 @@ def preview_treatments(project_name: str):
         import traceback
         traceback.print_exc()
         return fail(f"Error previewing treatments: {str(e)}", 500)
+
+
+@bp.post("/<project_name>/treatments/effectiveness")
+def treatment_effectiveness(project_name: str):
+    """
+    Count, per treatment, how many segments in the project would have their
+    Overall Risk Level Band *improve* (band decreases) if that treatment
+    were applied in isolation. Used by the frontend to rank the
+    "By Treatment" list top-down by effectiveness.
+
+    Request body (optional):
+        { "treatment_ids": [1, 2, 3, ...] }   # defaults to all 25
+
+    Response:
+        {
+            "ok": true,
+            "total_segments": 412,
+            "counts": { "1": 180, "2": 0, "3": 45, ... }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        data = request.get_json(silent=True) or {}
+        requested_ids = data.get("treatment_ids")
+        if requested_ids is None:
+            requested_ids = [t["id"] for t in TREATMENTS]
+        if not isinstance(requested_ids, list):
+            return fail("treatment_ids must be a list", 400)
+
+        attrs_df = ver.attributes.df
+        n = len(attrs_df)
+        if n == 0:
+            return jsonify({"ok": True, "total_segments": 0, "counts": {str(tid): 0 for tid in requested_ids}})
+
+        # Baseline scoring once
+        before_df = calculate_cyclerap_score_native(attrs_df)
+        before_band = before_df["Overall Risk Level Band"].to_numpy()
+
+        treatment_map = {t["id"]: t for t in TREATMENTS}
+        counts: dict[str, int] = {}
+
+        for tid in requested_ids:
+            if tid not in treatment_map:
+                counts[str(tid)] = 0
+                continue
+            treatment = treatment_map[tid]
+
+            # Applicability mask (vectorized): OR of trigger sets, AND within a set
+            mask = pd.Series(False, index=attrs_df.index)
+            for trigger_set in treatment.get("triggers", []):
+                set_mask = pd.Series(True, index=attrs_df.index)
+                for attr_name, valid_values in trigger_set.items():
+                    if attr_name not in attrs_df.columns:
+                        set_mask = pd.Series(False, index=attrs_df.index)
+                        break
+                    set_mask &= attrs_df[attr_name].isin(valid_values)
+                mask |= set_mask
+
+            if not mask.any():
+                counts[str(tid)] = 0
+                continue
+
+            modified = attrs_df.copy()
+            for attr_name, new_value in treatment.get("effects", {}).items():
+                if attr_name in modified.columns:
+                    modified.loc[mask, attr_name] = new_value
+                else:
+                    modified[attr_name] = None
+                    modified.loc[mask, attr_name] = new_value
+
+            after_df = calculate_cyclerap_score_native(modified)
+            after_band = after_df["Overall Risk Level Band"].to_numpy()
+
+            improved = ((after_band < before_band) & mask.to_numpy()).sum()
+            counts[str(tid)] = int(improved)
+
+        return jsonify({
+            "ok": True,
+            "total_segments": int(n),
+            "counts": counts,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error computing treatment effectiveness: {str(e)}", 500)
+
+
+@bp.get("/<project_name>/treatments/effectiveness/segment/<int:segment_index>")
+def treatment_segment_effectiveness(project_name: str, segment_index: int):
+    """
+    For a single segment, compute the Overall Risk Level score drop for each
+    treatment applied in isolation. Used by the frontend to rank the
+    "By Segment" treatment list top-down by per-segment effectiveness.
+
+    Response:
+        {
+            "ok": true,
+            "score_drops": { "1": 4.2, "3": 0.0, ... }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        attrs_df = ver.attributes.df
+        n = len(attrs_df)
+        if segment_index < 0 or segment_index >= n:
+            return fail(f"segment_index {segment_index} out of range [0, {n})", 400)
+
+        row_df = attrs_df.iloc[[segment_index]]
+        before_score = float(calculate_cyclerap_score_native(row_df)["Overall Risk Level"].iloc[0])
+
+        score_drops: dict[str, float] = {}
+        for treatment in TREATMENTS:
+            tid = treatment["id"]
+
+            applicable = True
+            for trigger_set in treatment.get("triggers", []):
+                set_ok = True
+                for attr_name, valid_values in trigger_set.items():
+                    if attr_name not in row_df.columns:
+                        set_ok = False
+                        break
+                    if row_df[attr_name].iloc[0] not in valid_values:
+                        set_ok = False
+                        break
+                if set_ok:
+                    break
+            else:
+                applicable = False
+
+            if not applicable:
+                score_drops[str(tid)] = 0.0
+                continue
+
+            modified = row_df.copy()
+            for attr_name, new_value in treatment.get("effects", {}).items():
+                if attr_name in modified.columns:
+                    modified[attr_name] = new_value
+                else:
+                    modified[attr_name] = new_value
+
+            after_score = float(calculate_cyclerap_score_native(modified)["Overall Risk Level"].iloc[0])
+            score_drops[str(tid)] = round(before_score - after_score, 4)
+
+        return jsonify({"ok": True, "score_drops": score_drops})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error computing segment treatment effectiveness: {str(e)}", 500)
 
 
 @bp.get("/<project_name>/treatments/all")
@@ -3321,9 +3476,18 @@ def autocode_gis(project_name: str):
         # Bicycle Crossing Facility Detection
         # Set Crossing Facility = Present (1) and Crossing Type = "Bicycle Crossing"
         # if within 2m of a known bicycle crossing point (AMG_BC2025_shp)
-        if _needs("Crossing Facility", "Crossing Type") and _gis.is_bicycle_crossing(pt, dist=20):
+        if _needs("Crossing Facility", "Crossing Type") and _gis.is_bicycle_crossing(pt, dist=2):
             updates["Crossing Facility"] = 1          # 1 = Present
             updates["Crossing Type"] = "Bicycle Crossing"
+
+        # Intersecting Bicycle Facility Detection
+        # Present (1) if within 5m of a road crossing; Not Present (2) otherwise.
+        # CV will override to Not Present (2) if a dominant traffic/zebra crossing mask is detected.
+        if _needs("Intersecting Bicycle Facility"):
+            if _gis.is_road_crossing(pt, dist=5):
+                updates["Intersecting Bicycle Facility"] = 1  # 1 = Present
+            else:
+                updates["Intersecting Bicycle Facility"] = 2  # 2 = Not Present
 
         if _needs("Area type"):
             area = _gis.get_area_type(pt)
@@ -4003,6 +4167,15 @@ def autocode_all(project_name: str):
             for field in gis_updates:
                 sources[field] = "GIS"  # GIS overrides CV source if both set the same field
 
+            # Special case: "Intersecting Bicycle Facility" — CV wins over GIS only when CV
+            # explicitly detected a dominant traffic/zebra crossing (value is not None).
+            # GIS says Present when a road crossing is within 5 m, but if CV saw a pedestrian
+            # crossing dominating the image it overrides to Not Present.
+            ibf_key = "Intersecting Bicycle Facility"
+            if img_updates.get(ibf_key) is not None and ibf_key in gis_updates:
+                merged[ibf_key] = img_updates[ibf_key]
+                sources[ibf_key] = "CV"
+
             return merged, sources, None
 
         # ========================================================================
@@ -4157,8 +4330,9 @@ def autocode_all(project_name: str):
 
                         # Apply per-attribute filter: only keep requested fields
                         if fields_filter:
-                            merged = {k: v for k, v in (merged or {}).items() if k in fields_filter}
-                            sources = {k: v for k, v in (sources or {}).items() if k in fields_filter}
+                            actual_filter = fields_filter + ["Gradient %"] if "Grade" in fields_filter else fields_filter
+                            merged = {k: v for k, v in (merged or {}).items() if k in actual_filter}
+                            sources = {k: v for k, v in (sources or {}).items() if k in actual_filter}
 
                         # Track which fields actually changed (for UI highlighting)
                         changed_fields: list = []

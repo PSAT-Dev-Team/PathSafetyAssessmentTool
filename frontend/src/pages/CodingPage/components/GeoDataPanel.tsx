@@ -19,6 +19,7 @@ import L, { divIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import proj4 from "proj4";
+import type { CurvatureVisualizationResponse } from '../../../api/curvatureVisualization';
 
 type Props = {
   projectName: string;                       // Current project name from parent
@@ -33,6 +34,13 @@ type Props = {
   onDataChange?: () => void;                 // Callback when data is modified (e.g. deleted)
   panToBounds?: L.LatLngBounds | null;       // When set, immediately flies map to these bounds (e.g. on project tab switch)
   panKey?: number;                           // Monotonic counter to force PanToBounds effect re-fire
+  curvData?: CurvatureVisualizationResponse | null;
+  showCurvatureOverlay?: boolean;
+  onToggleCurvatureOverlay?: () => void;
+  overlayContent?: React.ReactNode;
+  widthM?: number | null;
+  grade?: number | null;
+  gradientPct?: number | null;
 };
 
 type GJ = FeatureCollection<LineString, any>;
@@ -280,8 +288,20 @@ const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
 
 // No global cache needed anymore as we use localStorage
 
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <Flex direction="column" align="center" lineHeight="1.1">
+      <Text fontSize="9px" color="gray.400" fontWeight="medium" letterSpacing="wide" textTransform="uppercase">
+        {label}
+      </Text>
+      <Text fontSize="xs" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.200" }}>
+        {value}
+      </Text>
+    </Flex>
+  );
+}
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, panToBounds, panKey = 0 }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
@@ -290,7 +310,7 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [fc, setFc] = useState<GJ | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+
 
   // Use external geofeatures if provided (for multi-project display), otherwise use fetched data
   const hasExternalGeoFeatures = externalGeoFeatures !== undefined;
@@ -532,6 +552,30 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
   // Array form for rendering (buffer circle, zoom components)
   const activeQueryPoint: [number, number] | null =
     (activeGisLat !== null && activeGisLon !== null) ? [activeGisLat, activeGisLon] : null;
+
+  // Convert triplet points from EPSG:3414 to WGS84 (lat, lon) for display
+  const tripletPoints: [number, number][] | null = useMemo(() => {
+    if (!curvData?.diagnostics?.min_triplet?.points) return null;
+
+    try {
+      if (!proj4.defs('EPSG:3414')) {
+        proj4.defs('EPSG:3414', '+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 +ellps=WGS84 +units=m +no_defs');
+      }
+      return curvData.diagnostics.min_triplet.points.map(([x, y]: [number, number]) => {
+        const [lon, lat] = proj4('EPSG:3414', 'WGS84', [x, y]);
+        return [lat, lon] as [number, number];
+      });
+    } catch (error) {
+      return null;
+    }
+  }, [curvData]);
+  
+  const circleCoords: [number, number][] | null = useMemo(() => {
+    if (!curvData?.circle_geojson?.geometry?.coordinates?.[0]) return null;
+    return curvData.circle_geojson.geometry.coordinates[0].map(
+      ([lon, lat]: [number, number]) => [lat, lon] as [number, number]
+    );
+  }, [curvData]);
 
   // 初始中心（无数据时默认新加坡中心点）
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
@@ -810,34 +854,61 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
 
 
   return (
-    <Card.Root display="flex" flexDirection="column" h={isCollapsed ? "auto" : `${containerHeight}px`}>
-      {/* Clickable title bar — full width, matches AnalysisPanel header style */}
+    <Card.Root display="flex" flexDirection="column" h={`${containerHeight}px`} overflow="hidden" borderRadius="none">
+      {/* Clickable title bar restored as a static header */}
       <Box
-        onClick={() => setIsCollapsed(c => !c)}
-        cursor="pointer"
-        userSelect="none"
         px="4"
         py="3"
         borderBottom="1px solid"
         borderColor="gray.200"
         _dark={{ borderColor: "gray.700" }}
-        _hover={{ bg: "gray.50", _dark: { bg: "gray.800" } }}
         display="flex"
         alignItems="center"
         gap="2"
       >
         <Text fontSize="md" fontWeight="bold" color="gray.800" _dark={{ color: "gray.100" }}>
-          Map Preview&nbsp;{isCollapsed ? "▶" : "▼"}
+          Map Preview & Analysis
         </Text>
         {subtitle && (
           <Text fontSize="sm" fontWeight="medium" color="gray.600" _dark={{ color: "gray.400" }}>
             - {subtitle}
           </Text>
         )}
+        {onToggleCurvatureOverlay && curvData && (
+          <Flex align="center" gap="1.5" ml="auto">
+            <Flex align="center" gap="3" mr="2" pr="2" borderRight="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
+              <StatPill
+                label="Curv"
+                value={curvData.radius != null ? `${curvData.radius.toFixed(1)} m` : "∞"}
+              />
+              <StatPill
+                label="Width"
+                value={widthM != null ? `${widthM.toFixed(2)} m` : "—"}
+              />
+              <StatPill
+                label="Grade"
+                value={
+                  gradientPct != null
+                    ? `${(gradientPct as number) >= 0 ? "+" : ""}${(gradientPct as number).toFixed(1)}%`
+                    : grade === 1 ? "<5°"
+                    : grade === 2 ? "≥5°"
+                    : "—"
+                }
+              />
+            </Flex>
+            <Text fontSize="xs" fontWeight="medium" color={showCurvatureOverlay ? "gray.900" : "gray.400"} _dark={{ color: showCurvatureOverlay ? "gray.100" : "gray.500" }}>
+              Analysis Overlay
+            </Text>
+            <Switch
+              colorPalette="gray"
+              size="sm"
+              checked={showCurvatureOverlay}
+              onCheckedChange={onToggleCurvatureOverlay}
+            />
+          </Flex>
+        )}
       </Box>
 
-      {!isCollapsed && (
-        <>
           {/* Tools + GIS layer toggles */}
           <Box px="4" pt="2" pb="2" borderBottom="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.700" }}>
             {/* Tool icon buttons */}
@@ -1100,12 +1171,10 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 onCheckedChange={(e) => setShowKerbLine(e.checked)}
               />
             </Flex>
+
           </Flex>
         </Box>
-        </>
-      )}
-
-      <CardBody flex="1" minH={0} p={0} display={isCollapsed ? "none" : undefined}>
+      <CardBody flex="1" minH={0} p={0} position="relative">
         {loading && <Text color="gray.500">Loading map…</Text>}
         {err && <Text color="red.600">Failed: {err}</Text>}
 
@@ -1390,6 +1459,52 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 ))
               )}
 
+              
+              {/* === Curvature Analysis Overlays === */}
+              {showCurvatureOverlay && curvData && (
+                <>
+                  {/* Black circle outline (5m analysis window) */}
+                  {circleCoords && (
+                    <Polyline
+                      positions={circleCoords}
+                      pathOptions={{ color: '#000000', weight: 5, fill: false, opacity: 1 }}
+                    />
+                  )}
+                  {/* Path centerlines (color-coded) */}
+                  {curvData.paths?.map((path: any, pathIdx: number) => {
+                    const pathCoords = path.coordinates.map(([lon, lat]: [number, number]) => [lat, lon] as [number, number]);
+                    return (
+                      <Polyline
+                        key={`curv-path-${pathIdx}`}
+                        positions={pathCoords}
+                        pathOptions={{
+                          color: `rgb(${path.color.join(',')})`,
+                          weight: path.is_analysis_layer ? 6 : 4,
+                          opacity: path.is_analysis_layer ? 1 : 0.8,
+                        }}
+                      />
+                    );
+                  })}
+                  {/* Red dot (analysis point) */}
+                  {curvData.point && (
+                    <CircleMarker
+                      center={[curvData.point.lat, curvData.point.lon]}
+                      radius={12}
+                      pathOptions={{ fillColor: '#ff0000', fillOpacity: 1, color: '#ffffff', weight: 3 }}
+                    />
+                  )}
+                  {/* Blue triplet points (P1, P2, P3) */}
+                  {tripletPoints?.map((pt, ptIdx) => (
+                    <CircleMarker
+                      key={`triplet-${ptIdx}`}
+                      center={pt}
+                      radius={8}
+                      pathOptions={{ fillColor: '#1E90FF', fillOpacity: 1, color: '#ffffff', weight: 2 }}
+                    />
+                  ))}
+                </>
+              )}
+
               {/* 所有起点 */}
               {points.map(({ globalIdx, latlng, f }) => {
                 const isActive = globalIdx === index;
@@ -1461,6 +1576,8 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
         {!loading && !err && points.length === 0 && (
           <Text color="gray.500" mt="2">No geodata to show.</Text>
         )}
+
+        {overlayContent}
       </CardBody>
 
       {/* Delete Confirmation Dialog */}

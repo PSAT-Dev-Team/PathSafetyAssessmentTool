@@ -27,6 +27,9 @@ import {
   fetchAttributeMappings,
   previewTreatments,
   applySpecificTreatment,
+  getTreatmentEffectiveness,
+  getTreatmentSegmentEffectiveness,
+  calculateScore,
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
@@ -403,9 +406,20 @@ export default function TreatmentDetailPage() {
   const [attrs, setAttrs] = useState<AttributeRow[]>([]);
   const [accordionView, setAccordionView] = useState<"segment" | "treatment">("segment");
 
+  // Effectiveness = # of segments (across all loaded projects) whose Overall
+  // Risk Level Band improves when the treatment is applied in isolation.
+  // Keyed by treatment id; populated asynchronously from the backend once per
+  // project set, used to rank the "By Treatment" list top-down.
+  const [effectivenessCounts, setEffectivenessCounts] = useState<Record<number, number>>({});
+  const [effectivenessLoading, setEffectivenessLoading] = useState<boolean>(false);
+
+  // Score drop for each treatment applied in isolation on the currently viewed segment.
+  // Keyed by treatment id; populated when accordionView === "segment" and currentIndex changes.
+  const [segmentScoreDrops, setSegmentScoreDrops] = useState<Record<number, number>>({});
+
   const allApplicableTreatments = useMemo(() => {
     if (!attrs || attrs.length === 0) return [];
-    
+
     const uniqueMap = new Map<number, Treatment>();
     attrs.forEach(row => {
       // getApplicableTreatments expects a dict. It's safe to cast row.
@@ -416,9 +430,14 @@ export default function TreatmentDetailPage() {
         }
       });
     });
-    
-    return Array.from(uniqueMap.values()).sort((a,b) => a.id - b.id);
-  }, [attrs]);
+
+    return Array.from(uniqueMap.values()).sort((a, b) => {
+      const ea = effectivenessCounts[a.id] ?? 0;
+      const eb = effectivenessCounts[b.id] ?? 0;
+      if (eb !== ea) return eb - ea;
+      return a.id - b.id;
+    });
+  }, [attrs, effectivenessCounts]);
 
   const [geoFeatures, setGeoFeatures] = useState<Feature[]>([]);
   const [scores, setScores] = useState<Record<string, any>[]>([]);
@@ -610,9 +629,16 @@ export default function TreatmentDetailPage() {
           fetchProjectDetail(name),
           fetchProjectAttributes(name) as Promise<AttributesResponse>,
           fetchProjectGeoJSON(name) as Promise<FeatureCollection>,
-          fetch(`/api/projects/${encodeURIComponent(name)}/results`, { signal: sig }).then(res =>
-            res.ok ? res.json() : { result_rows: [] }
-          ).catch(() => ({ result_rows: [] })),
+          fetch(`/api/projects/${encodeURIComponent(name)}/results`, { signal: sig })
+            .then(async res => {
+              const data = res.ok ? await res.json() : { result_rows: [] };
+              if (!data.result_rows || data.result_rows.length === 0) {
+                const calc = await calculateScore(name);
+                return calc.ok ? calc : { result_rows: [] };
+              }
+              return data;
+            })
+            .catch(() => ({ result_rows: [] })),
         ]);
         return { name, detail: d ?? null, attrs: a?.rows ?? [], geo: gjson?.features ?? [], scores: resultsRes?.result_rows ?? [] };
       }));
@@ -625,12 +651,14 @@ export default function TreatmentDetailPage() {
 
       let start = 0;
       for (const res of results) {
-        const count = res.attrs.length;
-        newMap.push({ name: res.name, startIndex: start, count, detail: res.detail });
-        newAttrs.push(...res.attrs);
-        newGeo.push(...res.geo);
-        newScores.push(...res.scores);
-        start += count;
+        // Cap to min(geo, scores) to prevent index misalignment when a project
+        // has no attributes (e.g. TPYLor63Q25: 208 geo features, 0 scores).
+        const geoCount = Math.min(res.geo.length, res.scores.length);
+        newMap.push({ name: res.name, startIndex: start, count: geoCount, detail: res.detail });
+        newAttrs.push(...res.attrs.slice(0, geoCount));
+        newGeo.push(...res.geo.slice(0, geoCount));
+        newScores.push(...res.scores.slice(0, geoCount));
+        start += geoCount;
       }
 
       setProjectMap(newMap);
@@ -684,6 +712,63 @@ export default function TreatmentDetailPage() {
 
     return () => { cancelled = true; };
   }, [projectNames, projectMap]);
+
+  // Fetch per-treatment effectiveness counts aggregated across loaded projects,
+  // used to rank the "By Treatment" list top-down by most segments improved.
+  useEffect(() => {
+    if (projectMap.length === 0) return;
+
+    let cancelled = false;
+    setEffectivenessLoading(true);
+    (async () => {
+      try {
+        const results = await Promise.all(
+          projectMap.map(p => getTreatmentEffectiveness(p.name).catch(() => null))
+        );
+        if (cancelled) return;
+
+        const aggregated: Record<number, number> = {};
+        for (const r of results) {
+          if (!r || !r.ok) continue;
+          for (const [tidStr, count] of Object.entries(r.counts)) {
+            const tid = parseInt(tidStr, 10);
+            if (!Number.isFinite(tid)) continue;
+            aggregated[tid] = (aggregated[tid] ?? 0) + (count ?? 0);
+          }
+        }
+        setEffectivenessCounts(aggregated);
+      } finally {
+        if (!cancelled) setEffectivenessLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [projectMap]);
+
+  // Fetch per-treatment score drops for the current segment to rank the "By Segment" list.
+  useEffect(() => {
+    if (accordionView !== "segment") return;
+    const ctx = resolveIndex(currentIndex);
+    if (!ctx) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await getTreatmentSegmentEffectiveness(ctx.name, ctx.localIndex);
+        if (cancelled || !result.ok) return;
+        const drops: Record<number, number> = {};
+        for (const [tidStr, drop] of Object.entries(result.score_drops)) {
+          const tid = parseInt(tidStr, 10);
+          if (Number.isFinite(tid)) drops[tid] = drop;
+        }
+        setSegmentScoreDrops(drops);
+      } catch {
+        // non-fatal: list will remain in default order
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [accordionView, currentIndex, resolveIndex]);
 
   useEffect(() => {
     fetchData();
@@ -794,7 +879,7 @@ export default function TreatmentDetailPage() {
             },
           }));
           // Pre-select treatments that were applied
-          setSelectedTreatments(new Set(state.treatments_applied));
+          setSelectedTreatments(new Set());
         } else {
           // Clear selection for segments without treatments
           setSelectedTreatments(new Set());
@@ -819,7 +904,7 @@ export default function TreatmentDetailPage() {
     try {
       const result = await applyTreatments(ctx.name, {
         segment_index: ctx.localIndex,
-        treatment_ids: Array.from(selectedTreatments),
+        treatment_ids: [...new Set([...(treatmentState[currentIndex]?.treatment_ids ?? []), ...Array.from(selectedTreatments)])],
         image_ref: imgRef,
       });
 
@@ -852,10 +937,12 @@ export default function TreatmentDetailPage() {
     try {
         const allDetails: any[] = [];
         for (const id of Array.from(selectedTreatments)) {
-            const res = await applySpecificTreatment(currentCtx.name, id);
-            if (res.details) {
-                res.details.forEach((d: any) => d.projectName = currentCtx.name);
-                allDetails.push(...res.details);
+            for (const proj of projectMap) {
+                const res = await applySpecificTreatment(proj.name, id);
+                if (res.details) {
+                    res.details.forEach((d: any) => d.projectName = proj.name);
+                    allDetails.push(...res.details);
+                }
             }
         }
         window.dispatchEvent(new CustomEvent("psat:treat:all:completed", { detail: allDetails }));
@@ -1005,6 +1092,7 @@ export default function TreatmentDetailPage() {
           {projectNames.map((proj) => {
             const isActive = activeProject === proj;
             const segmentCount = getProjectSegmentCount(proj);
+            if (segmentCount === 0) return null;
             return (
               <Button
                 key={proj}
@@ -1079,7 +1167,7 @@ export default function TreatmentDetailPage() {
             containerHeight={MAP_HEIGHT}
             subtitle="Before Treatment"
             geoFeatures={geoFeatures as Feature<LineString, any>[]}
-            startIndex={currentCtx ? getProjectFirstSegmentIndex(currentCtx.name) : 0}
+            startIndex={0}
             scores={scores as any}
           />
         </GridItem>
@@ -1099,7 +1187,7 @@ export default function TreatmentDetailPage() {
             scores={afterTreatmentScores as any}
             subtitle="After Treatment"
             geoFeatures={geoFeatures as Feature<LineString, any>[]}
-            startIndex={currentCtx ? getProjectFirstSegmentIndex(currentCtx.name) : 0}
+            startIndex={0}
           />
         </GridItem>
       </Grid>
@@ -1158,7 +1246,8 @@ export default function TreatmentDetailPage() {
                 if (!currentAttr) {
                   return <Text fontSize="xs" color="gray.400">No segment data</Text>;
                 }
-                displayTreatments = getApplicableTreatments(currentAttr);
+                displayTreatments = getApplicableTreatments(currentAttr)
+                  .sort((a, b) => (segmentScoreDrops[b.id] ?? 0) - (segmentScoreDrops[a.id] ?? 0));
               } else {
                 displayTreatments = allApplicableTreatments;
               }
@@ -1178,9 +1267,7 @@ export default function TreatmentDetailPage() {
                       ? (treatmentState[currentIndex]?.applied && treatmentState[currentIndex]?.treatment_ids.includes(t.id))
                       : fullyAppliedTreatments.has(t.id);
                       
-                    const isDisabled = accordionView === "segment" 
-                      ? treatmentState[currentIndex]?.applied 
-                      : fullyAppliedTreatments.has(t.id);
+                    const isDisabled = isApplied;
 
                     return (
                       <Flex
@@ -1247,6 +1334,18 @@ export default function TreatmentDetailPage() {
                             {t.name}
                             {isApplied && " ✓"}
                           </Text>
+                          {accordionView === "treatment" && (
+                            <Text fontSize="2xs" color="blue.600" _dark={{ color: "blue.300" }} mt="1" fontWeight="semibold">
+                              {effectivenessLoading && effectivenessCounts[t.id] === undefined
+                                ? "Improves …%"
+                                : `Improves ${attrs.length > 0 ? ((effectivenessCounts[t.id] ?? 0) / attrs.length * 100).toFixed(1) : "0.0"}% of segments`}
+                            </Text>
+                          )}
+                          {accordionView === "segment" && segmentScoreDrops[t.id] !== undefined && (
+                            <Text fontSize="2xs" color="blue.600" _dark={{ color: "blue.300" }} mt="1" fontWeight="semibold">
+                              {`Score drop: ${segmentScoreDrops[t.id].toFixed(1)}`}
+                            </Text>
+                          )}
                           {t.description && (
                             <Text fontSize="2xs" color="gray.500" _dark={{ color: "gray.400" }} mt="1">
                               {t.description}
@@ -1276,7 +1375,8 @@ export default function TreatmentDetailPage() {
                         const currentAttr = attrs[currentIndex] as any;
                         if (!currentAttr) return true;
                         const applicable = getApplicableTreatments(currentAttr);
-                        return applicable.length === 0 || treatmentState[currentIndex]?.applied;
+                        const appliedIds = treatmentState[currentIndex]?.treatment_ids ?? [];
+                        return applicable.every(t => appliedIds.includes(t.id));
                       } else {
                         return allApplicableTreatments.length === 0;
                       }
@@ -1290,7 +1390,8 @@ export default function TreatmentDetailPage() {
                         const currentAttr = attrs[currentIndex] as any;
                         if (!currentAttr) return;
                         const applicable = getApplicableTreatments(currentAttr);
-                        setSelectedTreatments(new Set(applicable.map(t => t.id)));
+                        const appliedIds = treatmentState[currentIndex]?.treatment_ids ?? [];
+                        setSelectedTreatments(new Set(applicable.filter(t => !appliedIds.includes(t.id)).map(t => t.id)));
                       } else {
                         setSelectedTreatments(new Set(allApplicableTreatments.map(t => t.id)));
                       }
@@ -1317,7 +1418,7 @@ export default function TreatmentDetailPage() {
                 size="sm"
                 width="full"
                 variant="solid"
-                colorScheme={accordionView === "segment" && treatmentState[currentIndex]?.applied ? "green" : "blue"}
+                colorScheme={accordionView === "segment" && treatmentState[currentIndex]?.applied && selectedTreatments.size === 0 ? "green" : "blue"}
                 disabled={selectedTreatments.size === 0 || applyLoading}
                 loading={applyLoading}
                 onClick={async () => {
@@ -1329,7 +1430,7 @@ export default function TreatmentDetailPage() {
                   }
                 }}
               >
-                {accordionView === "segment" && treatmentState[currentIndex]?.applied
+                {accordionView === "segment" && treatmentState[currentIndex]?.applied && selectedTreatments.size === 0
                   ? "Applied ✓"
                   : `Apply (${selectedTreatments.size})`}
               </Button>
@@ -1525,7 +1626,13 @@ export default function TreatmentDetailPage() {
                 <Dialog.Title>Apply Treatments to Project</Dialog.Title>
               </Dialog.Header>
               <Dialog.Body>
-                Are you sure you want to logically apply <strong>{selectedTreatments.size}</strong> treatment(s) to <strong>all eligible segments</strong> across this project?
+                <p>Are you sure you want to apply the following treatments to all eligible segments across this project?</p>
+                <ul style={{ marginTop: "0.5rem", paddingLeft: "1.25rem" }}>
+                  {Array.from(selectedTreatments).map(id => {
+                    const t = TREATMENTS.find(tr => tr.id === id);
+                    return <li key={id}><strong>{t ? t.name : `Treatment ${id}`}</strong></li>;
+                  })}
+                </ul>
               </Dialog.Body>
               <Dialog.Footer>
                 <Dialog.ActionTrigger asChild>
