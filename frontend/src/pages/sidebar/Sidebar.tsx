@@ -7,7 +7,6 @@ import { applyAllTreatments, resetAllTreatments, saveTreatments } from "../../ap
 import CodingSidebar from "./components/CodingSidebar";
 import TreatmentSidebar from "./components/TreatmentSidebar";
 import ResetConfirmationDialog from "./components/ResetConfirmationDialog";
-import ShapefileModal from "./components/ShapefileModal";
 import ExitConfirmationDialog from "./components/ExitConfirmationDialog";
 import psatLogo from "../LandingPage/assets/PSAT Logo 2.png";
 import "./sidebar.css";
@@ -20,20 +19,11 @@ const LINKS = [
 export default function Sidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [treatmentExitDialogOpen, setTreatmentExitDialogOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
-  const openShapefileModal = () => {
-    setShapefileModalOpen(true);
-  };
-
-  const closeShapefileModal = () => {
-    setShapefileModalOpen(false);
-  };
 
   // Get the project name
   const codingMatch = useMatch("/coding/:projectName");
@@ -371,14 +361,8 @@ export default function Sidebar() {
           <Button onClick={() => navigateSidebar("/gis-layers")} colorPalette="teal" variant="surface" size="sm" width="100%">
             View GIS Layers
           </Button>
-          <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" width="100%">
-            Update GIS Layer
-          </Button>
         </div>
       )}
-
-      {/* Shapefile Management Modal */}
-      <ShapefileModal open={shapefileModalOpen} onClose={closeShapefileModal} />
 
       {/* Coding Exit Confirmation Dialog */}
       <ExitConfirmationDialog

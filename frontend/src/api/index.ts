@@ -598,6 +598,20 @@ export async function uploadShapefiles(files: File[], category?: string): Promis
 }
 
 /**
+ * Temporarily upload shapefile files and return GeoJSON preview (not saved permanently)
+ */
+export async function previewUploadedShapefiles(files: File[]): Promise<any> {
+  const formData = new FormData();
+  files.forEach(file => formData.append("files", file));
+  const res = await fetch("/api/shapefiles/preview-upload", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
  * Replace existing shapefiles with uploaded ones
  * @param replacements - Array of {uploaded_path, target_path} pairs
  */
@@ -970,7 +984,7 @@ export async function uploadImagesToSourceFolder(
 ): Promise<{ count: number; errors: string[] }> {
   const formData = new FormData();
   formData.append("folder_name", folderName);
-  
+
   files.forEach(file => {
     // If the file was dropped as part of a folder, it will have webkitRelativePath
     // Fallback to name if it's just a regular file selection

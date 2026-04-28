@@ -4,6 +4,25 @@ import { LuPlus, LuRefreshCw, LuUpload, LuFile, LuX, LuFolderInput, LuCheck } fr
 import { toaster } from "../../../components/ui/toaster";
 import * as api from "../../../api";
 import "../../ShapefileManagement/shapefileManagement.css";
+import { MapContainer, GeoJSON, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import ThemeAwareTileLayer from "../../../components/common/ThemeAwareTileLayer";
+import { Spinner } from "@chakra-ui/react";
+
+function FitBoundsGeoJSON({ data }: { data: any }) {
+  const map = useMap();
+  useEffect(() => {
+    if (data) {
+      try {
+        const layer = L.geoJSON(data);
+        const bounds = layer.getBounds();
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [24, 24] });
+      } catch (_) {}
+    }
+  }, [data, map]);
+  return null;
+}
 
 interface ShapefileModalProps {
   open: boolean;
@@ -32,6 +51,11 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
   const [replacing, setReplacing] = useState(false);
   const [replaceDragActive, setReplaceDragActive] = useState(false);
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Preview state (Add screen)
+  const [previewGeoJSON, setPreviewGeoJSON] = useState<any>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -65,6 +89,25 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     setSelectedReplaceCategory("");
     setSelectedTargetShapefile("");
     setDragActive(false);
+    setPreviewGeoJSON(null);
+    setPreviewError(null);
+  }
+
+  async function fetchPreview(files: File[]) {
+    const hasShp = files.some(f => f.name.toLowerCase().endsWith(".shp"));
+    if (!hasShp) { setPreviewGeoJSON(null); return; }
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewGeoJSON(null);
+    try {
+      const geojson = await api.previewUploadedShapefiles(files);
+      if (geojson?.error) throw new Error(geojson.error);
+      setPreviewGeoJSON(geojson);
+    } catch (e: any) {
+      setPreviewError(e.message || "Preview failed");
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   function handleClose() {
@@ -123,7 +166,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
   function addFiles(newFiles: File[]) {
     // Accept all GIS file types, but NO zip files
     const gisExtensions = ['.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx',
-                          '.geojson', '.kml', '.kmz', '.gml', '.gpx', '.json'];
+      '.geojson', '.kml', '.kmz', '.gml', '.gpx', '.json'];
 
     const validFiles = newFiles.filter((f) => {
       const fileName = f.name.toLowerCase();
@@ -141,11 +184,16 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
       return;
     }
 
-    setUploadFiles((prev) => [...prev, ...validFiles]);
+    const merged = [...uploadFiles, ...validFiles];
+    setUploadFiles(merged);
+    fetchPreview(merged);
   }
 
   function removeFile(index: number) {
-    setUploadFiles((prev) => prev.filter((_, i) => i !== index));
+    const updated = uploadFiles.filter((_, i) => i !== index);
+    setUploadFiles(updated);
+    if (updated.length > 0) fetchPreview(updated);
+    else { setPreviewGeoJSON(null); setPreviewError(null); }
   }
 
   async function handleAddUpload() {
@@ -248,7 +296,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
 
     // Validate all files are GIS files
     const gisExtensions = ['.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx',
-                          '.geojson', '.kml', '.kmz', '.gml', '.gpx', '.json'];
+      '.geojson', '.kml', '.kmz', '.gml', '.gpx', '.json'];
 
     const invalidFiles = files.filter(f => {
       const fileName = f.name.toLowerCase();
@@ -576,6 +624,44 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                       ))}
                     </div>
                   )}
+
+                  {/* Map Preview – always visible */}
+                  <Box mt={4}>
+                    <Text fontWeight="600" fontSize="sm" mb={2}>
+                      Layer Preview
+                      {!previewGeoJSON && !previewLoading && (
+                        <Text as="span" fontWeight="400" color="gray.400" fontSize="xs" ml={2}>
+                          (select a shapefile above to preview it)
+                        </Text>
+                      )}
+                    </Text>
+                    <Box h="280px" borderRadius="md" overflow="hidden" border="1px solid" borderColor="gray.200" position="relative">
+                      {previewLoading && (
+                        <Box position="absolute" inset="0" zIndex={500} bg="whiteAlpha.800"
+                          display="flex" alignItems="center" justifyContent="center" flexDirection="column" gap={2}>
+                          <Spinner size="lg" color="blue.500" />
+                          <Text fontSize="sm" color="gray.600">Generating preview...</Text>
+                        </Box>
+                      )}
+                      {previewError && !previewLoading && (
+                        <Box position="absolute" bottom={2} left={2} right={2} zIndex={500}
+                          bg="red.50" p={2} borderRadius="md" border="1px solid" borderColor="red.200">
+                          <Text fontSize="xs" color="red.600">{previewError}</Text>
+                        </Box>
+                      )}
+                      <MapContainer center={[1.3521, 103.8198]} zoom={11}
+                        style={{ width: "100%", height: "100%" }} scrollWheelZoom>
+                        <ThemeAwareTileLayer />
+                        {previewGeoJSON && !previewLoading && (
+                          <>
+                            <FitBoundsGeoJSON data={previewGeoJSON} />
+                            <GeoJSON data={previewGeoJSON}
+                              style={{ color: "#2563eb", weight: 2, fillOpacity: 0.25 }} />
+                          </>
+                        )}
+                      </MapContainer>
+                    </Box>
+                  </Box>
 
                   {uploading && (
                     <Box mt={4}>

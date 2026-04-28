@@ -382,6 +382,37 @@ def validate_replacement():
 
 
 # ---------------------------------------------------------------------------
+# POST /api/shapefiles/preview-upload
+# ---------------------------------------------------------------------------
+
+@bp.post("/preview-upload")
+def preview_upload():
+    """
+    Accept uploaded shapefile files, parse to GeoJSON, and return.
+    Nothing is saved permanently — temp files are deleted immediately.
+    """
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "No files received"}), 400
+
+    tmp_dir = Path(tempfile.mkdtemp(dir=_temp_root()))
+    try:
+        for f in files:
+            f.save(str(tmp_dir / f.filename))
+        shp_files = list(tmp_dir.glob("*.shp"))
+        if not shp_files:
+            return jsonify({"error": "No .shp file found in the uploaded files"}), 400
+        geojson = _read_shapefile_as_geojson(str(shp_files[0]), max_features=5000)
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+    finally:
+        shutil.rmtree(str(tmp_dir), ignore_errors=True)
+
+    return jsonify(geojson)
+
+
+# ---------------------------------------------------------------------------
 # POST /api/shapefiles/upload
 # ---------------------------------------------------------------------------
 

@@ -1,12 +1,49 @@
 import ThemeAwareTileLayer from "../../components/common/ThemeAwareTileLayer";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { listShapefiles, type ShapefileInfo } from "../../api";
-import { Spinner, Text, Badge, Box, Flex, HStack } from "@chakra-ui/react";
+import { Spinner, Text, Badge, Box, Flex, HStack, Button } from "@chakra-ui/react";
+import ShapefileModal from "../sidebar/components/ShapefileModal";
 import { MapContainer, TileLayer, Polyline, CircleMarker, Polygon as LeafletPolygon, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import "./gisLayersPage.css";
+
+const getLayerMetadata = (fileName: string) => {
+  const name = fileName.toLowerCase();
+  
+  // Paths
+  if (name.includes("footpath")) return { reqCols: "WIDTH", affects: "Facility Width, Curvature" };
+  if (name.includes("cycling")) return { reqCols: "WIDTH", affects: "Facility Width, Curvature" };
+  if (name.includes("shared")) return { reqCols: "WIDTH", affects: "Facility Width, Curvature" };
+  
+  // Crossings
+  if (name.includes("bicyclecrossing") || (name.includes("bicycle") && name.includes("crossing"))) return { reqCols: "None (Proximity)", affects: "Crossing Facility, Crossing Type" };
+  if (name.includes("roadcrossing") || (name.includes("road") && name.includes("crossing"))) return { reqCols: "None (Proximity)", affects: "Pedestrian Crossing" };
+  
+  // Speed / Links
+  if (name.includes("speedlimit") || name.includes("speed_limit")) return { reqCols: "SPEEDLIMIT", affects: "Road speed limit" };
+  if (name.includes("link")) return { reqCols: "LK_ID_NUM", affects: "Road operating speed" };
+  
+  // Public Transport
+  if (name.includes("mrt")) return { reqCols: "None (Proximity)", affects: "Pedestrian Crossing, Peak Flow" };
+  if (name.includes("busstop") || name.includes("bus_stop") || name.includes("bus stop")) return { reqCols: "None (Proximity)", affects: "Pedestrian Crossing" };
+  if (name.includes("busshelter") || name.includes("bus_shelter") || name.includes("bus shelter")) return { reqCols: "None (Proximity)", affects: "Peak Pedestrian Flow" };
+  if (name.includes("bus") && name.includes("lane")) return { reqCols: "None (Proximity)", affects: "Heavy vehicle flow" };
+  
+  // Area Types
+  if (name.includes("industrial")) return { reqCols: "None (Containment)", affects: "Area type (Industrial)" };
+  if (name.includes("rural")) return { reqCols: "None (Containment)", affects: "Area type (Rural)" };
+  if (name.includes("recreation")) return { reqCols: "None (Containment)", affects: "Area type (Recreational)" };
+  if (name.includes("central") || name.includes("inner")) return { reqCols: "None (Containment)", affects: "Area type (Urban)" };
+  
+  // Other infrastructure
+  if (name.includes("parking")) return { reqCols: "None (Proximity)", affects: "Adjacent Vehicle Parking" };
+  if (name.includes("kerb")) return { reqCols: "None (Proximity)", affects: "Lanes – adjacent road" };
+  if (name.includes("count")) return { reqCols: "DataType, DateTime, Count_Data", affects: "User Counts" };
+  
+  return { reqCols: "Unknown", affects: "Unknown" };
+};
 
 // Helper component to adjust bounds
 function FitBounds({ bounds }: { bounds: L.LatLngBounds | null }) {
@@ -34,22 +71,25 @@ export default function GisLayersPage() {
   const [mapLoading, setMapLoading] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   
+  const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
+  
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
 
-  useEffect(() => {
-    async function loadLayers() {
-      try {
-        setLoading(true);
-        const data = await listShapefiles();
-        setShapefiles(data);
-        setError(null);
-      } catch (err: any) {
-        console.error("Failed to load shapefiles", err);
-        setError(err.message || "Failed to load shapefiles");
-      } finally {
-        setLoading(false);
-      }
+  const loadLayers = async () => {
+    try {
+      setLoading(true);
+      const data = await listShapefiles();
+      setShapefiles(data);
+      setError(null);
+    } catch (err: any) {
+      console.error("Failed to load shapefiles", err);
+      setError(err.message || "Failed to load shapefiles");
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
     loadLayers();
   }, []);
 
@@ -188,12 +228,17 @@ export default function GisLayersPage() {
 
   return (
     <div className="gis-layers-root">
-      <div className="gis-layers-header">
-        <h1 className="gis-layers-title">GIS Layers Mapping</h1>
-        <p className="gis-layers-subtitle">
-          View all the shapefiles currently available in the system on the interactive map below.
-        </p>
-      </div>
+      <Flex className="gis-layers-header" justify="space-between" align="flex-start">
+        <Box>
+          <h1 className="gis-layers-title">GIS Layers Mapping</h1>
+          <p className="gis-layers-subtitle">
+            View all the shapefiles currently available in the system on the interactive map below.
+          </p>
+        </Box>
+        <Button onClick={() => setShapefileModalOpen(true)} colorPalette="blue" size="sm">
+          Update GIS Layer
+        </Button>
+      </Flex>
 
       <Flex h="calc(100vh - 180px)" gap="4">
         {/* Left Side: Table of Layers */}
@@ -247,6 +292,14 @@ export default function GisLayersPage() {
                         <Text><strong>Year:</strong> {file.year}</Text>
                         <Text truncate title={file.source}><strong>Source:</strong> {file.source}</Text>
                       </HStack>
+                      <Box mt={2} p={2} bg="gray.50" borderRadius="md" fontSize="xs" border="1px solid" borderColor="gray.200">
+                        <Text color="gray.700" mb={1}>
+                          <Text as="span" fontWeight="600">Required Columns:</Text> {getLayerMetadata(file.base_name).reqCols}
+                        </Text>
+                        <Text color="gray.700" whiteSpace="normal" wordBreak="break-word">
+                          <Text as="span" fontWeight="600">Affects PSAT Attribute:</Text> {getLayerMetadata(file.base_name).affects}
+                        </Text>
+                      </Box>
                     </Box>
                   );
                 })}
@@ -331,6 +384,15 @@ export default function GisLayersPage() {
           </MapContainer>
         </Box>
       </Flex>
+
+      {/* Shapefile Management Modal */}
+      <ShapefileModal 
+        open={shapefileModalOpen} 
+        onClose={() => {
+          setShapefileModalOpen(false);
+          loadLayers();
+        }} 
+      />
     </div>
   );
 }
