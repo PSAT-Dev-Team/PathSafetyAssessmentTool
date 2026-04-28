@@ -28,13 +28,12 @@ export default function HelpPage() {
           align="center"
           borderBottom="2px solid"
           borderColor="gray.200"
-          _dark={{ borderColor: "gray.600" }}
+          _dark={{ borderColor: "gray.600", bg: "gray.800" }}
           pb="4"
           mb="6"
           position="sticky"
           top="0"
           bg="white"
-          _dark={{ bg: "gray.800" } as any}
           zIndex="10"
         >
           <Text fontSize="2xl" fontWeight="bold" color="gray.800" _dark={{ color: "gray.100" }}>

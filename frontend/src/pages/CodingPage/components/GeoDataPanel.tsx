@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 
-import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle } from "react-leaflet";
+import { MapContainer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle } from "react-leaflet";
 import L, { divIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 

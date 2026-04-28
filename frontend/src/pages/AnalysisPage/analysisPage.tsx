@@ -6,16 +6,8 @@ import {
   Button,
   Tabs,
 } from "@chakra-ui/react";
-import { fetchProjectList } from "../../api";
+import { fetchProjectList, type FileResponse, type ProjectListItem } from "../../api";
 import "../Home/home.css"; // Reuse home page styles
-
-interface FileListResponse {
-  projects: string[];
-}
-
-interface ProjectItem {
-  name: string;
-}
 
 type TreatmentPhase = "pre" | "post";
 
@@ -24,8 +16,8 @@ export default function AnalysisPage() {
   const [phase, setPhase] = useState<TreatmentPhase>("pre");
 
   // Project list state
-  const [projectList, setProjectList] = useState<FileListResponse | null>(null);
-  const [postTreatmentList, setPostTreatmentList] = useState<FileListResponse | null>(null);
+  const [projectList, setProjectList] = useState<FileResponse | null>(null);
+  const [postTreatmentList, setPostTreatmentList] = useState<FileResponse | null>(null);
 
   // Filter and selection states
   const [nameQuery, setNameQuery] = useState("");
@@ -51,13 +43,12 @@ export default function AnalysisPage() {
   }, [phase]);
 
   // Process projects based on current phase
-  const projects: ProjectItem[] = useMemo(() => {
+  const projects: ProjectListItem[] = useMemo(() => {
     const list = phase === "pre" ? projectList : postTreatmentList;
     if (!list?.projects) return [];
     return list.projects
       .slice()
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name }));
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [projectList, postTreatmentList, phase]);
 
   // Apply filters

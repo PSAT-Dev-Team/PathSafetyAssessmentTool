@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { listShapefiles, type ShapefileInfo } from "../../api";
 import { Spinner, Text, Badge, Box, Flex, HStack, Button } from "@chakra-ui/react";
 import ShapefileModal from "../sidebar/components/ShapefileModal";
-import { MapContainer, TileLayer, Polyline, CircleMarker, Polygon as LeafletPolygon, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, Polyline, CircleMarker, Polygon as LeafletPolygon, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 

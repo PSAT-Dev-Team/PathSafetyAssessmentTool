@@ -2,7 +2,7 @@ import ThemeAwareTileLayer from "../../../components/common/ThemeAwareTileLayer"
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Box, Text, Tabs } from "@chakra-ui/react";
 
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";

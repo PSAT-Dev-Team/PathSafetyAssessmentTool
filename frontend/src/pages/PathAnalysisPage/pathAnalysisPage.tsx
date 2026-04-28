@@ -10,7 +10,7 @@ import {
   Portal,
 } from "@chakra-ui/react";
 import { fetchProjectList, type FileResponse } from "../../api";
-import FilterPanel from "./components/FilterPanel";
+import AttributesDropdown from "./components/AttributesDropdown";
 import PathAnalysisMapView from "./components/PathAnalysisMapView";
 import AttributeDistributionChart from "./components/AttributeDistributionChart";
 import AggregatedScoreBandPanel from "./components/AggregatedScoreBandPanel";
@@ -186,6 +186,11 @@ export default function PathAnalysisPage() {
       tag.toLowerCase().includes(tagsInputValue.toLowerCase())
     );
   }, [allTags, tagsInputValue]);
+
+  const activeSelectedAttributes = useMemo(
+    () => selectedAttributes.filter((attr): attr is string => attr !== null),
+    [selectedAttributes]
+  );
 
   // Create collections for dropdowns (using filtered data)
   const projectCollection = useMemo(() =>
@@ -515,7 +520,7 @@ export default function PathAnalysisPage() {
       <Box mb="6">
         <PathAnalysisMapView
           selectedProjects={loadedProjects}
-          selectedAttributes={selectedAttributes}
+          selectedAttributes={activeSelectedAttributes}
           onChartDataUpdate={setChartData}
         />
       </Box>
@@ -532,7 +537,6 @@ export default function PathAnalysisPage() {
           <AttributeDistributionChart
             categoryData={chartData.categoryDistributionData}
             selectedAttribute={chartData.primaryFocusAttribute}
-            selectedAttributes={selectedAttributes}
             categoryStatus={chartData.categoryStatus}
           />
         </Box>

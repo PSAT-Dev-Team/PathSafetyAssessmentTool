@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
+import { Box, Text, Tabs, Button, Flex, HStack, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
 import { toaster } from "../../../components/ui/toaster";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker } from "react-leaflet";
 import { FaDrawPolygon, FaMousePointer, FaPlus, FaTrash } from "react-icons/fa";
 import { Slider } from "../../../components/ui/slider";
-import { NUMERIC_FILTER_ATTRIBUTES, ATTRIBUTE_OPTIONS, ATTRIBUTE_LABELS, CYCLERAP_ATTRIBUTE_CONFIGS, getCategoryColor, SUBCATEGORY_MAP, MULTI_VALUE_ATTRS, SUBCATEGORY_CHILD_ATTRS } from "./AttributesDropdown";
+import { NUMERIC_FILTER_ATTRIBUTES, ATTRIBUTE_OPTIONS, ATTRIBUTE_LABELS, getCategoryColor, SUBCATEGORY_MAP, MULTI_VALUE_ATTRS, SUBCATEGORY_CHILD_ATTRS } from "./AttributesDropdown";
 import { AddSegmentsDialog } from "./AddSegmentsDialog";
 import { Menu } from "@chakra-ui/react";
 import { MapCursorController } from "../../../components/common/MapCursorController";
@@ -77,13 +77,12 @@ interface PolygonDrawingToolProps {
 interface DraggableMarkerProps {
   position: [number, number];
   index: number;
-  color: string;
   icon: L.DivIcon;
   onDrag: (index: number, latlng: L.LatLng) => void;
   onDragEnd: (index: number, latlng: L.LatLng) => void;
 }
 
-function DraggableMarker({ position, index, color, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
+function DraggableMarker({ position, index, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
   const eventHandlers = useMemo(
     () => ({
       drag: (e: L.LeafletEvent) => {
@@ -193,7 +192,6 @@ function PolygonDrawingTool({ isPolygonMode, isPolygonAddMode, onPolygonPoint, o
           key={`poly-point-${idx}`}
           position={pt}
           index={idx}
-          color={color}
           icon={icon}
           onDrag={handleDrag}
           onDragEnd={handleDragEnd}

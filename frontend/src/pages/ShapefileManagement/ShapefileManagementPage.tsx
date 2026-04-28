@@ -186,13 +186,13 @@ export default function ShapefileManagementPage() {
                         <Table.Row key={shp.path}>
                           <Table.Cell fontWeight="medium">{shp.name}</Table.Cell>
                           <Table.Cell>
-                            {shp.metadata.feature_count?.toLocaleString() || "N/A"}
+                            {shp.metadata?.feature_count?.toLocaleString() || "N/A"}
                           </Table.Cell>
-                          <Table.Cell fontSize="xs">{shp.metadata.crs || "Unknown"}</Table.Cell>
+                          <Table.Cell fontSize="xs">{shp.metadata?.crs || "Unknown"}</Table.Cell>
                           <Table.Cell>{formatBytes(shp.size)}</Table.Cell>
                           <Table.Cell>
                             <Text fontSize="xs" color="fg.muted">
-                              {shp.files.join(", ")}
+                              {(shp.files ?? [shp.filename]).join(", ")}
                             </Text>
                           </Table.Cell>
                           <Table.Cell>

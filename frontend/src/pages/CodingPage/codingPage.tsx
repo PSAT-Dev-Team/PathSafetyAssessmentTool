@@ -745,7 +745,6 @@ export default function CodingPage() {
           ("sources_by_row" in r && r.sources_by_row) ? r.sources_by_row : {};
         const totalOk = ("ok" in r ? r.ok : 0) || 0;
         const totalFail = ("fail" in r ? r.fail : 0) || 0;
-        const errors: any[] = ("errors" in r && r.errors) ? r.errors : [];
 
         setProgress(85);
         try {

@@ -1,5 +1,5 @@
 import ThemeAwareTileLayer from "../../common/ThemeAwareTileLayer";
-import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from 'react-leaflet';
+import { MapContainer, Polyline, CircleMarker, useMap } from 'react-leaflet';
 import { useEffect, useMemo } from 'react';
 import proj4 from 'proj4';
 import 'leaflet/dist/leaflet.css';

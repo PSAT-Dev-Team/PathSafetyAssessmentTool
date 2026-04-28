@@ -1,34 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchProjectList, ping, deleteProject as apiDeleteProject } from "../../api";
+import { fetchProjectList, deleteProject as apiDeleteProject, type FileResponse, type ProjectListItem } from "../../api";
 import {
   Button,
   Dialog,
   Portal,
   CloseButton,
-  Text,
 } from "@chakra-ui/react";import { useNavigate } from "react-router-dom";
 
 import "./home.css";
 
-interface FileListResponse {
-  projects: string[];
-}
-
-// 未来如果后端返回更多字段，可以直接扩展这个类型
-interface ProjectItem {
-  name: string;
-  // createdAt?: string; // ISO
-  // updatedAt?: string; // ISO
-}
-
 export default function Home() {
-
-  // Status
-  const [status, setStatus] = useState("checking...");
   const [error, setError] = useState<string | null>(null);
 
   // Project List
-  const [Projectlist, setProjectList] = useState<FileListResponse | null>(null);
+  const [Projectlist, setProjectList] = useState<FileResponse | null>(null);
 
   // Filter
   const [nameQuery, setNameQuery] = useState("");
@@ -46,23 +31,17 @@ export default function Home() {
 
   // Use effect
   useEffect(() => {
-    ping()
-      .then((r) => setStatus(r.status))
-      .catch(() => setStatus("offline"));
-
     fetchProjectList()
       .then((data) => setProjectList(data))
       .catch((e) => setError(String(e)));
   }, []);
 
   // UseMemo projects
-  const projects: ProjectItem[] = useMemo(() => {
+  const projects: ProjectListItem[] = useMemo(() => {
     if (!Projectlist?.projects) return [];
-    console.log(Projectlist)
     return Projectlist.projects
       .slice()
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name }));
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [Projectlist]);
 
   // for Filters
@@ -101,7 +80,7 @@ export default function Home() {
       // 本地把它从列表移除
       setProjectList((prev) =>
         prev
-          ? { projects: prev.projects.filter((n) => n !== selected) }
+          ? { projects: prev.projects.filter((project) => project.name !== selected) }
           : prev
       );
       setSelected(null);
@@ -128,6 +107,7 @@ export default function Home() {
             />
           </div>
         </div>
+        {error && <div className="empty">{error}</div>}
       </div>
 
       <div className="table-wrap">
@@ -194,6 +174,11 @@ export default function Home() {
               </Dialog.Header>
               <Dialog.Body>
                 This will permanently remove{" "}<strong>{selected}</strong> and its files.
+                {deleteErr && (
+                  <div style={{ marginTop: 12, color: "var(--chakra-colors-red-500)" }}>
+                    {deleteErr}
+                  </div>
+                )}
               </Dialog.Body>
               <Dialog.Footer>
                 <Dialog.ActionTrigger asChild>

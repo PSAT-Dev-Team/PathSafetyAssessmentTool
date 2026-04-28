@@ -1,5 +1,5 @@
 import ThemeAwareTileLayer from "../../common/ThemeAwareTileLayer";
-import { MapContainer, TileLayer, Polyline, CircleMarker, Circle, useMap, Popup } from 'react-leaflet';
+import { MapContainer, Polyline, CircleMarker, Circle, useMap, Popup } from 'react-leaflet';
 import { useEffect } from 'react';
 import 'leaflet/dist/leaflet.css';
 import type { WidthVisualizationResponse } from '../../../api/widthVisualization';

@@ -1,4 +1,3 @@
-import ThemeAwareTileLayer from "../../../components/common/ThemeAwareTileLayer";
 import { useEffect } from "react";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import { Box } from "@chakra-ui/react";

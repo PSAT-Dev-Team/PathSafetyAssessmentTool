@@ -520,6 +520,8 @@ export type ShapefileInfo = {
   type: string;
   year: string;
   source: string;
+  metadata?: ShapefileMetadata;
+  files?: string[];
 };
 
 export type ShapefileCategoryInfo = {
