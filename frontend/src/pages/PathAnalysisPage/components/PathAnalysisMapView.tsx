@@ -545,14 +545,21 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Define table columns
   const tableColumns = useMemo(() => {
-    const cols = [
+    const cols: { key: string; label: string }[] = [
       { key: "Project", label: "Project" },
       { key: "Segment #", label: "Segment #" },
       { key: "Image Reference", label: "Image Reference" },
       { key: "Coordinates", label: "Coordinates" },
-      ...activeFilters.map(attr => ({ key: attr, label: ATTRIBUTE_LABELS[attr] ?? attr })),
-      { key: "Overall Risk Score", label: "Overall Risk Score" }
     ];
+    for (const attr of activeFilters) {
+      cols.push({ key: attr, label: ATTRIBUTE_LABELS[attr] ?? attr });
+      const subcat = SUBCATEGORY_MAP[attr];
+      if (subcat) {
+        const childAttr = subcat.childAttr;
+        cols.push({ key: childAttr, label: ATTRIBUTE_LABELS[childAttr] ?? childAttr });
+      }
+    }
+    cols.push({ key: "Overall Risk Score", label: "Overall Risk Score" });
     return cols;
   }, [activeFilters]);
 
