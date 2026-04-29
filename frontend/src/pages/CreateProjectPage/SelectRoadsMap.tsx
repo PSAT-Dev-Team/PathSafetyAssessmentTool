@@ -28,6 +28,21 @@ import {
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
+function mergeRoadSelection(
+  previousRoads: SelectedRoad[],
+  nextRoads: Array<Omit<SelectedRoad, "selected">>,
+  fallback: boolean
+): SelectedRoad[] {
+  const previousSelection = new Map(
+    previousRoads.map((road) => [road.name, road.selected])
+  );
+
+  return nextRoads.map((road) => ({
+    ...road,
+    selected: previousSelection.get(road.name) ?? !fallback,
+  }));
+}
+
 // ── Map click handler ──────────────────────────────────────────────
 function MapClickHandler({
   active,
@@ -148,6 +163,11 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
   const [overlayPlanningAreas, setOverlayPlanningAreas] = useState<PlanningAreaInBounds[]>([]);
   const [planningAreaLoading, setPlanningAreaLoading] = useState(false);
   const [highlightPlanningAreaKey, setHighlightPlanningAreaKey] = useState<string | null>(null);
+  const roadsRef = useRef<SelectedRoad[]>([]);
+
+  useEffect(() => {
+    roadsRef.current = roads;
+  }, [roads]);
 
   // ─ Handlers ─────────────────────────────────────────────────────
   const addPoint = useCallback((latlng: L.LatLng) => {
@@ -254,6 +274,7 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
   useEffect(() => {
     if (polygonPoints.length < 3) {
       setRoads([]);
+      roadsRef.current = [];
       onSelectionChange([]);
       onPolygonChange([]);
       return;
@@ -269,11 +290,9 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
         const { roads: result, fallback } = await queryRoadsInPolygon(polygonPoints);
         if (cancelled) return;
         setIsFallback(fallback);
-        const mapped: SelectedRoad[] = result.map((r) => ({
-          ...r,
-          selected: !fallback, // don't pre-select planning area fallback results
-        }));
+        const mapped = mergeRoadSelection(roadsRef.current, result, fallback);
         setRoads(mapped);
+        roadsRef.current = mapped;
         onSelectionChange(mapped);
       } catch (e: any) {
         if (!cancelled) setQueryError(e?.message ?? "Query failed");
@@ -319,12 +338,30 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
   }, [onSelectionChange]);
 
   const allSelected = roads.length > 0 && roads.every((r) => r.selected);
+  const toolbarStatus = isDrawing
+    ? "Click on the map to place vertices. Draw at least 3 points."
+    : showRoadOverlay && overlayLoading
+      ? "Loading roads..."
+      : showPlanningAreaOverlay && planningAreaLoading
+        ? "Loading planning areas..."
+        : null;
+
+  let roadStatus: { text: string; color: string } | null = null;
+  if (querying) {
+    roadStatus = { text: "Searching for roads...", color: "gray.500" };
+  } else if (queryError) {
+    roadStatus = { text: queryError, color: "red.500" };
+  } else if (polygonPoints.length >= 3 && roads.length === 0) {
+    roadStatus = { text: "No roads found in selected area.", color: "gray.500" };
+  } else if (showPlanningAreaOverlay && !planningAreaLoading && viewportState && viewportState.zoom < 10) {
+    roadStatus = { text: "Zoom in to level 10 or above to view planning areas.", color: "gray.500" };
+  }
 
   // ── Render ──────────────────────────────────────────────────────
   return (
     <Box>
       {/* Toolbar */}
-      <Flex mb={2} gap={2} alignItems="center">
+      <Flex mb={2} gap={2} alignItems="center" wrap="wrap">
         <Button
           size="sm"
           variant={isDrawing ? "solid" : "outline"}
@@ -342,12 +379,6 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
           </Button>
         )}
 
-        {isDrawing && (
-          <Text fontSize="xs" color="gray.500">
-            Click on the map to place vertices. Draw at least 3 points.
-          </Text>
-        )}
-
         <Button
           size="sm"
           variant={showRoadOverlay ? "solid" : "outline"}
@@ -358,10 +389,6 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
           <Text ml={1}>{showRoadOverlay ? "Hide Roads" : "Show Roads"}</Text>
         </Button>
 
-        {showRoadOverlay && overlayLoading && (
-          <Text fontSize="xs" color="gray.500">Loading roads…</Text>
-        )}
-
         <Button
           size="sm"
           variant={showPlanningAreaOverlay ? "solid" : "outline"}
@@ -371,11 +398,15 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
           <FaMapMarkedAlt />
           <Text ml={1}>{showPlanningAreaOverlay ? "Hide Planning Areas" : "Show Planning Areas"}</Text>
         </Button>
-
-        {showPlanningAreaOverlay && planningAreaLoading && (
-          <Text fontSize="xs" color="gray.500">Loading planning areas…</Text>
-        )}
       </Flex>
+
+      <Box minH="20px" mb={2}>
+        {toolbarStatus && (
+          <Text fontSize="xs" color="gray.500">
+            {toolbarStatus}
+          </Text>
+        )}
+      </Box>
 
       {/* Map */}
       <Box borderRadius="md" overflow="hidden" border="1px solid" borderColor="gray.200">
@@ -449,30 +480,13 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
         </MapContainer>
       </Box>
 
-      {/* Road list */}
-      {querying && (
-        <Text fontSize="sm" color="gray.500" mt={2}>
-          Searching for roads…
-        </Text>
-      )}
-
-      {queryError && (
-        <Text fontSize="sm" color="red.500" mt={2}>
-          {queryError}
-        </Text>
-      )}
-
-      {!querying && polygonPoints.length >= 3 && roads.length === 0 && !queryError && (
-        <Text fontSize="sm" color="gray.500" mt={2}>
-          No roads found in selected area.
-        </Text>
-      )}
-
-      {showPlanningAreaOverlay && !planningAreaLoading && viewportState && viewportState.zoom < 10 && (
-        <Text fontSize="sm" color="gray.500" mt={2}>
-          Zoom in to level 10 or above to view planning areas.
-        </Text>
-      )}
+      <Box minH="24px" mt={2}>
+        {roadStatus && (
+          <Text fontSize="sm" color={roadStatus.color}>
+            {roadStatus.text}
+          </Text>
+        )}
+      </Box>
 
       {roads.length > 0 && !isFallback && (
         <Box mt={3}>

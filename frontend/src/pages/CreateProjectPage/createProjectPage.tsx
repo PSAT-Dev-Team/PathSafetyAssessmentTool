@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import {
   Box,
   Button,
@@ -95,13 +95,13 @@ export default function CreateProjectPage() {
     return () => ctrl.abort();
   }, []);
 
-  const handleRoadSelectionChange = (roads: SelectedRoad[]) => {
+  const handleRoadSelectionChange = useCallback((roads: SelectedRoad[]) => {
     setSelectedRoads(roads);
-  };
+  }, []);
 
-  const handlePolygonChange = (polygon: [number, number][]) => {
+  const handlePolygonChange = useCallback((polygon: [number, number][]) => {
     setSelectedPolygon(polygon);
-  };
+  }, []);
 
   const canCreate = useMemo(() => {
     if (!name.trim()) return false;
