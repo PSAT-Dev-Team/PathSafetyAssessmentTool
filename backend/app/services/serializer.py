@@ -155,6 +155,7 @@ class Attributes(BaseTable):
         NON_FIXED_OBSTACLE_STR          = "Non-Fixed Obstacle on Facility"
         NON_FIXED_OBSTACLE_TYPE_STR     = "NFO Type"
         DELINEATION_STR                 = "Delineation"
+        DELINEATION_TYPE_STR            = "Delineation Type"
         LIGHT_SEGREGATION_STR           = "Light Segregation"
         FACILITY_WIDTH_STR              = "Facility Width per Direction"
         FLOW_DIR_STR                    = "Flow Direction"
@@ -211,6 +212,7 @@ class Attributes(BaseTable):
         Fields.NON_FIXED_OBSTACLE_STR:          presence_mapping,
         Fields.NON_FIXED_OBSTACLE_TYPE_STR:     None,
         Fields.DELINEATION_STR:                 presence_mapping,
+        Fields.DELINEATION_TYPE_STR:            None,
         Fields.LIGHT_SEGREGATION_STR:           presence_mapping,
         Fields.FACILITY_WIDTH_STR:              facility_width_mapping,
         Fields.FLOW_DIR_STR:                    flow_direction_mapping,

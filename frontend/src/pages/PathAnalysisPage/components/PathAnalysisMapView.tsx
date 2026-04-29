@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Box, Text, Tabs, Button, Flex, HStack, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
 import { toaster } from "../../../components/ui/toaster";
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker, Pane } from "react-leaflet";
 import { FaDrawPolygon, FaMousePointer, FaPlus, FaTrash } from "react-icons/fa";
 import { Slider } from "../../../components/ui/slider";
 import { NUMERIC_FILTER_ATTRIBUTES, ATTRIBUTE_OPTIONS, ATTRIBUTE_LABELS, getCategoryColor, SUBCATEGORY_MAP, MULTI_VALUE_ATTRS, SUBCATEGORY_CHILD_ATTRS } from "./AttributesDropdown";
@@ -543,14 +543,21 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Define table columns
   const tableColumns = useMemo(() => {
-    const cols = [
+    const cols: { key: string; label: string }[] = [
       { key: "Project", label: "Project" },
       { key: "Segment #", label: "Segment #" },
       { key: "Image Reference", label: "Image Reference" },
       { key: "Coordinates", label: "Coordinates" },
-      ...activeFilters.map(attr => ({ key: attr, label: ATTRIBUTE_LABELS[attr] ?? attr })),
-      { key: "Overall Risk Score", label: "Overall Risk Score" }
     ];
+    for (const attr of activeFilters) {
+      cols.push({ key: attr, label: ATTRIBUTE_LABELS[attr] ?? attr });
+      const subcat = SUBCATEGORY_MAP[attr];
+      if (subcat) {
+        const childAttr = subcat.childAttr;
+        cols.push({ key: childAttr, label: ATTRIBUTE_LABELS[childAttr] ?? childAttr });
+      }
+    }
+    cols.push({ key: "Overall Risk Score", label: "Overall Risk Score" });
     return cols;
   }, [activeFilters]);
 
@@ -2238,56 +2245,59 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   {/* Pan to specific project bounds when button clicked */}
                   {panToBounds && <PanToBounds bounds={panToBounds} />}
 
-                  {/* Render all points as markers */}
-                  {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
-                    const radius = 5;
-                    let label = `${projectName} - #${idx + 1}`;
-                    if (f.properties?.["Image Reference"]) {
-                      label += ` ${f.properties["Image Reference"]}`;
-                    }
-                    if (primaryFocusAttribute && attributeValue) {
-                      label += ` | ${primaryFocusAttribute}: ${attributeValue}`;
-                    }
+                  {/* Render all points in a dedicated pane above any overlay layers */}
+                  <Pane name="segmentsPane" style={{ zIndex: 450 }}>
+                    {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
+                      const radius = 5;
+                      let label = `${projectName} - #${idx + 1}`;
+                      if (f.properties?.["Image Reference"]) {
+                        label += ` ${f.properties["Image Reference"]}`;
+                      }
+                      if (primaryFocusAttribute && attributeValue) {
+                        label += ` | ${primaryFocusAttribute}: ${attributeValue}`;
+                      }
 
-                    return (
-                      <CircleMarker
-                        key={`${projectName}-${idx}-${globalIdx}`}
-                        center={latlng}
-                        radius={radius}
-                        pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
-                        eventHandlers={{
-                          click: (e) => {
-                            // If in polygon mode, add this point to the polygon and stop propagation
-                            if (isPolygonMode || isPolygonAddMode) {
-                              L.DomEvent.stopPropagation(e as any);
-                              handlePolygonPoint(L.latLng(latlng[0], latlng[1]));
-                              return;
-                            }
+                      return (
+                        <CircleMarker
+                          key={`${projectName}-${idx}-${globalIdx}`}
+                          center={latlng}
+                          radius={radius}
+                          pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
+                          pane="segmentsPane"
+                          eventHandlers={{
+                            click: (e) => {
+                              // If in polygon mode, add this point to the polygon and stop propagation
+                              if (isPolygonMode || isPolygonAddMode) {
+                                L.DomEvent.stopPropagation(e as any);
+                                handlePolygonPoint(L.latLng(latlng[0], latlng[1]));
+                                return;
+                              }
 
-                            // Check delete modes first
-                            if (isDeleteMode) {
-                              setSegmentToDelete({ projectName: projectName, index: idx });
-                              setDeleteConfirmationOpen(true);
-                              return;
-                            }
-                            if (isPointAddMode) {
-                              setSegmentToAdd({ projectName: projectName, index: idx });
-                              setIsAddSegmentsDialogOpen(true);
-                              return;
-                            }
+                              // Check delete modes first
+                              if (isDeleteMode) {
+                                setSegmentToDelete({ projectName: projectName, index: idx });
+                                setDeleteConfirmationOpen(true);
+                                return;
+                              }
+                              if (isPointAddMode) {
+                                setSegmentToAdd({ projectName: projectName, index: idx });
+                                setIsAddSegmentsDialogOpen(true);
+                                return;
+                              }
 
-                            // Navigate to coding page for this project and segment
-                            const segmentIdx = idx + 1; // 1-based index for UI
-                            navigate(`/coding/${encodeURIComponent(projectName)}?segment=${segmentIdx}`, {
-                              state: { returnToAnalysis: true }
-                            });
-                          }
-                        }}
-                      >
-                        <Tooltip>{label}</Tooltip>
-                      </CircleMarker>
-                    );
-                  })}
+                              // Navigate to coding page for this project and segment
+                              const segmentIdx = idx + 1; // 1-based index for UI
+                              navigate(`/coding/${encodeURIComponent(projectName)}?segment=${segmentIdx}`, {
+                                state: { returnToAnalysis: true }
+                              });
+                            }
+                          }}
+                        >
+                          <Tooltip>{label}</Tooltip>
+                        </CircleMarker>
+                      );
+                    })}
+                  </Pane>
                 </MapContainer>
               </>
             )}

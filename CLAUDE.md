@@ -19,6 +19,76 @@ Path Safety Assessment Tool for LTA - a React + Python (Flask) application for a
 - `projectMap` tracks each project's `startIndex` and `count` in the global arrays
 - `resolveIndex(globalIndex)` maps global → `{ projectName, localIndex }`
 
+### PathAnalysisPage: Project Selection Honors Reselection (2026-04-29)
+
+**Symptom:** After loading multiple projects in PathAnalysisPage, navigating back to the Projects page and reselecting a different subset, the page still loaded **all** projects from the backend instead of only the reselected ones.
+
+**Root cause:** `pathAnalysisPage.tsx` had a mount-time `useEffect` that unconditionally called `fetchProjectList()` and set `loadedProjects` to every project. The session storage key `pathAnalysis_loadedProjects` set by `projects.tsx::loadPathAnalysis()` was completely ignored.
+
+**Fix:** Initialize `loadedProjects` state from `loadState("loadedProjects", [])` (which reads `pathAnalysis_loadedProjects` via the `SESSION_KEY_PREFIX`). Only fall back to `fetchProjectList()` when session storage is empty (e.g. user navigates directly to `/analysis/path` without going through the projects page).
+
+**Key files:**
+
+- `frontend/src/pages/PathAnalysisPage/pathAnalysisPage.tsx` — `useState` initializer + fallback `useEffect`
+- `frontend/src/pages/Projects/projects.tsx` — `loadPathAnalysis()` writes `pathAnalysis_loadedProjects` (always overwrites, so each reselection refreshes the value)
+
+### Chakra UI Dialog: Blocking Interaction After Close
+
+**Symptom:** After closing a `Dialog` (e.g. EditProjectModal), the page beneath becomes unresponsive — mouse wheel scroll and clicks on rows are blocked. Only the native scrollbar thumb drag still works.
+
+#### Root cause (fully traced through library source)
+
+**Architecture:**
+- `Dialog.Backdrop` is `position: fixed`, `100dvw × 100dvh`, stays in DOM during close animation
+- `@zag-js/presence` only removes overlay DOM nodes after `animationend` fires. During animation, the backdrop remains with `pointer-events: auto` (browser default)
+- `Dialog.Positioner` has `pointer-events: none` via Zag's inline style when closed AND is immediately removed from DOM (its presence machine has no node → `animationName = "none"` → immediate UNMOUNT). **Positioner is not the blocking element.**
+- The **backdrop** is the blocking element during the close animation (~200–300 ms)
+
+**Why CSS class selectors failed (Attempt 3):**
+The previous fix used:
+```css
+.chakra-dialog__backdrop[data-state="closed"] { pointer-events: none; }
+.chakra-dialog__positioner[data-state="closed"] { pointer-events: none; }
+```
+The positioner rule matched **nothing** — `getPositionerProps()` does not set `data-state` (confirmed in `@zag-js/dialog/dist/dialog.connect.js` line 75–84). The backdrop rule *should* work (`.chakra-dialog__backdrop` IS applied via `classNameMap["backdrop"] = \`${config.className}__${slot}\`` in `sva.cjs`), but may have been overridden or did not reliably prevent the block.
+
+**Why `unmountOnExit` alone failed (Attempt 2):**
+`unmountOnExit: true` is already Chakra's **default** (set in `dialog.cjs` line 24: `defaultProps: { unmountOnExit: true, lazyMount: true }`). So adding it explicitly was a no-op. And even if it weren't, unmountOnExit only removes the DOM after `animationend` — it can't prevent the block during the animation.
+
+**Why `setTimeout` failed (Attempt 1):**
+Races with the animation. Doesn't affect pointer-events. Doesn't touch Zag presence cleanup.
+
+#### Correct fix (Updated)
+
+**Why the CSS fix alone was insufficient:** While removing pointer events from the backdrop solved some issues, Zag.js/Chakra UI actively places a `data-scroll-locked` attribute and inline `pointer-events: none` directly on the `<html>` and `<body>` tags. If the modal's `open` state becomes `false` simultaneously with a heavy parent state update (e.g., updating the project list which triggers a re-render), the modal may unmount or lose its internal cleanup sequence before it restores these tags.
+
+**JS Cleanup Workaround:**
+To reliably prevent the entire app from permanently freezing, explicitly clean up the `html` and `body` tag scroll locks using a `useEffect` hook with a delayed `setTimeout` whenever the modal closes (`open === false`):
+
+```tsx
+  useEffect(() => {
+    if (!open) {
+      // Force cleanup of pointer-events lock caused by Chakra UI Dialog bugs
+      setTimeout(() => {
+        document.body.style.pointerEvents = "auto";
+        document.documentElement.style.pointerEvents = "auto";
+        document.body.removeAttribute("data-scroll-locked");
+        document.documentElement.removeAttribute("data-scroll-locked");
+      }, 400);
+    }
+  }, [open]);
+```
+
+**Key files:** `frontend/src/pages/Projects/components/EditProjectModal.tsx`, `frontend/src/pages/PathAnalysisPage/components/AddSegmentsDialog.tsx`
+
+#### Quick lookup: what attribute each element gets
+
+| Element | `data-state` | `data-part` | Blocking risk |
+|---------|-------------|-------------|---------------|
+| Backdrop | ✓ `"open"/"closed"` | `"backdrop"` | YES during animation |
+| Positioner | ✗ none | `"positioner"` | NO (immediate unmount via null-node presence machine) |
+| Content | ✓ `"open"/"closed"` | `"content"` | No (not full-screen) |
+
 ### GeoDataPanel `startIndex` Prop
 - **IMPORTANT:** When passing ALL aggregated `geoFeatures` and `scores` to `GeoDataPanel`, `startIndex` MUST be `0` — the local index already equals the global index
 - `startIndex` should only be non-zero when passing a SUBSET of features (single project) that needs mapping to global indices

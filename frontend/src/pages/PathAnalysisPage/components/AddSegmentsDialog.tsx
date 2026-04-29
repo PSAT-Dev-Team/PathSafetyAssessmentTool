@@ -100,6 +100,14 @@ export function AddSegmentsDialog({
                     setExistingTags(Array.from(tagSet).sort());
                 })
                 .catch(console.error);
+        } else {
+            // Force cleanup of pointer-events lock caused by Chakra UI Dialog bugs
+            setTimeout(() => {
+                document.body.style.pointerEvents = "auto";
+                document.documentElement.style.pointerEvents = "auto";
+                document.body.removeAttribute("data-scroll-locked");
+                document.documentElement.removeAttribute("data-scroll-locked");
+            }, 400);
         }
     }, [isOpen]);
 

@@ -47,6 +47,7 @@ export default function PathAnalysisPage() {
   });
 
   useEffect(() => {
+    if (loadedProjects.length > 0) return;
     fetchProjectList()
       .then((data) => {
         if (data?.projects) {

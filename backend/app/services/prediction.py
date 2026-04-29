@@ -349,19 +349,24 @@ class CycleRAP_Coding_Helper:
             "No of Lanes on Intersecting Road": "1 per direction",
         }
 
+        delineation_triggers: list[str] = []
+
         # Step 2 – Cycling Path in bottom 20 %
         if cls._check_bottom_presence(masks["cycling"], img_h, fraction=0.20):
             attrs["Facility Type"] = "Off-Road Bicycle Path"
             attrs["Delineation"] = "Present"
             attrs["Adjacent Sidewalk 0-1m"] = "Present"
+            delineation_triggers.append("Cycling Path")
 
         # Step 3 – Red Stripe in bottom 20 %
         if cls._check_bottom_presence(masks["red_stripe"], img_h, fraction=0.20):
             attrs["Facility Type"] = "Multi-Use Path"
             attrs["Delineation"] = "Present"
+            delineation_triggers.append("Red Stripe")
 
         # Step 4 – Traffic Crossing >= 80 % of bottom 10 %
         if cls._check_bottom_majority(masks["traffic_crossing"], img_h, img_w):
+            delineation_triggers.append("Traffic Crossing")
             attrs.update({
                 "Facility Type":                    "Mixed Traffic Road Lane",
                 "Light Segregation":                "Not Present",
@@ -381,6 +386,7 @@ class CycleRAP_Coding_Helper:
 
         # Step 5 – Zebra Crossing >= 80 % of bottom 10 %
         if cls._check_bottom_majority(masks["zebra_crossing"], img_h, img_w):
+            delineation_triggers.append("Zebra Crossing")
             attrs.update({
                 "Facility Type":                    "Mixed Traffic Road Lane",
                 "Light Segregation":                "Not Present",
@@ -400,6 +406,7 @@ class CycleRAP_Coding_Helper:
 
         # Step 6 – Road >= 80 % of bottom 10 %
         if cls._check_bottom_majority(masks["road"], img_h, img_w):
+            delineation_triggers.clear()
             attrs.update({
                 "Facility Type":                    "Mixed Traffic Road Lane",
                 "Light Segregation":                "Not Present",
@@ -420,6 +427,7 @@ class CycleRAP_Coding_Helper:
         attrs["Non-Fixed Obstacles"] = non_fixed_obstacles
         attrs["FO Type"] = blocking_fixed_classes
         attrs["NFO Type"] = blocking_non_fixed_classes
+        attrs["Delineation Type"] = ", ".join(delineation_triggers) if delineation_triggers else None
 
         return attrs
 
@@ -451,6 +459,7 @@ class CycleRAP_Coding_Helper:
             "Non-Fixed Obstacles":             F.NON_FIXED_OBSTACLE_STR,
             "FO Type":                         F.FIXED_OBSTACLE_TYPE_STR,
             "NFO Type":                        F.NON_FIXED_OBSTACLE_TYPE_STR,
+            "Delineation Type":                F.DELINEATION_TYPE_STR,
         }
 
         # Value converters per field
@@ -472,7 +481,7 @@ class CycleRAP_Coding_Helper:
                 coded[field_key] = serializer.none_low_modhigh_mapping.get(value)
             elif field_key == F.NOL_INTERSECT_ROAD_STR:
                 coded[field_key] = nol_map.get(value)
-            elif field_key in [F.FIXED_OBSTACLE_TYPE_STR, F.NON_FIXED_OBSTACLE_TYPE_STR, F.CROSSING_TYPE_STR]:
+            elif field_key in [F.FIXED_OBSTACLE_TYPE_STR, F.NON_FIXED_OBSTACLE_TYPE_STR, F.CROSSING_TYPE_STR, F.DELINEATION_TYPE_STR]:
                 coded[field_key] = value
             else:
                 # All remaining fields use presence_mapping

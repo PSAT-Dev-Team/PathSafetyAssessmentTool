@@ -3641,6 +3641,38 @@ def autocode_gis(project_name: str):
             if nol is not None:
                 updates["Number of lanes – adjacent road"] = nol
 
+        # Defect-based surface condition checks
+        _DEFORM = "Major Surface Deformation or Drain Opening"
+        _SLIP = "Loose or slippery surface"
+        if _needs(_DEFORM, _SLIP):
+            try:
+                from shapely.geometry import LineString as _LineString
+                import geopandas as _gpd
+                from app.services.defects_store import get_defects_store
+                line_raw = _LineString(coords)
+                # Auto-detect CRS: EPSG:3414 easting > 180; WGS84 lon ≈ 103–104
+                if coords[0][0] < 180:
+                    line_metric = _gpd.GeoSeries([line_raw], crs="EPSG:4326").to_crs("EPSG:3414").iloc[0]
+                else:
+                    line_metric = line_raw
+                nearby = get_defects_store().query_near_line(line_metric, 5.0)
+                has_deform = False
+                has_slip = False
+                for d in nearby:
+                    dt = d["type_of_defect"].strip().lower()
+                    if dt == "algae":
+                        has_slip = True
+                    elif dt != "faded marking":
+                        has_deform = True
+                if has_deform and _needs(_DEFORM):
+                    updates[_DEFORM] = 1
+                if has_slip and _needs(_SLIP):
+                    updates[_SLIP] = 1
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
         return ok({"updates": updates, "changed_fields": list(updates.keys())})
@@ -4413,7 +4445,11 @@ def autocode_all(project_name: str):
 
                         # Apply per-attribute filter: only keep requested fields
                         if fields_filter:
-                            actual_filter = fields_filter + ["Gradient %"] if "Grade" in fields_filter else fields_filter
+                            actual_filter = list(fields_filter)
+                            if "Grade" in actual_filter:
+                                actual_filter.append("Gradient %")
+                            if "Delineation" in actual_filter:
+                                actual_filter.append("Delineation Type")
                             merged = {k: v for k, v in (merged or {}).items() if k in actual_filter}
                             sources = {k: v for k, v in (sources or {}).items() if k in actual_filter}
 

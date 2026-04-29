@@ -126,49 +126,62 @@ export function AnalysisSidebar({
         boxShadow={isOpen ? "lg" : "none"}
       >
         <Box w="420px" h="100%" overflowY="auto" p="4">
-          <div className="analysis-grid" style={{ gridTemplateColumns: '1fr' }}>
-            <DataCard
-              label="Facility Width"
-              loading={widthLoading}
-              error={!!widthError}
-              value={widthData?.width != null ? `${widthData.width.toFixed(2)} m` : <span className="analysis-card-na">Not Found</span>}
-            />
-            <DataCard
-              label="Curvature Radius"
-              loading={curvLoading}
-              error={!!curvError}
-              value={curvData?.radius != null ? `${curvData.radius.toFixed(1)} m` : curvData?.layer_used ? <span style={{ color: '#27AE60' }}>∞ (Straight)</span> : <span className="analysis-card-na">N/A</span>}
-            />
-            <DataCard label="Gradient" value={gradientValue} />
+          <Box mb={6}>
+            <Box fontWeight="semibold" mb={3} fontSize="sm" color="gray.500" _dark={{ color: "gray.400" }} textTransform="uppercase" letterSpacing="wider">Width Analysis</Box>
+            <div className="analysis-grid" style={{ gridTemplateColumns: '1fr' }}>
+              <DataCard
+                label="Facility Width"
+                loading={widthLoading}
+                error={!!widthError}
+                value={widthData?.width != null ? `${widthData.width.toFixed(2)} m` : <span className="analysis-card-na">Not Found</span>}
+              />
+              <DataCard
+                label="Width Category"
+                loading={widthLoading}
+                error={!!widthError}
+                accent={widthData ? getWidthCategoryColor(widthData.width_category) : undefined}
+                value={widthData ? `${getWidthCategoryIcon(widthData.width_category)} ${widthData.category_labels[widthData.width_category as 1|2|3]}` : undefined}
+              />
+              <DataCard
+                label="Width Source Layer"
+                loading={widthLoading}
+                error={!!widthError}
+                value={widthData?.search_info?.layer_used ? <>{widthData.search_info.layer_used}<LayerDot layer={widthData.search_info.layer_used} /></> : <span className="analysis-card-na">—</span>}
+              />
+            </div>
+          </Box>
 
-            <DataCard
-              label="Width Category"
-              loading={widthLoading}
-              error={!!widthError}
-              accent={widthData ? getWidthCategoryColor(widthData.width_category) : undefined}
-              value={widthData ? `${getWidthCategoryIcon(widthData.width_category)} ${widthData.category_labels[widthData.width_category as 1|2|3]}` : undefined}
-            />
-            <DataCard
-              label="Curvature Class"
-              loading={curvLoading}
-              error={!!curvError}
-              accent={curvData ? (curvData.curvature === 1 ? '#E74C3C' : '#27AE60') : undefined}
-              value={curvData ? (curvData.curvature === 1 ? '⚠️ Sharp Turn' : '✓ No Sharp Turn') : undefined}
-            />
+          <Box mb={6}>
+            <Box fontWeight="semibold" mb={3} fontSize="sm" color="gray.500" _dark={{ color: "gray.400" }} textTransform="uppercase" letterSpacing="wider">Curvature Analysis</Box>
+            <div className="analysis-grid" style={{ gridTemplateColumns: '1fr' }}>
+              <DataCard
+                label="Curvature Radius"
+                loading={curvLoading}
+                error={!!curvError}
+                value={curvData?.radius != null ? `${curvData.radius.toFixed(1)} m` : curvData?.layer_used ? <span style={{ color: '#27AE60' }}>∞ (Straight)</span> : <span className="analysis-card-na">N/A</span>}
+              />
+              <DataCard
+                label="Curvature Class"
+                loading={curvLoading}
+                error={!!curvError}
+                accent={curvData ? (curvData.curvature === 1 ? '#E74C3C' : '#27AE60') : undefined}
+                value={curvData ? (curvData.curvature === 1 ? '⚠️ Sharp Turn' : '✓ No Sharp Turn') : undefined}
+              />
+              <DataCard
+                label="Curvature Layer"
+                loading={curvLoading}
+                error={!!curvError}
+                value={curvData?.layer_used ? <>{curvData.layer_used}<LayerDot layer={curvData.layer_used} /></> : <span className="analysis-card-na">—</span>}
+              />
+            </div>
+          </Box>
 
-            <DataCard
-              label="Width Source Layer"
-              loading={widthLoading}
-              error={!!widthError}
-              value={widthData?.search_info?.layer_used ? <>{widthData.search_info.layer_used}<LayerDot layer={widthData.search_info.layer_used} /></> : <span className="analysis-card-na">—</span>}
-            />
-            <DataCard
-              label="Curvature Layer"
-              loading={curvLoading}
-              error={!!curvError}
-              value={curvData?.layer_used ? <>{curvData.layer_used}<LayerDot layer={curvData.layer_used} /></> : <span className="analysis-card-na">—</span>}
-            />
-          </div>
+          <Box mb={6}>
+            <Box fontWeight="semibold" mb={3} fontSize="sm" color="gray.500" _dark={{ color: "gray.400" }} textTransform="uppercase" letterSpacing="wider">Gradient Analysis</Box>
+            <div className="analysis-grid" style={{ gridTemplateColumns: '1fr' }}>
+              <DataCard label="Gradient" value={gradientValue} />
+            </div>
+          </Box>
 
           <div className="analysis-diagnostics-section" style={{ marginTop: '16px' }}>
             <button className="analysis-diagnostics-toggle" onClick={() => setShowDiag(v => !v)}>

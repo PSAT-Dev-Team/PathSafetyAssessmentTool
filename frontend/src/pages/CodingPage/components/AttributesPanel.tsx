@@ -82,6 +82,7 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
   ],
   "Facility surface conditions": [
     "Delineation",
+    "Delineation type",
     "Major surface road deformation",
     "Loose or slippery surface",
     "Grade",
@@ -141,6 +142,7 @@ const KEY_ALIASES: Record<string, string> = {
 
   // Facility surface conditions
   "Delineation": "Delineation",
+  "Delineation type": "Delineation Type",
   "Major surface road deformation": "Major Surface Deformation or Drain Opening",
   "Loose or slippery surface": "Loose or slippery surface",
   "Grade": "Grade",

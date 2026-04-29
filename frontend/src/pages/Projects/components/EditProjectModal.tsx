@@ -58,6 +58,14 @@ export default function EditProjectModal({
       setNewName(projectName);
       setTags(projectTags);
       setTagInput("");
+    } else {
+      // Force cleanup of pointer-events lock caused by Chakra UI Dialog bugs
+      setTimeout(() => {
+        document.body.style.pointerEvents = "auto";
+        document.documentElement.style.pointerEvents = "auto";
+        document.body.removeAttribute("data-scroll-locked");
+        document.documentElement.removeAttribute("data-scroll-locked");
+      }, 400);
     }
   }, [open, projectName, projectTags]);
 
@@ -126,8 +134,10 @@ export default function EditProjectModal({
         type: "success",
       });
 
-      onSuccess(result.name || newName, result.tags || tags);
       handleClose();
+      setTimeout(() => {
+        onSuccess(result.name || newName, result.tags || tags);
+      }, 300);
     } catch (error: any) {
       toaster.create({
         title: "Update Failed",
@@ -140,7 +150,7 @@ export default function EditProjectModal({
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={(d) => !d.open && handleClose()}>
+    <Dialog.Root open={open} onOpenChange={(d) => !d.open && handleClose()} unmountOnExit>
       <Portal>
         <Dialog.Backdrop className="edit-modal-backdrop" />
         <Dialog.Positioner>

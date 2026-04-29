@@ -645,7 +645,7 @@ export default function Home() {
       )}
 
       {/* Delete confirmation Dialog */}
-      <Dialog.Root open={openDelete} onOpenChange={(d) => setOpenDelete(d.open)}>
+      <Dialog.Root open={openDelete} onOpenChange={(d) => setOpenDelete(d.open)} unmountOnExit>
         <Portal>
           <Dialog.Backdrop />
           <Dialog.Positioner>
