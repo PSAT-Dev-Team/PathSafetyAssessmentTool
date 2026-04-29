@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 
-import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle, Pane } from "react-leaflet";
 import L, { divIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -123,6 +123,14 @@ function ZoomToGIS({ center, anyLayerOn }: { center: [number, number] | null; an
   }, [anyLayerOn, center, map]);
   return null;
 }
+
+// Path Defect marker — ⚠️ emoji used in the "Path Defects" overlay.
+const defectIcon = divIcon({
+  className: "path-defect-marker",
+  html: `<div style="font-size:20px;line-height:20px;text-align:center;opacity:0.5;filter:drop-shadow(0 0 2px rgba(0,0,0,0.5));pointer-events:auto;">⚠️</div>`,
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+});
 
 // Polygon Drawing Tool Component
 // Custom icon to mimic CircleMarker but allow dragging
@@ -345,14 +353,15 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [showParkingLot, setShowParkingLot] = useState(cachedLayers.showParkingLot ?? false); // Gold
   const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Deep Pink
   const [showBicycleCrossing, setShowBicycleCrossing] = useState(cachedLayers.showBicycleCrossing ?? false); // Orange
+  const [showPathDefects, setShowPathDefects] = useState(cachedLayers.showPathDefects ?? false); // Red
 
   // Update localStorage whenever these toggles change
   useEffect(() => {
     if (!projectName) return;
     localStorage.setItem(`gisLayerToggles_${projectName}`, JSON.stringify({
-      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing
+      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects
     }));
-  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, projectName]);
+  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects, projectName]);
 
 // Sub-component to pan map to current selection.
 // When panKey changes (project tab clicked), MapAutoCenter suppresses its setView
@@ -440,6 +449,16 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
     kerb_line: GISLayerFeature[];
   };
   const [gisLayers, setGisLayers] = useState<GISLayers | null>(null);
+
+  // Path Defects overlay (xlsx-backed defect inspection records)
+  type PathDefect = {
+    lat: number;
+    lon: number;
+    type_of_defect: string;
+    location: string;
+    date_of_inspection: string;
+  };
+  const [pathDefects, setPathDefects] = useState<PathDefect[] | null>(null);
 
   // 拉取整条 geodata（如果没有 external geofeatures）
   useEffect(() => {
@@ -642,6 +661,41 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
 
     return () => { controller.abort(); };
   }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, hasExternalGeoFeatures]);
+
+  // Fetch Path Defects within the search radius around the active query point.
+  // Kept separate from the GIS layers fetch so toggling defects doesn't refetch
+  // every GIS layer (and vice versa).
+  useEffect(() => {
+    if (activeGisLat === null || activeGisLon === null) return;
+    if (!showPathDefects) {
+      setPathDefects(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(`/api/defects/nearby`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            point: [activeGisLon, activeGisLat],
+            radius: 200,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+        const data = await res.json();
+        if (data.ok) setPathDefects(data.defects ?? []);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          console.error("[Defects] Fetch error:", e);
+        }
+      }
+    })();
+
+    return () => { controller.abort(); };
+  }, [activeGisLat, activeGisLon, showPathDefects]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
@@ -1172,6 +1226,18 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
               />
             </Flex>
 
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showPathDefects ? "red.600" : "gray.500"}>
+                Path Defects
+              </Text>
+              <Switch
+                colorPalette="red"
+                size="sm"
+                checked={showPathDefects}
+                onCheckedChange={(e) => setShowPathDefects(e.checked)}
+              />
+            </Flex>
+
           </Flex>
         </Box>
       <CardBody flex="1" minH={0} p={0} position="relative">
@@ -1199,13 +1265,13 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
               {/* Auto-zoom to current point when GIS layers active */}
               <ZoomToGIS
                 center={activeQueryPoint}
-                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing || showPathDefects}
               />
 
               {/* 自动跟随当前选中点 */}
               <MapAutoCenter
                 center={current?.latlng ?? null}
-                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing || showPathDefects}
                 panKey={panKey}
               />
 
@@ -1459,6 +1525,17 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 ))
               )}
 
+              {/* Path Defects - ⚠️ markers within the 200m search radius */}
+              {showPathDefects && pathDefects?.map((d, i) => (
+                <Marker
+                  key={`defect-${i}`}
+                  position={[d.lat, d.lon]}
+                  icon={defectIcon}
+                >
+                  <Tooltip>{`${d.type_of_defect || "Defect"} — ${d.location || "Unknown"}${d.date_of_inspection ? ` (${d.date_of_inspection})` : ""}`}</Tooltip>
+                </Marker>
+              ))}
+
               
               {/* === Curvature Analysis Overlays === */}
               {showCurvatureOverlay && curvData && (
@@ -1505,61 +1582,64 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 </>
               )}
 
-              {/* 所有起点 */}
-              {points.map(({ globalIdx, latlng, f }) => {
-                const isActive = globalIdx === index;
-                const baseColor = getSegmentColor(globalIdx);
-                const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
-                const radius = isActive ? 8 : 5;
-                // Handle both new and old column names for backward compatibility
-                const scoreValue = activeScores[globalIdx]?.["Overall Risk Level"] ?? activeScores[globalIdx]?.["CycleRAP score"];
-                const label = `#${globalIdx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
-                // Include score in key to force re-render when score changes
-                const keyWithScore = `${globalIdx}-${scoreValue?.toFixed(2) ?? "loading"}`;
+              {/* 所有起点 — rendered in a dedicated pane above GIS overlay layers */}
+              <Pane name="segmentsPane" style={{ zIndex: 610 }}>
+                {points.map(({ globalIdx, latlng, f }) => {
+                  const isActive = globalIdx === index;
+                  const baseColor = getSegmentColor(globalIdx);
+                  const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
+                  const radius = isActive ? 8 : 5;
+                  // Handle both new and old column names for backward compatibility
+                  const scoreValue = activeScores[globalIdx]?.["Overall Risk Level"] ?? activeScores[globalIdx]?.["CycleRAP score"];
+                  const label = `#${globalIdx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
+                  // Include score in key to force re-render when score changes
+                  const keyWithScore = `${globalIdx}-${scoreValue?.toFixed(2) ?? "loading"}`;
 
-                return (
-                  <CircleMarker
-                    key={keyWithScore}
-                    center={latlng}
-                    radius={radius}
-                    pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
-                    eventHandlers={{
-                      click: (e) => {
-                        // If in polygon mode, add this point to the polygon and stop propagation
-                        if (isPolygonMode || isPolygonAddMode) {
-                          L.DomEvent.stopPropagation(e as any);
-                          handlePolygonPoint(latlng);
-                          return;
-                        }
+                  return (
+                    <CircleMarker
+                      key={keyWithScore}
+                      center={latlng}
+                      radius={radius}
+                      pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
+                      pane="segmentsPane"
+                      eventHandlers={{
+                        click: (e) => {
+                          // If in polygon mode, add this point to the polygon and stop propagation
+                          if (isPolygonMode || isPolygonAddMode) {
+                            L.DomEvent.stopPropagation(e as any);
+                            handlePolygonPoint(latlng);
+                            return;
+                          }
 
-                        if (isDeleteMode) {
-                          setSegmentToDelete(globalIdx);
-                          setDeleteConfirmationOpen(true);
-                        } else if (isPointAddMode) {
-                          setSegmentToAdd(globalIdx);
-                          setIsAddSegmentsDialogOpen(true);
-                        } else {
-                          onJump?.(globalIdx);
+                          if (isDeleteMode) {
+                            setSegmentToDelete(globalIdx);
+                            setDeleteConfirmationOpen(true);
+                          } else if (isPointAddMode) {
+                            setSegmentToAdd(globalIdx);
+                            setIsAddSegmentsDialogOpen(true);
+                          } else {
+                            onJump?.(globalIdx);
+                          }
+                        },
+                        mouseover: (e) => {
+                          if (isDeleteMode) {
+                            e.target.setStyle({ color: "red", weight: 4 });
+                            const target = e.originalEvent.target as HTMLElement;
+                            if (target) target.style.cursor = "pointer";
+                          }
+                        },
+                        mouseout: (e) => {
+                          if (isDeleteMode) {
+                            e.target.setStyle({ color: color, weight: isActive ? 3 : 1 });
+                          }
                         }
-                      },
-                      mouseover: (e) => {
-                        if (isDeleteMode) {
-                          e.target.setStyle({ color: "red", weight: 4 });
-                          const target = e.originalEvent.target as HTMLElement;
-                          if (target) target.style.cursor = "pointer";
-                        }
-                      },
-                      mouseout: (e) => {
-                        if (isDeleteMode) {
-                          e.target.setStyle({ color: color, weight: isActive ? 3 : 1 });
-                        }
-                      }
-                    }}   // ← 跳转到全局索引
-                  >
-                    <Tooltip>{isDeleteMode ? "Click to Delete" : (isPointAddMode ? "Click to Copy" : label)}</Tooltip>
-                  </CircleMarker>
-                );
-              })}
+                      }}
+                    >
+                      <Tooltip>{isDeleteMode ? "Click to Delete" : (isPointAddMode ? "Click to Copy" : label)}</Tooltip>
+                    </CircleMarker>
+                  );
+                })}
+              </Pane>
 
               <PolygonDrawingTool
                 active={isPolygonMode || isPolygonAddMode}

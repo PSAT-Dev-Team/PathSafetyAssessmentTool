@@ -16,3 +16,13 @@ def register_blueprints(app):
         app.logger.warning("Optional blueprint 'gis_layers' not available; skipping")
     else:
         app.register_blueprint(shapefiles_bp, url_prefix="/api/shapefiles")
+
+    # defects blueprint depends on backend/data/defects/defect_summary.xlsx;
+    # register only if the module imports cleanly so a missing data file
+    # does not crash the whole app.
+    try:
+        from .defects import bp as defects_bp
+    except Exception:
+        app.logger.warning("Optional blueprint 'defects' not available; skipping")
+    else:
+        app.register_blueprint(defects_bp, url_prefix="/api/defects")

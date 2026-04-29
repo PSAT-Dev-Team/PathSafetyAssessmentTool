@@ -22,7 +22,9 @@ const loadState = <T,>(key: string, defaultVal: T): T => {
 };
 
 export default function PathAnalysisPage() {
-  const [loadedProjects, setLoadedProjects] = useState<string[]>([]);
+  const [loadedProjects, setLoadedProjects] = useState<string[]>(() =>
+    loadState("loadedProjects", [])
+  );
 
   // Active filter attributes (passed to FilterPanel for master toggles and MapView for filtering)
   const [activeFilters, setActiveFilters] = useState<string[]>(() =>
@@ -40,8 +42,9 @@ export default function PathAnalysisPage() {
     categoryStatus: [],
   });
 
-  // Fetch projects on mount and auto-load all of them
+  // If no projects were selected (e.g. navigated directly), fall back to all projects
   useEffect(() => {
+    if (loadedProjects.length > 0) return;
     fetchProjectList()
       .then((data) => {
         if (data?.projects) {
