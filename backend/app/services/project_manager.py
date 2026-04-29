@@ -808,7 +808,7 @@ class project_manager:
                 return proj
         raise KeyError(f"Project not found: {project_name}")
     
-    def create_project(self, project_title, geo_data : gpd.geodataframe, dataset_name, tags=None):
+    def create_project(self, project_title, geo_data : gpd.geodataframe, dataset_name, tags=None, source_folders=None):
         proj_root = self.des_path / project_title
 
         prefix = str(project_title) + "_"
@@ -826,6 +826,7 @@ class project_manager:
         project_metadata.last_updated   = now_dt
         project_metadata.created_by     = "default"
         project_metadata.dataset        = dataset_name
+        project_metadata.source_folders = source_folders if source_folders is not None else ([dataset_name] if dataset_name and dataset_name != "MULTI_FOLDER_SELECTION" else [])
         project_metadata.progress       = []
         project_metadata.size           = size
         project_metadata.tags           = tags if tags is not None else []

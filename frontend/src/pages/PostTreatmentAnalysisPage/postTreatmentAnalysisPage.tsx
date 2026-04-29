@@ -6,6 +6,7 @@ import {
   Button,
 } from "@chakra-ui/react";
 import { fetchProjectList, type FileResponse } from "../../api";
+import { matchesProjectSearch } from "../../utils/projectSearch";
 import "../Projects/projects.css"; // Reuse projects page styles
 
 function getTagBorderColor(tag: string): string {
@@ -70,9 +71,8 @@ export default function PostTreatmentAnalysisPage() {
 
   // Apply filters
   const filtered = useMemo(() => {
-    const q = nameQuery.trim().toLowerCase();
     let list = projects;
-    if (q) list = list.filter((project) => project.name.toLowerCase().includes(q));
+    if (nameQuery.trim()) list = list.filter((project) => matchesProjectSearch(project, nameQuery));
     return list;
   }, [projects, nameQuery]);
 
@@ -123,11 +123,11 @@ export default function PostTreatmentAnalysisPage() {
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
-            <label htmlFor="nameQuery">Search by project name</label>
+            <label htmlFor="nameQuery">Search by project or road</label>
             <input
               id="nameQuery"
               type="text"
-              placeholder="Type project name…"
+              placeholder="Type project name or road…"
               value={nameQuery}
               onChange={(e) => setNameQuery(e.target.value)}
             />

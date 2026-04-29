@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchProjectList, ping, deleteProject as apiDeleteProject, type ProjectListItem } from "../../api";
+import { matchesProjectSearch } from "../../utils/projectSearch";
 import {
   Button,
   Dialog,
@@ -192,15 +193,10 @@ export default function Home() {
 
   // for Filters
   const filtered = useMemo(() => {
-    const q = nameQuery.trim().toLowerCase();
     let list = projects;
 
-    // Filter by name query - searches both project name and tags
-    if (q) {
-      list = list.filter((p) =>
-        p.name.toLowerCase().includes(q) ||
-        (p.tags && p.tags.some(tag => tag.toLowerCase().includes(q)))
-      );
+    if (nameQuery.trim()) {
+      list = list.filter((p) => matchesProjectSearch(p, nameQuery));
     }
 
     // Filter by selected tags - project must have ALL selected tags
@@ -398,11 +394,11 @@ export default function Home() {
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
-            <label htmlFor="nameQuery">Search by project name or tags</label>
+            <label htmlFor="nameQuery">Search by project, road, or tag</label>
             <input
               id="nameQuery"
               type="text"
-              placeholder="Type project name or tag…"
+              placeholder="Type project name, road, or tag…"
               value={nameQuery}
               onChange={(e) => setNameQuery(e.target.value)}
               className="search-input"

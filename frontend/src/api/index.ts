@@ -11,6 +11,8 @@ export async function ping(): Promise<{ status: string }> {
 export interface ProjectListItem {
   name: string;
   tags: string[];
+  dataset?: string | null;
+  source_folders?: string[];
   date_created?: string;
   last_updated?: string;
   verified?: boolean;

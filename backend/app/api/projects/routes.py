@@ -794,6 +794,75 @@ def _lookup_project_gradient(project_name: str, image_ref: str) -> "tuple[int, f
     return None
 
 
+def _display_source_name_from_namespace(namespace: str) -> str:
+    return re.sub(r"\s+", " ", namespace.replace("_", " ").strip()).title()
+
+
+def _build_source_namespace_map(in_path: Path) -> dict[str, str]:
+    namespace_map: dict[str, str] = {}
+    if not in_path.exists():
+        return namespace_map
+
+    for child_name in os.listdir(in_path):
+        child_path = in_path / child_name
+        if not child_path.is_dir():
+            continue
+        namespace_map[make_image_namespace(child_name).lower()] = child_name
+    return namespace_map
+
+
+def _get_project_source_folders(proj: Project, pm) -> list[str]:
+    metadata_sources = getattr(proj.metadata, "source_folders", None) or []
+    cleaned_sources: list[str] = []
+    seen_sources: set[str] = set()
+    for source in metadata_sources:
+        source_name = str(source or "").strip()
+        if not source_name or source_name in seen_sources:
+            continue
+        cleaned_sources.append(source_name)
+        seen_sources.add(source_name)
+    if cleaned_sources:
+        return cleaned_sources
+
+    dataset_name = str(getattr(proj.metadata, "dataset", "") or "").strip()
+    if dataset_name and dataset_name != "MULTI_FOLDER_SELECTION":
+        return [dataset_name]
+
+    try:
+        geo_df = proj.geo_data.df
+    except Exception:
+        geo_df = None
+
+    if geo_df is None or geo_df.empty or "Image Reference" not in geo_df.columns:
+        return []
+
+    namespace_map = _build_source_namespace_map(pm.in_path)
+    project_prefix = f"{proj.metadata.project_name}_"
+    derived_sources: list[str] = []
+    seen_sources.clear()
+
+    for image_ref in geo_df["Image Reference"].dropna().astype(str):
+        normalized_ref = image_ref.strip()
+        if not normalized_ref:
+            continue
+        if normalized_ref.startswith(project_prefix):
+            normalized_ref = normalized_ref[len(project_prefix):]
+        if "__" not in normalized_ref:
+            continue
+
+        namespace = normalized_ref.split("__", 1)[0].strip("_")
+        if not namespace:
+            continue
+
+        source_name = namespace_map.get(namespace.lower()) or _display_source_name_from_namespace(namespace)
+        if source_name in seen_sources:
+            continue
+        derived_sources.append(source_name)
+        seen_sources.add(source_name)
+
+    return derived_sources
+
+
 def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
                    project_name: str = "") -> "float | None":
     """Inject Grade from the master gradient profile into *updates* (in-place).
@@ -840,6 +909,7 @@ def list_projects():
     for name in names:
         try:
             proj = pm.project(name)
+            source_folders = _get_project_source_folders(proj, pm)
             # Get total segment count from latest version's attributes
             ver = proj.latest()
             total_segments = 0
@@ -851,6 +921,8 @@ def list_projects():
             project_data = {
                 "name": name,
                 "tags": proj.metadata.tags or [],
+                "dataset": getattr(proj.metadata, 'dataset', None),
+                "source_folders": source_folders,
                 "verified": getattr(proj.metadata, 'verified', False),
                 "verified_segment_count": getattr(proj.metadata, 'verified_segment_count', 0),
                 "autocoded_segment_count": getattr(proj.metadata, 'autocoded_segment_count', 0),
@@ -873,6 +945,8 @@ def list_projects():
             projects.append({
                 "name": name,
                 "tags": [],
+                "dataset": None,
+                "source_folders": [],
                 "verified": False,
                 "verified_segment_count": 0,
                 "autocoded_segment_count": 0,
@@ -1021,6 +1095,7 @@ def copy_segments():
                 new_proj.metadata.created_by = "copy_segments"
                 new_proj.metadata.tags = tags
                 new_proj.metadata.dataset = source_proj.metadata.dataset # Inherit dataset type?
+                new_proj.metadata.source_folders = _get_project_source_folders(source_proj, pm)
                 new_proj.metadata.size = 0
                 
                 # Initialize empty tables
@@ -1098,6 +1173,8 @@ def get_project_metadata(project_name: str):
     return jsonify({
         "name": proj.metadata.project_name,
         "tags": proj.metadata.tags or [],
+        "dataset": getattr(proj.metadata, 'dataset', None),
+        "source_folders": _get_project_source_folders(proj, ctx["pm"]),
         "verified": getattr(proj.metadata, 'verified', False),
         "verified_segment_count": getattr(proj.metadata, 'verified_segment_count', 0),
         "autocoded_segment_count": getattr(proj.metadata, 'autocoded_segment_count', 0),
@@ -3101,7 +3178,13 @@ def create_project_from_folder():
     )
 
     dataset_name = normalized_folder_names[0] if len(normalized_folder_names) == 1 else "MULTI_FOLDER_SELECTION"
-    pm.create_project(project_name, combined_geo_data, dataset_name, tags=tags)
+    pm.create_project(
+        project_name,
+        combined_geo_data,
+        dataset_name,
+        tags=tags,
+        source_folders=normalized_folder_names,
+    )
 
     return ok({
         "ok": True,

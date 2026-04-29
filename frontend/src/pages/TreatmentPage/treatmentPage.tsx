@@ -8,6 +8,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { LuPencil } from "react-icons/lu";
 import { fetchProjectList, type FileResponse } from "../../api";
+import { matchesProjectSearch } from "../../utils/projectSearch";
 import EditProjectModal from "../Projects/components/EditProjectModal";
 import "../Projects/projects.css";
 
@@ -116,9 +117,8 @@ export default function TreatmentPage() {
 
   // Apply filters
   const filtered = useMemo(() => {
-    const q = nameQuery.trim().toLowerCase();
     let list = projects;
-    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+    if (nameQuery.trim()) list = list.filter((p) => matchesProjectSearch(p, nameQuery));
     if (tagFilter) list = list.filter((p) => p.tags?.includes(tagFilter));
     return list;
   }, [projects, nameQuery, tagFilter]);
@@ -186,7 +186,7 @@ export default function TreatmentPage() {
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
-            <label htmlFor="nameQuery">Search by project name</label>
+            <label htmlFor="nameQuery">Search by project or road</label>
             <Combobox.Root
               collection={createListCollection({
                 items: projects.map(p => ({ label: p.name, value: p.name }))
@@ -206,7 +206,7 @@ export default function TreatmentPage() {
               <Combobox.Control onClick={() => setNameQueryComboboxOpen(true)}>
                 <Combobox.Input
                   id="nameQuery"
-                  placeholder="Type project name…"
+                  placeholder="Type project name or road…"
                 />
               </Combobox.Control>
               <Portal>

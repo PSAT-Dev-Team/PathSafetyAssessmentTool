@@ -10,6 +10,7 @@ import {
   Portal,
 } from "@chakra-ui/react";
 import { fetchProjectList, type FileResponse } from "../../api";
+import { matchesProjectSearch } from "../../utils/projectSearch";
 import AttributesDropdown from "./components/AttributesDropdown";
 import PathAnalysisMapView from "./components/PathAnalysisMapView";
 import AttributeDistributionChart from "./components/AttributeDistributionChart";
@@ -107,9 +108,7 @@ export default function PathAnalysisPage() {
 
     // Filter by project name input
     if (projectInputValue) {
-      result = result.filter((p) =>
-        p.name.toLowerCase().includes(projectInputValue.toLowerCase())
-      );
+      result = result.filter((p) => matchesProjectSearch(p, projectInputValue));
     }
 
     // Filter by selected tags (if any tags are selected, show only projects that have at least one of those tags)
@@ -290,7 +289,7 @@ export default function PathAnalysisPage() {
                 onClick={() => setProjectComboboxOpen(true)}
               >
                 <Combobox.Input
-                  placeholder="Type to search projects..."
+                  placeholder="Type to search projects or roads..."
                 />
                 <Combobox.IndicatorGroup>
                   <Combobox.ClearTrigger />

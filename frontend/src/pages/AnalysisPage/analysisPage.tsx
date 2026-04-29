@@ -7,6 +7,7 @@ import {
   Tabs,
 } from "@chakra-ui/react";
 import { fetchProjectList, type FileResponse, type ProjectListItem } from "../../api";
+import { matchesProjectSearch } from "../../utils/projectSearch";
 import "../Home/home.css"; // Reuse home page styles
 
 type TreatmentPhase = "pre" | "post";
@@ -53,9 +54,8 @@ export default function AnalysisPage() {
 
   // Apply filters
   const filtered = useMemo(() => {
-    const q = nameQuery.trim().toLowerCase();
     let list = projects;
-    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+    if (nameQuery.trim()) list = list.filter((p) => matchesProjectSearch(p, nameQuery));
     return list;
   }, [projects, nameQuery]);
 
@@ -133,11 +133,11 @@ export default function AnalysisPage() {
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
-            <label htmlFor="nameQuery">Search by project name</label>
+            <label htmlFor="nameQuery">Search by project or road</label>
             <input
               id="nameQuery"
               type="text"
-              placeholder="Type project name…"
+              placeholder="Type project name or road…"
               value={nameQuery}
               onChange={(e) => setNameQuery(e.target.value)}
             />

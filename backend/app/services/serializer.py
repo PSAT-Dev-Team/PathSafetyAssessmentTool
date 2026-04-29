@@ -381,6 +381,7 @@ class ProjectMetadata:
         self.last_updated : datetime        = None
         self.created_by   : str             = None
         self.dataset      : str             = None
+        self.source_folders : list[str]     = None
         self.progress     : int             = None
         self.size         : int             = None
         self.tags         : list[str]       = None
@@ -409,6 +410,7 @@ class ProjectMetadata:
             self.last_updated = parse_datetime(data.get("last_updated"))
             self.created_by = data.get("created_by")
             self.dataset    = data.get("dataset")
+            self.source_folders = data.get("source_folders") or []
             self.progress   = data.get("progress")
             self.size       = data.get("size")
             self.tags       = data.get("tags")
@@ -424,6 +426,7 @@ class ProjectMetadata:
             "last_updated": self.last_updated.isoformat() if self.last_updated else None,
             "created_by": self.created_by,
             "dataset": self.dataset,
+            "source_folders": self.source_folders or [],
             "progress": self.progress,
             "size": self.size,
             "tags": self.tags,
