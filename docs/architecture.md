@@ -1,200 +1,228 @@
 # Architecture Overview
 
-PSAT is a two-container web application orchestrated by Docker Compose. The **frontend** is a React SPA served by nginx; the **backend** is a Flask REST API. They share no database — all communication is via HTTP through the `/api/*` interface.
+PSAT is a two-container application orchestrated by Docker Compose. The frontend is a React SPA served by nginx, and the backend is a Flask API that owns project storage, GIS lookups, CV inference, scoring, and treatment logic. There is **no database**; the file system under `data/`, `in/`, and `backend/shapefiles/` is the source of truth.
 
----
+## System diagram
 
-## System Diagram
-
-```
+```text
 Browser
-  │
-  │  HTTP :80
-  ▼
-┌─────────────────────┐
-│   nginx (frontend)  │  Serves compiled React SPA (static files)
-│   Port 80           │  Reverse-proxies /api/* → backend:8000
-└─────────┬───────────┘
-          │  HTTP :8000
-          ▼
-┌─────────────────────┐
-│   Flask (backend)   │  REST API, CV inference, CycleRAP scoring
-│   Port 8000         │
-└─────────┬───────────┘
-          │
-   ┌──────┴──────┐
-   │             │
-   ▼             ▼
-./data/       ./in/
-(project      (input
- storage)      images)
+  |
+  | HTTP :80
+  v
++-----------------------+
+| nginx / Vite frontend |
+| - serves SPA          |
+| - serves help docs    |
+| - proxies /api/*      |
++-----------+-----------+
+            |
+            | HTTP :8000
+            v
++-----------------------+
+| Flask backend         |
+| - projects API        |
+| - shapefiles API      |
+| - CV + GIS logic      |
+| - scoring + treatments|
++-----+-----------+-----+
+      |           |      |
+      v           v      v
+   ./data/      ./in/  backend/shapefiles/
 ```
 
-Both `./data/` and `./in/` are **bind-mounted Docker volumes**, so all project data persists between container restarts and across rebuilds.
+Docker bind-mounts `./data/` and `./in/`, so project data and source image folders survive rebuilds and restarts.
 
----
+## High-level flow
 
-## Backend Structure
+1. The user creates or selects a project in the frontend.
+2. The frontend calls `/api/projects/*` and `/api/shapefiles/*` as needed.
+3. The backend loads project metadata, geodata, snapshot CSVs, shapefiles, and models lazily.
+4. Coding, analysis, and treatment flows mutate the latest snapshot and persist derived artifacts such as scores, baselines, and autocode metadata.
+5. The frontend rehydrates the updated data through normal REST reads.
 
-The backend is a **Flask** application (`Python 3.11`) built as a package under `backend/app/`.
+## Backend structure
 
-```
+```text
 backend/
-├── app.py                      # Entry point: create_app() + /api/health
+├── app.py
 ├── app/
-│   ├── __init__.py             # create_app() factory, CORS setup
-│   ├── config.py               # Config object
+│   ├── __init__.py
 │   ├── api/
-│   │   ├── health.py           # GET /api/ping
-│   │   └── projects/
-│   │       ├── __init__.py     # Blueprint registration
-│   │       └── routes.py       # All /api/projects/* endpoints (~2000 lines)
+│   │   ├── health.py               # /api/ping, /api/health
+│   │   ├── gis_layers/routes.py    # /api/shapefiles/*
+│   │   └── projects/routes.py      # /api/projects/*
 │   ├── services/
-│   │   ├── prediction.py       # CV inference (CycleRAP_Coding_Helper class)
-│   │   ├── cyclerap_scoring.py # Native Python CycleRAP v2.11 scoring
-│   │   ├── project_manager.py  # ProjectVersion, Project, project_manager classes
-│   │   ├── serializer.py       # Attributes, Results, Treatment, ProjectGeoData models
-│   │   ├── cycleRAP_interface.py   # Legacy Excel COM interface (optional)
-│   │   ├── cycleRAP_VA.py      # GPS EXIF extraction, geocoding, LineString building
-│   │   ├── gis_mapping.py      # GIS layer queries via shapefiles
-│   │   ├── platform_compat.py  # Windows/pywin32 compatibility shim
-│   │   └── global_var.py       # Field name constants, enum mappings, defaults
+│   │   ├── project_manager.py
+│   │   ├── serializer.py
+│   │   ├── prediction.py
+│   │   ├── cyclerap_scoring.py
+│   │   ├── cycleRAP_VA.py
+│   │   ├── gis_mapping.py
+│   │   └── global_var.py
 │   └── utils/
-│       └── path_width_curvature.py  # Path width & curvature measurement utils
-└── src/
-    └── CycleRAP/
-        └── defaults.json       # CycleRAP resource path defaults
+│       └── path_width_curvature.py
+├── generate_road_reference.py
+├── models/
+└── shapefiles/
 ```
 
-### Application Factory
+### Registered blueprints
 
-`create_app()` in `app/__init__.py`:
-1. Creates the Flask app
-2. Enables CORS for all `/api/*` routes (allow all origins)
-3. Registers blueprints (health + projects)
-4. Returns the app
+- `health.py` exposes the liveness checks
+- `projects/routes.py` owns project lifecycle, coding, scoring, treatment, baseline, and project-discovery endpoints
+- `gis_layers/routes.py` exposes shapefile inventory, preview, upload, replace, and delete operations under `/api/shapefiles`
 
-### Lazy Initialisation
+### Lazy initialization
 
-On first request, `get_ctx()` in `routes.py` lazily initialises:
-- `project_manager` — scans `data/` for project directories
-- `serializer.data_loader` — loads attribute mapping data
-- `CRI.cycleRAP_interface` — sets up the CycleRAP resource path
+`get_ctx()` in `projects/routes.py` lazily initializes and caches:
 
-CV models (YOLO) are loaded separately via `_ensure_models_ready()`, also lazily on first CV request. Model load errors are **memoised** — a failed load will return HTTP 503 on all subsequent CV requests without retrying.
+- `project_manager` over `data/`
+- serializer / attribute-mapping data
+- the legacy CycleRAP interface helpers where still needed
 
----
+CV models are loaded separately by `_ensure_models_ready()`. Initialization failures are memoized so repeated requests fail fast with HTTP 503 rather than repeatedly blocking on model load.
 
-## Frontend Structure
+### GIS caches and helper assets
 
-The frontend is a **React + TypeScript** SPA built with Vite and served by nginx.
+The backend also caches GIS layers and project-level gradient/profile lookups. One new helper asset is:
 
-```
-frontend/src/
-├── api/index.ts        # All backend fetch calls (typed)
-├── App.tsx             # React Router route definitions
-├── pages/
-│   ├── LandingPage/    # Entry / welcome screen
-│   ├── Projects/       # Project list, tags, delete, edit
-│   ├── CodingPage/     # Main work area: image + attributes table + map
-│   ├── TreatmentPage/  # Treatment recommendations list & detail
-│   ├── PathAnalysisPage/  # Autocode validation view
-│   └── CreateProjectPage/ # New project wizard (folder select → create)
-├── components/
-│   └── visualization/
-│       ├── curvature/  # Curvature overlay panel
-│       ├── width/      # Path width overlay panel
-│       └── scoreband/  # Per-segment score badge component
-├── layouts/
-│   └── AppLayout.tsx   # Shared shell (sidebar + outlet)
-└── types/              # Shared TypeScript type definitions
-```
+- `backend/shapefiles/road_reference.csv` - sampled EXIF points per road folder, used by the polygon road-selection flow
 
-The frontend communicates **exclusively** through the `/api/*` REST interface. There is no shared database, no WebSocket, and no direct file access — every read and write goes through the backend API.
+That CSV is optional, but when present it lets the create-project map show which intersecting roads actually have local image folders.
 
-### nginx Reverse Proxy
+## Frontend structure
 
-```nginx
-location /api/ {
-    proxy_pass http://backend:8000/api/;
-}
+```text
+frontend/
+├── public/
+│   ├── README.md
+│   └── docs/
+├── src/
+│   ├── api/index.ts
+│   ├── App.tsx
+│   ├── layouts/AppLayout.tsx
+│   ├── pages/
+│   │   ├── CreateProjectPage/
+│   │   ├── CodingPage/
+│   │   ├── GisLayersPage/
+│   │   ├── HelpPage/
+│   │   ├── PathAnalysisPage/
+│   │   ├── Projects/
+│   │   └── TreatmentPage/
+│   ├── components/
+│   └── utils/projectSearch.ts
 ```
 
-This means the frontend can call `/api/projects` and nginx transparently forwards it to the Flask container. The frontend never needs to know the backend's port.
+Two frontend details are easy to miss but now matter architecturally:
 
----
+- `frontend/public/docs/` contains the markdown actually served in the Help page
+- `utils/projectSearch.ts` centralizes the project-or-road fuzzy matching used across multiple pages
 
-## Data Model
+## Project storage model
 
-### Project Storage Layout
+Each project lives under `data/<ProjectName>/`.
 
-Each project lives as a directory under `data/`:
-
-```
+```text
 data/
 └── ProjectName/
-    ├── metadata.csv            # Project-level metadata (name, tags, verified status)
-    ├── geo_data.gpkg           # GeoPackage with LineString segments (EPSG:3414)
-    ├── images/                 # Copies of the source images
+    ├── project_metadata.json
+    ├── geo_data.gpkg
+    ├── images/
+    ├── autocode/
+    │   └── ProjectName_metadata.json
+    ├── baseline/
+    │   └── ProjectName_baseline.csv
     └── versions/
-        ├── 20250416/           # Snapshot from 16 Apr 2025
-        │   ├── attributes.csv
-        │   ├── results.csv
-        │   └── treatment.csv
-        └── 20250417/           # Snapshot from 17 Apr 2025
+        └── YYYYMMDD/
+            ├── snapshot_metadata.csv
             ├── attributes.csv
             ├── results.csv
             └── treatment.csv
 ```
 
-### Date-Versioned Snapshots
+### `project_metadata.json`
 
-Every time `save_all()` is called, the backend checks whether a folder for today's date (`YYYYMMDD`) already exists under `versions/`. If not, it creates a new snapshot by copying the current state forward. **Multiple saves on the same calendar day overwrite the existing snapshot.** This means the history retains one snapshot per day, not one per save.
+The metadata model now carries more than name and tags. Relevant fields include:
 
-### Key Data Classes (`serializer.py`)
+- `project_name`
+- `dataset`
+- `source_folders`
+- `tags`
+- `path_key`
+- `verified`
+- `verified_segment_count`
+- `autocoded_segment_count`
+- `date_created`
+- `last_updated`
 
-| Class | File | Description |
-|---|---|---|
-| `Attributes` | `attributes.csv` | The 41 CycleRAP coding fields per segment |
-| `Results` | `results.csv` | BB, BP, SB, VB scores + risk bands per segment |
-| `Treatment` | `treatment.csv` | Applied treatment IDs + modified attribute values |
-| `ProjectGeoData` | `geo_data.gpkg` | LineString geometry + image reference per segment |
-| `ProjectMetadata` | `metadata.csv` | Name, tags, dates, verified status |
-| `SnapshotMetadata` | `snapshot_metadata.csv` | Coder name, coding date, status per version |
+`dataset` is a single source-folder name for legacy / single-folder projects, or `MULTI_FOLDER_SELECTION` for projects created from multiple folders. `source_folders` is the durable provenance field used by fuzzy search and by newer UI flows.
 
-All classes extend `BaseTable`, which wraps a pandas `DataFrame` with dirty-tracking (`df_dirty` flag) and CSV/XLSX/JSON serialisation.
+### Snapshot behavior
 
----
+Version folders are date-based (`YYYYMMDD`). Multiple saves on the same day update the same dated snapshot rather than creating many sub-daily versions.
 
-## Key Design Decisions
+### Sidecar directories
 
-### API-Only Frontend Communication
+Two newer sidecar directories support analysis workflows:
 
-The frontend never reads from disk directly. All data flows through the REST API. This means:
-- The backend is the single source of truth
-- Frontend and backend can be deployed independently
-- CORS is enabled on the backend for all `/api/*` routes
+- `baseline/` stores the attribute baseline used by autocode validation comparisons
+- `autocode/` stores changed-field and field-source metadata for the coding UI
 
-### Excel COM Automation (Legacy / Optional)
+## Project creation pipeline
 
-The original CycleRAP scoring used an Excel `.xlsm` macro file via the Windows COM interface (`pywin32`). This is encapsulated in `cycleRAP_interface.py` and guarded by `platform_compat.py`:
+Project creation still starts from geotagged source images in `in/`, but it now supports both single-folder and multi-folder/polygon flows.
 
-```python
-# platform_compat.py
-IS_WINDOWS = platform.system() == "Windows"
-if IS_WINDOWS:
-    import pythoncom, win32com.client
-    WINDOWS_MODULES_AVAILABLE = True
-else:
-    WINDOWS_MODULES_AVAILABLE = False  # Non-Windows stubs
-```
+Backend steps:
 
-**The scoring endpoint no longer uses Excel COM.** It calls `calculate_cyclerap_score_native()` in `cyclerap_scoring.py` — a pure Python port of the CycleRAP v2.11 algorithm that runs on any platform without Excel.
+1. enumerate one or more source folders
+2. extract EXIF GPS data from images
+3. optionally filter nodes by a selection polygon
+4. geocode and sample points at the project-creation stage
+5. convert sampled points to LineStrings
+6. copy images into the project image store
+7. create metadata, geodata, and the initial dated snapshot
 
-### CRS: EPSG:3414 (SVY21)
+When multiple source folders are merged, copied image names are namespaced so duplicate filenames do not collide.
 
-All geodata is stored and measured in **EPSG:3414** (Singapore SVY21 projected CRS). GPS EXIF coordinates (WGS84, EPSG:4326) are reprojected at project creation time.
+## Multi-project aggregation pattern
 
-### Thread Safety
+Several frontend pages load multiple projects into one combined view. The usual pattern is:
 
-Model loading is protected by a threading lock (`_INIT_LOCK`) in `routes.py`. A memoised error (`_INIT_ERR`) prevents repeated failed initialisation attempts from blocking requests. Flask is run with `threaded=True`.
+- concatenate attributes, results, and geodata into global arrays
+- keep a `projectMap` of project name, start index, and count
+- resolve UI actions back to `{ projectName, localIndex }` when saving, deleting, or treating a row
+
+This pattern is especially important in coding, treatment, and path-analysis views.
+
+## Shapefile management architecture
+
+The GIS Layers page is backed by the `gis_layers` blueprint. That blueprint:
+
+- scans `backend/shapefiles/`
+- groups layers by category (subdirectory)
+- can return a selected shapefile as WGS84 GeoJSON
+- validates uploaded ZIPs and replacement files
+- supports upload, preview, replace, and delete operations
+
+This means the same layer inventory drives both:
+
+- the GIS Layers admin page
+- the backend GIS mapping logic used during coding
+
+## Key design choices
+
+### API-only frontend communication
+
+The frontend never reads the filesystem directly. Every read/write goes through REST endpoints, which keeps all storage rules and migration logic on the backend.
+
+### Native scoring path
+
+The current score endpoint uses `calculate_cyclerap_score_native()` instead of Excel COM. Legacy Excel helpers still exist, but native Python scoring is the main path.
+
+### CRS handling
+
+Source image GPS is read in WGS84 (`EPSG:4326`). Stored project geodata is written in Singapore SVY21 (`EPSG:3414`) so geometric distance and width/curvature operations behave sensibly.
+
+### Thread safety
+
+Model loading is protected by a lock and cached error state, which avoids repeated slow failures under concurrent requests.

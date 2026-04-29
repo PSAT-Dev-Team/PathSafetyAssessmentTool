@@ -1,6 +1,31 @@
 ## 5. Treatment Application
-The Treatment Application acts as a scenario-testing tool to see how safety interventions can reduce the baseline risk. It applies predefined risk multipliers and condition penalties for specific treatments to the chosen segments, recalculating the safety score to show potential improvements.
-* **Apply Standard Treatments**: Select from a library of interventions, such as 'Widen Path', 'Improve Lighting', or 'Provide Physical Separation'.
-* **Compare Before and After**: View side-by-side risk score reductions (e.g., seeing a Bicycle-Pedestrian crash type score drop after applying a segregated path treatment).
-* **Batch Treatment Application**: Apply a selected treatment across multiple segments simultaneously to evaluate corridor-wide safety improvements.
-* **Export Interventions**: Generate a report of the applied treatments and the estimated safety benefits to present to stakeholders and decision-makers.
+
+The Treatment workflow lets you test how standard interventions affect risk before you commit changes.
+
+### Start from the project picker
+
+Use the Treatment page to search for projects by project name or road name, then load one or more projects into the treatment workspace.
+
+### Work by segment or by treatment
+
+Inside the detailed treatment view, you can switch between:
+
+- By Segment to review the current segment and its applicable treatments
+- By Treatment to rank treatments by how often they improve segments across the loaded data
+
+### Preview and apply
+
+You can:
+
+- preview the effect of treatments before saving
+- apply selected treatments to one segment
+- apply one treatment across all applicable segments
+- apply all applicable treatments in bulk
+
+### Save or reset
+
+Treatment changes can be reviewed before they are finalized. Use the page controls to:
+
+- save the treatment state
+- reset pending treatment changes
+- compare before and after scores while deciding what to keep

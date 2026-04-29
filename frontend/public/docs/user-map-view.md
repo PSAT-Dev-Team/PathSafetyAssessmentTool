@@ -1,7 +1,31 @@
 ## 3. Map View & Analysis
-The Map View & Analysis section allows users to visualize, review, and edit path segments within the project using interactive map tools and GIS data layers.
-* **GIS Layers**: You can toggle different map layers to visualize Footpaths, Cycling Paths, Road crossings, bus stops, MRT stations, etc. This helps provide spatial context when reviewing segments.
-* **Risk Bands**: Segments are color-coded based on overall risk (i.e. worst risk of any SB, BB, BP, VP category) logic. This allows users to quickly identify higher-risk and lower-risk segments on the map.
-* **Segment Selection**: You can click on individual segments on the map to view its image, associated attributes and risk levels. The selected segment will be highlighted for easier review.
-* **Map Navigation**: You can zoom in and out and pan across the map to focus on specific areas or segments.
-* **Editing**: You can select or delete segment points directly on the map preview using the cursor tools. This allows you to refine segment boundaries and improve accuracy.
+
+Map views appear in several PSAT workflows, especially Coding, Path Analysis, Treatment, and GIS Layers.
+
+### Segment map in Coding
+
+On the Coding page, the map helps you:
+
+- click a segment to select it
+- see risk-band coloring for saved scoring results
+- view nearby GIS context for the current point
+- inspect the spatial position of the current image and segment
+
+### Risk colors
+
+Segments are color-coded by their highest relevant risk band so you can quickly spot high-risk areas.
+
+### GIS context
+
+Depending on the page and workflow, PSAT can show nearby GIS information such as:
+
+- paths and crossings
+- bus stops and MRT-related features
+- road-name and planning-area context
+- width and curvature analysis overlays
+
+### GIS Layers page
+
+Use the dedicated GIS Layers page when you want to inspect the raw shapefile layers themselves rather than just the map context around a segment.
+
+That page lets you preview available layers, review their metadata, and update GIS files when needed.

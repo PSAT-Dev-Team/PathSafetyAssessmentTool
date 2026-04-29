@@ -1,6 +1,48 @@
 ## 2. Coding Page
-* **Auto-coding**: Use the "Auto-code image" button to leverage AI models that automatically identify risk factors (e.g. facility type, obstacles on paths) from the images. There is an option to auto-code by image or all images within the project. The "Segments Autocoded" will automatically be updated.
-* **Auto-coding algorithms**:
-  * **Computer Vision**: CV utilizes image learning algorithms to systematically identify patterns and features.
-  * **GIS Coding/Mapping**: Our GIS backend automatically evaluates contextual geo-referenced spatial data such as proximity of the images to MRT exits, bus stops, and road intersections.
-* **Manual Review**: You can review and override the attributes predicted by the AI/GIS directly on the panel. You can review the attributes by different categories, then click "Next", or jump between sections. You can refer to the Coding Guide for coding the various attributes. Under the "Details" tab, users can find the exact parameters of some attributes (e.g. path width, radius, and grade), and a zoomed-in map view of a 5m radius buffer overlaying the data source layers. A red box "Manual Edit Done" will appear to label attributes that have been manually overwritten. There is also an Autocode Validation table at the bottom of the page that summarizes the percentage change of overwritten attributes. After finishing the manual review, remember to update the "Segments Verified".
+
+The Coding page is the main review workspace. It can open one or more selected projects in a combined session.
+
+### Main layout
+
+The page keeps three views in sync:
+
+- the current segment image
+- the attributes table
+- the segment map
+
+Selecting a segment in one area updates the others.
+
+### Auto-code options
+
+PSAT supports several auto-code paths:
+
+- CV auto-code from the image
+- GIS auto-code from the segment geometry
+- bulk auto-code across selected rows or the full project
+- per-attribute auto-code in workflows that target only certain fields
+
+Autocode updates are tracked, and the Segments Autocoded counter is updated in the project metadata.
+
+### Manual review
+
+You can override any coded value directly in the table. The page also shows:
+
+- score updates for the selected segment
+- a validation summary comparing current rows against the stored baseline
+- field-source provenance for auto-coded changes
+
+### Details and GIS context
+
+For supported attributes, the page can show extra spatial detail such as:
+
+- nearby GIS layers around the current segment
+- curvature visualization
+- width visualization
+- grade or gradient details when profile data is available
+
+### Save and progress tracking
+
+After review:
+
+- save your attribute edits to persist them and recalculate scores
+- update the Segments Verified counter as you complete manual checks

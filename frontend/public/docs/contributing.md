@@ -1,9 +1,21 @@
 # Contributing
 
-> This is a placeholder. Branch conventions, code style guidelines, and PR process will be documented here.
+These notes keep contributions predictable and safe.
 
-For local development setup (running the app without Docker), see the [Advanced section in Installation](installation.md#advanced-running-without-docker).
+## Expectations
 
----
+- keep changes focused
+- validate the area you changed
+- avoid mixing unrelated cleanup into the same change
 
-*Full contributing guidelines TBD.*
+## Documentation rule
+
+When you update repository docs in `docs/`, also update the mirrored Help-page copies in `frontend/public/docs/`.
+
+## Validation examples
+
+- backend code: targeted route or import checks
+- frontend code: typecheck or build
+- docs: stale-content sweep across both doc locations
+
+For local setup, see [installation.md](installation.md).

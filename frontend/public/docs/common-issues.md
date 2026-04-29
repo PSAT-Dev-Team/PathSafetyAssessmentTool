@@ -1,6 +1,6 @@
 # Common Issues
 
-This page covers setup problems that commonly arise and how to fix them.
+This page covers the setup and workflow issues that most often block current PSAT usage.
 
 ---
 
@@ -83,9 +83,20 @@ Then rebuild: `docker compose up --build`.
 
 ### Missing shapefiles
 
-**Symptom:** GIS auto-coding (`POST /autocode/gis`) returns empty results or an error.
+**Symptom:** GIS auto-coding or the GIS Layers page returns empty results.
 
 **Fix:** Copy the `shapefiles/` folder from the SSD into `backend/shapefiles/`. Rebuild afterwards.
+
+### Polygon road selection returns poor matches
+
+**Symptom:** The Create Project map only shows planning-area fallback results or incomplete road matches.
+
+**Fix:** Regenerate `backend/shapefiles/road_reference.csv` after updating `in/`:
+
+```bash
+cd backend
+python generate_road_reference.py
+```
 
 ---
 

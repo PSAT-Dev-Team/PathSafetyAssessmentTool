@@ -1,6 +1,6 @@
 # Installation
 
-This guide covers everything needed to get PSAT running locally on a **Windows** machine using Docker.
+This guide covers local setup for PSAT on Windows. Docker is the standard path, but a non-Docker developer workflow is also supported.
 
 ---
 
@@ -16,16 +16,16 @@ This guide covers everything needed to get PSAT running locally on a **Windows**
 
 Install all three before proceeding. Docker Desktop must be **running** before you attempt to start the app.
 
-### Required Files (from the SSD)
+### Required assets
 
-Two folders must be copied from the shared SSD before the app can use its CV features:
+Two external asset folders must be copied into `backend/` before CV and GIS-assisted coding will work:
 
 | Folder | Destination | Contents |
 |---|---|---|
 | `models/` | `backend/models/` | YOLO `.pt` model files (see [CV Pipeline](cv-pipeline.md)) |
 | `shapefiles/` | `backend/shapefiles/` | GIS shapefiles used by the GIS autocoder |
 
-> **Important:** If these folders are absent, the app will still start, but any attempt to auto-code images or run GIS-based coding will fail. See [Common Issues](common-issues.md).
+If these folders are missing, the app can still boot, but GIS and/or CV features will fail at runtime.
 
 ---
 
@@ -74,7 +74,7 @@ PathSafetyAssessmentTool/
 mkdir in
 ```
 
-Inside `in/`, you will place subfolders containing the `.jpg` images for each survey. Each subfolder becomes the source for one project. For example:
+Inside `in/`, each subfolder is a reusable image source. A project can be created from one folder or from multiple folders selected by polygon on the Create Project map.
 
 ```
 in/
@@ -86,7 +86,7 @@ in/
     └── ...
 ```
 
-### Copy Models and Shapefiles
+### Copy models and shapefiles
 
 ```
 # From the SSD:
@@ -104,6 +104,18 @@ backend/
 ```
 
 ---
+
+### Optional but recommended: build `road_reference.csv`
+
+After populating `in/`, run:
+
+```bash
+cd backend
+python generate_road_reference.py
+cd ..
+```
+
+This creates `backend/shapefiles/road_reference.csv`, which improves polygon-based road selection in the Create Project page.
 
 ## Step 3 — Run the App
 
