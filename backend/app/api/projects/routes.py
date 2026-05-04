@@ -31,6 +31,7 @@ import geopandas as gpd
 import shutil
 import datetime
 import math
+import ipaddress
 from app.services.cyclerap_scoring import calculate_cyclerap_score_native
 # ---- init guards (thread-safe & error memo) ----
 import threading
@@ -42,6 +43,9 @@ _INIT_ERR = {"cv": None}
 _GIS_INSTANCE: "gis.GIS | None" = None
 _ROAD_SECTIONS_GDF: gpd.GeoDataFrame | None = None
 _PLANNING_AREAS_GDF: gpd.GeoDataFrame | None = None
+_KNOWN_ROAD_NAMES: list[str] | None = None
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"}
+_FOLDER_PREVIEW_SAMPLE_LIMIT = 6
 
 
 def _get_road_sections_gdf() -> gpd.GeoDataFrame:
@@ -2760,6 +2764,176 @@ def make_image_namespace(source_name: str) -> str:
     namespace = "".join(ch if ch.isalnum() else "_" for ch in source_name).strip("_")
     return namespace or "source"
 
+
+def _is_loopback_request() -> bool:
+    remote_addr = (request.remote_addr or "").strip()
+    if not remote_addr:
+        return False
+
+    try:
+        return ipaddress.ip_address(remote_addr).is_loopback
+    except ValueError:
+        return False
+
+
+def _clean_source_folder_name(raw_name) -> str | None:
+    if not isinstance(raw_name, str):
+        return None
+
+    clean_name = raw_name.strip()
+    if not clean_name or clean_name in {".", ".."}:
+        return None
+    if any(sep in clean_name for sep in ("/", "\\")):
+        return None
+
+    return clean_name
+
+
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _get_known_road_names() -> list[str]:
+    global _KNOWN_ROAD_NAMES
+    if _KNOWN_ROAD_NAMES is not None:
+        return _KNOWN_ROAD_NAMES
+
+    known_names: set[str] = set()
+    backend_root = Path(__file__).resolve().parents[3]
+
+    ref_csv_candidates = [
+        backend_root / "shapefiles" / "road_reference.csv",
+        backend_root / "app" / "shapefiles" / "road_reference.csv",
+    ]
+    ref_csv = next((candidate for candidate in ref_csv_candidates if candidate.exists()), None)
+
+    if ref_csv is not None:
+        import csv
+
+        try:
+            with open(ref_csv, newline="", encoding="utf-8-sig") as handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    name = str(row.get("road_name", "")).strip()
+                    if name:
+                        known_names.add(name)
+        except Exception as exc:
+            current_app.logger.warning("Failed to read road_reference.csv for folder suggestions: %s", exc)
+
+    try:
+        road_gdf = _get_road_sections_gdf()
+        road_name_col = next(
+            (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in road_gdf.columns),
+            None,
+        )
+        if road_name_col is not None:
+            for raw_name in road_gdf[road_name_col].dropna().astype(str):
+                name = raw_name.strip()
+                if name and any(ch.isalnum() for ch in name):
+                    known_names.add(name)
+    except Exception as exc:
+        current_app.logger.warning("Failed to read road shapefile for folder suggestions: %s", exc)
+
+    _KNOWN_ROAD_NAMES = sorted(known_names)
+    return _KNOWN_ROAD_NAMES
+
+
+def _build_flat_copy_name(source_file: Path, source_root: Path, destination_dir: Path) -> str:
+    relative_parts = source_file.relative_to(source_root).parts
+    base_name = relative_parts[-1]
+    if not (destination_dir / base_name).exists():
+        return base_name
+
+    prefix_parts = [part.strip().replace("/", "_").replace("\\", "_") for part in relative_parts[:-1] if part.strip()]
+    if prefix_parts:
+        candidate = "__".join(prefix_parts + [base_name])
+        if not (destination_dir / candidate).exists():
+            return candidate
+
+    stem = Path(base_name).stem
+    suffix = Path(base_name).suffix
+    safe_stem = "__".join(prefix_parts + [stem]) if prefix_parts else stem
+    counter = 2
+    while True:
+        candidate = f"{safe_stem}__{counter}{suffix}"
+        if not (destination_dir / candidate).exists():
+            return candidate
+        counter += 1
+
+
+def _iter_source_image_files(source_dir: Path) -> list[Path]:
+    if not source_dir.exists() or not source_dir.is_dir():
+        return []
+
+    return [
+        file_path
+        for file_path in sorted(source_dir.rglob("*"))
+        if file_path.is_file() and file_path.suffix.lower() in _IMAGE_EXTENSIONS
+    ]
+
+
+def _parse_exif_datetime(raw_value: str | None) -> datetime.datetime | None:
+    if raw_value is None:
+        return None
+
+    value = raw_value.strip()
+    if not value:
+        return None
+
+    for fmt in (
+        "%Y:%m:%d %H:%M:%S",
+        "%Y:%m:%d %H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+    ):
+        try:
+            return datetime.datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+
+    return None
+
+
+def _read_capture_datetime(image_path: Path) -> datetime.datetime | None:
+    try:
+        with open(image_path, "rb") as handle:
+            tags = exifread.process_file(handle, details=False)
+    except Exception:
+        return None
+
+    for key in ("EXIF DateTimeOriginal", "EXIF DateTimeDigitized", "Image DateTime"):
+        parsed = _parse_exif_datetime(str(tags.get(key))) if tags.get(key) is not None else None
+        if parsed is not None:
+            return parsed
+
+    return None
+
+
+def _format_quarter_label(captured_at: datetime.datetime | None) -> str | None:
+    if captured_at is None:
+        return None
+
+    quarter = ((captured_at.month - 1) // 3) + 1
+    return f"Q{quarter} {captured_at.year}"
+
+
+def _sample_preview_entries(entries: list[dict], limit: int) -> list[dict]:
+    if len(entries) <= limit:
+        return entries
+
+    if limit <= 1:
+        return entries[:1]
+
+    indices = sorted({
+        round(index * (len(entries) - 1) / (limit - 1))
+        for index in range(limit)
+    })
+    return [entries[index] for index in indices]
+
 @bp.get("/folders")
 def list_input_folders():
     """
@@ -2777,6 +2951,232 @@ def list_input_folders():
     items = [f for f in os.listdir(in_path) if (in_path / f).is_dir()]
     items.sort()
     return ok({"items": items})
+
+
+@bp.get("/folders/preview")
+def preview_input_folder():
+    """
+    Return sample images and EXIF capture dates for a source folder under /in.
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+
+    folder_name = _clean_source_folder_name(request.args.get("folder_name"))
+    if not folder_name:
+        return fail("folder_name is required", 400)
+
+    in_root = pm.in_path.resolve()
+    source_dir = (in_root / folder_name).resolve()
+    if not _path_is_within(source_dir, in_root):
+        return fail("Invalid folder_name", 400)
+    if not source_dir.exists() or not source_dir.is_dir():
+        return fail("Source folder not found", 404)
+
+    image_files = _iter_source_image_files(source_dir)
+    dated_entries: list[dict] = []
+    fallback_entries: list[dict] = []
+    capture_dates: list[datetime.datetime] = []
+
+    for image_file in image_files:
+        captured_at = _read_capture_datetime(image_file)
+        quarter = _format_quarter_label(captured_at)
+        if captured_at is not None:
+            capture_dates.append(captured_at)
+
+        entry = {
+            "relative_path": image_file.relative_to(source_dir).as_posix(),
+            "captured_at": captured_at.isoformat() if captured_at is not None else None,
+            "quarter": quarter,
+        }
+
+        if captured_at is not None:
+            dated_entries.append(entry)
+        else:
+            fallback_entries.append(entry)
+
+    preview_entries = _sample_preview_entries(dated_entries or fallback_entries, _FOLDER_PREVIEW_SAMPLE_LIMIT)
+    if dated_entries and len(preview_entries) < _FOLDER_PREVIEW_SAMPLE_LIMIT:
+        used_paths = {entry["relative_path"] for entry in preview_entries}
+        remaining = [entry for entry in fallback_entries if entry["relative_path"] not in used_paths]
+        preview_entries.extend(_sample_preview_entries(remaining, _FOLDER_PREVIEW_SAMPLE_LIMIT - len(preview_entries)))
+
+    quarter_labels = sorted({
+        _format_quarter_label(captured_at)
+        for captured_at in capture_dates
+        if _format_quarter_label(captured_at) is not None
+    })
+
+    return ok({
+        "folder_name": folder_name,
+        "image_count": len(image_files),
+        "dated_image_count": len(dated_entries),
+        "earliest_capture_at": min(capture_dates).isoformat() if capture_dates else None,
+        "latest_capture_at": max(capture_dates).isoformat() if capture_dates else None,
+        "quarters": quarter_labels,
+        "samples": preview_entries,
+    })
+
+
+@bp.get("/folders/image")
+def get_input_folder_image():
+    """
+    Return an image file under a source folder in /in for preview purposes.
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+
+    folder_name = _clean_source_folder_name(request.args.get("folder_name"))
+    relative_path = str(request.args.get("relative_path") or "").strip()
+    if not folder_name or not relative_path:
+        abort(400, description="folder_name and relative_path are required")
+
+    in_root = pm.in_path.resolve()
+    source_dir = (in_root / folder_name).resolve()
+    if not _path_is_within(source_dir, in_root):
+        abort(400, description="Invalid image path")
+    if not source_dir.exists() or not source_dir.is_dir():
+        abort(404, description="Source folder not found")
+
+    safe_path = safe_join(str(source_dir), relative_path)
+    if safe_path is None:
+        abort(400, description="Invalid image path")
+
+    file_path = Path(safe_path).resolve()
+    if not _path_is_within(file_path, source_dir):
+        abort(400, description="Invalid image path")
+    if not file_path.exists() or not file_path.is_file():
+        abort(404, description="Image not found")
+
+    resp = send_from_directory(str(source_dir), file_path.relative_to(source_dir).as_posix(), conditional=True)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@bp.get("/folders/suggestions")
+def list_input_folder_suggestions():
+    """
+    Return searchable destination folder suggestions for source imports.
+    Includes both existing input folders and known road names from reference data.
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    in_path: Path = pm.in_path
+
+    existing_folders = set()
+    if in_path.exists():
+        existing_folders = {
+            item.name
+            for item in in_path.iterdir()
+            if item.is_dir()
+        }
+    suggestion_names = existing_folders | set(_get_known_road_names())
+
+    items = [
+        {"name": name, "exists": name in existing_folders}
+        for name in suggestion_names
+    ]
+    items.sort(key=lambda item: (not item["exists"], item["name"].lower()))
+    return ok({"items": items})
+
+
+@bp.post("/folders/pick-local")
+def pick_local_source_folder():
+    """
+    Open a native folder picker on the same machine as the backend.
+    Local-only by design so deployed instances do not expose filesystem browsing.
+    """
+    if not _is_loopback_request():
+        return fail("Local folder browsing is only available from the same machine as the server", 403)
+
+    root = None
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected_path = filedialog.askdirectory(title="Select image folder to import")
+    except Exception as exc:
+        current_app.logger.exception("Failed to open local folder picker")
+        return fail(f"Local folder picker is unavailable in this environment: {exc}", 500)
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    if not selected_path:
+        return ok({"path": None, "suggested_folder_name": None})
+
+    return ok({
+        "path": selected_path,
+        "suggested_folder_name": Path(selected_path).name,
+    })
+
+
+@bp.post("/folders/copy-local")
+def copy_images_to_source_folder():
+    """
+    Copy image files from a local folder on the backend machine into a source folder under /in.
+    Local-only by design so deployed instances do not expose arbitrary filesystem reads.
+    """
+    if not _is_loopback_request():
+        return fail("Local folder copy is only available from the same machine as the server", 403)
+
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    data = request.get_json(silent=True) or {}
+
+    folder_name = _clean_source_folder_name(data.get("folder_name"))
+    if not folder_name:
+        return fail("Destination folder name is required", 400)
+
+    source_path = str(data.get("source_path") or "").strip()
+    if not source_path:
+        return fail("Source folder path is required", 400)
+
+    try:
+        source_dir = Path(source_path).expanduser().resolve()
+    except Exception:
+        return fail("Source folder path is invalid", 400)
+
+    if not source_dir.exists() or not source_dir.is_dir():
+        return fail("Source folder does not exist or is not a directory", 400)
+
+    in_root = pm.in_path.resolve()
+    destination_dir = (in_root / folder_name).resolve()
+    if not _path_is_within(destination_dir, in_root):
+        return fail("Invalid destination folder name", 400)
+
+    if source_dir == destination_dir or _path_is_within(source_dir, destination_dir) or _path_is_within(destination_dir, source_dir):
+        return fail("Source and destination folders must not overlap", 400)
+
+    image_files = _iter_source_image_files(source_dir)
+
+    if not image_files:
+        return fail("No image files were found in the selected folder", 400)
+
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    count = 0
+    errors: list[str] = []
+
+    for image_file in image_files:
+        try:
+            destination_name = _build_flat_copy_name(image_file, source_dir, destination_dir)
+            shutil.copy2(image_file, destination_dir / destination_name)
+            count += 1
+        except Exception as exc:
+            rel_path = image_file.relative_to(source_dir)
+            errors.append(f"Failed to copy {rel_path}: {exc}")
+
+    return ok({
+        "count": count,
+        "errors": errors,
+        "folder_name": folder_name,
+        "message": f"Copied {count} image(s) into folder '{folder_name}'",
+    })
 
 
 @bp.post("/roads-in-polygon")

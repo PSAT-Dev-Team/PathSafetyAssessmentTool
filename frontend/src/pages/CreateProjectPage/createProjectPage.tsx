@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import {
+  Badge,
   Box,
   Button,
   Card,
@@ -8,13 +9,19 @@ import {
   Heading,
   Input,
   Text,
-  Portal,
   Combobox,
   createListCollection,
   Separator,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
-import { listSourceFolders, createProjectFromFolder, fetchProjectList } from "../../api";
+import {
+  listSourceFolders,
+  createProjectFromFolder,
+  fetchProjectList,
+  fetchSourceFolderPreview,
+  getSourceFolderImageUrl,
+  type SourceFolderPreview,
+} from "../../api";
 import ImageUploadModal from "../sidebar/components/ImageUploadModal";
 import SelectRoadsMap, { type SelectedRoad } from "./SelectRoadsMap";
 import "../Projects/components/EditProjectModal.css";
@@ -39,6 +46,24 @@ function getTagColor(tag: string): string {
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
+function formatCaptureDate(value: string | null | undefined, options?: Intl.DateTimeFormatOptions) {
+  if (!value) return null;
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return parsed.toLocaleDateString(undefined, options ?? {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function getSampleImageLabel(relativePath: string) {
+  const parts = relativePath.split("/");
+  return parts[parts.length - 1] || relativePath;
+}
+
 export default function CreateProjectPage() {
   const nav = useNavigate();
   const [folders, setFolders] = useState<string[]>([]);
@@ -53,6 +78,10 @@ export default function CreateProjectPage() {
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
+  const [roadAvailabilityVersion, setRoadAvailabilityVersion] = useState(0);
+  const [folderPreview, setFolderPreview] = useState<SourceFolderPreview | null>(null);
+  const [loadingFolderPreview, setLoadingFolderPreview] = useState(false);
+  const [folderPreviewError, setFolderPreviewError] = useState<string | null>(null);
   const [selectedRoads, setSelectedRoads] = useState<SelectedRoad[]>([]);
   const [selectedPolygon, setSelectedPolygon] = useState<[number, number][]>([]);
 
@@ -65,6 +94,10 @@ export default function CreateProjectPage() {
     [selectedRoadFolders]
   );
   const usingRoadSelection = selectedRoadFolders.length > 0;
+  const selectedFolderExists = useMemo(
+    () => folders.includes(folder.trim()),
+    [folder, folders]
+  );
 
   const loadFolders = async (ctrl?: AbortController) => {
     try {
@@ -94,6 +127,31 @@ export default function CreateProjectPage() {
     loadFolders(ctrl);
     return () => ctrl.abort();
   }, []);
+
+  useEffect(() => {
+    if (!selectedFolderExists) {
+      setFolderPreview(null);
+      setFolderPreviewError(null);
+      setLoadingFolderPreview(false);
+      return;
+    }
+
+    const ctrl = new AbortController();
+    setLoadingFolderPreview(true);
+    setFolderPreviewError(null);
+
+    fetchSourceFolderPreview(folder.trim(), { signal: ctrl.signal })
+      .then((preview) => setFolderPreview(preview))
+      .catch((error: any) => {
+        if (error?.name !== "AbortError") {
+          setFolderPreview(null);
+          setFolderPreviewError(error?.message ?? "Failed to load folder preview");
+        }
+      })
+      .finally(() => setLoadingFolderPreview(false));
+
+    return () => ctrl.abort();
+  }, [folder, roadAvailabilityVersion, selectedFolderExists]);
 
   const handleRoadSelectionChange = useCallback((roads: SelectedRoad[]) => {
     setSelectedRoads(roads);
@@ -237,22 +295,20 @@ export default function CreateProjectPage() {
                       onKeyDown={handleTagInputKeyDown}
                     />
                   </Combobox.Control>
-                  <Portal>
-                    <Combobox.Positioner>
-                      <Combobox.Content>
-                        {existingTags
-                          .filter(t =>
-                            t.toLowerCase().includes(tagInput.toLowerCase()) &&
-                            !tags.includes(t)
-                          )
-                          .map(t => (
-                            <Combobox.Item key={t} item={{ label: t, value: t }}>
-                              {t}
-                            </Combobox.Item>
-                          ))}
-                      </Combobox.Content>
-                    </Combobox.Positioner>
-                  </Portal>
+                  <Combobox.Positioner zIndex={1200}>
+                    <Combobox.Content>
+                      {existingTags
+                        .filter(t =>
+                          t.toLowerCase().includes(tagInput.toLowerCase()) &&
+                          !tags.includes(t)
+                        )
+                        .map(t => (
+                          <Combobox.Item key={t} item={{ label: t, value: t }}>
+                            {t}
+                          </Combobox.Item>
+                        ))}
+                    </Combobox.Content>
+                  </Combobox.Positioner>
                 </Combobox.Root>
               </Box>
             </Box>
@@ -289,19 +345,17 @@ export default function CreateProjectPage() {
                       placeholder={loadingFolders ? "Loading..." : "Select a folder"}
                     />
                   </Combobox.Control>
-                  <Portal>
-                    <Combobox.Positioner>
-                      <Combobox.Content>
-                        {folders
-                          .filter(f => f.toLowerCase().includes(folder.toLowerCase()))
-                          .map(f => (
-                            <Combobox.Item key={f} item={{ label: f, value: f }}>
-                              {f}
-                            </Combobox.Item>
-                          ))}
-                      </Combobox.Content>
-                    </Combobox.Positioner>
-                  </Portal>
+                  <Combobox.Positioner zIndex={1200}>
+                    <Combobox.Content>
+                      {folders
+                        .filter(f => f.toLowerCase().includes(folder.toLowerCase()))
+                        .map(f => (
+                          <Combobox.Item key={f} item={{ label: f, value: f }}>
+                            {f}
+                          </Combobox.Item>
+                        ))}
+                    </Combobox.Content>
+                  </Combobox.Positioner>
                 </Combobox.Root>
               </Box>
               <Button
@@ -310,7 +364,7 @@ export default function CreateProjectPage() {
                 size="sm"
                 onClick={() => setImageUploadModalOpen(true)}
               >
-                Upload Images
+                Import Folder
               </Button>
             </Box>
 
@@ -325,6 +379,121 @@ export default function CreateProjectPage() {
                 This is used when no roads are selected from the polygon map.
               </Text>
             )}
+
+            {selectedFolderExists && (
+              <Box mt={3} border="1px solid" borderColor="gray.200" borderRadius="md" p={3} bg="gray.50">
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={3} flexWrap="wrap" mb={2}>
+                  <Box>
+                    <Text fontSize="sm" fontWeight="semibold">
+                      Folder Preview: {folder}
+                    </Text>
+                    {folderPreview && (
+                      <Text fontSize="xs" color="gray.500">
+                        {folderPreview.image_count} image{folderPreview.image_count === 1 ? "" : "s"} in this source folder
+                      </Text>
+                    )}
+                  </Box>
+                  {folderPreview && folderPreview.quarters.length > 0 && (
+                    <Box display="flex" gap={2} flexWrap="wrap">
+                      {folderPreview.quarters.map((quarter) => (
+                        <Badge key={quarter} colorPalette="blue" size="sm">
+                          {quarter}
+                        </Badge>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+
+                {loadingFolderPreview && (
+                  <Text fontSize="xs" color="gray.500">
+                    Loading image dates and samples...
+                  </Text>
+                )}
+
+                {folderPreviewError && !loadingFolderPreview && (
+                  <Text fontSize="xs" color="red.600">
+                    {folderPreviewError}
+                  </Text>
+                )}
+
+                {folderPreview && !loadingFolderPreview && !folderPreviewError && (
+                  <>
+                    <Text fontSize="xs" color="gray.600" mb={3}>
+                      {folderPreview.earliest_capture_at && folderPreview.latest_capture_at
+                        ? folderPreview.earliest_capture_at === folderPreview.latest_capture_at
+                          ? `Survey date: ${formatCaptureDate(folderPreview.earliest_capture_at)}`
+                          : `Survey window: ${formatCaptureDate(folderPreview.earliest_capture_at)} to ${formatCaptureDate(folderPreview.latest_capture_at)}`
+                        : folderPreview.image_count > 0
+                          ? "No EXIF capture dates were found in this folder."
+                          : "This folder does not contain previewable image files."}
+                    </Text>
+
+                    {folderPreview.dated_image_count > 0 && folderPreview.dated_image_count < folderPreview.image_count && (
+                      <Text fontSize="xs" color="gray.500" mb={3}>
+                        Capture dates were found on {folderPreview.dated_image_count} of {folderPreview.image_count} images.
+                      </Text>
+                    )}
+
+                    {folderPreview.samples.length > 0 && (
+                      <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap={3}>
+                        {folderPreview.samples.map((sample) => (
+                          <Box
+                            key={sample.relative_path}
+                            border="1px solid"
+                            borderColor="gray.200"
+                            borderRadius="md"
+                            overflow="hidden"
+                            bg="white"
+                          >
+                            <Box position="relative" paddingTop="70%" bg="gray.100">
+                              <img
+                                src={getSourceFolderImageUrl(folderPreview.folder_name, sample.relative_path)}
+                                alt={sample.relative_path}
+                                style={{
+                                  position: "absolute",
+                                  inset: 0,
+                                  width: "100%",
+                                  height: "100%",
+                                  objectFit: "cover",
+                                }}
+                                loading="lazy"
+                              />
+                              <Box
+                                position="absolute"
+                                left={2}
+                                bottom={2}
+                                bg="rgba(0, 0, 0, 0.72)"
+                                color="white"
+                                px={2}
+                                py={1}
+                                borderRadius="md"
+                                fontSize="11px"
+                                lineHeight="short"
+                              >
+                                {formatCaptureDate(sample.captured_at) ?? "Date unknown"}
+                              </Box>
+                            </Box>
+                            <Box p={2}>
+                              <Text
+                                fontSize="xs"
+                                fontWeight="medium"
+                                title={sample.relative_path}
+                                style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                              >
+                                {getSampleImageLabel(sample.relative_path)}
+                              </Text>
+                              <Text fontSize="xs" color="gray.500">
+                                {sample.quarter ?? "Unknown quarter"}
+                              </Text>
+                            </Box>
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
+                  </>
+                )}
+              </Box>
+            )}
           </Box>
 
           <Separator />
@@ -336,7 +505,11 @@ export default function CreateProjectPage() {
             <Text color="gray.500" fontSize="xs" mb={3}>
               Draw a polygon or click a planning area to select multiple roads. Project creation uses only nodes inside the selected boundary.
             </Text>
-            <SelectRoadsMap onSelectionChange={handleRoadSelectionChange} onPolygonChange={handlePolygonChange} />
+            <SelectRoadsMap
+              onSelectionChange={handleRoadSelectionChange}
+              onPolygonChange={handlePolygonChange}
+              refreshKey={roadAvailabilityVersion}
+            />
 
             {usingRoadSelection && unavailableSelectedRoads.length > 0 && (
               <Text color="orange.600" fontSize="xs" mt={3}>
@@ -370,7 +543,12 @@ export default function CreateProjectPage() {
       <ImageUploadModal
         open={imageUploadModalOpen}
         onClose={() => setImageUploadModalOpen(false)}
-        onSuccess={() => loadFolders()}
+        onSuccess={({ folderName }) => {
+          setFolder(folderName);
+          setFolderComboboxOpen(false);
+          setRoadAvailabilityVersion((version) => version + 1);
+          loadFolders();
+        }}
       />
     </Box>
   );

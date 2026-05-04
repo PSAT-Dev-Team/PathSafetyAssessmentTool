@@ -9,6 +9,7 @@ import {
 } from "@chakra-ui/react";
 import {
   MapContainer,
+  Marker,
   Polyline as LeafletPolyline,
   Polygon as LeafletPolygon,
   Popup,
@@ -27,6 +28,15 @@ import {
 } from "../../api";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+
+const polygonVertexIcon = L.divIcon({
+  className: "",
+  html: '<div style="width:14px;height:14px;border-radius:9999px;background:#dc2626;border:2px solid #ffffff;box-shadow:0 1px 4px rgba(0,0,0,0.35);"></div>',
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
+
+type PolygonSource = "manual" | "planning-area" | null;
 
 function mergeRoadSelection(
   previousRoads: SelectedRoad[],
@@ -142,11 +152,13 @@ export interface SelectedRoad {
 interface SelectRoadsMapProps {
   onSelectionChange: (roads: SelectedRoad[]) => void;
   onPolygonChange: (polygon: [number, number][]) => void;
+  refreshKey?: number;
 }
 
-export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: SelectRoadsMapProps) {
+export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, refreshKey = 0 }: SelectRoadsMapProps) {
   // Polygon state
   const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
+  const [polygonSource, setPolygonSource] = useState<PolygonSource>(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
   // Road results
@@ -164,18 +176,39 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
   const [planningAreaLoading, setPlanningAreaLoading] = useState(false);
   const [highlightPlanningAreaKey, setHighlightPlanningAreaKey] = useState<string | null>(null);
   const roadsRef = useRef<SelectedRoad[]>([]);
+  const polygonSourceRef = useRef<PolygonSource>(null);
 
   useEffect(() => {
     roadsRef.current = roads;
   }, [roads]);
 
+  useEffect(() => {
+    polygonSourceRef.current = polygonSource;
+  }, [polygonSource]);
+
   // ─ Handlers ─────────────────────────────────────────────────────
   const addPoint = useCallback((latlng: L.LatLng) => {
-    setPolygonPoints((prev) => [...prev, [latlng.lat, latlng.lng]]);
+    setHighlightPlanningAreaKey(null);
+    setPolygonSource("manual");
+    setPolygonPoints((prev) =>
+      polygonSourceRef.current === "planning-area"
+        ? [[latlng.lat, latlng.lng]]
+        : [...prev, [latlng.lat, latlng.lng]]
+    );
+  }, []);
+
+  const movePoint = useCallback((index: number, latlng: L.LatLng) => {
+    setPolygonSource("manual");
+    setPolygonPoints((prev) =>
+      prev.map((point, pointIndex) =>
+        pointIndex === index ? [latlng.lat, latlng.lng] : point
+      )
+    );
   }, []);
 
   const clearPolygon = useCallback(() => {
     setPolygonPoints([]);
+    setPolygonSource(null);
     setRoads([]);
     setQueryError(null);
     setIsFallback(false);
@@ -186,6 +219,7 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
 
   const selectPlanningArea = useCallback((area: PlanningAreaInBounds) => {
     setIsDrawing(false);
+    setPolygonSource("planning-area");
     setQueryError(null);
     setIsFallback(false);
     setHighlightPlanningAreaKey(`${area.name}-${area.partIndex}`);
@@ -305,7 +339,7 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [onPolygonChange, onSelectionChange, polygonPoints]);
+  }, [onPolygonChange, onSelectionChange, polygonPoints, refreshKey]);
 
   // ─ Selection helpers ────────────────────────────────────────────
   const toggleRoad = useCallback(
@@ -340,6 +374,8 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
   const allSelected = roads.length > 0 && roads.every((r) => r.selected);
   const toolbarStatus = isDrawing
     ? "Click on the map to place vertices. Draw at least 3 points."
+    : polygonSource === "manual" && polygonPoints.length > 0
+      ? "Drag the red vertices to fine-tune a manually drawn polygon."
     : showRoadOverlay && overlayLoading
       ? "Loading roads..."
       : showPlanningAreaOverlay && planningAreaLoading
@@ -477,6 +513,20 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange }: S
           <PolygonOverlay
             points={polygonPoints}
           />
+          {polygonSource === "manual" && polygonPoints.map((point, index) => (
+            <Marker
+              key={`polygon-point-${index}-${point[0]}-${point[1]}`}
+              position={point}
+              icon={polygonVertexIcon}
+              draggable
+              eventHandlers={{
+                dragend: (event) => {
+                  const latlng = (event.target as L.Marker).getLatLng();
+                  movePoint(index, latlng);
+                },
+              }}
+            />
+          ))}
         </MapContainer>
       </Box>
 

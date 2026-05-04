@@ -100,6 +100,72 @@ export async function listSourceFolders(opts?: { signal?: AbortSignal }) {
   return (data?.items ?? []) as string[];
 }
 
+export interface SourceFolderSuggestion {
+  name: string;
+  exists: boolean;
+}
+
+export interface SourceFolderPreviewSample {
+  relative_path: string;
+  captured_at: string | null;
+  quarter: string | null;
+}
+
+export interface SourceFolderPreview {
+  folder_name: string;
+  image_count: number;
+  dated_image_count: number;
+  earliest_capture_at: string | null;
+  latest_capture_at: string | null;
+  quarters: string[];
+  samples: SourceFolderPreviewSample[];
+}
+
+export async function listSourceFolderSuggestions(opts?: { signal?: AbortSignal }) {
+  const res = await fetch("/api/projects/folders/suggestions", { signal: opts?.signal });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = await res.json();
+  return (data?.items ?? []) as SourceFolderSuggestion[];
+}
+
+export async function fetchSourceFolderPreview(folderName: string, opts?: { signal?: AbortSignal }) {
+  const params = new URLSearchParams({ folder_name: folderName });
+  const res = await fetch(`/api/projects/folders/preview?${params.toString()}`, { signal: opts?.signal });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as SourceFolderPreview;
+}
+
+export function getSourceFolderImageUrl(folderName: string, relativePath: string) {
+  const params = new URLSearchParams({ folder_name: folderName, relative_path: relativePath });
+  return `/api/projects/folders/image?${params.toString()}`;
+}
+
+export async function pickLocalSourceFolder() {
+  const res = await fetch("/api/projects/folders/pick-local", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as {
+    path: string | null;
+    suggested_folder_name: string | null;
+  };
+}
+
+export async function copyLocalImagesToSourceFolder(
+  sourcePath: string,
+  folderName: string,
+): Promise<{ count: number; errors: string[]; folder_name: string }> {
+  const res = await fetch("/api/projects/folders/copy-local", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_path: sourcePath, folder_name: folderName }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export interface RoadInPolygon {
   name: string;
   points: number;
