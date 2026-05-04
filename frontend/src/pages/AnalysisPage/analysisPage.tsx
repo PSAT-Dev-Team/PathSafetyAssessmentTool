@@ -15,6 +15,7 @@ type TreatmentPhase = "pre" | "post";
 export default function AnalysisPage() {
   // Tab state - switches between Pre-Treatment and Post-Treatment
   const [phase, setPhase] = useState<TreatmentPhase>("pre");
+  const [loadingProjects, setLoadingProjects] = useState(true);
 
   // Project list state
   const [projectList, setProjectList] = useState<FileResponse | null>(null);
@@ -28,9 +29,11 @@ export default function AnalysisPage() {
   useEffect(() => {
     if (phase === "pre") {
       // Fetch from Pre-Treatment folder (current default)
+      setLoadingProjects(true);
       fetchProjectList()
         .then((data) => setProjectList(data))
-        .catch((e) => console.error("Failed to fetch pre-treatment projects:", e));
+        .catch((e) => console.error("Failed to fetch pre-treatment projects:", e))
+        .finally(() => setLoadingProjects(false));
     } else {
       // TODO: Fetch from Post-Treatment folder
       // For now, using placeholder - you'll need to create an API endpoint for this
@@ -40,6 +43,7 @@ export default function AnalysisPage() {
 
       // Placeholder: Empty list for post-treatment
       setPostTreatmentList({ projects: [] });
+      setLoadingProjects(false);
     }
   }, [phase]);
 
@@ -156,7 +160,13 @@ export default function AnalysisPage() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loadingProjects ? (
+              <tr>
+                <td colSpan={3} className="empty">
+                  Loading projects...
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={3} className="empty">
                   {phase === "post"

@@ -12,6 +12,7 @@ import "./home.css";
 
 export default function Home() {
   const [error, setError] = useState<string | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(true);
 
   // Project List
   const [Projectlist, setProjectList] = useState<FileResponse | null>(null);
@@ -32,9 +33,11 @@ export default function Home() {
 
   // Use effect
   useEffect(() => {
+    setLoadingProjects(true);
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoadingProjects(false));
   }, []);
 
   // UseMemo projects
@@ -119,7 +122,13 @@ export default function Home() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loadingProjects ? (
+              <tr>
+                <td colSpan={2} className="empty">
+                  Loading projects...
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={2} className="empty">
                   No projects found

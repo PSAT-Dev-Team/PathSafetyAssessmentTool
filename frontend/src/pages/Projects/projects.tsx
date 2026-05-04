@@ -59,6 +59,7 @@ export default function Home() {
 
   // Project List
   const [Projectlist, setProjectList] = useState<FileListResponse | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(true);
 
   // Sorting
   type SortCriterion = { key: string; direction: 'asc' | 'desc' };
@@ -92,9 +93,11 @@ export default function Home() {
       .then((r) => setStatus(r.status))
       .catch(() => setStatus("offline"));
 
+    setLoadingProjects(true);
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoadingProjects(false));
   }, []);
 
   // Listen for project verified status changes from coding page
@@ -208,7 +211,7 @@ export default function Home() {
 
     return list;
   }, [projects, nameQuery, tagFilters]);
-  const showCreateProjectPrompt = filtered.length === 0 && nameQuery.trim().length > 0;
+  const showCreateProjectPrompt = !loadingProjects && filtered.length === 0 && nameQuery.trim().length > 0;
 
   // Toggle project selection
   const onRowClick = (name: string) => {
@@ -510,7 +513,13 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {loadingProjects ? (
+                <tr>
+                  <td colSpan={8} className="empty">
+                    Loading projects...
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="empty">
                     {showCreateProjectPrompt ? (
