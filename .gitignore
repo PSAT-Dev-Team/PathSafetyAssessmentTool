@@ -37,6 +37,7 @@ yck_facil/
 yck_obstacles/
 obstacles/
 scripts/
+tmp/
 Gradient Calculation/
 
 # Data and Models
