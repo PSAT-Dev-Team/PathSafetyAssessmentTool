@@ -105,20 +105,16 @@ export interface SourceFolderSuggestion {
   exists: boolean;
 }
 
-export interface SourceFolderPreviewSample {
-  relative_path: string;
-  captured_at: string | null;
-  quarter: string | null;
-}
-
 export interface SourceFolderPreview {
   folder_name: string;
   image_count: number;
-  dated_image_count: number;
-  earliest_capture_at: string | null;
-  latest_capture_at: string | null;
-  quarters: string[];
-  samples: SourceFolderPreviewSample[];
+  geotagged_image_count: number;
+  segment_count: number;
+  segment_error: string | null;
+  earliest_modified_at: string | null;
+  latest_modified_at: string | null;
+  survey_quarter: string | null;
+  survey_quarters: string[];
 }
 
 export async function listSourceFolderSuggestions(opts?: { signal?: AbortSignal }) {
@@ -133,11 +129,6 @@ export async function fetchSourceFolderPreview(folderName: string, opts?: { sign
   const res = await fetch(`/api/projects/folders/preview?${params.toString()}`, { signal: opts?.signal });
   if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as SourceFolderPreview;
-}
-
-export function getSourceFolderImageUrl(folderName: string, relativePath: string) {
-  const params = new URLSearchParams({ folder_name: folderName, relative_path: relativePath });
-  return `/api/projects/folders/image?${params.toString()}`;
 }
 
 export async function pickLocalSourceFolder() {

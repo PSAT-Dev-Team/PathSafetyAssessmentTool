@@ -19,7 +19,6 @@ import {
   createProjectFromFolder,
   fetchProjectList,
   fetchSourceFolderPreview,
-  getSourceFolderImageUrl,
   type SourceFolderPreview,
 } from "../../api";
 import ImageUploadModal from "../sidebar/components/ImageUploadModal";
@@ -57,11 +56,6 @@ function formatCaptureDate(value: string | null | undefined, options?: Intl.Date
     month: "short",
     day: "numeric",
   });
-}
-
-function getSampleImageLabel(relativePath: string) {
-  const parts = relativePath.split("/");
-  return parts[parts.length - 1] || relativePath;
 }
 
 export default function CreateProjectPage() {
@@ -385,7 +379,7 @@ export default function CreateProjectPage() {
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={3} flexWrap="wrap" mb={2}>
                   <Box>
                     <Text fontSize="sm" fontWeight="semibold">
-                      Folder Preview: {folder}
+                      {folder} Summary
                     </Text>
                     {folderPreview && (
                       <Text fontSize="xs" color="gray.500">
@@ -393,9 +387,9 @@ export default function CreateProjectPage() {
                       </Text>
                     )}
                   </Box>
-                  {folderPreview && folderPreview.quarters.length > 0 && (
+                  {folderPreview && folderPreview.survey_quarters.length > 0 && (
                     <Box display="flex" gap={2} flexWrap="wrap">
-                      {folderPreview.quarters.map((quarter) => (
+                      {folderPreview.survey_quarters.map((quarter) => (
                         <Badge key={quarter} colorPalette="blue" size="sm">
                           {quarter}
                         </Badge>
@@ -406,7 +400,7 @@ export default function CreateProjectPage() {
 
                 {loadingFolderPreview && (
                   <Text fontSize="xs" color="gray.500">
-                    Loading image dates and samples...
+                    Loading folder summary...
                   </Text>
                 )}
 
@@ -419,76 +413,50 @@ export default function CreateProjectPage() {
                 {folderPreview && !loadingFolderPreview && !folderPreviewError && (
                   <>
                     <Text fontSize="xs" color="gray.600" mb={3}>
-                      {folderPreview.earliest_capture_at && folderPreview.latest_capture_at
-                        ? folderPreview.earliest_capture_at === folderPreview.latest_capture_at
-                          ? `Survey date: ${formatCaptureDate(folderPreview.earliest_capture_at)}`
-                          : `Survey window: ${formatCaptureDate(folderPreview.earliest_capture_at)} to ${formatCaptureDate(folderPreview.latest_capture_at)}`
-                        : folderPreview.image_count > 0
-                          ? "No EXIF capture dates were found in this folder."
-                          : "This folder does not contain previewable image files."}
+                      Survey quarter is inferred from the last modified timestamp on the images in this folder, not from EXIF metadata.
                     </Text>
 
-                    {folderPreview.dated_image_count > 0 && folderPreview.dated_image_count < folderPreview.image_count && (
-                      <Text fontSize="xs" color="gray.500" mb={3}>
-                        Capture dates were found on {folderPreview.dated_image_count} of {folderPreview.image_count} images.
-                      </Text>
-                    )}
-
-                    {folderPreview.samples.length > 0 && (
-                      <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap={3}>
-                        {folderPreview.samples.map((sample) => (
-                          <Box
-                            key={sample.relative_path}
-                            border="1px solid"
-                            borderColor="gray.200"
-                            borderRadius="md"
-                            overflow="hidden"
-                            bg="white"
-                          >
-                            <Box position="relative" paddingTop="70%" bg="gray.100">
-                              <img
-                                src={getSourceFolderImageUrl(folderPreview.folder_name, sample.relative_path)}
-                                alt={sample.relative_path}
-                                style={{
-                                  position: "absolute",
-                                  inset: 0,
-                                  width: "100%",
-                                  height: "100%",
-                                  objectFit: "cover",
-                                }}
-                                loading="lazy"
-                              />
-                              <Box
-                                position="absolute"
-                                left={2}
-                                bottom={2}
-                                bg="rgba(0, 0, 0, 0.72)"
-                                color="white"
-                                px={2}
-                                py={1}
-                                borderRadius="md"
-                                fontSize="11px"
-                                lineHeight="short"
-                              >
-                                {formatCaptureDate(sample.captured_at) ?? "Date unknown"}
-                              </Box>
-                            </Box>
-                            <Box p={2}>
-                              <Text
-                                fontSize="xs"
-                                fontWeight="medium"
-                                title={sample.relative_path}
-                                style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                              >
-                                {getSampleImageLabel(sample.relative_path)}
-                              </Text>
-                              <Text fontSize="xs" color="gray.500">
-                                {sample.quarter ?? "Unknown quarter"}
-                              </Text>
-                            </Box>
-                          </Box>
-                        ))}
+                    <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(160px, 1fr))" gap={3}>
+                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" mb={1}>Segments</Text>
+                        <Text fontSize="lg" fontWeight="semibold">
+                          {folderPreview.segment_count}
+                        </Text>
                       </Box>
+
+                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" mb={1}>Survey Quarter</Text>
+                        <Text fontSize="lg" fontWeight="semibold">
+                          {folderPreview.survey_quarter ?? (folderPreview.survey_quarters.length > 0 ? folderPreview.survey_quarters.join(", ") : "Unknown")}
+                        </Text>
+                      </Box>
+
+                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" mb={1}>Source Images</Text>
+                        <Text fontSize="lg" fontWeight="semibold">
+                          {folderPreview.image_count}
+                        </Text>
+                        <Text fontSize="xs" color="gray.500" mt={1}>
+                          {folderPreview.geotagged_image_count} geotagged
+                        </Text>
+                      </Box>
+
+                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" mb={1}>Last Modified</Text>
+                        <Text fontSize="sm" fontWeight="semibold">
+                          {folderPreview.earliest_modified_at && folderPreview.latest_modified_at
+                            ? folderPreview.earliest_modified_at === folderPreview.latest_modified_at
+                              ? formatCaptureDate(folderPreview.latest_modified_at) ?? "Unknown"
+                              : `${formatCaptureDate(folderPreview.earliest_modified_at) ?? "Unknown"} to ${formatCaptureDate(folderPreview.latest_modified_at) ?? "Unknown"}`
+                            : "Unknown"}
+                        </Text>
+                      </Box>
+                    </Box>
+
+                    {folderPreview.segment_error && (
+                      <Text fontSize="xs" color="orange.600" mt={3}>
+                        Segment summary fallback: {folderPreview.segment_error}
+                      </Text>
                     )}
                   </>
                 )}

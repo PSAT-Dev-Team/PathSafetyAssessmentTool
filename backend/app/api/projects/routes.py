@@ -45,7 +45,6 @@ _ROAD_SECTIONS_GDF: gpd.GeoDataFrame | None = None
 _PLANNING_AREAS_GDF: gpd.GeoDataFrame | None = None
 _KNOWN_ROAD_NAMES: list[str] | None = None
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"}
-_FOLDER_PREVIEW_SAMPLE_LIMIT = 6
 
 
 def _get_road_sections_gdf() -> gpd.GeoDataFrame:
@@ -2686,36 +2685,32 @@ def get_image_folder_geo(folder_path):
             })
 
     df = pd.DataFrame(records)
-    # geometry column
     df['geometry'] = [Point(xy) for xy in zip(df.longitude, df.latitude)]
     return gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
 
-def get_All_Img_Folder(folder_path, filename_df, imagePath):
-    """
-    folder_path:      Source folder containing the .jpg files to copy
-    filename_df:      DataFrame containing a FILENAME column
-    imagePath:        Destination path to save; will be created if not present
-    """
-    # 1. Validate source folder
-    if not os.path.isdir(folder_path):
-        raise FileNotFoundError(f"The folder at {folder_path} does not exist or is not a directory.")
-    
-    # 2. Ensure destination folder exists
-    os.makedirs(imagePath, exist_ok=True)
-    
-    # 3. Copy by names in the FILENAME column
-    for img_name in filename_df['FILENAME']:
-        src = os.path.join(folder_path, img_name)
-        dst = os.path.join(imagePath, img_name)
-        
-        if os.path.isfile(src):
-            shutil.copy2(src, dst)
-        else:
-            # Similar to the Zip version: record missing files
-            print(f"Image {img_name} not found in folder {folder_path}.")
-    
-    # 4. Return the original DataFrame for downstream use
-    return filename_df
+
+def _build_project_geo_data_from_points(
+    geo_points: gpd.GeoDataFrame,
+    source_name: str,
+    selection_polygon: Polygon | None = None,
+):
+    df = geo_points.copy()
+    if df.empty:
+        raise ValueError(f"No geotagged images found in folder '{source_name}'")
+
+    if selection_polygon is not None:
+        df = df[df.geometry.apply(selection_polygon.covers)].reset_index(drop=True)
+        if df.empty:
+            return gpd.GeoDataFrame(columns=["LATITUDE", "LONGITUDE", "FILENAME", "geometry"], geometry="geometry", crs="EPSG:4326")
+
+    df = df.rename(columns={"latitude": "LATITUDE", "longitude": "LONGITUDE", "filename": "FILENAME"})
+    df = cycleRAP_VA.geoCode(df)
+    df = cycleRAP_VA.get_geo_points_by_distance(df, min_distance=10)
+    if "geometry" not in df.columns:
+        raise ValueError(f"Missing 'geometry' after geocoding for folder '{source_name}'")
+
+    gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+    return cycleRAP_VA.convert_points_to_linestrings(gdf)
 
 def copy_project_images(folder_path, filename_df, imagePath, filename_prefix=None):
     """
@@ -2742,23 +2737,8 @@ def copy_project_images(folder_path, filename_df, imagePath, filename_prefix=Non
     return result_df
 
 def build_project_geo_data(src_dir: Path, selection_polygon: Polygon | None = None):
-    df = get_image_folder_geo(str(src_dir))
-    if df.empty:
-        raise ValueError(f"No geotagged images found in folder '{src_dir.name}'")
-
-    if selection_polygon is not None:
-        df = df[df.geometry.apply(selection_polygon.covers)].reset_index(drop=True)
-        if df.empty:
-            return gpd.GeoDataFrame(columns=["LATITUDE", "LONGITUDE", "FILENAME", "geometry"], geometry="geometry", crs="EPSG:4326")
-
-    df = df.rename(columns={"latitude": "LATITUDE", "longitude": "LONGITUDE", "filename": "FILENAME"})
-    df = cycleRAP_VA.geoCode(df)
-    df = cycleRAP_VA.get_geo_points_by_distance(df, min_distance=10)
-    if "geometry" not in df.columns:
-        raise ValueError(f"Missing 'geometry' after geocoding for folder '{src_dir.name}'")
-
-    gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
-    return cycleRAP_VA.convert_points_to_linestrings(gdf)
+    geo_points = get_image_folder_geo(str(src_dir))
+    return _build_project_geo_data_from_points(geo_points, src_dir.name, selection_polygon)
 
 def make_image_namespace(source_name: str) -> str:
     namespace = "".join(ch if ch.isalnum() else "_" for ch in source_name).strip("_")
@@ -2876,41 +2856,11 @@ def _iter_source_image_files(source_dir: Path) -> list[Path]:
     ]
 
 
-def _parse_exif_datetime(raw_value: str | None) -> datetime.datetime | None:
-    if raw_value is None:
-        return None
-
-    value = raw_value.strip()
-    if not value:
-        return None
-
-    for fmt in (
-        "%Y:%m:%d %H:%M:%S",
-        "%Y:%m:%d %H:%M:%S%z",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S",
-    ):
-        try:
-            return datetime.datetime.strptime(value, fmt)
-        except ValueError:
-            continue
-
-    return None
-
-
-def _read_capture_datetime(image_path: Path) -> datetime.datetime | None:
+def _read_modified_datetime(image_path: Path) -> datetime.datetime | None:
     try:
-        with open(image_path, "rb") as handle:
-            tags = exifread.process_file(handle, details=False)
-    except Exception:
+        return datetime.datetime.fromtimestamp(image_path.stat().st_mtime)
+    except OSError:
         return None
-
-    for key in ("EXIF DateTimeOriginal", "EXIF DateTimeDigitized", "Image DateTime"):
-        parsed = _parse_exif_datetime(str(tags.get(key))) if tags.get(key) is not None else None
-        if parsed is not None:
-            return parsed
-
-    return None
 
 
 def _format_quarter_label(captured_at: datetime.datetime | None) -> str | None:
@@ -2918,21 +2868,7 @@ def _format_quarter_label(captured_at: datetime.datetime | None) -> str | None:
         return None
 
     quarter = ((captured_at.month - 1) // 3) + 1
-    return f"Q{quarter} {captured_at.year}"
-
-
-def _sample_preview_entries(entries: list[dict], limit: int) -> list[dict]:
-    if len(entries) <= limit:
-        return entries
-
-    if limit <= 1:
-        return entries[:1]
-
-    indices = sorted({
-        round(index * (len(entries) - 1) / (limit - 1))
-        for index in range(limit)
-    })
-    return [entries[index] for index in indices]
+    return f"{quarter}Q{captured_at.year}"
 
 @bp.get("/folders")
 def list_input_folders():
@@ -2956,7 +2892,7 @@ def list_input_folders():
 @bp.get("/folders/preview")
 def preview_input_folder():
     """
-    Return sample images and EXIF capture dates for a source folder under /in.
+    Return a folder summary derived from image file modified timestamps.
     """
     ctx = get_ctx()
     pm = ctx["pm"]
@@ -2973,47 +2909,41 @@ def preview_input_folder():
         return fail("Source folder not found", 404)
 
     image_files = _iter_source_image_files(source_dir)
-    dated_entries: list[dict] = []
-    fallback_entries: list[dict] = []
-    capture_dates: list[datetime.datetime] = []
+    modified_dates = [
+        modified_at
+        for modified_at in (_read_modified_datetime(image_file) for image_file in image_files)
+        if modified_at is not None
+    ]
 
-    for image_file in image_files:
-        captured_at = _read_capture_datetime(image_file)
-        quarter = _format_quarter_label(captured_at)
-        if captured_at is not None:
-            capture_dates.append(captured_at)
+    geotagged_image_count = 0
+    segment_count = 0
+    segment_error = None
 
-        entry = {
-            "relative_path": image_file.relative_to(source_dir).as_posix(),
-            "captured_at": captured_at.isoformat() if captured_at is not None else None,
-            "quarter": quarter,
-        }
-
-        if captured_at is not None:
-            dated_entries.append(entry)
-        else:
-            fallback_entries.append(entry)
-
-    preview_entries = _sample_preview_entries(dated_entries or fallback_entries, _FOLDER_PREVIEW_SAMPLE_LIMIT)
-    if dated_entries and len(preview_entries) < _FOLDER_PREVIEW_SAMPLE_LIMIT:
-        used_paths = {entry["relative_path"] for entry in preview_entries}
-        remaining = [entry for entry in fallback_entries if entry["relative_path"] not in used_paths]
-        preview_entries.extend(_sample_preview_entries(remaining, _FOLDER_PREVIEW_SAMPLE_LIMIT - len(preview_entries)))
+    try:
+        geo_points = get_image_folder_geo(str(source_dir))
+        geotagged_image_count = len(geo_points)
+        if geotagged_image_count > 0:
+            segment_count = len(_build_project_geo_data_from_points(geo_points, folder_name))
+    except Exception as exc:
+        segment_error = str(exc)
 
     quarter_labels = sorted({
-        _format_quarter_label(captured_at)
-        for captured_at in capture_dates
-        if _format_quarter_label(captured_at) is not None
+        quarter_label
+        for quarter_label in (_format_quarter_label(modified_at) for modified_at in modified_dates)
+        if quarter_label is not None
     })
+    survey_quarter = quarter_labels[0] if len(quarter_labels) == 1 else None
 
     return ok({
         "folder_name": folder_name,
         "image_count": len(image_files),
-        "dated_image_count": len(dated_entries),
-        "earliest_capture_at": min(capture_dates).isoformat() if capture_dates else None,
-        "latest_capture_at": max(capture_dates).isoformat() if capture_dates else None,
-        "quarters": quarter_labels,
-        "samples": preview_entries,
+        "geotagged_image_count": geotagged_image_count,
+        "segment_count": segment_count,
+        "segment_error": segment_error,
+        "earliest_modified_at": min(modified_dates).isoformat() if modified_dates else None,
+        "latest_modified_at": max(modified_dates).isoformat() if modified_dates else None,
+        "survey_quarter": survey_quarter,
+        "survey_quarters": quarter_labels,
     })
 
 
