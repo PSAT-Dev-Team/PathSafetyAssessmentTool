@@ -20,7 +20,7 @@ DEFAULT_VALUES_SOURCE = "defaults.json"
 
 class cycleRAP_interface:
     source_dir : Path = None
-    attribute_default_values : dict[str, int] = None
+    attribute_default_values : dict[str, int | None] = None
     treatment_solutions : pd.DataFrame = None
 
     def __init__(self):
@@ -30,7 +30,7 @@ class cycleRAP_interface:
     def initialise(cls, source_dir : Path):
         cls.source_dir : Path = source_dir
 
-        cls.attribute_default_values : dict[str, int] = None
+        cls.attribute_default_values : dict[str, int | None] = None
         cls.treatment_solutions : pd.DataFrame = None
 
         path = cls.source_dir / DEFAULT_VALUES_SOURCE
@@ -283,7 +283,7 @@ class cycleRAP_interface:
             Attributes.Fields.ADJ_SVR_HAZARD_13M_STR            : 2,
             Attributes.Fields.ADJ_OBJ_LVL_CHGE_13M_STR          : 2,
             Attributes.Fields.ADJ_SIDEWALK_13M_STR              : 2,
-            Attributes.Fields.GRADE_STR                         : 1,
+            Attributes.Fields.GRADE_STR                         : None,
             Attributes.Fields.CURV_STR                          : 2,
             Attributes.Fields.STREET_LIGHT_STR                  : 1,
             Attributes.Fields.PED_CROSS_STR                     : 2,

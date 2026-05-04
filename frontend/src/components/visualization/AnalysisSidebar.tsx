@@ -5,6 +5,7 @@ import { CurvatureDiagnostics } from './curvature/CurvatureDiagnostics';
 import { WidthSearchDiagnostics } from './width/WidthSearchDiagnostics';
 import type { WidthVisualizationResponse } from '../../api/widthVisualization';
 import type { CurvatureVisualizationResponse } from '../../api/curvatureVisualization';
+import { getGradientDisplayColor, getGradientDisplayState } from '../../utils/gradientDisplay';
 import './AnalysisPanel.css'; // Reusing styles
 
 interface AnalysisSidebarProps {
@@ -18,6 +19,7 @@ interface AnalysisSidebarProps {
   curvError: string | null;
   grade?: number | string | null;
   gradientPct?: number | string | null;
+  gradientStatus?: string | null;
 }
 
 function getWidthCategoryColor(category: number): string {
@@ -90,21 +92,20 @@ export function AnalysisSidebar({
   curvError,
   grade,
   gradientPct,
+  gradientStatus,
 }: AnalysisSidebarProps) {
   const [showDiag, setShowDiag] = useState(false);
 
-  const gradeNum = grade != null ? Number(grade) : null;
-  const pct = gradientPct != null ? Number(gradientPct) : null;
-  const gradientValue = pct != null ? (
-    <span style={{ color: gradeNum === 2 ? '#E74C3C' : '#27AE60', fontWeight: 600 }}>
-      {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-    </span>
-  ) : gradeNum === 1 ? (
-    <span style={{ color: '#27AE60' }}>✓ Grade 1 (&lt;5°)</span>
-  ) : gradeNum === 2 ? (
-    <span style={{ color: '#E74C3C' }}>⚠️ Grade 2 (≥5°)</span>
+  const gradientState = getGradientDisplayState({ grade, gradientPct, gradientStatus });
+  const gradientColor = getGradientDisplayColor(gradientState.kind);
+  const gradientValue = gradientState.mode === 'percent' ? (
+    <span style={{ color: gradientColor, fontWeight: 600 }}>{gradientState.text}</span>
+  ) : gradientState.mode === 'grade' && gradientState.kind === 'ok' ? (
+    <span style={{ color: gradientColor }}>✓ {gradientState.text}</span>
+  ) : gradientState.mode === 'grade' ? (
+    <span style={{ color: gradientColor }}>⚠️ {gradientState.text}</span>
   ) : (
-    <span className="analysis-card-na">—</span>
+    <span style={{ color: gradientColor }}>{gradientState.text}</span>
   );
 
   return (

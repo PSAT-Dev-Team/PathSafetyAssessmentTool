@@ -14,6 +14,7 @@ from flask import (
 )
 import zipfile
 import io
+import hashlib
 import json
 import re
 from bisect import bisect_left
@@ -45,6 +46,9 @@ _ROAD_SECTIONS_GDF: gpd.GeoDataFrame | None = None
 _PLANNING_AREAS_GDF: gpd.GeoDataFrame | None = None
 _KNOWN_ROAD_NAMES: list[str] | None = None
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"}
+_SOURCE_FOLDER_METADATA_FILENAME = "psat-folder-summary.json"
+_SOURCE_FOLDER_METADATA_VERSION = 1
+_QUARTER_SUFFIX_RE = re.compile(r"(?:[_\-\s]+(?:[1-4]Q\d{4}|Q[1-4]\d{4}))(?:__\d+)?$", re.IGNORECASE)
 
 
 def _get_road_sections_gdf() -> gpd.GeoDataFrame:
@@ -505,6 +509,14 @@ _warmup_thread.start()
 # Loaded once and cached for the lifetime of the server process.
 _GRADIENT_PROFILE_CATALOG: "dict[str, dict] | None" = None
 _PROJECT_GRADIENT_CACHE: dict[str, dict[str, tuple[int, float]]] = {}
+_PROJECT_GRADIENT_CACHE_STATE: dict[str, str] = {}
+
+_GRADIENT_CACHE_STATE_PROFILE_MISSING = "profile_missing"
+_GRADIENT_CACHE_STATE_PROFILE_AVAILABLE = "profile_available"
+
+GRADIENT_STATUS_FIELD = "Gradient Status"
+GRADIENT_STATUS_NOT_ASSESSED = "Not assessed yet"
+GRADIENT_STATUS_NO_LIDAR_RESULT = "N/A (no LiDAR result)"
 
 
 def _normalize_gradient_token(value: str) -> str:
@@ -689,6 +701,7 @@ def _get_project_gradient_mapping(project_name: str) -> dict[str, tuple[int, flo
 
     mapping: dict[str, tuple[int, float]] = {}
     _PROJECT_GRADIENT_CACHE[project_name] = mapping
+    _PROJECT_GRADIENT_CACHE_STATE[project_name] = _GRADIENT_CACHE_STATE_PROFILE_MISSING
 
     if not project_name:
         return mapping
@@ -720,6 +733,8 @@ def _get_project_gradient_mapping(project_name: str) -> dict[str, tuple[int, flo
         if not meta:
             print(f"[Gradient] no matching profile found for project '{project_name}'")
             return mapping
+
+        _PROJECT_GRADIENT_CACHE_STATE[project_name] = _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE
 
         profile_df = pd.read_csv(meta["_profile_path"])
         if profile_df.empty or "chainage_m" not in profile_df.columns:
@@ -776,6 +791,11 @@ def _get_project_gradient_mapping(project_name: str) -> dict[str, tuple[int, flo
         print(f"[Gradient] WARNING: failed to build project gradient cache for '{project_name}': {exc}", flush=True)
 
     return mapping
+
+
+def _get_project_gradient_cache_state(project_name: str) -> str:
+    _get_project_gradient_mapping(project_name)
+    return _PROJECT_GRADIENT_CACHE_STATE.get(project_name, _GRADIENT_CACHE_STATE_PROFILE_MISSING)
 
 
 def _lookup_project_gradient(project_name: str, image_ref: str) -> "tuple[int, float] | None":
@@ -876,7 +896,24 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
     try:
         hit = _lookup_project_gradient(project_name, image_ref)
         if not hit:
-            print(f"[Gradient] no profile entry for '{image_ref}' in project '{project_name}' — skipping", flush=True)
+            cache_state = _get_project_gradient_cache_state(project_name)
+            gradient_status = (
+                GRADIENT_STATUS_NO_LIDAR_RESULT
+                if cache_state == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE
+                else GRADIENT_STATUS_NOT_ASSESSED
+            )
+            updates["Grade"] = None
+            updates["Gradient %"] = None
+            updates[GRADIENT_STATUS_FIELD] = gradient_status
+            if sources is not None:
+                sources["Grade"] = "Gradient Profile"
+                sources["Gradient %"] = "Gradient Profile"
+                sources[GRADIENT_STATUS_FIELD] = "Gradient Profile"
+            print(
+                f"[Gradient] no profile entry for '{image_ref}' in project '{project_name}'"
+                f" -> {gradient_status}",
+                flush=True,
+            )
             return None
         grade_coded, grade_pct = hit
         print(f"[Gradient] {image_ref}: {grade_pct:+.2f}% -> Grade {grade_coded}", flush=True)
@@ -885,9 +922,11 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
             return None
         updates["Grade"] = grade_coded
         updates["Gradient %"] = round(grade_pct, 2)
+        updates[GRADIENT_STATUS_FIELD] = None
         if sources is not None:
             sources["Grade"] = "Gradient Profile"
             sources["Gradient %"] = "Gradient Profile"
+            sources[GRADIENT_STATUS_FIELD] = "Gradient Profile"
         return grade_pct
     except Exception as _e:
         print(f"[Gradient] WARNING: error injecting Grade for {image_ref}: {_e}")
@@ -2870,6 +2909,186 @@ def _format_quarter_label(captured_at: datetime.datetime | None) -> str | None:
     quarter = ((captured_at.month - 1) // 3) + 1
     return f"{quarter}Q{captured_at.year}"
 
+
+def _quarter_sort_key(label: str) -> tuple[int, int, str]:
+    match = re.fullmatch(r"([1-4])Q(\d{4})", label)
+    if match:
+        return (int(match.group(2)), int(match.group(1)), label)
+
+    legacy_match = re.fullmatch(r"Q([1-4])(\d{4})", label)
+    if legacy_match:
+        return (int(legacy_match.group(2)), int(legacy_match.group(1)), label)
+
+    return (9999, 9999, label)
+
+
+def _get_source_folder_metadata_path(source_dir: Path) -> Path:
+    return source_dir / _SOURCE_FOLDER_METADATA_FILENAME
+
+
+def _build_source_folder_cache_key(source_dir: Path, image_files: list[Path]) -> str:
+    digest = hashlib.sha1()
+    for image_file in image_files:
+        try:
+            stat = image_file.stat()
+        except OSError:
+            continue
+
+        digest.update(image_file.relative_to(source_dir).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(stat.st_size).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(str(stat.st_mtime_ns).encode("ascii"))
+        digest.update(b"\0")
+
+    return digest.hexdigest()
+
+
+def _load_source_folder_metadata(source_dir: Path) -> dict | None:
+    metadata_path = _get_source_folder_metadata_path(source_dir)
+    if not metadata_path.exists() or not metadata_path.is_file():
+        return None
+
+    try:
+        data = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    if data.get("version") != _SOURCE_FOLDER_METADATA_VERSION:
+        return None
+    if not isinstance(data.get("summary"), dict):
+        return None
+
+    return data
+
+
+def _write_source_folder_metadata(source_dir: Path, cache_key: str, summary: dict) -> None:
+    metadata_path = _get_source_folder_metadata_path(source_dir)
+    temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
+    payload = {
+        "version": _SOURCE_FOLDER_METADATA_VERSION,
+        "generated_at": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "cache_key": cache_key,
+        "summary": summary,
+    }
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(metadata_path)
+
+
+def _build_source_folder_summary(source_dir: Path, image_files: list[Path]) -> dict:
+    modified_dates = [
+        modified_at
+        for modified_at in (_read_modified_datetime(image_file) for image_file in image_files)
+        if modified_at is not None
+    ]
+
+    geotagged_image_count = 0
+    segment_count = 0
+    segment_error = None
+
+    try:
+        geo_points = get_image_folder_geo(str(source_dir))
+        geotagged_image_count = len(geo_points)
+        if geotagged_image_count > 0:
+            segment_count = len(_build_project_geo_data_from_points(geo_points, source_dir.name))
+    except Exception as exc:
+        segment_error = str(exc)
+
+    quarter_labels = sorted({
+        quarter_label
+        for quarter_label in (_format_quarter_label(modified_at) for modified_at in modified_dates)
+        if quarter_label is not None
+    }, key=_quarter_sort_key)
+    survey_quarter = quarter_labels[0] if len(quarter_labels) == 1 else None
+
+    return {
+        "folder_name": source_dir.name,
+        "image_count": len(image_files),
+        "geotagged_image_count": geotagged_image_count,
+        "segment_count": segment_count,
+        "segment_error": segment_error,
+        "earliest_modified_at": min(modified_dates).isoformat() if modified_dates else None,
+        "latest_modified_at": max(modified_dates).isoformat() if modified_dates else None,
+        "survey_quarter": survey_quarter,
+        "survey_quarters": quarter_labels,
+    }
+
+
+def _folder_name_has_quarter_suffix(folder_name: str) -> bool:
+    return bool(_QUARTER_SUFFIX_RE.search(folder_name.strip()))
+
+
+def _get_unique_source_folder_target(in_root: Path, desired_name: str, current_dir: Path | None = None) -> Path:
+    candidate_name = desired_name
+    counter = 2
+
+    while True:
+        candidate_dir = in_root / candidate_name
+        if current_dir is not None and candidate_dir == current_dir:
+            return candidate_dir
+        if not candidate_dir.exists():
+            return candidate_dir
+
+        candidate_name = f"{desired_name}__{counter}"
+        counter += 1
+
+
+def _maybe_auto_rename_source_folder(source_dir: Path, in_root: Path, summary: dict) -> tuple[Path, str | None]:
+    survey_quarter = str(summary.get("survey_quarter") or "").strip()
+    if not survey_quarter:
+        return source_dir, None
+    if _folder_name_has_quarter_suffix(source_dir.name):
+        return source_dir, None
+
+    target_dir = _get_unique_source_folder_target(in_root, f"{source_dir.name}_{survey_quarter}", source_dir)
+    if target_dir == source_dir:
+        return source_dir, None
+
+    previous_name = source_dir.name
+    source_dir.rename(target_dir)
+    summary["folder_name"] = target_dir.name
+    return target_dir, previous_name
+
+
+def _resolve_source_folder_preview(source_dir: Path, in_root: Path) -> dict:
+    image_files = _iter_source_image_files(source_dir)
+    cache_key = _build_source_folder_cache_key(source_dir, image_files)
+    metadata = _load_source_folder_metadata(source_dir)
+
+    cached = False
+    summary = None
+    if metadata is not None and metadata.get("cache_key") == cache_key:
+        cached_summary = metadata.get("summary")
+        if isinstance(cached_summary, dict):
+            summary = dict(cached_summary)
+            cached = True
+
+    if summary is None:
+        summary = _build_source_folder_summary(source_dir, image_files)
+
+    summary["folder_name"] = source_dir.name
+    renamed_from = None
+    try:
+        source_dir, renamed_from = _maybe_auto_rename_source_folder(source_dir, in_root, summary)
+    except Exception as exc:
+        current_app.logger.warning("Failed to auto-rename source folder %s: %s", source_dir, exc)
+
+    summary["folder_name"] = source_dir.name
+
+    if not cached or renamed_from is not None:
+        try:
+            _write_source_folder_metadata(source_dir, cache_key, summary)
+        except Exception as exc:
+            current_app.logger.warning("Failed to write source folder metadata for %s: %s", source_dir, exc)
+
+    result = dict(summary)
+    result["cached"] = cached and renamed_from is None
+    result["mixed_quarters"] = len(result.get("survey_quarters") or []) > 1
+    result["renamed_from"] = renamed_from
+    return result
+
 @bp.get("/folders")
 def list_input_folders():
     """
@@ -2908,43 +3127,7 @@ def preview_input_folder():
     if not source_dir.exists() or not source_dir.is_dir():
         return fail("Source folder not found", 404)
 
-    image_files = _iter_source_image_files(source_dir)
-    modified_dates = [
-        modified_at
-        for modified_at in (_read_modified_datetime(image_file) for image_file in image_files)
-        if modified_at is not None
-    ]
-
-    geotagged_image_count = 0
-    segment_count = 0
-    segment_error = None
-
-    try:
-        geo_points = get_image_folder_geo(str(source_dir))
-        geotagged_image_count = len(geo_points)
-        if geotagged_image_count > 0:
-            segment_count = len(_build_project_geo_data_from_points(geo_points, folder_name))
-    except Exception as exc:
-        segment_error = str(exc)
-
-    quarter_labels = sorted({
-        quarter_label
-        for quarter_label in (_format_quarter_label(modified_at) for modified_at in modified_dates)
-        if quarter_label is not None
-    })
-    survey_quarter = quarter_labels[0] if len(quarter_labels) == 1 else None
-
-    return ok({
-        "folder_name": folder_name,
-        "image_count": len(image_files),
-        "geotagged_image_count": geotagged_image_count,
-        "segment_count": segment_count,
-        "segment_error": segment_error,
-        "earliest_modified_at": min(modified_dates).isoformat() if modified_dates else None,
-        "latest_modified_at": max(modified_dates).isoformat() if modified_dates else None,
-        "survey_quarter": survey_quarter,
-        "survey_quarters": quarter_labels,
-    })
+    return ok(_resolve_source_folder_preview(source_dir, in_root))
 
 
 @bp.get("/folders/image")
@@ -3101,11 +3284,15 @@ def copy_images_to_source_folder():
             rel_path = image_file.relative_to(source_dir)
             errors.append(f"Failed to copy {rel_path}: {exc}")
 
+    preview = _resolve_source_folder_preview(destination_dir, in_root)
+
     return ok({
         "count": count,
         "errors": errors,
-        "folder_name": folder_name,
-        "message": f"Copied {count} image(s) into folder '{folder_name}'",
+        "folder_name": preview["folder_name"],
+        "renamed_from": preview["renamed_from"],
+        "preview": preview,
+        "message": f"Copied {count} image(s) into folder '{preview['folder_name']}'",
     })
 
 

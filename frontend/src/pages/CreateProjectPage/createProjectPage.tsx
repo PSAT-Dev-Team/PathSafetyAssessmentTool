@@ -135,7 +135,22 @@ export default function CreateProjectPage() {
     setFolderPreviewError(null);
 
     fetchSourceFolderPreview(folder.trim(), { signal: ctrl.signal })
-      .then((preview) => setFolderPreview(preview))
+      .then((preview) => {
+        setFolderPreview(preview);
+
+        if (preview.folder_name !== folder.trim()) {
+          setFolders((currentFolders) => {
+            const nextFolders = currentFolders.filter((item) => item !== folder.trim());
+            if (!nextFolders.includes(preview.folder_name)) {
+              nextFolders.push(preview.folder_name);
+            }
+            return nextFolders.sort((left, right) => left.localeCompare(right));
+          });
+          setFolder(preview.folder_name);
+          setFolderComboboxOpen(false);
+          void loadFolders();
+        }
+      })
       .catch((error: any) => {
         if (error?.name !== "AbortError") {
           setFolderPreview(null);
@@ -413,8 +428,26 @@ export default function CreateProjectPage() {
                 {folderPreview && !loadingFolderPreview && !folderPreviewError && (
                   <>
                     <Text fontSize="xs" color="gray.600" mb={3}>
-                      Survey quarter is inferred from the last modified timestamp on the images in this folder, not from EXIF metadata.
+                      Survey quarter is inferred from the last modified timestamp on the images in this folder, not from EXIF metadata. This summary is cached inside the folder and refreshes automatically when the image set changes.
                     </Text>
+
+                    {folderPreview.renamed_from && (
+                      <Text fontSize="xs" color="blue.600" mb={3}>
+                        Renamed from {folderPreview.renamed_from} to {folderPreview.folder_name} to include the detected survey quarter.
+                      </Text>
+                    )}
+
+                    {folderPreview.mixed_quarters && (
+                      <Text fontSize="xs" color="orange.600" mb={3}>
+                        This folder spans multiple survey quarters ({folderPreview.survey_quarters.join(", ")}). Keep quarters separated where possible so project creation stays predictable.
+                      </Text>
+                    )}
+
+                    {folderPreview.cached && !folderPreview.renamed_from && (
+                      <Text fontSize="xs" color="green.600" mb={3}>
+                        Loaded instantly from cached folder metadata.
+                      </Text>
+                    )}
 
                     <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(160px, 1fr))" gap={3}>
                       <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>

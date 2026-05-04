@@ -42,6 +42,8 @@ const GROUP_ORDER = [
   "Flow & Speed",
 ] as const;
 
+const OPTIONAL_FIELDS_HIDE_WHEN_EMPTY = new Set(["Gradient Status"]);
+
 /** ====== Display fields under each group (keep your original order) ====== */
 const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
   "Facility configuration": [
@@ -86,6 +88,7 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
     "Major surface road deformation",
     "Loose or slippery surface",
     "Grade",
+    "Gradient status",
     "Curvature",
     "Tram or train rails",
     "Street lighting",
@@ -146,6 +149,7 @@ const KEY_ALIASES: Record<string, string> = {
   "Major surface road deformation": "Major Surface Deformation or Drain Opening",
   "Loose or slippery surface": "Loose or slippery surface",
   "Grade": "Grade",
+  "Gradient status": "Gradient Status",
   "Curvature": "Curvature",
   "Tram or train rails": "Tram or Train Rails",
   "Street lighting": "Street Lighting",
@@ -169,7 +173,7 @@ function groupEntries(row: AttributeRow) {
   for (const group of GROUP_ORDER) {
     for (const displayName of GROUP_RULES[group]) {
       const realKey = KEY_ALIASES[displayName] ?? displayName;
-      if (!(realKey in rowWithDefaults)) {
+      if (!(realKey in rowWithDefaults) && !OPTIONAL_FIELDS_HIDE_WHEN_EMPTY.has(realKey)) {
         rowWithDefaults[realKey] = null;
       }
     }
@@ -194,6 +198,9 @@ function groupEntries(row: AttributeRow) {
   for (const [k, v] of allEntries) {
     const hit = keyToGroup[k];
     if (hit) {
+      if (OPTIONAL_FIELDS_HIDE_WHEN_EMPTY.has(k) && (v === null || v === undefined || v === "")) {
+        continue;
+      }
       grouped[hit.group].push([k, v]);
     }
   }

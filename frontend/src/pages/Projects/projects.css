@@ -244,6 +244,22 @@
   padding: 20px 0;
 }
 
+.empty-project-search-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.empty-project-search-title {
+  color: var(--chakra-colors-fg-emphasized);
+  font-weight: 600;
+}
+
+.empty-project-search-copy {
+  max-width: 460px;
+}
+
 .actions-panel {
   display: flex;
   align-items: center;

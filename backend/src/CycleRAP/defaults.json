@@ -24,7 +24,7 @@
         "Adjacent Severe Hazard 1-3m": 2,
         "Adjacent object or level change 1-3m": 2,
         "Adjacent Sidewalk 1-3m": 2,
-        "Grade": 1,
+        "Grade": null,
         "Curvature": 2,
         "Street Lighting": 1,
         "Pedestrian Crossing": 2,

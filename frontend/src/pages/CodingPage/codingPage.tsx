@@ -518,9 +518,12 @@ export default function CodingPage() {
         const gisChanged = g?.changed_fields ?? [];
         const allChanged = [...new Set([...cvChanged, ...gisChanged])];
 
-        const fieldSources: Record<string, string> = {};
-        cvChanged.forEach(field => { fieldSources[field] = "CV"; });
-        gisChanged.forEach(field => { fieldSources[field] = "GIS"; });
+        const fieldSources: Record<string, string> = {
+          ...(cv?.field_sources ?? {}),
+          ...(g?.field_sources ?? {}),
+        };
+        cvChanged.forEach(field => { if (!fieldSources[field]) fieldSources[field] = "CV"; });
+        gisChanged.forEach(field => { if (!fieldSources[field]) fieldSources[field] = "GIS"; });
 
         updateProjectData(currentProjectName, {
           changedFieldsByRow: {
@@ -1919,6 +1922,7 @@ export default function CodingPage() {
             widthM={widthData?.width ?? null}
             grade={(currentAttr?.["Grade"] as number | null) ?? null}
             gradientPct={(currentAttr?.["Gradient %"] as number | null) ?? null}
+            gradientStatus={(currentAttr?.["Gradient Status"] as string | null) ?? null}
             showCurvatureOverlay={showCurvatureOverlay}
             onToggleCurvatureOverlay={() => setShowCurvatureOverlay(v => !v)}
             overlayContent={
@@ -1933,6 +1937,7 @@ export default function CodingPage() {
                 curvError={curvError}
                 grade={currentAttr?.["Grade"] as number | null}
                 gradientPct={currentAttr?.["Gradient %"] as number | null}
+                gradientStatus={(currentAttr?.["Gradient Status"] as string | null) ?? null}
               />
             }
           />

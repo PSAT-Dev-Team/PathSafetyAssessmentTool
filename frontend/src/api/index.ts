@@ -115,6 +115,9 @@ export interface SourceFolderPreview {
   latest_modified_at: string | null;
   survey_quarter: string | null;
   survey_quarters: string[];
+  cached: boolean;
+  mixed_quarters: boolean;
+  renamed_from: string | null;
 }
 
 export async function listSourceFolderSuggestions(opts?: { signal?: AbortSignal }) {
@@ -144,10 +147,18 @@ export async function pickLocalSourceFolder() {
   };
 }
 
+export interface CopyLocalImagesResult {
+  count: number;
+  errors: string[];
+  folder_name: string;
+  renamed_from: string | null;
+  preview: SourceFolderPreview;
+}
+
 export async function copyLocalImagesToSourceFolder(
   sourcePath: string,
   folderName: string,
-): Promise<{ count: number; errors: string[]; folder_name: string }> {
+): Promise<CopyLocalImagesResult> {
   const res = await fetch("/api/projects/folders/copy-local", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -335,7 +346,12 @@ export async function autocodeImage(project: string, imageRef: string) {
     body: JSON.stringify({ imageRef }),
   });
   if (!res.ok) throw new Error(await res.text());
-  const data = (await res.json()) as { updates: Record<string, number>; changed_fields: string[]; gradient_pct?: number };
+  const data = (await res.json()) as {
+    updates: AttributeRow;
+    changed_fields: string[];
+    field_sources?: Record<string, string>;
+    gradient_pct?: number;
+  };
   if (data.gradient_pct !== undefined) {
     console.log(`[Gradient] ${imageRef}: ${data.gradient_pct >= 0 ? "+" : ""}${data.gradient_pct.toFixed(2)}%`);
   }
@@ -349,7 +365,12 @@ export async function autocodeGIS(project: string, coords: number[][]) {
     body: JSON.stringify({ coords }),
   });
   if (!res.ok) throw new Error(await res.text());
-  const data = (await res.json()) as { updates: Record<string, number>; changed_fields: string[]; gradient_pct?: number };
+  const data = (await res.json()) as {
+    updates: AttributeRow;
+    changed_fields: string[];
+    field_sources?: Record<string, string>;
+    gradient_pct?: number;
+  };
   if (data.gradient_pct !== undefined) {
     console.log(`[Gradient] GIS result: ${data.gradient_pct >= 0 ? "+" : ""}${data.gradient_pct.toFixed(2)}%`);
   }

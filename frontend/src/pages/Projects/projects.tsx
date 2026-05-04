@@ -208,6 +208,7 @@ export default function Home() {
 
     return list;
   }, [projects, nameQuery, tagFilters]);
+  const showCreateProjectPrompt = filtered.length === 0 && nameQuery.trim().length > 0;
 
   // Toggle project selection
   const onRowClick = (name: string) => {
@@ -512,7 +513,26 @@ export default function Home() {
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="empty">
-                    No projects found
+                    {showCreateProjectPrompt ? (
+                      <div className="empty-project-search-state">
+                        <div className="empty-project-search-title">
+                          No projects matched "{nameQuery.trim()}"
+                        </div>
+                        <div className="empty-project-search-copy">
+                          Create a new project if this road or project has not been set up yet.
+                        </div>
+                        <Button
+                          size="sm"
+                          colorPalette="black"
+                          variant="solid"
+                          onClick={() => createProject(navigate)}
+                        >
+                          Create Project
+                        </Button>
+                      </div>
+                    ) : (
+                      "No projects found"
+                    )}
                   </td>
                 </tr>
               ) : (

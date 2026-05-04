@@ -32,6 +32,8 @@ export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUplo
   const [loadedSuggestions, setLoadedSuggestions] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [renamedFrom, setRenamedFrom] = useState<string | null>(null);
+  const [importPreview, setImportPreview] = useState<api.SourceFolderPreview | null>(null);
 
   const filteredSuggestions = useMemo(
     () => suggestions.filter((item) => item.name.toLowerCase().includes(folderInputValue.toLowerCase())),
@@ -59,6 +61,8 @@ export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUplo
     setLoadingSuggestions(false);
     setBrowsing(false);
     setUploading(false);
+    setRenamedFrom(null);
+    setImportPreview(null);
   }
 
   async function ensureSuggestionsLoaded() {
@@ -132,21 +136,26 @@ export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUplo
     try {
       setUploading(true);
       const result = await api.copyLocalImagesToSourceFolder(sourcePath.trim(), folderName.trim());
+      const renamedDescription = result.renamed_from
+        ? ` Renamed to "${result.folder_name}" using the detected survey quarter.`
+        : "";
 
       if (result.errors.length > 0) {
         toaster.create({
-          description: `Imported ${result.count} image(s) with ${result.errors.length} error(s)`,
+          description: `Imported ${result.count} image(s) with ${result.errors.length} error(s).${renamedDescription}`,
           type: "warning",
         });
       } else {
         toaster.create({
-          description: `Copied ${result.count} image(s) into folder "${result.folder_name}"`,
+          description: `Copied ${result.count} image(s) into folder "${result.folder_name}".${renamedDescription}`,
           type: "success",
         });
       }
 
       setFolderName(result.folder_name);
       setFolderInputValue(result.folder_name);
+      setRenamedFrom(result.renamed_from);
+      setImportPreview(result.preview);
       setStep("success");
     } catch (error) {
       toaster.create({
@@ -313,6 +322,36 @@ export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUplo
                   <Text color="fg.muted" mb={6}>
                     The destination folder <strong>{folderName}</strong> is ready to use in project creation.
                   </Text>
+
+                  {renamedFrom && (
+                    <Text fontSize="sm" color="blue.600" mb={4}>
+                      Renamed from <strong>{renamedFrom}</strong> to include the detected survey quarter.
+                    </Text>
+                  )}
+
+                  <Text fontSize="sm" color="fg.muted" mb={4}>
+                    A folder summary metadata file was generated so the next load can reuse the cached segment and quarter summary.
+                  </Text>
+
+                  {importPreview && (
+                    <Box borderWidth="1px" borderRadius="md" p={4} bg="bg.subtle" textAlign="left">
+                      <Text fontWeight="600" mb={3}>Imported Folder Summary</Text>
+                      <Text fontSize="sm" color="fg.muted">
+                        Segments: {importPreview.segment_count}
+                      </Text>
+                      <Text fontSize="sm" color="fg.muted">
+                        Survey Quarter: {importPreview.survey_quarter ?? (importPreview.survey_quarters.length > 0 ? importPreview.survey_quarters.join(", ") : "Unknown")}
+                      </Text>
+                      <Text fontSize="sm" color="fg.muted">
+                        Source Images: {importPreview.image_count} ({importPreview.geotagged_image_count} geotagged)
+                      </Text>
+                      {importPreview.mixed_quarters && (
+                        <Text fontSize="sm" color="orange.600" mt={3}>
+                          This folder spans multiple quarters. Keep quarter batches separated where possible.
+                        </Text>
+                      )}
+                    </Box>
+                  )}
                 </Box>
               )}
             </Dialog.Body>
