@@ -440,8 +440,9 @@ def create_video(image_dir, video_name, fps):
 
 # TODO: Move to Utility
 def get_full_path(filename):
-    root = Path.cwd()
-    return str(root / filename)
+    # Resolve relative to the backend directory (.../backend)
+    backend_root = Path(__file__).resolve().parents[2]
+    return str(backend_root / filename)
 
 # if __name__ == "__main__":
 #     import win32com.client as win32

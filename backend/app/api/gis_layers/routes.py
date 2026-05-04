@@ -150,6 +150,24 @@ def _file_info(shp_path: Path, root: Path) -> dict:
         # 3. File upload/mtime fallback year
         year = str(datetime.fromtimestamp(stat.st_mtime).year)
     
+    from app.services.gis_layer_definition import get_layer_definition
+    
+    # Resolve detailed layer definition
+    # Use category as the key, but handle the 'path' subfolder specifically
+    ld_key = category
+    if category == "path":
+        fname_lower = shp_path.name.lower()
+        if "cycling" in fname_lower:
+            ld_key = "cycling_path"
+        elif "shared" in fname_lower:
+            ld_key = "shared_path"
+        elif "foot" in fname_lower:
+            ld_key = "footpath"
+    
+    ld = get_layer_definition(ld_key)
+    req_cols = ", ".join(ld.required_columns) if ld and ld.required_columns else "None"
+    affects = ld.description if ld else "Unknown"
+
     return {
         "name": shp_path.stem.replace("_", " ").title(),
         "filename": shp_path.name,
@@ -160,6 +178,8 @@ def _file_info(shp_path: Path, root: Path) -> dict:
         "type": "Shapefile",
         "year": year,
         "source": fallback_source,
+        "required_columns": req_cols,
+        "affects": affects
     }
 
 

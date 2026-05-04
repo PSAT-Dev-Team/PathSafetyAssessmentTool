@@ -246,6 +246,17 @@ export default function GisLayersPage() {
                         <Text><strong>Year:</strong> {file.year}</Text>
                         <Text truncate title={file.source}><strong>Source:</strong> {file.source}</Text>
                       </HStack>
+<<<<<<< Updated upstream
+=======
+                      <Box mt={2} p={2} bg="gray.50" borderRadius="md" fontSize="xs" border="1px solid" borderColor="gray.200">
+                        <Text color="gray.700" mb={1}>
+                          <Text as="span" fontWeight="600">Required Columns:</Text> {(file as any).required_columns}
+                        </Text>
+                        <Text color="gray.700" whiteSpace="normal" wordBreak="break-word">
+                          <Text as="span" fontWeight="600">Affects PSAT Attribute:</Text> {(file as any).affects}
+                        </Text>
+                      </Box>
+>>>>>>> Stashed changes
                     </Box>
                   );
                 })}

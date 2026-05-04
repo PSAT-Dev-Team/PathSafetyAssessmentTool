@@ -8,12 +8,47 @@ export default function HelpPage() {
   const [activeTab, setActiveTab] = useState<"user" | "developer" | "admin">("user");
 
   return (
+<<<<<<< Updated upstream
     <div className="help-page-container">
       <div className="help-page-card">
         <header className="help-header">
           <h1>Documentation & Guides</h1>
           <button onClick={() => navigate(-1)} className="help-back-button">Go Back</button>
         </header>
+=======
+    <Box minH="100vh" bg="gray.100" _dark={{ bg: "gray.900" }} p="8" fontFamily="inherit">
+      <Box
+        maxW="1000px"
+        mx="auto"
+        bg="white"
+        _dark={{ bg: "gray.800" }}
+        borderRadius="xl"
+        boxShadow="lg"
+        p={{ base: "6", md: "10" }}
+      >
+        {/* Header */}
+        <Flex
+          justify="space-between"
+          align="center"
+          borderBottom="2px solid"
+          borderColor="gray.200"
+          _dark={{ borderColor: "gray.600" }}
+          pb="4"
+          mb="6"
+          position="sticky"
+          top="0"
+          bg="white"
+          _dark={{ bg: "gray.800" }}
+          zIndex="10"
+        >
+          <Text fontSize="2xl" fontWeight="bold" color="gray.800" _dark={{ color: "gray.100" }}>
+            Documentation & Guides
+          </Text>
+          <Button size="sm" colorPalette="blue" onClick={() => navigate(-1)}>
+            Go Back
+          </Button>
+        </Flex>
+>>>>>>> Stashed changes
 
         <div className="help-tabs">
           <button 

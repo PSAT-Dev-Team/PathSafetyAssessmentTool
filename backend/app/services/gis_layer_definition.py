@@ -51,20 +51,32 @@ class LayerDefinition:
 
 # Define all layers and their requirements
 LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
-    # Area Type Layers (Polygon containment queries)
-    "inner": LayerDefinition(
-        name="inner",
+    # --- Area Type Layers (Polygon containment queries) ---
+    "area_type": LayerDefinition(
+        name="area_type",
         geometry_types=["Polygon", "MultiPolygon"],
-        required_columns=[],  # No specific columns for containment check
+        required_columns=["None (Containment)"],
         query_type="poly",
-        description="Central Business District / Urban area",
+        description="Affects PSAT Attribute: Area type (Urban, Industrial, Rural, Recreational)",
+        default_buffer_m=20.0,
+        column_aliases={
+            "NAME": ["NAME", "STATION_NA", "PARKING_ZO", "DESC", "DESCRIPTION", "ZONE", "LU_DESC", "LU_TEXT"]
+        },
+    ),
+    "LanduseRural2026": LayerDefinition(
+        name="LanduseRural2026",
+        geometry_types=["Polygon", "MultiPolygon"],
+        required_columns=["None (Containment)"],
+        query_type="poly",
+        description="Affects PSAT Attribute: Area type (Rural)",
         default_buffer_m=20.0,
     ),
-    "industrial": LayerDefinition(
-        name="industrial",
+    "LanduseRecre2026": LayerDefinition(
+        name="LanduseRecre2026",
         geometry_types=["Polygon", "MultiPolygon"],
-        required_columns=[],
+        required_columns=["None (Containment)"],
         query_type="poly",
+<<<<<<< Updated upstream
         description="Industrial area",
         default_buffer_m=20.0,
     ),
@@ -74,135 +86,226 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         required_columns=[],
         query_type="poly",
         description="Rural area",
+=======
+        description="Affects PSAT Attribute: Area type (Recreational)",
+>>>>>>> Stashed changes
         default_buffer_m=20.0,
     ),
 
-    # Proximity Queries (Point/Line distance queries)
-    "mrt": LayerDefinition(
-        name="mrt",
+    # --- Proximity Queries (Point/Line distance queries) ---
+    "Mrt_exit": LayerDefinition(
+        name="Mrt_exit",
         geometry_types=["Point", "MultiPoint"],
-        required_columns=[],  # No specific columns needed for proximity
+        required_columns=["None (Proximity)"],
         query_type="near",
-        description="MRT exit locations",
+        description="Affects PSAT Attribute: Pedestrian Crossing, Peak Flow",
         default_buffer_m=20.0,
+        column_aliases={
+            "STATION_NA": ["STATION_NA", "STATION_NAME", "NAME", "EXIT_CODE", "EXIT_NAME", "CODE"]
+        },
     ),
     "bus_stop": LayerDefinition(
         name="bus_stop",
         geometry_types=["Point", "MultiPoint"],
-        required_columns=[],
+        required_columns=["None (Proximity)"],
         query_type="near",
-        description="Bus stop locations",
+        description="Affects PSAT Attribute: Pedestrian Crossing, Peak Flow",
         default_buffer_m=20.0,
+        column_aliases={
+            "BUS_STOP_N": ["BUS_STOP_N", "BUS_STOP_NO", "BUS_STOP_C", "BUS_STOP_CODE", "CODE", "NAME", "LOC_DESC"]
+        },
     ),
     "bus_lane": LayerDefinition(
         name="bus_lane",
         geometry_types=["LineString", "MultiLineString"],
-        required_columns=[],
+        required_columns=["None (Proximity)"],
         query_type="near",
-        description="Bus lane segments",
+        description="Affects PSAT Attribute: Heavy vehicle flow",
         default_buffer_m=20.0,
     ),
-    "parking": LayerDefinition(
-        name="parking",
+    "parking_lot": LayerDefinition(
+        name="parking_lot",
         geometry_types=["Polygon", "MultiPolygon"],
-        required_columns=[],
+        required_columns=["None (Proximity)"],
         query_type="near",
-        description="Parking lot locations",
+        description="Affects PSAT Attribute: Adjacent Vehicle Parking",
         default_buffer_m=20.0,
+    ),
+    "roadcrossinglayer": LayerDefinition(
+        name="roadcrossinglayer",
+        geometry_types=["LineString", "MultiLineString", "Point"],
+        required_columns=["None (Proximity)"],
+        query_type="near",
+        description="Affects PSAT Attribute: Pedestrian Crossing",
+        default_buffer_m=5.0,
+    ),
+    "AMG_BC2025_shp": LayerDefinition(
+        name="AMG_BC2025_shp",
+        geometry_types=["LineString", "MultiLineString", "Point"],
+        required_columns=["None (Proximity)"],
+        query_type="near",
+        description="Affects PSAT Attribute: Intersection or Road Crossing, Crossing Facility",
+        default_buffer_m=2.0,
     ),
 
-    # Path Feature Layers (LineString width queries)
-    "cycling_path": LayerDefinition(
-        name="cycling_path",
+    # --- Path Feature Layers (LineString width/curvature queries) ---
+    "path": LayerDefinition(
+        name="path",
         geometry_types=["LineString", "MultiLineString"],
-        required_columns=["WIDTH"],  # MUST have width information
+        required_columns=["WIDTH"],
         query_type="near",
-        description="Cycling path centerlines",
+        description="Affects PSAT Attribute: Facility Width, Curvature",
         default_buffer_m=5.0,
         column_aliases={
             "WIDTH": ["WIDTH", "PATH_WIDTH", "W_WIDTH", "width", "Width_m", "WIDTH_M", "Wdth", "WID"]
         },
+    ),
+    # Legacy keys for backward compatibility
+    "cycling_path": LayerDefinition(
+        name="cycling_path",
+        geometry_types=["LineString", "MultiLineString"],
+        required_columns=["WIDTH"],
+        query_type="near",
+        description="Affects PSAT Attribute: Facility Width, Curvature",
+        default_buffer_m=5.0,
     ),
     "shared_path": LayerDefinition(
         name="shared_path",
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["WIDTH"],
         query_type="near",
-        description="Shared path centerlines",
+        description="Affects PSAT Attribute: Facility Width, Curvature",
         default_buffer_m=5.0,
-        column_aliases={
-            "WIDTH": ["WIDTH", "PATH_WIDTH", "W_WIDTH", "width", "Width_m", "WIDTH_M", "Wdth", "WID"]
-        },
     ),
     "footpath": LayerDefinition(
         name="footpath",
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["WIDTH"],
         query_type="near",
-        description="Footpath centerlines",
+        description="Affects PSAT Attribute: Facility Width, Curvature",
         default_buffer_m=5.0,
-        column_aliases={
-            "WIDTH": ["WIDTH", "PATH_WIDTH", "W_WIDTH", "width", "Width_m", "WIDTH_M", "Wdth", "WID"]
-        },
+    ),
+    "CyclingPath_Jul2024": LayerDefinition(
+        name="CyclingPath_Jul2024",
+        geometry_types=["LineString", "MultiLineString"],
+        required_columns=["WIDTH"],
+        query_type="near",
+        description="Affects PSAT Attribute: Facility Width, Curvature",
+        default_buffer_m=5.0,
+    ),
+    "FootPath_Mar2025": LayerDefinition(
+        name="FootPath_Mar2025",
+        geometry_types=["LineString", "MultiLineString"],
+        required_columns=["WIDTH"],
+        query_type="near",
+        description="Affects PSAT Attribute: Facility Width, Curvature",
+        default_buffer_m=5.0,
     ),
 
-    # Road Data Layers (Lookup queries)
-    "road_links": LayerDefinition(
-        name="road_links",
+    # --- Road Data Layers (Lookup/Attribute queries) ---
+    "LinkID_Shape_File": LayerDefinition(
+        name="LinkID_Shape_File",
         geometry_types=["LineString", "MultiLineString"],
-        required_columns=["LK_ID_NUM"],  # MUST have link ID for CSV lookup
+        required_columns=["LK_ID_NUM"],
         query_type="nearest_with_lookup",
-        description="Road link segments with IDs",
+        description="Affects PSAT Attribute: Road operating speed (mean)",
         default_buffer_m=20.0,
         column_aliases={
             "LK_ID_NUM": ["LK_ID_NUM", "LINKID", "LINK_ID", "LinkID", "ID", "link_id"]
         },
     ),
-    "speed_limit": LayerDefinition(
-        name="speed_limit",
+    "Speed_limit": LayerDefinition(
+        name="Speed_limit",
         geometry_types=["LineString", "MultiLineString"],
-        required_columns=["SPEEDLIMIT"],  # MUST have speed limit value
+        required_columns=["SPEEDLIMIT"],
         query_type="nearest_with_attribute",
-        description="Road segments with speed limits",
+        description="Affects PSAT Attribute: Road speed limit",
         default_buffer_m=20.0,
         column_aliases={
             "SPEEDLIMIT": ["SPEEDLIMIT", "SPEED_LIMIT", "SPEED_LIM", "speedlimit", "speed_limit", "LIMIT"]
         },
     ),
-
-    # Pedestrian Flow Layers (CSV-backed queries)
-    "beforeCount": LayerDefinition(
-        name="beforeCount",
-        geometry_types=["Point", "MultiPoint"],
-        required_columns=["DataType", "DateTime", "Count_Data"],  # Column names as in CSV
-        query_type="temporal_aggregation",
-        description="Pedestrian/micromobility counts (before treatment)",
-        default_buffer_m=20.0,
-    ),
-    "sensorCount": LayerDefinition(
-        name="sensorCount",
-        geometry_types=["Point", "MultiPoint"],
-        required_columns=["Pivot_user", "Datetime_p", "Count"],
-        query_type="temporal_aggregation",
-        description="Sensor-based counts (e.g., for treatment evaluation)",
-        default_buffer_m=20.0,
-    ),
-
-    # Curb and Kerb Layers
     "kerb_line": LayerDefinition(
         name="kerb_line",
         geometry_types=["LineString", "MultiLineString"],
-        required_columns=[],
+        required_columns=["LANES"],
         query_type="nearest",
-        description="Kerb line segments",
+        description="Affects PSAT Attribute: Number of lanes – adjacent road",
+        default_buffer_m=10.0,
+        column_aliases={
+            "LANES": ["LANES", "NUM_LANES", "LANE_COUNT", "UNIQUE_ID", "ID"]
+        },
+    ),
+
+    # --- Pedestrian/Traffic Flow Layers (Temporal queries) ---
+    "AMGbeforeCount": LayerDefinition(
+        name="AMGbeforeCount",
+        geometry_types=["Point", "MultiPoint"],
+        required_columns=["DataType", "DateTime", "Count_Data"],
+        query_type="temporal_aggregation",
+        description="Affects PSAT Attribute: Peak Pedestrian Flow, Peak Bicycle Traffic Flow",
+        default_buffer_m=20.0,
+    ),
+    "AMGsensorCount": LayerDefinition(
+        name="AMGsensorCount",
+        geometry_types=["Point", "MultiPoint"],
+        required_columns=["Pivot_user", "Datetime_p", "Count"],
+        query_type="temporal_aggregation",
+        description="Affects PSAT Attribute: Peak Pedestrian Flow, Peak Bicycle Traffic Flow",
+        default_buffer_m=20.0,
+    ),
+
+    # --- Miscellaneous ---
+    "Planning_area": LayerDefinition(
+        name="Planning_area",
+        geometry_types=["Polygon", "MultiPolygon"],
+        required_columns=["PLN_AREA_N"],
+        query_type="poly",
+        description="Affects PSAT Attribute: Area-based reporting",
+        default_buffer_m=0.0,
+    ),
+    "Road_name": LayerDefinition(
+        name="Road_name",
+        geometry_types=["LineString", "MultiLineString"],
+        required_columns=["RD_TYP_CD"],
+        query_type="near",
+        description="Affects PSAT Attribute: Road name reference",
         default_buffer_m=10.0,
     ),
 }
 
 
+
 def get_layer_definition(layer_name: str) -> Optional[LayerDefinition]:
-    """Get definition for a layer by name"""
-    return LAYER_DEFINITIONS.get(layer_name)
+    """
+    Get definition for a layer by name.
+    Performs case-insensitive lookup and handles versioned folder names.
+    """
+    if not layer_name:
+        return None
+
+    # 1. Direct match (case-sensitive)
+    if layer_name in LAYER_DEFINITIONS:
+        return LAYER_DEFINITIONS[layer_name]
+
+    # 2. Case-insensitive match
+    lower_name = layer_name.lower()
+    for key, ld in LAYER_DEFINITIONS.items():
+        if key.lower() == lower_name:
+            return ld
+
+    # 3. Fuzzy match for versioned folders (e.g., "CyclingPath_Jul2024" -> "cycling_path")
+    # Clean both strings of non-alphanumeric chars for comparison
+    import re
+    def clean(s): return re.sub(r'[^a-z0-9]', '', s.lower())
+    
+    clean_name = clean(layer_name)
+    for key, ld in LAYER_DEFINITIONS.items():
+        clean_key = clean(key)
+        if clean_key in clean_name or clean_name in clean_key:
+            return ld
+
+    return None
 
 
 def list_layer_definitions() -> Dict[str, LayerDefinition]:

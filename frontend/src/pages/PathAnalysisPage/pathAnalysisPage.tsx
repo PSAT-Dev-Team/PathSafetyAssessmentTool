@@ -10,7 +10,10 @@ import {
   Portal,
 } from "@chakra-ui/react";
 import { fetchProjectList, type FileResponse } from "../../api";
+<<<<<<< Updated upstream
 import AttributesDropdown from "./components/AttributesDropdown";
+=======
+>>>>>>> Stashed changes
 import PathAnalysisMapView from "./components/PathAnalysisMapView";
 import AttributeDistributionChart from "./components/AttributeDistributionChart";
 import AggregatedScoreBandPanel from "./components/AggregatedScoreBandPanel";
@@ -41,7 +44,7 @@ export default function PathAnalysisPage() {
   const [tagsFilter, setTagsFilter] = useState<string[]>(() => loadState("tagsFilter", []));
 
   // Selected attributes for visualization (up to 5)
-  const [selectedAttributes, setSelectedAttributes] = useState<(string | null)[]>(() => loadState("selectedAttributes", [null]));
+  const [selectedAttributes, setSelectedAttributes] = useState<string[]>(() => loadState("selectedAttributes", []));
 
   // Combobox input states for filtering
   const [projectInputValue, setProjectInputValue] = useState("");
@@ -503,14 +506,6 @@ export default function PathAnalysisPage() {
         </Box>
       )}
 
-      {/* Attributes Dropdown Section */}
-      <Box mb="6">
-        <AttributesDropdown
-          selectedAttributes={selectedAttributes}
-          onAttributeChange={setSelectedAttributes}
-        />
-      </Box>
-
       {/* Map/Table Section */}
       <Box mb="6">
         <PathAnalysisMapView
@@ -532,7 +527,6 @@ export default function PathAnalysisPage() {
           <AttributeDistributionChart
             categoryData={chartData.categoryDistributionData}
             selectedAttribute={chartData.primaryFocusAttribute}
-            selectedAttributes={selectedAttributes}
             categoryStatus={chartData.categoryStatus}
           />
         </Box>
