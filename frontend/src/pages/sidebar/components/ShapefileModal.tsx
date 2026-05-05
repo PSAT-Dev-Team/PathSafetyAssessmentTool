@@ -88,10 +88,9 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
 
   function resetState() {
     setStep("choice");
-    setSelectedCategory("");
-    setNewCategoryName("");
     setUploadFiles([]);
     setReplaceFiles([]);
+    setSelectedCategory("__new__");
     setSelectedReplaceCategory("");
     setSelectedTargetShapefile("");
     setDragActive(false);
@@ -125,6 +124,9 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
 
   function handleChoiceSelect(choice: "add" | "replace") {
     setStep(choice);
+    if (choice === "add") {
+      setSelectedCategory("__new__");
+    }
   }
 
   function handleBackToChoice() {
@@ -572,41 +574,18 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
               {/* Add Shapefile Screen */}
               {step === "add" && (
                 <Box>
-                  {/* Category Selection */}
+                  {/* New Category Name Input (Now always visible) */}
                   <Box mb={4}>
-                    <Text fontWeight="600" mb={2}>Select Folder</Text>
-                    <SelectRoot
-                      collection={categoryCollection}
-                      value={selectedCategory ? [selectedCategory] : []}
-                      onValueChange={(details) => setSelectedCategory(details.value[0])}
-                    >
-                      <SelectTrigger>
-                        <SelectValueText placeholder="Choose a category folder" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categoryItems.map((item) => (
-                          <SelectItem key={item.value} item={item.value}>
-                            {item.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </SelectRoot>
-                  </Box>
-
-                  {/* New Category Name Input */}
-                  {selectedCategory === "__new__" && (
-                    <Box mb={4}>
-                      <Text fontWeight="600" mb={2}>New Category Name</Text>
-                      <Box display="flex" alignItems="center" gap={2}>
-                        <LuFolderInput />
-                        <Input
-                          placeholder="e.g., area_type, bus_stop"
-                          value={newCategoryName}
-                          onChange={(e) => setNewCategoryName(e.target.value)}
-                        />
-                      </Box>
+                    <Text fontWeight="600" mb={2}>New Category Name</Text>
+                    <Box display="flex" alignItems="center" gap={2}>
+                      <LuFolderInput />
+                      <Input
+                        placeholder="e.g., area_type, bus_stop"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                      />
                     </Box>
-                  )}
+                  </Box>
 
                   {/* Dropzone */}
                   <div
