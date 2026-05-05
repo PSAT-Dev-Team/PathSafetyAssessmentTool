@@ -581,6 +581,8 @@ export type ShapefileInfo = {
   source: string;
   metadata?: ShapefileMetadata;
   files?: string[];
+  required_columns?: string;
+  affects?: string;
 };
 
 export type ShapefileCategoryInfo = {

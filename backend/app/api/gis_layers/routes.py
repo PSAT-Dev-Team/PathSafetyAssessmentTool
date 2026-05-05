@@ -54,8 +54,8 @@ def _shp_root() -> Path:
 # Maps the folder/category name to its creation year and data source.
 # Edit this dictionary to keep the information up to date.
 LAYER_METADATA = {
-    "AMGbeforeCount":       {"year": "2024", "source": "LTA – Active Mobility Group"},
-    "AMGsensorCount":       {"year": "2024", "source": "LTA – Active Mobility Group"},
+    "AMGbeforeCount":       {"year": "2025", "source": "LTA – Active Mobility Group"},
+    "AMGsensorCount":       {"year": "2025", "source": "LTA – Active Mobility Group"},
     "CyclingPath_Jul2024":  {"year": "2024", "source": "LTA / URA – Cycling Path Network"},
     "FootPath_Mar2025":     {"year": "2025", "source": "LTA / NParks – Footpath Network"},
     "LanduseRecre2026":     {"year": "2026", "source": "URA – Master Plan Land Use (Recreation)"},
