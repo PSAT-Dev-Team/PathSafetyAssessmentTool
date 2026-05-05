@@ -70,4 +70,12 @@ Important metadata fields now include `dataset`, `source_folders`, `verified_seg
 
 - `projects/routes.py` owns project creation, coding, scoring, treatment, baseline, and road-selection endpoints
 - `gis_layers/routes.py` owns shapefile listing, preview, upload, replace, and delete endpoints
+- `gis_layer_definition.py` defines the source of truth for all required GIS columns and their source indices
 - `generate_road_reference.py` builds `backend/shapefiles/road_reference.csv` for polygon road selection
+
+## GIS Layer Definition System
+
+The application maintains a strict schema for GIS layers to ensure compatibility with auto-coding rules.
+- **Location**: `backend/app/services/gis_layer_definition.py`
+- **Structure**: Each layer defines its `layer_name`, `affects_psat_attribute`, and `required_columns`.
+- **Mapping Indices**: Required columns now include 1-based indices (e.g., `LU_DESC (1)`) which are used by both the backend for validation and the frontend for user guidance.

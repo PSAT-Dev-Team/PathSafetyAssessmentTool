@@ -10,6 +10,7 @@ const DOCS_LIST = [
   { id: "map-view", title: "3. Map View & Analysis", path: "/docs/user-map-view.md" },
   { id: "path-analysis", title: "4. Path Analysis", path: "/docs/user-path-analysis.md" },
   { id: "treatment-application", title: "5. Treatment Application", path: "/docs/user-treatment-application.md" },
+  { id: "gis-management", title: "6. GIS Layer Management", path: "/docs/user-gis-management.md" },
 ];
 
 export default function UserGuide() {

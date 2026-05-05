@@ -97,15 +97,15 @@ Project list responses now include:
 
 ## Shapefile management endpoints
 
-- `GET /api/shapefiles`
-- `GET /api/shapefiles/categories`
-- `POST /api/shapefiles/geojson`
-- `POST /api/shapefiles/validate`
-- `POST /api/shapefiles/preview-upload`
-- `POST /api/shapefiles/upload`
-- `POST /api/shapefiles/validate-replacement`
-- `PUT /api/shapefiles/replace`
-- `DELETE /api/shapefiles/<path:shapefile_path>`
+- `GET /api/shapefiles`: Returns a list of all shapefiles. Each item includes `required_columns` metadata with source indices, e.g., `"LU_DESC (1), LU_TEXT (3)"`.
+- `GET /api/shapefiles/categories`: Returns a list of all category folders.
+- `POST /api/shapefiles/geojson`: Converts a shapefile to GeoJSON for frontend display.
+- `POST /api/shapefiles/validate`: Basic validation of uploaded shapefile files (checks for .shp, .shx, .dbf).
+- `POST /api/shapefiles/preview-upload`: Temporary upload and GeoJSON preview before saving.
+- `POST /api/shapefiles/upload`: Save new shapefiles into a user-specified category.
+- `POST /api/shapefiles/validate-replacement`: Compares a new shapefile against an existing one to ensure column compatibility.
+- `PUT /api/shapefiles/replace`: Overwrites an existing shapefile with a new one.
+- `DELETE /api/shapefiles/<path:shapefile_path>`: Removes a shapefile and its companion files from disk.
 
 ## Common status codes
 

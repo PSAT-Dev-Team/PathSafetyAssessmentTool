@@ -122,10 +122,12 @@ function AdminGuide() {
           ],
         },
         {
-          title: "3. Updating GIS Shapefiles",
+          title: "3. Managing GIS Data Layers",
           items: [
-            { label: "Location:", body: <>The CycleRAP contextual GIS infrastructure shapefiles are stored under <Code>backend/shapefiles/</Code>.</> },
-            { label: "Updating Layers:", body: "Replace the files within their respective category subdirectories. The Flask application automatically rescans when the server is restarted." },
+            { label: "Storage Location:", body: <>The CycleRAP contextual GIS infrastructure shapefiles are stored under <Code>backend/shapefiles/</Code>.</> },
+            { label: "Updating via UI:", body: "Administrators can now use the 'Update GIS Layer' button in the sidebar to add or replace layers. This UI handles file validation and ensures that all mandatory companion files (.shx, .dbf, etc.) are present." },
+            { label: "Replacement Safety:", body: "The 'Replace GIS Layer' workflow includes a search filter for quick navigation and a compatibility check that verifies the new file's column structure against the existing layer definition." },
+            { label: "Column Mapping:", body: "Ensure that any new GIS data follows the required column indices documented in the 'Gis Layers' dashboard (e.g., column index 1 for LU_DESC)." },
           ],
         },
         {
