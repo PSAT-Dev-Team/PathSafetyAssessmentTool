@@ -168,7 +168,7 @@ export function AnalysisPanel({
       >
         <div className="analysis-header-inner">
           <h3 className="analysis-panel-title">
-            Analysis&nbsp;{isExpanded ? '▼' : '▶'}
+            Details&nbsp;{isExpanded ? '▼' : '▶'}
           </h3>
           {collapsedSummary}
         </div>

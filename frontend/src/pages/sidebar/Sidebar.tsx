@@ -7,7 +7,6 @@ import { applyAllTreatments, resetAllTreatments, saveTreatments } from "../../ap
 import CodingSidebar from "./components/CodingSidebar";
 import TreatmentSidebar from "./components/TreatmentSidebar";
 import ResetConfirmationDialog from "./components/ResetConfirmationDialog";
-import ShapefileModal from "./components/ShapefileModal";
 import ExitConfirmationDialog from "./components/ExitConfirmationDialog";
 import psatLogo from "../LandingPage/assets/PSAT Logo 2.png";
 import "./sidebar.css";
@@ -20,20 +19,11 @@ const LINKS = [
 export default function Sidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [treatmentExitDialogOpen, setTreatmentExitDialogOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
-  const openShapefileModal = () => {
-    setShapefileModalOpen(true);
-  };
-
-  const closeShapefileModal = () => {
-    setShapefileModalOpen(false);
-  };
 
   // Get the project name
   const codingMatch = useMatch("/coding/:projectName");
@@ -72,7 +62,7 @@ export default function Sidebar() {
       return;
     }
 
-    const projects = projectName.split(',').filter(Boolean);
+    const projects = projectName.split(',').map(s => s.trim()).filter(Boolean);
     const allDetails: any[] = [];
     let totalTreated = 0;
     let totalSkipped = 0;
@@ -126,7 +116,7 @@ export default function Sidebar() {
 
     try {
       setIsResetting(true);
-      const projects = projectName.split(',').filter(Boolean);
+      const projects = projectName.split(',').map(s => s.trim()).filter(Boolean);
       let totalReset = 0;
       let errors: string[] = [];
 
@@ -175,6 +165,10 @@ export default function Sidebar() {
 
   const onAutoCodeAllProjects = useCallback(() => {
     window.dispatchEvent(new CustomEvent("psat:autocode:all-projects"));
+  }, []);
+
+  const onAutoCodeByAttribute = useCallback((fields: string[]) => {
+    window.dispatchEvent(new CustomEvent("psat:autocode:by-field", { detail: { fields } }));
   }, []);
 
   const onSave = async () => {
@@ -243,7 +237,7 @@ export default function Sidebar() {
     }
 
     try {
-      const projects = projectName.split(',').filter(Boolean);
+      const projects = projectName.split(',').map(s => s.trim()).filter(Boolean);
       let errors: string[] = [];
 
       for (const proj of projects) {
@@ -312,7 +306,7 @@ export default function Sidebar() {
         <h1 className="psat-sidebar-title">Path Safety Assessment Tool</h1>
 
         <div className="psat-actions">
-          {LINKS.map(({ to, label }) => {
+          {LINKS.filter(({ to }) => pathname !== to).map(({ to, label }) => {
             const active = pathname.startsWith(to);
             return (
               <Button
@@ -327,15 +321,6 @@ export default function Sidebar() {
             );
           })}
 
-          {/* Path Analysis Button */}
-          <Button
-            onClick={() => navigateSidebar("/analysis/path")}
-            colorPalette="gray"
-            variant={pathname === "/analysis/path" ? "solid" : "outline"}
-            size="sm"
-          >
-            Path Analysis
-          </Button>
         </div>
       </div>
 
@@ -351,6 +336,7 @@ export default function Sidebar() {
             onAutoCodeOne={onAutoCodeOne}
             onAutoCodeAll={onAutoCodeAll}
             onAutoCodeAllProjects={onAutoCodeAllProjects}
+            onAutoCodeByAttribute={onAutoCodeByAttribute}
           />
         )}
       </div>
@@ -375,14 +361,8 @@ export default function Sidebar() {
           <Button onClick={() => navigateSidebar("/gis-layers")} colorPalette="teal" variant="surface" size="sm" width="100%">
             View GIS Layers
           </Button>
-          <Button onClick={openShapefileModal} colorPalette="blue" variant="surface" size="sm" width="100%">
-            Update GIS Layer
-          </Button>
         </div>
       )}
-
-      {/* Shapefile Management Modal */}
-      <ShapefileModal open={shapefileModalOpen} onClose={closeShapefileModal} />
 
       {/* Coding Exit Confirmation Dialog */}
       <ExitConfirmationDialog

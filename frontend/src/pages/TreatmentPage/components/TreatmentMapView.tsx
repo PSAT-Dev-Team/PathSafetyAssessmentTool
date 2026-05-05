@@ -1,7 +1,8 @@
+import ThemeAwareTileLayer from "../../../components/common/ThemeAwareTileLayer";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Box, Text, Tabs } from "@chakra-ui/react";
 
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import proj4 from "proj4";
@@ -100,10 +101,7 @@ export default function TreatmentMapView() {
               >
 
                 {/* Tile Layer */}
-                <TileLayer
-                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                  attribution='&copy; OpenStreetMap contributors & CARTO'
-                />
+                <ThemeAwareTileLayer />
 
                 {/* Auto-fit bounds if data is available */}
                 {allLatLngs.length > 0 && <FitBounds points={allLatLngs} />}

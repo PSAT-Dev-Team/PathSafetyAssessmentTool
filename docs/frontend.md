@@ -1,248 +1,195 @@
 # Frontend
 
-The PSAT frontend is a **React + TypeScript** single-page application (SPA) built with Vite and served by nginx. It communicates with the Flask backend exclusively through the `/api/*` REST interface.
+The PSAT frontend is a **React + TypeScript** SPA built with Vite and served by nginx. It talks to the Flask backend only through `/api/*` requests.
 
-**UI library:** [Chakra UI v3](https://chakra-ui.com)  
-**Routing:** React Router v6  
-**Maps:** Leaflet (via react-leaflet)  
-**Build tool:** Vite
+- **UI library:** Chakra UI v3
+- **Routing:** React Router v6
+- **Maps:** Leaflet via react-leaflet
+- **Docs renderer:** React Markdown + mirrored files in `frontend/public/docs`
 
----
+## Route map
 
-## Route Map
-
-| URL pattern | Page component | Description |
+| URL pattern | Component | Purpose |
 |---|---|---|
-| `/` | `LandingPage` | Welcome / entry screen |
-| `/home` | `Projects` | Project list, management, navigation |
-| `/coding/:projectNames` | `CodingPage` | Main attribute coding interface |
-| `/treatment` | `TreatmentPage` | Treatment recommendations overview |
-| `/treatment/:projectName` | `TreatmentDetailPage` | Per-project treatment detail |
-| `/analysis/path` | `PathAnalysisPage` | Autocode validation view |
-| `/projects/create` | `CreateProjectPage` | New project wizard |
-| `*` | → `/home` | Catch-all redirect |
+| `/` | `LandingPage` | Entry screen |
+| `/help` | `HelpPage` | In-app user and developer guide |
+| `/home` | `Projects` | Project listing and management |
+| `/coding/:projectNames` | `CodingPage` | Main coding workspace for one or more projects |
+| `/treatment` | `TreatmentPage` | Project picker for treatment workflows |
+| `/treatment/:projectName` | `TreatmentDetailPage` | Treatment detail for one or more selected projects |
+| `/analysis/path` | `PathAnalysisPage` | Multi-project analysis and export workspace |
+| `/projects/create` | `CreateProjectPage` | Project creation wizard |
+| `/gis-layers` | `GisLayersPage` | GIS layer browser and management page |
+| `*` | `Navigate -> /home` | Catch-all redirect |
 
-All routes except `/` are wrapped in `AppLayout`, which provides the shared sidebar navigation shell.
+`HelpButton` is rendered globally, so the help entry point is available from anywhere in the app.
 
----
+## Page behavior
 
-## Page Descriptions
+### Landing page
 
-### Landing Page (`/`)
+`LandingPage` is a lightweight entry screen with no backend dependency beyond navigation.
 
-Entry screen with a brief description of PSAT and a button to navigate to the project list. No API calls are made here.
+### Help page
 
----
+`HelpPage` renders two doc collections:
 
-### Projects (`/home`)
+- a **User Guide** made of the `user-*.md` files in `frontend/public/docs/`
+- a **Developer Guide** that mirrors the repository docs and the overview README
 
-**Purpose:** Browse, manage, and navigate to projects.
+This is why documentation changes must be mirrored into `frontend/public/docs/`, not just `docs/`.
 
-**Key features:**
-- Displays all projects as cards with name, tags, segment counts, dates, and verification status
-- Sort by name, date created, or last updated (ascending/descending)
-- Filter by tag using a combobox
-- Delete a project (with confirmation dialog)
-- Edit project name and tags via `EditProjectModal`
-- Navigate to coding for one or more selected projects
-- Navigate to create a new project
+### Projects page
 
-**API calls:**
-- `GET /api/projects` — initial load and after mutations
-- `DELETE /api/projects/<name>` — delete
-- `PATCH /api/projects/<name>` — rename or update tags
+`Projects` is the operational home screen.
 
----
+Current behavior:
 
-### Coding Page (`/coding/:projectNames`)
+- loads `GET /api/projects`
+- supports fuzzy search by **project or road**, not just exact project name
+- filters by one or more tags
+- sorts by verification %, distance verified, autocode %, and last modified time
+- shows live verification/autocode counters pushed back from the coding page
+- supports multi-select navigation into coding, path analysis, or treatment workflows
+- supports rename/tag edits via `EditProjectModal`
+- deletes entire projects with confirmation
 
-**Purpose:** The primary work area. Supports one or multiple projects simultaneously (passed as a URL-encoded comma-separated list in `:projectNames`).
+The fuzzy search logic lives in `src/utils/projectSearch.ts` and matches against:
 
-**Layout (three-panel grid):**
+- project name
+- `dataset`
+- tags
+- `source_folders`
 
-```
-┌────────────────┬──────────────────────────────┬─────────────────┐
-│  Image Viewer  │  Attributes Table             │  Map Panel      │
-│                │  (41 fields per segment)      │  (GeoJSON +     │
-│  Shows segment │                               │   Leaflet)      │
-│  photograph    │  Dropdowns for enum fields    │                 │
-│                │  Numbers for continuous       │  Click segment  │
-│  Score badges  │  fields                       │  to navigate    │
-└────────────────┴──────────────────────────────┴─────────────────┘
-       ▲                   ▲                              ▲
-  ImagePanel         AttributesPanel               GeoDataPanel
-```
+### Create Project page
 
-Additionally renders:
-- `CurvatureVisualizationPanel` — overlays curvature detection on the image
-- `WidthVisualizationPanel` — overlays path width measurement
-- `SegmentScoresCard` — shows BB/BP/SB/VB scores for the current segment in real time
-- `AutocodeValidation` — shows CV auto-code results before committing
+`CreateProjectPage` now supports two creation modes:
 
-**Navigation:**
-- Clicking a segment in the map selects it in the table and loads its image
-- Clicking a row in the table selects the corresponding map segment
-- Keyboard shortcuts for next/previous segment
+1. **Single-folder creation** using a source folder from `in/`
+2. **Polygon-based multi-road creation** using the embedded `SelectRoadsMap`
 
-**Save flow:**
-1. User edits attributes in the table
-2. Auto-save is triggered, or user clicks **Save**
-3. `PUT /api/projects/<name>/attributes` is called with all rows
-4. The backend recalculates and persists scores; bands are returned and merged into the table
+The map workflow adds several behaviors that were not in the earlier implementation:
 
-**Auto-code flow:**
-1. User clicks **Auto-code** on a segment (or **Auto-code All**)
-2. `POST /api/projects/<name>/autocode/all` is called
-3. Suggested attribute updates are shown in a validation panel
-4. User accepts or rejects individual field suggestions
-5. Accepted changes are written back into the attributes table
-6. User saves normally
+- draw a polygon manually
+- show road overlays for the current viewport
+- show planning-area overlays and click one to seed the selection polygon
+- query intersecting roads with `POST /api/projects/roads-in-polygon`
+- warn when selected roads do not exist locally in `in/`
+- pass `folder_names` and an optional `polygon` to project creation
 
-**Key API calls:**
-- `GET /api/projects/<name>` — project details
-- `GET /api/projects/<name>/versions/latest/attributes` — attribute rows
-- `GET /api/projects/<name>/geodata` — segment geometries
-- `GET /api/projects/attribute-mappings` — enum option labels
-- `GET /api/projects/<name>/metadata` — tags and verification status
-- `PUT /api/projects/<name>/attributes` — save attributes
-- `POST /api/projects/<name>/score` — calculate score (real-time single row)
-- `POST /api/projects/<name>/autocode/image` — auto-code one image
-- `POST /api/projects/<name>/autocode/gis` — auto-code via GIS
-- `POST /api/projects/<name>/autocode/all` — batch auto-code
-- `GET /api/projects/<name>/images/<filename>` — load images
+If multiple source folders are selected, the backend namespaces copied image filenames to avoid collisions and stores the original list in `source_folders`.
 
----
+### Coding page
 
-### Treatment Page (`/treatment`)
+`CodingPage` is the primary work area and supports one or more projects in a single session through the comma-separated `:projectNames` route param.
 
-**Purpose:** Overview of treatment recommendations across all (or selected) projects.
+Key UI slices:
 
-**Key features:**
-- Select one or more projects
-- View applicable treatments per segment
-- Apply treatments to individual segments or all at once
-- Reset all treatments
-- Save applied treatments
+- image viewer
+- attributes table
+- GeoDataPanel map
+- live score card
+- curvature visualization
+- width visualization
+- autocode validation panel
 
----
+Key current behaviors:
 
-### Treatment Detail Page (`/treatment/:projectName`)
+- loads project detail, metadata, attributes, geodata, results, baseline rows, and autocode metadata
+- allows CV-only, GIS-only, single-segment, selected-segment, or full-project bulk autocode
+- persists changed-field provenance through `/autocode-metadata`
+- compares current attributes to a saved baseline for validation stats
+- updates `verified_segment_count` and `autocoded_segment_count` back into project metadata
+- can request nearby GIS context layers on the map through `/api/projects/<name>/gis/layers`
 
-**Purpose:** Per-project treatment detail with before/after score comparison.
+Multi-project coding/treatment views aggregate segment arrays and keep a project index map in the page state so UI actions can still resolve back to the owning project and local row.
 
-**Key features:**
-- Table of all segments with applicable treatment suggestions
-- Select treatment IDs to apply to each segment
-- Preview projected score improvement (before/after)
-- Apply all treatments in one click
-- Save / reset treatment state
+### Path Analysis page
 
-**API calls:**
-- `GET /api/projects/<name>/versions/latest/attributes`
-- `POST /api/projects/<name>/treatments/preview`
-- `POST /api/projects/<name>/treatments/apply`
-- `POST /api/projects/<name>/treatments/apply-all`
-- `POST /api/projects/<name>/treatments/reset-all`
-- `POST /api/projects/<name>/treatments/save`
-- `GET /api/projects/<name>/treatments/segment/<index>`
+`PathAnalysisPage` is now a full **multi-project analysis workspace**, not just an autocode review screen.
 
----
+It currently supports:
 
-### Path Analysis Page (`/analysis/path`)
+- searching projects by project name or source-road name
+- tag and date-range filtering before loading projects
+- multi-select loading of projects into one analysis session
+- selecting up to five attributes for analysis
+- an aggregated score-band panel
+- attribute distribution charts
+- a synchronized map/table analysis surface
+- export of the filtered table as CSV
+- download of filtered images as a ZIP
 
-**Purpose:** Validate and review auto-coded attributes before committing them to the project.
+The page also stores filter and selection state in `sessionStorage`, so analysts can navigate away and return without losing the active analysis setup.
 
-Displays CV auto-code results side-by-side with the original image so the user can accept or reject individual field suggestions.
+### Treatment pages
 
----
+`TreatmentPage` is the picker / filter view. It mirrors the project-or-road search behavior introduced on the Projects page.
 
-### Create Project Page (`/projects/create`)
+`TreatmentDetailPage` is where treatment work happens. Current capabilities include:
 
-**Purpose:** Create a new project from an image folder in `in/`.
+- loading one or more selected projects into a combined treatment session
+- viewing treatments **By Segment** or **By Treatment**
+- ranking treatments using backend effectiveness endpoints
+- previewing treatment effects before save
+- applying a treatment to one segment, all applicable segments, or one specific treatment across the loaded set
+- saving or resetting pending treatment state
 
-**Flow:**
-1. Enter a project name (no underscores)
-2. Optionally add tags
-3. Select a source folder from the dropdown (populated by `GET /api/projects/folders`)
-4. Optionally upload new images directly (via drag-and-drop to `POST /api/projects/folders/upload-images`)
-5. Click **Create** → calls `POST /api/projects/folders`
-6. On success, redirects to the new project's coding page
+### GIS Layers page
 
-**API calls:**
-- `GET /api/projects/folders` — list available source folders
-- `POST /api/projects/folders/upload-images` — (optional) upload images
-- `POST /api/projects/folders` — create project
+`GisLayersPage` exposes the shapefile inventory that powers GIS-assisted coding.
 
----
+It currently supports:
 
-## API Client (`src/api/index.ts`)
+- listing available shapefiles and categories
+- previewing a selected layer as GeoJSON on a Leaflet map
+- opening `ShapefileModal` to upload, validate, replace, or delete layers
+- surfacing metadata such as source, year, category, and file size
 
-All backend communication is centralised in a single typed module. Each function:
-- Calls `fetch()` with the correct method, headers, and body
-- Throws a descriptive `Error` on non-OK responses
-- Returns a typed result
+## API client highlights
 
-Key exports:
+All client-side fetch wrappers live in `src/api/index.ts`.
 
-| Function | HTTP | Description |
-|---|---|---|
-| `ping()` | GET /api/ping | Health check |
-| `fetchProjectList()` | GET /api/projects | Project list |
-| `fetchProjectDetail(name)` | GET /api/projects/<name> | Versions |
-| `fetchProjectMetadata(name)` | GET /api/projects/<name>/metadata | Metadata |
-| `fetchProjectAttributes(name)` | GET /api/projects/<name>/versions/latest/attributes | Coding data |
-| `fetchProjectGeoJSON(name)` | GET /api/projects/<name>/geodata | GeoJSON |
-| `fetchAttributeMappings()` | GET /api/projects/attribute-mappings | Enum labels |
-| `saveAttributes(project, rows)` | PUT /api/projects/<name>/attributes | Save coding |
-| `calculateScore(project, attrs?)` | POST /api/projects/<name>/score | Full score |
-| `calculateScoreForRow(project, attrs)` | POST /api/projects/<name>/score | Single-row score |
-| `listSourceFolders()` | GET /api/projects/folders | Input folders |
-| `createProjectFromFolder(...)` | POST /api/projects/folders | Create project |
-| `deleteProject(name)` | DELETE /api/projects/<name> | Delete project |
-| `updateProject(name, updates)` | PATCH /api/projects/<name> | Rename/tag |
-| `deleteSegment(project, idx)` | DELETE /api/projects/<name>/segments/<idx> | Delete segment |
-| `deleteSegmentsBatch(project, idxs)` | POST /api/projects/<name>/segments/delete-batch | Batch delete |
-| `checkCollisions(src, tgt, idxs)` | POST /api/projects/check-collisions | Collision check |
-| `copySegments(...)` | POST /api/projects/copy-segments | Copy segments |
-| `autocodeImage(project, imageRef)` | POST /api/projects/<name>/autocode/image | CV auto-code |
-| `autocodeGIS(project, coords)` | POST /api/projects/<name>/autocode/gis | GIS auto-code |
-| `autocodeAll(project, payload)` | POST /api/projects/<name>/autocode/all | Batch auto-code |
-| `downloadImages(projects)` | POST /api/projects/download-images | ZIP download |
+Notable newer exports include:
 
----
+- `queryRoadsInPolygon()`
+- `queryRoadsInBounds()`
+- `queryPlanningAreasInBounds()`
+- `getAllTreatments()`
+- `getTreatmentEffectiveness()`
+- `getTreatmentSegmentEffectiveness()`
+- shapefile-management helpers such as `listShapefiles()`, `uploadShapefiles()`, and `replaceShapefiles()`
 
-## Visualisation Components
+## Visual analysis components
 
-### `CurvatureVisualizationPanel`
+### CurvatureVisualizationPanel
 
-Renders a curvature measurement overlay on top of the current segment image. Uses `api/curvatureVisualization.ts` which calls `/api/projects/<name>/width-visualization` (width/curvature analysis endpoint).
+Calls `POST /api/projects/<name>/curvature/visualize` and renders the local path geometry, 5 m analysis window, derived radius, and curvature classification.
 
-The curvature calculation uses a sliding window with a default radius of **5.0 m** (`collect_radius` parameter in `gis_mapping.py`), extended internally to **5.5 m** to capture edge geometry. Path geometry is densified at a **0.25 m** step (hardcoded) for accurate curvature detection.
+### WidthVisualizationPanel
 
-The path width search uses a separate expanding-ring approach, ranging from **1.0 m to 10.0 m** in 1 m increments (hardcoded in `width_visualization.py`).
+Calls `POST /api/projects/<name>/width/visualize` and renders the expanding search rings, candidate paths, and derived width category.
 
-### `WidthVisualizationPanel`
+### GeoDataPanel GIS overlays
 
-Renders a path width measurement overlay. Powered by `backend/app/utils/path_width_curvature.py`.
+When a single project is active, the coding map can request nearby GIS layers from `POST /api/projects/<name>/gis/layers` to show map context around the active segment.
 
-### `SegmentScoresCard`
+## State management
 
-A compact card showing BB, BP, SB, VB, and Overall Risk Level for the currently selected segment. Scores update in real time as the user edits attributes (via single-row scoring calls).
+PSAT still relies on page-local React state rather than a global state library. The main shared patterns are:
 
----
+- local `useState` / `useEffect` for page data
+- memoized derived views with `useMemo`
+- browser storage for selected Path Analysis filters
+- custom browser events to push metadata changes back to listing pages
 
-## State Management
+## nginx behavior
 
-The application uses **React local state** (`useState`, `useEffect`, `useMemo`, `useRef`) — no external state management library (no Redux, Zustand, etc.). Each page owns its data and fetches it on mount. Shared state (e.g., the currently selected segment index) is passed via props or React context where needed.
+The frontend container:
 
----
-
-## nginx Configuration
-
-The frontend container uses nginx to:
-1. Serve the compiled React SPA from `/usr/share/nginx/html`
-2. Handle client-side routing: all non-asset requests return `index.html` (`try_files $uri /index.html`)
-3. Reverse-proxy all `/api/*` requests to `http://backend:8000/api/`
+1. serves the built SPA from `/usr/share/nginx/html`
+2. falls back to `index.html` for client-side routes
+3. proxies `/api/*` to `http://backend:8000/api/`
 
 ```nginx
 location / {

@@ -196,23 +196,6 @@ class Project:
             self._geo_data : serializer.ProjectGeoData  = serializer.ProjectGeoData()
             self.versions.insert(0, ProjectVersion())
 
-    # TODO fix project merge
-    def __add__(self, rhs : Project) -> Project:
-        raise ValueError("Does not work properly at the moment. Do not use")
-        temp_path = None
-        merged = Project(temp_path)
-        # Merge geo data
-        merged._geo_data = serializer.ProjectGeoData()
-        merged._geo_data.df = pd.concat([self.geo_data.df, rhs.geo_data.df], ignore_index=True)
-        # Merge latest version data
-        merged.versions.insert(0, self.latest())
-        merged.latest().path = temp_path
-        merged.latest()._attributes = serializer.Attributes()
-        
-        merged.latest()._attributes._df = pd.concat([self.latest().attributes.df, rhs.latest().attributes.df], ignore_index=True)
-
-        return merged
-
     # ─── Version handling ─────────────────────────────────────
     def _discover_versions(self):
         version_dir = self.project_path / "versions"
@@ -284,7 +267,10 @@ class Project:
             # 只有在今天目录真的不存在时，才创建新版本
             self.create_new_version(self.latest())
 
-        self.metadata.serialize(self.project_path)
+        # NOTE: metadata is NOT serialized here intentionally.
+        # Callers are responsible for setting last_updated and calling
+        # metadata.serialize() explicitly, so only the intended project
+        # gets its timestamp updated.
         if self.geo_data.df_dirty is True:
             self.geo_data.serialize(self.project_path)
         self.latest().save_all()
@@ -626,6 +612,7 @@ class Project:
         
         # Save Target
         target_project.save_all()
+        target_project.metadata.serialize(target_project.project_path)
         return count_added
         # ================================
         # Get dataframes to filter
@@ -830,7 +817,7 @@ class project_manager:
                 return proj
         raise KeyError(f"Project not found: {project_name}")
     
-    def create_project(self, project_title, geo_data : gpd.geodataframe, dataset_name, tags=None):
+    def create_project(self, project_title, geo_data : gpd.geodataframe, dataset_name, tags=None, source_folders=None):
         proj_root = self.des_path / project_title
 
         prefix = str(project_title) + "_"
@@ -848,6 +835,7 @@ class project_manager:
         project_metadata.last_updated   = now_dt
         project_metadata.created_by     = "default"
         project_metadata.dataset        = dataset_name
+        project_metadata.source_folders = source_folders if source_folders is not None else ([dataset_name] if dataset_name and dataset_name != "MULTI_FOLDER_SELECTION" else [])
         project_metadata.progress       = []
         project_metadata.size           = size
         project_metadata.tags           = tags if tags is not None else []
@@ -879,6 +867,7 @@ class project_manager:
 
         # Write project to file
         new_project.save_all()
+        new_project.metadata.serialize(new_project.project_path)
 
         self.projects.append(new_project)
         
@@ -1045,7 +1034,7 @@ def load_images_from_folder_cv(folder):
     image_array = []
     
     for filename in os.listdir(folder):
-        if filename.lower().endswith(".jpg"):
+        if filename.lower().endswith((".jpg", ".jpeg")):
             image_array.append(filename)
     
     def extract_numeric_key(filename):

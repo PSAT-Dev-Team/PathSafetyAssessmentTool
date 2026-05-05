@@ -9,9 +9,14 @@ from flask import (
     send_file,
     make_response,
     current_app,
+    Response,
+    stream_with_context,
 )
 import zipfile
 import io
+import json
+import re
+from bisect import bisect_left
 from pathlib import Path
 import urllib.parse
 import traceback
@@ -21,11 +26,12 @@ import app.services.global_var as global_var
 import pandas as pd
 import os
 import exifread
-from shapely.geometry import Point,LineString
+from shapely.geometry import Point,LineString,Polygon,box
 import geopandas as gpd
 import shutil
 import datetime
 import math
+import ipaddress
 from app.services.cyclerap_scoring import calculate_cyclerap_score_native
 # ---- init guards (thread-safe & error memo) ----
 import threading
@@ -35,6 +41,51 @@ _INIT_LOCK = threading.Lock()
 _INIT_ERR = {"cv": None}
 
 _GIS_INSTANCE: "gis.GIS | None" = None
+_ROAD_SECTIONS_GDF: gpd.GeoDataFrame | None = None
+_PLANNING_AREAS_GDF: gpd.GeoDataFrame | None = None
+_KNOWN_ROAD_NAMES: list[str] | None = None
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"}
+
+
+def _get_road_sections_gdf() -> gpd.GeoDataFrame:
+    global _ROAD_SECTIONS_GDF
+    if _ROAD_SECTIONS_GDF is not None:
+        return _ROAD_SECTIONS_GDF
+
+    backend_root = Path(__file__).resolve().parents[3]
+    road_shp_candidates = [
+        backend_root / "shapefiles" / "planningareas" / "ROADSECTIONLINE.shp",
+        backend_root / "shapefiles" / "Road_name" / "ROADSECTIONLINE.shp",
+        backend_root / "shapefiles" / "Road_name" / "ROADNETWORKLINE.shp",
+    ]
+    road_shp = next((candidate for candidate in road_shp_candidates if candidate.exists()), None)
+    if road_shp is None:
+        raise FileNotFoundError("No road sections shapefile found")
+
+    gdf = gpd.read_file(str(road_shp))
+    if gdf.crs and gdf.crs.to_epsg() != 4326:
+        gdf = gdf.to_crs(epsg=4326)
+
+    _ROAD_SECTIONS_GDF = gdf
+    return _ROAD_SECTIONS_GDF
+
+
+def _get_planning_areas_gdf() -> gpd.GeoDataFrame:
+    global _PLANNING_AREAS_GDF
+    if _PLANNING_AREAS_GDF is not None:
+        return _PLANNING_AREAS_GDF
+
+    backend_root = Path(__file__).resolve().parents[3]
+    planning_shp = backend_root / "shapefiles" / "planningareas" / "G_MP25_PLNG_AREA_NO_SEA_PL.shp"
+    if not planning_shp.exists():
+        raise FileNotFoundError("Planning areas shapefile not found")
+
+    gdf = gpd.read_file(str(planning_shp))
+    if gdf.crs and gdf.crs.to_epsg() != 4326:
+        gdf = gdf.to_crs(epsg=4326)
+
+    _PLANNING_AREAS_GDF = gdf
+    return _PLANNING_AREAS_GDF
 
 def _get_gis() -> "gis.GIS":
     global _GIS_INSTANCE
@@ -66,7 +117,9 @@ def warmup_gis() -> None:
 
     def _warm():
         try:
-            _get_gis()
+            g = _get_gis()
+            # Pre-load all registered layers so the first toggle is instant
+            g.store.reload()
         except Exception as exc:  # pragma: no cover
             import logging
             logging.getLogger(__name__).warning("GIS warmup failed: %s", exc)
@@ -381,13 +434,13 @@ def _ensure_models_ready():
 
                 model_dir = None
                 for d in candidates:
-                    if (d / "path_seg.pt").exists():
+                    if (d / "path_segmentation.pt").exists():
                         model_dir = d.resolve()
                         break
 
                 if model_dir is None:
                     tried = "\n".join(str(p) for p in candidates)
-                    raise RuntimeError(f"Cannot find model_dir (missing path_seg.pt). Tried:\n{tried}")
+                    raise RuntimeError(f"Cannot find model_dir (missing path_segmentation.pt). Tried:\n{tried}")
 
                 # YOLO models load
                 print(f"[Autocode] Loading CV models from {model_dir} — this may take several minutes on CPU...", flush=True)
@@ -450,83 +503,391 @@ _warmup_thread.start()
 
 # ───────────────────────── Gradient lookup (module-level) ─────────────────────
 # Loaded once and cached for the lifetime of the server process.
-# Works for any project — the CSV accumulates entries across all project areas.
+_GRADIENT_PROFILE_CATALOG: "dict[str, dict] | None" = None
+_PROJECT_GRADIENT_CACHE: dict[str, dict[str, tuple[int, float]]] = {}
 
-_GRADIENT_LOOKUP: "dict | None" = None
+
+def _normalize_gradient_token(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", str(value or "")).strip("_").lower()
 
 
-def _load_gradient_lookup() -> dict:
-    """Load (and cache) the gradient lookup CSV. Returns {} if unavailable."""
-    global _GRADIENT_LOOKUP
-    if _GRADIENT_LOOKUP is not None:
-        return _GRADIENT_LOOKUP
-    lookup_path = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_lookup.csv"
-    if not lookup_path.exists():
-        _GRADIENT_LOOKUP = {}
-        return _GRADIENT_LOOKUP
+def _strip_survey_suffix(value: str) -> str:
+    return re.sub(r"(?:\d*q\d{2,4})$", "", _normalize_gradient_token(value), flags=re.IGNORECASE)
+
+
+def _rect_distance(bounds_a, bounds_b) -> float:
+    ax1, ay1, ax2, ay2 = bounds_a
+    bx1, by1, bx2, by2 = bounds_b
+    dx = max(bx1 - ax2, ax1 - bx2, 0.0)
+    dy = max(by1 - ay2, ay1 - by2, 0.0)
+    return math.hypot(dx, dy)
+
+
+def _same_xy(a, b, tol: float = 1e-3) -> bool:
+    return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
+
+
+def _stitch_gradient_centerline(gdf: gpd.GeoDataFrame) -> "LineString | None":
+    stitched = []
+    for geom in gdf.geometry:
+        if geom is None or geom.is_empty:
+            continue
+        if geom.geom_type == "MultiLineString":
+            parts = list(geom.geoms)
+            if not parts:
+                continue
+            geom = max(parts, key=lambda g: g.length)
+        if geom.geom_type != "LineString":
+            continue
+
+        coords = list(geom.coords)
+        if len(coords) < 2:
+            continue
+        if not stitched:
+            stitched.extend(coords)
+            continue
+
+        end_pt = stitched[-1]
+        start_dist = math.hypot(end_pt[0] - coords[0][0], end_pt[1] - coords[0][1])
+        reverse_dist = math.hypot(end_pt[0] - coords[-1][0], end_pt[1] - coords[-1][1])
+        if reverse_dist < start_dist:
+            coords = list(reversed(coords))
+
+        if _same_xy(stitched[-1], coords[0]):
+            stitched.extend(coords[1:])
+        else:
+            stitched.extend(coords)
+
+    if len(stitched) < 2:
+        return None
+    return LineString(stitched)
+
+
+def _load_gradient_profile_catalog() -> dict[str, dict]:
+    global _GRADIENT_PROFILE_CATALOG
+    if _GRADIENT_PROFILE_CATALOG is not None:
+        return _GRADIENT_PROFILE_CATALOG
+
+    base_dir = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_profiles"
+    result: dict[str, dict] = {}
+    if not base_dir.exists():
+        _GRADIENT_PROFILE_CATALOG = result
+        return result
+
+    for meta_path in sorted(base_dir.glob("*/metadata.json")):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            profile_path = meta_path.parent / "gradient_profile.csv"
+            if not profile_path.exists():
+                continue
+            if int(meta.get("valid_gradient_count") or 0) <= 0:
+                print(f"[Gradient] skipping profile '{meta_path.parent.name}' with no valid gradients")
+                continue
+            bounds = meta.get("path_bounds_svy21") or {}
+            meta["_bounds"] = None
+            if {"min_x", "min_y", "max_x", "max_y"} <= set(bounds):
+                meta["_bounds"] = (
+                    float(bounds["min_x"]),
+                    float(bounds["min_y"]),
+                    float(bounds["max_x"]),
+                    float(bounds["max_y"]),
+                )
+            aliases = {
+                _normalize_gradient_token(meta.get("path_key", "")),
+                _normalize_gradient_token(meta.get("display_name", "")),
+                _normalize_gradient_token(meta.get("source_project", "")),
+                _strip_survey_suffix(meta.get("path_key", "")),
+                _strip_survey_suffix(meta.get("display_name", "")),
+                _strip_survey_suffix(meta.get("source_project", "")),
+            }
+            aliases.discard("")
+            meta["_aliases"] = aliases
+            meta["_profile_path"] = str(profile_path)
+            result[str(meta.get("path_key") or meta_path.parent.name)] = meta
+        except Exception as exc:
+            print(f"[Gradient] WARNING: failed to read profile metadata {meta_path}: {exc}")
+
+    _GRADIENT_PROFILE_CATALOG = result
+    return result
+
+
+
+def _resolve_gradient_profile_for_project(project_name: str, centerline: LineString) -> "dict | None":
+    catalog = _load_gradient_profile_catalog()
+    if not catalog or centerline is None:
+        return None
+
+    project_path_key = None
     try:
-        import csv as _csv
-        result = {}
-        with open(lookup_path, newline="", encoding="utf-8") as f:
-            reader = _csv.DictReader(f)
-            if "Image Reference" not in (reader.fieldnames or []):
-                print("[Gradient] WARNING: gradient_lookup.csv missing 'Image Reference' column — skipping")
-                _GRADIENT_LOOKUP = {}
-                return _GRADIENT_LOOKUP
-            for row in reader:
-                try:
-                    img = row.get("Image Reference", "").strip()
-                    grade_pct_raw = row.get("gradient_pct", "").strip()
-                    grade_coded_raw = row.get("Grade", "").strip()
-                    if img and grade_coded_raw:
-                        grade_coded = int(float(grade_coded_raw))
-                        grade_pct = float(grade_pct_raw) if grade_pct_raw else float("nan")
-                        result[img] = (grade_coded, grade_pct)
-                except (ValueError, TypeError):
+        proj = get_ctx()["pm"].project(project_name)
+        project_path_key = getattr(proj.metadata, "path_key", None)
+    except Exception:
+        project_path_key = None
+
+    if project_path_key:
+        direct_match = catalog.get(project_path_key)
+        if direct_match:
+            return direct_match
+
+        normalized_override = _normalize_gradient_token(project_path_key)
+        for meta in catalog.values():
+            aliases = meta.get("_aliases") or set()
+            if normalized_override in aliases:
+                return meta
+
+    project_aliases = {_normalize_gradient_token(project_name), _strip_survey_suffix(project_name)}
+    project_bounds = centerline.bounds
+    project_length = float(centerline.length)
+
+    exact_matches = []
+    fallback_matches = []
+    for meta in catalog.values():
+        aliases = meta.get("_aliases") or set()
+        meta_len = float(meta.get("centerline_length_m") or 0.0)
+        len_diff = abs(project_length - meta_len) if meta_len else float("inf")
+
+        if aliases & project_aliases:
+            exact_matches.append((len_diff, meta))
+            continue
+
+        bounds = meta.get("_bounds")
+        if bounds is None:
+            continue
+        dist = _rect_distance(project_bounds, bounds)
+        fallback_matches.append((dist, len_diff, meta))
+
+    if exact_matches:
+        exact_matches.sort(key=lambda item: item[0])
+        return exact_matches[0][1]
+
+    if fallback_matches:
+        fallback_matches.sort(key=lambda item: (item[0], item[1]))
+        best_dist, best_len_diff, best_meta = fallback_matches[0]
+        best_len = float(best_meta.get("centerline_length_m") or project_length)
+        if best_dist <= 50.0 and best_len_diff <= max(75.0, 0.35 * best_len):
+            return best_meta
+
+    return None
+
+
+def _nearest_chainage_index(chainages: list[float], target: float) -> "int | None":
+    if not chainages:
+        return None
+    idx = bisect_left(chainages, target)
+    if idx <= 0:
+        return 0
+    if idx >= len(chainages):
+        return len(chainages) - 1
+    left = chainages[idx - 1]
+    right = chainages[idx]
+    return idx - 1 if abs(target - left) <= abs(right - target) else idx
+
+
+def _get_project_gradient_mapping(project_name: str) -> dict[str, tuple[int, float]]:
+    if project_name in _PROJECT_GRADIENT_CACHE:
+        return _PROJECT_GRADIENT_CACHE[project_name]
+
+    mapping: dict[str, tuple[int, float]] = {}
+    _PROJECT_GRADIENT_CACHE[project_name] = mapping
+
+    if not project_name:
+        return mapping
+
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        gpkg_path = proj.project_path / "geo_data.gpkg"
+        if not gpkg_path.exists():
+            print(f"[Gradient] no geo_data.gpkg for project '{project_name}'")
+            return mapping
+
+        gdf = gpd.read_file(gpkg_path)
+        if gdf.empty or "Image Reference" not in gdf.columns:
+            print(f"[Gradient] project '{project_name}' has no usable Image Reference column in geo_data.gpkg")
+            return mapping
+
+        if gdf.crs is None:
+            gdf = gdf.set_crs("EPSG:3414")
+        elif gdf.crs.to_epsg() != 3414:
+            gdf = gdf.to_crs(epsg=3414)
+
+        centerline = _stitch_gradient_centerline(gdf)
+        if centerline is None:
+            print(f"[Gradient] project '{project_name}' has no usable centerline for gradient lookup")
+            return mapping
+
+        meta = _resolve_gradient_profile_for_project(project_name, centerline)
+        if not meta:
+            print(f"[Gradient] no matching profile found for project '{project_name}'")
+            return mapping
+
+        profile_df = pd.read_csv(meta["_profile_path"])
+        if profile_df.empty or "chainage_m" not in profile_df.columns:
+            print(f"[Gradient] profile CSV missing chainage_m for '{meta.get('path_key')}'")
+            return mapping
+
+        profile_df = profile_df.sort_values("chainage_m").reset_index(drop=True)
+        chainages = [float(v) for v in profile_df["chainage_m"].tolist()]
+        if len(chainages) > 1:
+            diffs = [chainages[i] - chainages[i - 1] for i in range(1, len(chainages))]
+            step = float(pd.Series(diffs).median())
+        else:
+            step = 0.0
+        tolerance = max(step * 1.5, 1.0)
+
+        for _, row in gdf.iterrows():
+            image_ref = str(row.get("Image Reference") or "").strip()
+            geom = row.geometry
+            if not image_ref or geom is None or geom.is_empty:
+                continue
+            if geom.geom_type == "MultiLineString":
+                parts = list(geom.geoms)
+                if not parts:
                     continue
-        _GRADIENT_LOOKUP = result
-        print(f"[Gradient] Loaded {len(_GRADIENT_LOOKUP)} entries from gradient_lookup.csv")
-    except Exception as _e:
-        print(f"[Gradient] WARNING: could not load gradient_lookup.csv: {_e} — Grade will not be set")
-        _GRADIENT_LOOKUP = {}
-    return _GRADIENT_LOOKUP
+                geom = max(parts, key=lambda g: g.length)
+            if geom.geom_type != "LineString":
+                continue
+
+            midpoint = geom.interpolate(0.5, normalized=True)
+            chainage = float(centerline.project(midpoint))
+            idx = _nearest_chainage_index(chainages, chainage)
+            if idx is None:
+                continue
+            profile_row = profile_df.iloc[idx]
+            profile_chainage = float(profile_row.get("chainage_m", float("nan")))
+            if math.isnan(profile_chainage) or abs(profile_chainage - chainage) > tolerance:
+                continue
+
+            grade_raw = profile_row.get("Grade")
+            grad_raw = profile_row.get("gradient_pct")
+            if pd.isna(grade_raw) or pd.isna(grad_raw):
+                continue
+
+            grade_coded = int(float(grade_raw))
+            gradient_pct = float(grad_raw)
+            if grade_coded in (1, 2):
+                mapping[image_ref] = (grade_coded, gradient_pct)
+
+        print(
+            f"[Gradient] project '{project_name}' -> profile '{meta.get('path_key')}' mapped {len(mapping)} image refs",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[Gradient] WARNING: failed to build project gradient cache for '{project_name}': {exc}", flush=True)
+
+    return mapping
+
+
+def _lookup_project_gradient(project_name: str, image_ref: str) -> "tuple[int, float] | None":
+    mapping = _get_project_gradient_mapping(project_name)
+    if not mapping:
+        return None
+    if image_ref in mapping:
+        return mapping[image_ref]
+
+    if project_name and not image_ref.startswith(project_name + "_"):
+        prefixed = f"{project_name}_{image_ref}"
+        if prefixed in mapping:
+            return mapping[prefixed]
+
+    bare = image_ref.split("_", 1)[-1] if "_" in image_ref else image_ref
+    for key, value in mapping.items():
+        if key.endswith(bare) or bare.endswith(key):
+            return value
+    return None
+
+
+def _display_source_name_from_namespace(namespace: str) -> str:
+    return re.sub(r"\s+", " ", namespace.replace("_", " ").strip()).title()
+
+
+def _build_source_namespace_map(in_path: Path) -> dict[str, str]:
+    namespace_map: dict[str, str] = {}
+    if not in_path.exists():
+        return namespace_map
+
+    for child_name in os.listdir(in_path):
+        child_path = in_path / child_name
+        if not child_path.is_dir():
+            continue
+        namespace_map[make_image_namespace(child_name).lower()] = child_name
+    return namespace_map
+
+
+def _get_project_source_folders(proj: Project, pm) -> list[str]:
+    metadata_sources = getattr(proj.metadata, "source_folders", None) or []
+    cleaned_sources: list[str] = []
+    seen_sources: set[str] = set()
+    for source in metadata_sources:
+        source_name = str(source or "").strip()
+        if not source_name or source_name in seen_sources:
+            continue
+        cleaned_sources.append(source_name)
+        seen_sources.add(source_name)
+    if cleaned_sources:
+        return cleaned_sources
+
+    dataset_name = str(getattr(proj.metadata, "dataset", "") or "").strip()
+    if dataset_name and dataset_name != "MULTI_FOLDER_SELECTION":
+        return [dataset_name]
+
+    try:
+        geo_df = proj.geo_data.df
+    except Exception:
+        geo_df = None
+
+    if geo_df is None or geo_df.empty or "Image Reference" not in geo_df.columns:
+        return []
+
+    namespace_map = _build_source_namespace_map(pm.in_path)
+    project_prefix = f"{proj.metadata.project_name}_"
+    derived_sources: list[str] = []
+    seen_sources.clear()
+
+    for image_ref in geo_df["Image Reference"].dropna().astype(str):
+        normalized_ref = image_ref.strip()
+        if not normalized_ref:
+            continue
+        if normalized_ref.startswith(project_prefix):
+            normalized_ref = normalized_ref[len(project_prefix):]
+        if "__" not in normalized_ref:
+            continue
+
+        namespace = normalized_ref.split("__", 1)[0].strip("_")
+        if not namespace:
+            continue
+
+        source_name = namespace_map.get(namespace.lower()) or _display_source_name_from_namespace(namespace)
+        if source_name in seen_sources:
+            continue
+        derived_sources.append(source_name)
+        seen_sources.add(source_name)
+
+    return derived_sources
 
 
 def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
                    project_name: str = "") -> "float | None":
-    """Inject Grade from the gradient lookup into *updates* (in-place).
+    """Inject Grade from the master gradient profile into *updates* (in-place).
+    The master profile is keyed by path_key + chainage; image refs are only used
+    inside a per-project cache built from the current project's geometry.
     Returns grade_pct if found, else None.
     """
     try:
-        lookup = _load_gradient_lookup()
-        if not lookup:
+        hit = _lookup_project_gradient(project_name, image_ref)
+        if not hit:
+            print(f"[Gradient] no profile entry for '{image_ref}' in project '{project_name}' — skipping", flush=True)
             return None
-        # Try exact match first, then strip project prefix, then suffix match
-        key = image_ref
-        if key not in lookup and project_name:
-            prefix = project_name + "_"
-            if key.startswith(prefix):
-                key = key[len(prefix):]
-        if key not in lookup:
-            # Last resort: find any CSV entry whose key is a suffix of image_ref
-            bare = image_ref.split("_", 1)[-1] if "_" in image_ref else image_ref
-            for k in lookup:
-                if image_ref.endswith(k) or k.endswith(bare):
-                    key = k
-                    break
-        if key not in lookup:
-            print(f"[Gradient] no entry for '{image_ref}' — skipping", flush=True)
-            return None
-        grade_coded, grade_pct = lookup[key]
-        print(f"[Gradient] {image_ref}: {grade_pct:+.2f}% → Grade {grade_coded}", flush=True)
+        grade_coded, grade_pct = hit
+        print(f"[Gradient] {image_ref}: {grade_pct:+.2f}% -> Grade {grade_coded}", flush=True)
         if grade_coded not in (1, 2):
             print(f"[Gradient] WARNING: unexpected Grade value {grade_coded!r} for {image_ref} — skipping")
             return None
         updates["Grade"] = grade_coded
         updates["Gradient %"] = round(grade_pct, 2)
         if sources is not None:
-            sources["Grade"] = "LAZ"
-            sources["Gradient %"] = "LAZ"
+            sources["Grade"] = "Gradient Profile"
+            sources["Gradient %"] = "Gradient Profile"
         return grade_pct
     except Exception as _e:
         print(f"[Gradient] WARNING: error injecting Grade for {image_ref}: {_e}")
@@ -551,6 +912,7 @@ def list_projects():
     for name in names:
         try:
             proj = pm.project(name)
+            source_folders = _get_project_source_folders(proj, pm)
             # Get total segment count from latest version's attributes
             ver = proj.latest()
             total_segments = 0
@@ -562,6 +924,8 @@ def list_projects():
             project_data = {
                 "name": name,
                 "tags": proj.metadata.tags or [],
+                "dataset": getattr(proj.metadata, 'dataset', None),
+                "source_folders": source_folders,
                 "verified": getattr(proj.metadata, 'verified', False),
                 "verified_segment_count": getattr(proj.metadata, 'verified_segment_count', 0),
                 "autocoded_segment_count": getattr(proj.metadata, 'autocoded_segment_count', 0),
@@ -584,6 +948,8 @@ def list_projects():
             projects.append({
                 "name": name,
                 "tags": [],
+                "dataset": None,
+                "source_folders": [],
                 "verified": False,
                 "verified_segment_count": 0,
                 "autocoded_segment_count": 0,
@@ -623,11 +989,6 @@ def delete_segments_batch(project_name):
     except Exception as e:
         traceback.print_exc()
         abort(500, description=f"Failed to delete segments: {e}")
-
-    # Return updated metadata
-    meta = project.metadata.to_dict() if project.metadata else {}
-    return jsonify(meta)
-
 
     # Return updated metadata
     meta = project.metadata.to_dict() if project.metadata else {}
@@ -737,6 +1098,7 @@ def copy_segments():
                 new_proj.metadata.created_by = "copy_segments"
                 new_proj.metadata.tags = tags
                 new_proj.metadata.dataset = source_proj.metadata.dataset # Inherit dataset type?
+                new_proj.metadata.source_folders = _get_project_source_folders(source_proj, pm)
                 new_proj.metadata.size = 0
                 
                 # Initialize empty tables
@@ -745,6 +1107,7 @@ def copy_segments():
                 
                 # Save just to register it
                 new_proj.save_all()
+                new_proj.metadata.serialize(new_proj.project_path)
                 pm.projects.append(new_proj)
                 target_proj = new_proj
             else:
@@ -813,9 +1176,12 @@ def get_project_metadata(project_name: str):
     return jsonify({
         "name": proj.metadata.project_name,
         "tags": proj.metadata.tags or [],
+        "dataset": getattr(proj.metadata, 'dataset', None),
+        "source_folders": _get_project_source_folders(proj, ctx["pm"]),
         "verified": getattr(proj.metadata, 'verified', False),
         "verified_segment_count": getattr(proj.metadata, 'verified_segment_count', 0),
         "autocoded_segment_count": getattr(proj.metadata, 'autocoded_segment_count', 0),
+        "path_key": getattr(proj.metadata, 'path_key', None),
         "date_created": proj.metadata.date_created.isoformat() if hasattr(proj.metadata, 'date_created') and proj.metadata.date_created else None,
         "last_updated": proj.metadata.last_updated.isoformat() if hasattr(proj.metadata, 'last_updated') and proj.metadata.last_updated else None
     })
@@ -1452,6 +1818,250 @@ def preview_treatments(project_name: str):
         return fail(f"Error previewing treatments: {str(e)}", 500)
 
 
+@bp.post("/<project_name>/treatments/effectiveness")
+def treatment_effectiveness(project_name: str):
+    """
+    Count, per treatment, how many segments in the project would have their
+    Overall Risk Level Band *improve* (band decreases) if that treatment
+    were applied in isolation. Used by the frontend to rank the
+    "By Treatment" list top-down by effectiveness.
+
+    Request body (optional):
+        { "treatment_ids": [1, 2, 3, ...] }   # defaults to all 25
+
+    Response:
+        {
+            "ok": true,
+            "total_segments": 412,
+            "counts": { "1": 180, "2": 0, "3": 45, ... }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        data = request.get_json(silent=True) or {}
+        requested_ids = data.get("treatment_ids")
+        if requested_ids is None:
+            requested_ids = [t["id"] for t in TREATMENTS]
+        if not isinstance(requested_ids, list):
+            return fail("treatment_ids must be a list", 400)
+
+        attrs_df = ver.attributes.df
+        n = len(attrs_df)
+        if n == 0:
+            return jsonify({"ok": True, "total_segments": 0, "counts": {str(tid): 0 for tid in requested_ids}})
+
+        # Baseline scoring once
+        before_df = calculate_cyclerap_score_native(attrs_df)
+        before_band = before_df["Overall Risk Level Band"].to_numpy()
+
+        treatment_map = {t["id"]: t for t in TREATMENTS}
+        counts: dict[str, int] = {}
+
+        for tid in requested_ids:
+            if tid not in treatment_map:
+                counts[str(tid)] = 0
+                continue
+            treatment = treatment_map[tid]
+
+            # Applicability mask (vectorized): OR of trigger sets, AND within a set
+            mask = pd.Series(False, index=attrs_df.index)
+            for trigger_set in treatment.get("triggers", []):
+                set_mask = pd.Series(True, index=attrs_df.index)
+                for attr_name, valid_values in trigger_set.items():
+                    if attr_name not in attrs_df.columns:
+                        set_mask = pd.Series(False, index=attrs_df.index)
+                        break
+                    set_mask &= attrs_df[attr_name].isin(valid_values)
+                mask |= set_mask
+
+            if not mask.any():
+                counts[str(tid)] = 0
+                continue
+
+            modified = attrs_df.copy()
+            for attr_name, new_value in treatment.get("effects", {}).items():
+                if attr_name in modified.columns:
+                    modified.loc[mask, attr_name] = new_value
+                else:
+                    modified[attr_name] = None
+                    modified.loc[mask, attr_name] = new_value
+
+            after_df = calculate_cyclerap_score_native(modified)
+            after_band = after_df["Overall Risk Level Band"].to_numpy()
+
+            improved = ((after_band < before_band) & mask.to_numpy()).sum()
+            counts[str(tid)] = int(improved)
+
+        return jsonify({
+            "ok": True,
+            "total_segments": int(n),
+            "counts": counts,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error computing treatment effectiveness: {str(e)}", 500)
+
+
+@bp.get("/<project_name>/treatments/effectiveness/segment/<int:segment_index>")
+def treatment_segment_effectiveness(project_name: str, segment_index: int):
+    """
+    For a single segment, compute the Overall Risk Level score drop for each
+    treatment applied in isolation. Used by the frontend to rank the
+    "By Segment" treatment list top-down by per-segment effectiveness.
+
+    Response:
+        {
+            "ok": true,
+            "score_drops": { "1": 4.2, "3": 0.0, ... }
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        attrs_df = ver.attributes.df
+        n = len(attrs_df)
+        if segment_index < 0 or segment_index >= n:
+            return fail(f"segment_index {segment_index} out of range [0, {n})", 400)
+
+        row_df = attrs_df.iloc[[segment_index]]
+        before_score = float(calculate_cyclerap_score_native(row_df)["Overall Risk Level"].iloc[0])
+
+        score_drops: dict[str, float] = {}
+        for treatment in TREATMENTS:
+            tid = treatment["id"]
+
+            applicable = True
+            for trigger_set in treatment.get("triggers", []):
+                set_ok = True
+                for attr_name, valid_values in trigger_set.items():
+                    if attr_name not in row_df.columns:
+                        set_ok = False
+                        break
+                    if row_df[attr_name].iloc[0] not in valid_values:
+                        set_ok = False
+                        break
+                if set_ok:
+                    break
+            else:
+                applicable = False
+
+            if not applicable:
+                score_drops[str(tid)] = 0.0
+                continue
+
+            modified = row_df.copy()
+            for attr_name, new_value in treatment.get("effects", {}).items():
+                if attr_name in modified.columns:
+                    modified[attr_name] = new_value
+                else:
+                    modified[attr_name] = new_value
+
+            after_score = float(calculate_cyclerap_score_native(modified)["Overall Risk Level"].iloc[0])
+            score_drops[str(tid)] = round(before_score - after_score, 4)
+
+        return jsonify({"ok": True, "score_drops": score_drops})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error computing segment treatment effectiveness: {str(e)}", 500)
+
+
+@bp.get("/<project_name>/treatments/all")
+def get_all_treatments(project_name: str):
+    """
+    Return treatment state for every segment in one call.
+
+    Reads treatment.csv once and returns which segments have treatments and
+    what modified attributes are stored.  Does NOT re-score — scores are
+    calculated lazily per segment on demand.
+
+    Response:
+        {
+            "ok": true,
+            "segments": {
+                "3":  { "has_treatments": true,  "treatments_applied": [1, 9], "modified_attributes": {...} },
+                "17": { "has_treatments": true,  "treatments_applied": [5],    "modified_attributes": {...} }
+            }
+        }
+    Only segments that actually have treatments are included.
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+
+        treatment_df = ver.treatment.df
+        attrs_df = ver.attributes.df
+
+        segments: dict = {}
+
+        if treatment_df is None or treatment_df.empty or "Treatments Applied" not in treatment_df.columns:
+            return jsonify({"ok": True, "segments": segments})
+
+        for idx, row in treatment_df.iterrows():
+            treatments_str = row.get("Treatments Applied", "")
+            if not treatments_str or pd.isna(treatments_str) or str(treatments_str).strip() == "":
+                continue
+
+            try:
+                treatment_ids = [int(x.strip()) for x in str(treatments_str).split(",") if x.strip()]
+            except ValueError:
+                continue
+
+            if not treatment_ids:
+                continue
+
+            modified_attributes: dict = {}
+            for col in attrs_df.columns:
+                if col in treatment_df.columns and col != "Treatments Applied":
+                    val = row.get(col)
+                    if pd.notna(val):
+                        try:
+                            modified_attributes[col] = val.item() if hasattr(val, 'item') else val
+                        except (ValueError, TypeError):
+                            modified_attributes[col] = None
+                    else:
+                        modified_attributes[col] = None
+
+            segments[str(idx)] = {
+                "has_treatments": True,
+                "treatments_applied": treatment_ids,
+                "modified_attributes": modified_attributes,
+            }
+
+        if segments:
+            # Vectorized calculation of after_scores for all segments with treatments
+            modified_rows = [v["modified_attributes"] for v in segments.values()]
+            idx_keys = list(segments.keys())
+            modified_df = pd.DataFrame(modified_rows)
+            after_scores_df = calculate_cyclerap_score_native(modified_df)
+            
+            for i, idx_str in enumerate(idx_keys):
+                after_scores = {
+                    "BB": float(after_scores_df["BB"].iloc[i].item() if hasattr(after_scores_df["BB"].iloc[i], 'item') else after_scores_df["BB"].iloc[i]),
+                    "BP": float(after_scores_df["BP"].iloc[i].item() if hasattr(after_scores_df["BP"].iloc[i], 'item') else after_scores_df["BP"].iloc[i]),
+                    "SB": float(after_scores_df["SB"].iloc[i].item() if hasattr(after_scores_df["SB"].iloc[i], 'item') else after_scores_df["SB"].iloc[i]),
+                    "VB": float(after_scores_df["VB"].iloc[i].item() if hasattr(after_scores_df["VB"].iloc[i], 'item') else after_scores_df["VB"].iloc[i]),
+                    "Overall Risk Level": float(after_scores_df["Overall Risk Level"].iloc[i].item() if hasattr(after_scores_df["Overall Risk Level"].iloc[i], 'item') else after_scores_df["Overall Risk Level"].iloc[i])
+                }
+                segments[idx_str]["after_scores"] = after_scores
+
+        return jsonify({"ok": True, "segments": segments})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error retrieving all treatments: {str(e)}", 500)
+
+
 @bp.get("/<project_name>/treatments/segment/<int:segment_index>")
 def get_segment_treatments(project_name: str, segment_index: int):
     """
@@ -1513,25 +2123,29 @@ def get_segment_treatments(project_name: str, segment_index: int):
         # Extract modified attributes from row
         modified_attributes = {}
         attrs_df = ver.attributes.df
+        original_row = dict(attrs_df.iloc[segment_index])
 
         for col in attrs_df.columns:
+            val_treatment = None
             if col in treatment_df.columns and col != "Treatments Applied":
-                val = row.get(col)
+                val_treatment = row.get(col)
+                
+            # If value in treatment_df is not null and not empty string, use it
+            if pd.notna(val_treatment) and str(val_treatment).strip() != "":
                 # Convert pandas types to Python native types for JSON serialization
-                if pd.notna(val):
-                    # Handle numpy/pandas numeric types
-                    try:
-                        if hasattr(val, 'item'):  # numpy/pandas scalar
-                            val = val.item()
-                        # Ensure we get a Python native type
-                        if isinstance(val, (int, float, bool)):
-                            modified_attributes[col] = val
-                        else:
-                            modified_attributes[col] = float(val)
-                    except (ValueError, TypeError):
-                        modified_attributes[col] = None
-                else:
-                    modified_attributes[col] = None
+                try:
+                    if hasattr(val_treatment, 'item'):  # numpy/pandas scalar
+                        val_treatment = val_treatment.item()
+                    # Ensure we get a Python native type
+                    if isinstance(val_treatment, (int, float, bool)):
+                        modified_attributes[col] = val_treatment
+                    else:
+                        modified_attributes[col] = float(val_treatment)
+                except (ValueError, TypeError):
+                    modified_attributes[col] = original_row.get(col)
+            else:
+                # Fallback to the original baseline attributes if this column was untouched
+                modified_attributes[col] = original_row.get(col)
 
         # Calculate after scores from modified attributes
         modified_df = pd.DataFrame([modified_attributes])
@@ -1595,10 +2209,16 @@ def apply_all_treatments(project_name: str):
         attrs_df = ver.attributes.df
         treatment_df = ver.treatment.df.copy()
 
+        # Ensure treatment dataframe has all attribute columns
+        for col in attrs_df.columns:
+            if col not in treatment_df.columns:
+                # Initialize column with None for all rows
+                treatment_df[col] = None  # Use None first for proper pandas handling
+
         # Ensure treatment dataframe has same number of rows as attributes dataframe
         if len(treatment_df) < len(attrs_df):
             # Expand treatment dataframe to match attributes size
-            new_rows = [{}] * (len(attrs_df) - len(treatment_df))
+            new_rows = [treatment_df.iloc[0].copy() if len(treatment_df) > 0 else {}] * (len(attrs_df) - len(treatment_df))
             treatment_df = pd.concat([treatment_df, pd.DataFrame(new_rows)], ignore_index=True)
 
         # Helper function to get applicable treatments for a segment
@@ -1621,12 +2241,6 @@ def apply_all_treatments(project_name: str):
                         applicable.append(treatment)
                         break  # Only need one trigger set to match
             return applicable
-
-        # Ensure treatment dataframe has all attribute columns
-        for col in attrs_df.columns:
-            if col not in treatment_df.columns:
-                # Initialize column with empty string for all rows
-                treatment_df[col] = None  # Use None first for proper pandas handling
 
         # Process each segment
         details = []
@@ -1721,6 +2335,149 @@ def apply_all_treatments(project_name: str):
         import traceback
         traceback.print_exc()
         return fail(f"Error applying all treatments: {str(e)}", 500)
+
+
+@bp.post("/<project_name>/treatments/apply-specific")
+def apply_specific_treatment(project_name: str):
+    """
+    Apply a specific treatment to all applicable segments within a project.
+
+    This endpoint analyzes each segment, checks if the given treatment_id is applicable,
+    and applies it if so.
+
+    Response:
+        {
+            "ok": true,
+            "total_segments": 50,
+            "segments_treated": 48,
+            "segments_skipped": 2,
+            "details": [ ... ]
+        }
+    """
+    try:
+        ctx = get_ctx()
+        proj: Project = ctx["pm"].project(project_name)
+        ver = proj.latest()
+        
+        data = request.get_json(silent=True) or {}
+        target_treatment_id = data.get("treatment_id")
+        if not target_treatment_id:
+            return fail("Missing treatment_id", 400)
+            
+        target_treatment = next((t for t in TREATMENTS if t["id"] == target_treatment_id), None)
+        if not target_treatment:
+            return fail(f"Invalid treatment_id: {target_treatment_id}", 400)
+
+        attrs_df = ver.attributes.df
+        treatment_df = ver.treatment.df.copy()
+
+        if len(treatment_df) < len(attrs_df):
+            new_rows = [{}] * (len(attrs_df) - len(treatment_df))
+            treatment_df = pd.concat([treatment_df, pd.DataFrame(new_rows)], ignore_index=True)
+
+        def is_treatment_applicable(attr_row, treatment):
+            for trigger_set in treatment.get("triggers", []):
+                all_match = True
+                for attr_name, required_values in trigger_set.items():
+                    if attr_name not in attr_row:
+                        all_match = False
+                        break
+                    if attr_row[attr_name] not in required_values:
+                        all_match = False
+                        break
+                if all_match:
+                    return True
+            return False
+
+        for col in attrs_df.columns:
+            if col not in treatment_df.columns:
+                treatment_df[col] = None
+
+        details = []
+        total_treated = 0
+
+        if "Treatments Applied" not in treatment_df.columns:
+            treatment_df.insert(0, "Treatments Applied", "")
+
+        for segment_index in range(len(attrs_df)):
+            try:
+                original_row = dict(attrs_df.iloc[segment_index])
+                
+                if not is_treatment_applicable(original_row, target_treatment):
+                    continue
+                
+                existing_treatments_str = treatment_df.at[segment_index, "Treatments Applied"]
+                existing_treatment_ids = []
+                if pd.notna(existing_treatments_str) and str(existing_treatments_str).strip():
+                    try:
+                        existing_treatment_ids = [int(x.strip()) for x in str(existing_treatments_str).split(",") if x.strip()]
+                    except ValueError:
+                        pass
+                
+                if target_treatment_id in existing_treatment_ids:
+                    continue # Already applied
+                
+                treatment_ids = existing_treatment_ids + [target_treatment_id]
+                
+                modified_row = original_row.copy()
+                for tid in treatment_ids:
+                    t_obj = next((t for t in TREATMENTS if t["id"] == tid), None)
+                    if t_obj:
+                        for attr_name, new_value in t_obj['effects'].items():
+                            modified_row[attr_name] = new_value
+
+                original_df = pd.DataFrame([original_row])
+                before_scores_df = calculate_cyclerap_score_native(original_df)
+                before_scores = {
+                    "BB": float(before_scores_df["BB"].iloc[0]),
+                    "BP": float(before_scores_df["BP"].iloc[0]),
+                    "SB": float(before_scores_df["SB"].iloc[0]),
+                    "VB": float(before_scores_df["VB"].iloc[0]),
+                    "Overall Risk Level": float(before_scores_df["Overall Risk Level"].iloc[0])
+                }
+
+                modified_df = pd.DataFrame([modified_row])
+                after_scores_df = calculate_cyclerap_score_native(modified_df)
+                after_scores = {
+                    "BB": float(after_scores_df["BB"].iloc[0]),
+                    "BP": float(after_scores_df["BP"].iloc[0]),
+                    "SB": float(after_scores_df["SB"].iloc[0]),
+                    "VB": float(after_scores_df["VB"].iloc[0]),
+                    "Overall Risk Level": float(after_scores_df["Overall Risk Level"].iloc[0])
+                }
+
+                for col in modified_row.keys():
+                    if col in treatment_df.columns:
+                        treatment_df.at[segment_index, col] = modified_row[col]
+
+                treatment_df.at[segment_index, "Treatments Applied"] = ",".join(str(tid) for tid in treatment_ids)
+
+                details.append({
+                    "segment_index": segment_index,
+                    "treatment_ids": treatment_ids,
+                    "before_scores": before_scores,
+                    "after_scores": after_scores
+                })
+
+                total_treated += 1
+
+            except Exception:
+                continue
+
+        ver.treatment.df = treatment_df
+
+        return jsonify({
+            "ok": True,
+            "total_segments": int(len(attrs_df)),
+            "segments_treated": int(total_treated),
+            "segments_skipped": int(len(attrs_df) - total_treated),
+            "details": details
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return fail(f"Error applying specific treatment: {str(e)}", 500)
 
 
 @bp.post("/<project_name>/treatments/reset-all")
@@ -1905,16 +2662,11 @@ def dms_to_decimal(dms, ref):
 
 def get_image_folder_geo(folder_path):
     records = []
-    base_path = Path(folder_path)
-    # Recursively find all jpg/jpeg files
-    for filepath in base_path.rglob("*"):
-        if not filepath.is_file() or not filepath.suffix.lower() in ('.jpg', '.jpeg'):
+    for fname in sorted(os.listdir(folder_path)):
+        if not fname.lower().endswith(('.jpg', '.jpeg')):
             continue
-            
-        # Record the relative path so we maintain directory structure when tracking images
-        rel_path = filepath.relative_to(base_path)
-        
-        with open(filepath, 'rb') as f:
+        img_path = os.path.join(folder_path, fname)
+        with open(img_path, 'rb') as f:
             tags = exifread.process_file(f, details=False)
 
         # Required GPS tags
@@ -1929,43 +2681,194 @@ def get_image_folder_geo(folder_path):
             records.append({
                 'latitude':  lat,
                 'longitude': lon,
-                'filename':  str(rel_path)  # Keep the relative path (e.g. folder/img.jpg)
+                'filename':  fname
             })
 
     df = pd.DataFrame(records)
-    # geometry column
     df['geometry'] = [Point(xy) for xy in zip(df.longitude, df.latitude)]
     return gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
 
-def get_All_Img_Folder(folder_path, filename_df, imagePath):
+
+def _build_project_geo_data_from_points(
+    geo_points: gpd.GeoDataFrame,
+    source_name: str,
+    selection_polygon: Polygon | None = None,
+):
+    df = geo_points.copy()
+    if df.empty:
+        raise ValueError(f"No geotagged images found in folder '{source_name}'")
+
+    if selection_polygon is not None:
+        df = df[df.geometry.apply(selection_polygon.covers)].reset_index(drop=True)
+        if df.empty:
+            return gpd.GeoDataFrame(columns=["LATITUDE", "LONGITUDE", "FILENAME", "geometry"], geometry="geometry", crs="EPSG:4326")
+
+    df = df.rename(columns={"latitude": "LATITUDE", "longitude": "LONGITUDE", "filename": "FILENAME"})
+    df = cycleRAP_VA.geoCode(df)
+    df = cycleRAP_VA.get_geo_points_by_distance(df, min_distance=10)
+    if "geometry" not in df.columns:
+        raise ValueError(f"Missing 'geometry' after geocoding for folder '{source_name}'")
+
+    gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+    return cycleRAP_VA.convert_points_to_linestrings(gdf)
+
+def copy_project_images(folder_path, filename_df, imagePath, filename_prefix=None):
     """
-    folder_path:      Source folder containing the .jpg files to copy
-    filename_df:      DataFrame containing a FILENAME column (with potential relative paths)
-    imagePath:        Destination path to save; will be created if not present
+    Copy images referenced by FILENAME into the project image folder.
+    When combining multiple source folders, prefix file names to avoid collisions.
     """
-    # 1. Validate source folder
     if not os.path.isdir(folder_path):
         raise FileNotFoundError(f"The folder at {folder_path} does not exist or is not a directory.")
-    
-    # 2. Ensure base destination folder exists
+
     os.makedirs(imagePath, exist_ok=True)
-    
-    # 3. Copy by names in the FILENAME column (which may include subdirectories)
-    for img_name in filename_df['FILENAME']:
+    result_df = filename_df.copy()
+
+    for idx, img_name in result_df['FILENAME'].items():
         src = os.path.join(folder_path, img_name)
-        dst = os.path.join(imagePath, img_name)
-        
-        # Make sure destination subdirectory exists before copying
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        
+        dst_name = img_name if not filename_prefix else f"{filename_prefix}__{img_name}"
+        dst = os.path.join(imagePath, dst_name)
+
         if os.path.isfile(src):
             shutil.copy2(src, dst)
+            result_df.at[idx, 'FILENAME'] = dst_name
         else:
-            # Similar to the Zip version: record missing files
-            pass
-    
-    # 4. Return the original DataFrame for downstream use
-    return filename_df
+            print(f"Image {img_name} not found in folder {folder_path}.")
+
+    return result_df
+
+def build_project_geo_data(src_dir: Path, selection_polygon: Polygon | None = None):
+    geo_points = get_image_folder_geo(str(src_dir))
+    return _build_project_geo_data_from_points(geo_points, src_dir.name, selection_polygon)
+
+def make_image_namespace(source_name: str) -> str:
+    namespace = "".join(ch if ch.isalnum() else "_" for ch in source_name).strip("_")
+    return namespace or "source"
+
+
+def _is_loopback_request() -> bool:
+    remote_addr = (request.remote_addr or "").strip()
+    if not remote_addr:
+        return False
+
+    try:
+        return ipaddress.ip_address(remote_addr).is_loopback
+    except ValueError:
+        return False
+
+
+def _clean_source_folder_name(raw_name) -> str | None:
+    if not isinstance(raw_name, str):
+        return None
+
+    clean_name = raw_name.strip()
+    if not clean_name or clean_name in {".", ".."}:
+        return None
+    if any(sep in clean_name for sep in ("/", "\\")):
+        return None
+
+    return clean_name
+
+
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _get_known_road_names() -> list[str]:
+    global _KNOWN_ROAD_NAMES
+    if _KNOWN_ROAD_NAMES is not None:
+        return _KNOWN_ROAD_NAMES
+
+    known_names: set[str] = set()
+    backend_root = Path(__file__).resolve().parents[3]
+
+    ref_csv_candidates = [
+        backend_root / "shapefiles" / "road_reference.csv",
+        backend_root / "app" / "shapefiles" / "road_reference.csv",
+    ]
+    ref_csv = next((candidate for candidate in ref_csv_candidates if candidate.exists()), None)
+
+    if ref_csv is not None:
+        import csv
+
+        try:
+            with open(ref_csv, newline="", encoding="utf-8-sig") as handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    name = str(row.get("road_name", "")).strip()
+                    if name:
+                        known_names.add(name)
+        except Exception as exc:
+            current_app.logger.warning("Failed to read road_reference.csv for folder suggestions: %s", exc)
+
+    try:
+        road_gdf = _get_road_sections_gdf()
+        road_name_col = next(
+            (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in road_gdf.columns),
+            None,
+        )
+        if road_name_col is not None:
+            for raw_name in road_gdf[road_name_col].dropna().astype(str):
+                name = raw_name.strip()
+                if name and any(ch.isalnum() for ch in name):
+                    known_names.add(name)
+    except Exception as exc:
+        current_app.logger.warning("Failed to read road shapefile for folder suggestions: %s", exc)
+
+    _KNOWN_ROAD_NAMES = sorted(known_names)
+    return _KNOWN_ROAD_NAMES
+
+
+def _build_flat_copy_name(source_file: Path, source_root: Path, destination_dir: Path) -> str:
+    relative_parts = source_file.relative_to(source_root).parts
+    base_name = relative_parts[-1]
+    if not (destination_dir / base_name).exists():
+        return base_name
+
+    prefix_parts = [part.strip().replace("/", "_").replace("\\", "_") for part in relative_parts[:-1] if part.strip()]
+    if prefix_parts:
+        candidate = "__".join(prefix_parts + [base_name])
+        if not (destination_dir / candidate).exists():
+            return candidate
+
+    stem = Path(base_name).stem
+    suffix = Path(base_name).suffix
+    safe_stem = "__".join(prefix_parts + [stem]) if prefix_parts else stem
+    counter = 2
+    while True:
+        candidate = f"{safe_stem}__{counter}{suffix}"
+        if not (destination_dir / candidate).exists():
+            return candidate
+        counter += 1
+
+
+def _iter_source_image_files(source_dir: Path) -> list[Path]:
+    if not source_dir.exists() or not source_dir.is_dir():
+        return []
+
+    return [
+        file_path
+        for file_path in sorted(source_dir.rglob("*"))
+        if file_path.is_file() and file_path.suffix.lower() in _IMAGE_EXTENSIONS
+    ]
+
+
+def _read_modified_datetime(image_path: Path) -> datetime.datetime | None:
+    try:
+        return datetime.datetime.fromtimestamp(image_path.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def _format_quarter_label(captured_at: datetime.datetime | None) -> str | None:
+    if captured_at is None:
+        return None
+
+    quarter = ((captured_at.month - 1) // 3) + 1
+    return f"{quarter}Q{captured_at.year}"
 
 @bp.get("/folders")
 def list_input_folders():
@@ -1985,68 +2888,640 @@ def list_input_folders():
     items.sort()
     return ok({"items": items})
 
+
+@bp.get("/folders/preview")
+def preview_input_folder():
+    """
+    Return a folder summary derived from image file modified timestamps.
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+
+    folder_name = _clean_source_folder_name(request.args.get("folder_name"))
+    if not folder_name:
+        return fail("folder_name is required", 400)
+
+    in_root = pm.in_path.resolve()
+    source_dir = (in_root / folder_name).resolve()
+    if not _path_is_within(source_dir, in_root):
+        return fail("Invalid folder_name", 400)
+    if not source_dir.exists() or not source_dir.is_dir():
+        return fail("Source folder not found", 404)
+
+    image_files = _iter_source_image_files(source_dir)
+    modified_dates = [
+        modified_at
+        for modified_at in (_read_modified_datetime(image_file) for image_file in image_files)
+        if modified_at is not None
+    ]
+
+    geotagged_image_count = 0
+    segment_count = 0
+    segment_error = None
+
+    try:
+        geo_points = get_image_folder_geo(str(source_dir))
+        geotagged_image_count = len(geo_points)
+        if geotagged_image_count > 0:
+            segment_count = len(_build_project_geo_data_from_points(geo_points, folder_name))
+    except Exception as exc:
+        segment_error = str(exc)
+
+    quarter_labels = sorted({
+        quarter_label
+        for quarter_label in (_format_quarter_label(modified_at) for modified_at in modified_dates)
+        if quarter_label is not None
+    })
+    survey_quarter = quarter_labels[0] if len(quarter_labels) == 1 else None
+
+    return ok({
+        "folder_name": folder_name,
+        "image_count": len(image_files),
+        "geotagged_image_count": geotagged_image_count,
+        "segment_count": segment_count,
+        "segment_error": segment_error,
+        "earliest_modified_at": min(modified_dates).isoformat() if modified_dates else None,
+        "latest_modified_at": max(modified_dates).isoformat() if modified_dates else None,
+        "survey_quarter": survey_quarter,
+        "survey_quarters": quarter_labels,
+    })
+
+
+@bp.get("/folders/image")
+def get_input_folder_image():
+    """
+    Return an image file under a source folder in /in for preview purposes.
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+
+    folder_name = _clean_source_folder_name(request.args.get("folder_name"))
+    relative_path = str(request.args.get("relative_path") or "").strip()
+    if not folder_name or not relative_path:
+        abort(400, description="folder_name and relative_path are required")
+
+    in_root = pm.in_path.resolve()
+    source_dir = (in_root / folder_name).resolve()
+    if not _path_is_within(source_dir, in_root):
+        abort(400, description="Invalid image path")
+    if not source_dir.exists() or not source_dir.is_dir():
+        abort(404, description="Source folder not found")
+
+    safe_path = safe_join(str(source_dir), relative_path)
+    if safe_path is None:
+        abort(400, description="Invalid image path")
+
+    file_path = Path(safe_path).resolve()
+    if not _path_is_within(file_path, source_dir):
+        abort(400, description="Invalid image path")
+    if not file_path.exists() or not file_path.is_file():
+        abort(404, description="Image not found")
+
+    resp = send_from_directory(str(source_dir), file_path.relative_to(source_dir).as_posix(), conditional=True)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@bp.get("/folders/suggestions")
+def list_input_folder_suggestions():
+    """
+    Return searchable destination folder suggestions for source imports.
+    Includes both existing input folders and known road names from reference data.
+    """
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    in_path: Path = pm.in_path
+
+    existing_folders = set()
+    if in_path.exists():
+        existing_folders = {
+            item.name
+            for item in in_path.iterdir()
+            if item.is_dir()
+        }
+    suggestion_names = existing_folders | set(_get_known_road_names())
+
+    items = [
+        {"name": name, "exists": name in existing_folders}
+        for name in suggestion_names
+    ]
+    items.sort(key=lambda item: (not item["exists"], item["name"].lower()))
+    return ok({"items": items})
+
+
+@bp.post("/folders/pick-local")
+def pick_local_source_folder():
+    """
+    Open a native folder picker on the same machine as the backend.
+    Local-only by design so deployed instances do not expose filesystem browsing.
+    """
+    if not _is_loopback_request():
+        return fail("Local folder browsing is only available from the same machine as the server", 403)
+
+    root = None
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected_path = filedialog.askdirectory(title="Select image folder to import")
+    except Exception as exc:
+        current_app.logger.exception("Failed to open local folder picker")
+        return fail(f"Local folder picker is unavailable in this environment: {exc}", 500)
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    if not selected_path:
+        return ok({"path": None, "suggested_folder_name": None})
+
+    return ok({
+        "path": selected_path,
+        "suggested_folder_name": Path(selected_path).name,
+    })
+
+
+@bp.post("/folders/copy-local")
+def copy_images_to_source_folder():
+    """
+    Copy image files from a local folder on the backend machine into a source folder under /in.
+    Local-only by design so deployed instances do not expose arbitrary filesystem reads.
+    """
+    if not _is_loopback_request():
+        return fail("Local folder copy is only available from the same machine as the server", 403)
+
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    data = request.get_json(silent=True) or {}
+
+    folder_name = _clean_source_folder_name(data.get("folder_name"))
+    if not folder_name:
+        return fail("Destination folder name is required", 400)
+
+    source_path = str(data.get("source_path") or "").strip()
+    if not source_path:
+        return fail("Source folder path is required", 400)
+
+    try:
+        source_dir = Path(source_path).expanduser().resolve()
+    except Exception:
+        return fail("Source folder path is invalid", 400)
+
+    if not source_dir.exists() or not source_dir.is_dir():
+        return fail("Source folder does not exist or is not a directory", 400)
+
+    in_root = pm.in_path.resolve()
+    destination_dir = (in_root / folder_name).resolve()
+    if not _path_is_within(destination_dir, in_root):
+        return fail("Invalid destination folder name", 400)
+
+    if source_dir == destination_dir or _path_is_within(source_dir, destination_dir) or _path_is_within(destination_dir, source_dir):
+        return fail("Source and destination folders must not overlap", 400)
+
+    image_files = _iter_source_image_files(source_dir)
+
+    if not image_files:
+        return fail("No image files were found in the selected folder", 400)
+
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    count = 0
+    errors: list[str] = []
+
+    for image_file in image_files:
+        try:
+            destination_name = _build_flat_copy_name(image_file, source_dir, destination_dir)
+            shutil.copy2(image_file, destination_dir / destination_name)
+            count += 1
+        except Exception as exc:
+            rel_path = image_file.relative_to(source_dir)
+            errors.append(f"Failed to copy {rel_path}: {exc}")
+
+    return ok({
+        "count": count,
+        "errors": errors,
+        "folder_name": folder_name,
+        "message": f"Copied {count} image(s) into folder '{folder_name}'",
+    })
+
+
+@bp.post("/roads-in-polygon")
+def roads_in_polygon():
+    """
+    Given a polygon (list of [lat, lon] vertices in WGS84), return the road
+    folders whose reference GPS points fall inside the polygon, or road sections,
+    or planning areas as fallback.
+
+    Body: { "polygon": [[lat1, lon1], [lat2, lon2], ...] }
+    Response: { "roads": [ { "name": "AMK AVE 1", "points": 24, "exists": true }, ... ], "fallback": false }
+    """
+    import csv
+    from shapely.geometry import Polygon as ShapelyPolygon, Point
+
+    data = request.get_json(silent=True) or {}
+    polygon_coords = data.get("polygon")
+    if not polygon_coords or len(polygon_coords) < 3:
+        return fail("polygon must have at least 3 vertices", 400)
+
+    # Build shapely polygon (lon, lat order for shapely)
+    try:
+        ring = [(pt[1], pt[0]) for pt in polygon_coords]  # swap to (lon, lat)
+        poly = ShapelyPolygon(ring)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+    except Exception as e:
+        return fail(f"Invalid polygon: {e}", 400)
+
+    # Check which folders already exist locally
+    ctx = get_ctx()
+    pm = ctx["pm"]
+    in_path: Path = pm.in_path
+    backend_root = Path(__file__).resolve().parents[3]
+
+    # Merged result: roads from shapefile with exists flag from CSV + folder check
+    all_road_names: dict[str, dict] = {}  # { "ROAD NAME": { "points": count, "exists": bool } }
+
+    # Attempt 1: Load reference CSV (EXIF points) to mark which roads have images
+    csv_roads = set()
+    ref_csv_candidates = [
+        backend_root / "shapefiles" / "road_reference.csv",
+        backend_root / "app" / "shapefiles" / "road_reference.csv",
+    ]
+    ref_csv = next((candidate for candidate in ref_csv_candidates if candidate.exists()), None)
+
+    if ref_csv is not None:
+        with open(ref_csv, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                pt = Point(float(row["lon"]), float(row["lat"]))
+                if poly.contains(pt):
+                    name = row["road_name"]
+                    csv_roads.add(name)
+                    if name not in all_road_names:
+                        all_road_names[name] = {"points": 0, "exists": False}
+                    all_road_names[name]["points"] += 1
+
+    # Mark which CSV roads have folders
+    for name in csv_roads:
+        exists = in_path.exists() and (in_path / name).is_dir()
+        all_road_names[name]["exists"] = exists
+
+    # Fallback 1: road sections shapefile (add roads not in CSV)
+    try:
+        import geopandas as gpd
+        
+        print(f"[DEBUG] Querying road sections shapefile...")
+
+        road_shp_candidates = [
+            backend_root / "shapefiles" / "planningareas" / "ROADSECTIONLINE.shp",
+            backend_root / "shapefiles" / "Road_name" / "ROADSECTIONLINE.shp",
+            backend_root / "shapefiles" / "Road_name" / "ROADNETWORKLINE.shp",
+        ]
+        
+        road_shp = next((candidate for candidate in road_shp_candidates if candidate.exists()), None)
+        print(f"[DEBUG] Found road shapefile: {road_shp}")
+        
+        if road_shp is not None:
+            print(f"[DEBUG] Reading {road_shp}...")
+            road_gdf = gpd.read_file(str(road_shp))
+            print(f"[DEBUG] Loaded {len(road_gdf)} road features, columns: {road_gdf.columns.tolist()}")
+            
+            if road_gdf.crs and road_gdf.crs.to_epsg() != 4326:
+                print(f"[DEBUG] Reprojecting from {road_gdf.crs.to_epsg()} to EPSG:4326...")
+                road_gdf = road_gdf.to_crs(epsg=4326)
+
+            intersecting_roads = road_gdf[road_gdf.geometry.intersects(poly)]
+            print(f"[DEBUG] Found {len(intersecting_roads)} intersecting road features")
+            
+            road_name_col = next(
+                (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in intersecting_roads.columns),
+                None,
+            )
+            print(f"[DEBUG] Using column '{road_name_col}' for road names")
+
+            if road_name_col is not None and not intersecting_roads.empty:
+                road_counts: dict[str, int] = {}
+                for raw_name in intersecting_roads[road_name_col].dropna().astype(str):
+                    name = raw_name.strip()
+                    if not name:
+                        continue
+                    if not any(ch.isalnum() for ch in name):
+                        continue
+                    road_counts[name] = road_counts.get(name, 0) + 1
+
+                print(f"[DEBUG] Extracted {len(road_counts)} unique road names from shapefile")
+                
+                # Merge shapefile roads into all_road_names
+                for name, count in road_counts.items():
+                    if name not in all_road_names:
+                        # Not in CSV; check if folder exists anyway
+                        exists = in_path.exists() and (in_path / name).is_dir()
+                        all_road_names[name] = {"points": count, "exists": exists}
+                    else:
+                        # Already in CSV; just add the point count
+                        all_road_names[name]["points"] += count
+                
+                print(f"[DEBUG] Total merged roads: {len(all_road_names)}")
+    except Exception as e:
+        print(f"[WARN] Road sections fallback failed: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # If we have any road data (CSV or shapefile), return it
+    if all_road_names:
+        roads = []
+        for name in sorted(all_road_names):
+            roads.append({
+                "name": name,
+                "points": all_road_names[name]["points"],
+                "exists": all_road_names[name]["exists"],
+            })
+        print(f"[DEBUG] Returning {len(roads)} merged roads (fallback=False)")
+        return ok({"roads": roads, "fallback": False})
+
+    # ── Fallback 2: planning areas shapefile (town names only as last resort) ──
+    try:
+        import geopandas as gpd
+        planning_dir = backend_root / "shapefiles" / "planningareas"
+
+        pa_shp = planning_dir / "G_MP25_PLNG_AREA_NO_SEA_PL.shp"
+        if not pa_shp.exists():
+            return ok({"roads": [], "fallback": False})
+
+        gdf = gpd.read_file(str(pa_shp))
+        # Reproject to WGS84 if needed
+        if gdf.crs and gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(epsg=4326)
+
+        intersecting = gdf[gdf.geometry.intersects(poly)]
+        # Try common field names for the area name
+        name_col = next(
+            (c for c in ("PLN_AREA_N", "REGION_N", "NAME", "SUBZONE_N", "PLANNING_A") if c in intersecting.columns),
+            intersecting.columns[0],
+        )
+        pa_roads = [
+            {"name": row[name_col].title(), "points": 0, "exists": False}
+            for _, row in intersecting.iterrows()
+        ]
+        pa_roads.sort(key=lambda r: r["name"])
+        return ok({"roads": pa_roads, "fallback": True})
+    except Exception as e:
+        return ok({"roads": [], "fallback": False})
+
+
+@bp.get("/roads-in-bounds")
+def roads_in_bounds():
+    """
+    Return road line segments for a visible map viewport.
+    Query params:
+      minLat, minLng, maxLat, maxLng (required)
+      limit (optional, default 2000)
+    """
+    try:
+        min_lat = float(request.args.get("minLat"))
+        min_lng = float(request.args.get("minLng"))
+        max_lat = float(request.args.get("maxLat"))
+        max_lng = float(request.args.get("maxLng"))
+        limit = int(request.args.get("limit", 2000))
+    except (TypeError, ValueError):
+        return fail("Invalid or missing bounds query params", 400)
+
+    limit = max(100, min(limit, 5000))
+
+    try:
+        gdf = _get_road_sections_gdf()
+        bbox_poly = box(min_lng, min_lat, max_lng, max_lat)
+
+        view = gdf[gdf.geometry.intersects(bbox_poly)].head(limit)
+        name_col = next(
+            (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in view.columns),
+            None,
+        )
+
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        in_path: Path = pm.in_path
+
+        roads = []
+        for _, row in view.iterrows():
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+
+            road_name = "Unknown Road"
+            if name_col is not None and row.get(name_col) is not None:
+                candidate = str(row.get(name_col)).strip()
+                if candidate:
+                    road_name = candidate
+
+            exists = in_path.exists() and (in_path / road_name).is_dir()
+
+            if geom.geom_type == "LineString":
+                coords = [[lat, lng] for lng, lat in list(geom.coords)]
+                roads.append({"name": road_name, "exists": exists, "coords": coords})
+            elif geom.geom_type == "MultiLineString":
+                for line in geom.geoms:
+                    coords = [[lat, lng] for lng, lat in list(line.coords)]
+                    roads.append({"name": road_name, "exists": exists, "coords": coords})
+
+        return ok({"roads": roads})
+    except Exception as e:
+        return fail(f"roads-in-bounds failed: {e}", 500)
+
+
+@bp.get("/planning-areas-in-bounds")
+def planning_areas_in_bounds():
+    """
+    Return planning-area polygon parts for a visible map viewport.
+    Query params:
+      minLat, minLng, maxLat, maxLng (required)
+      limit (optional, default 500)
+    """
+    try:
+        min_lat = float(request.args.get("minLat"))
+        min_lng = float(request.args.get("minLng"))
+        max_lat = float(request.args.get("maxLat"))
+        max_lng = float(request.args.get("maxLng"))
+        limit = int(request.args.get("limit", 500))
+    except (TypeError, ValueError):
+        return fail("Invalid or missing bounds query params", 400)
+
+    limit = max(25, min(limit, 1000))
+
+    try:
+        gdf = _get_planning_areas_gdf()
+        bbox_poly = box(min_lng, min_lat, max_lng, max_lat)
+        view = gdf[gdf.geometry.intersects(bbox_poly)].head(limit)
+
+        name_col = next(
+            (c for c in ("PLN_AREA_N", "PLANNING_A", "NAME", "SUBZONE_N") if c in view.columns),
+            None,
+        )
+        region_col = next((c for c in ("REGION_N", "REGION") if c in view.columns), None)
+
+        areas = []
+        for _, row in view.iterrows():
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+
+            area_name = "Unknown Planning Area"
+            if name_col is not None and row.get(name_col) is not None:
+                candidate = str(row.get(name_col)).strip()
+                if candidate:
+                    area_name = candidate.title()
+
+            region_name = None
+            if region_col is not None and row.get(region_col) is not None:
+                candidate = str(row.get(region_col)).strip()
+                if candidate:
+                    region_name = candidate.title()
+
+            geoms = [geom] if geom.geom_type == "Polygon" else list(geom.geoms) if geom.geom_type == "MultiPolygon" else []
+            for part_index, poly in enumerate(geoms):
+                exterior = poly.exterior
+                if exterior is None:
+                    continue
+                coords = [[lat, lng] for lng, lat in list(exterior.coords)]
+                if len(coords) < 4:
+                    continue
+                areas.append({
+                    "name": area_name,
+                    "region": region_name,
+                    "partIndex": part_index,
+                    "coords": coords,
+                })
+
+        return ok({"areas": areas})
+    except Exception as e:
+        return fail(f"planning-areas-in-bounds failed: {e}", 500)
+
+
 @bp.post("/folders")
 def create_project_from_folder():
     """
-    Create a new project based on an input directory (folder):
+    Create a new project from one or more input directories.
     Body: { "project_name": "My Project", "folder_name": "SomeFolder", "tags": ["tag1", "tag2"] }
+    or   { "project_name": "My Project", "folder_names": ["Road A", "Road B"], "tags": ["tag1", "tag2"] }
     """
     data = request.get_json(silent=True) or {}
     project_name = (data.get("project_name") or "").strip()
     folder_name = data.get("folder_name")
+    folder_names = data.get("folder_names")
+    polygon_coords = data.get("polygon")
     tags = data.get("tags", [])
 
     if not project_name:
         return fail("project_name is required", 400)
     if "_" in project_name:
         return fail("Project name cannot contain underscores (_)", 400)
-    if not folder_name:
-        return fail("folder_name is required", 400)
 
     # Validate tags is a list
     if not isinstance(tags, list):
         return fail("tags must be an array", 400)
+
+    if folder_names is None:
+        folder_names = [folder_name] if folder_name else []
+    elif not isinstance(folder_names, list):
+        return fail("folder_names must be an array", 400)
+
+    normalized_folder_names = []
+    seen_folder_names = set()
+    for raw_name in folder_names:
+        if not isinstance(raw_name, str):
+            return fail("folder_names must contain strings", 400)
+        clean_name = raw_name.strip()
+        if not clean_name or clean_name in seen_folder_names:
+            continue
+        normalized_folder_names.append(clean_name)
+        seen_folder_names.add(clean_name)
+
+    if not normalized_folder_names:
+        return fail("folder_name or folder_names is required", 400)
+
+    selection_polygon = None
+    if polygon_coords is not None:
+        if not isinstance(polygon_coords, list) or len(polygon_coords) < 3:
+            return fail("polygon must have at least 3 vertices", 400)
+        try:
+            ring = [(pt[1], pt[0]) for pt in polygon_coords]
+            selection_polygon = Polygon(ring)
+            if not selection_polygon.is_valid:
+                selection_polygon = selection_polygon.buffer(0)
+        except Exception as e:
+            return fail(f"Invalid polygon: {e}", 400)
 
     ctx = get_ctx()                 # ← Use your existing get_ctx()
     pm = ctx["pm"]
     in_path: Path = pm.in_path
     out_path: Path = pm.des_path
 
-    src_dir: Path = in_path / folder_name
-    if not src_dir.exists() or not src_dir.is_dir():
-        return fail("folder not found", 404)
-
     project_path = out_path / project_name
     if project_path.exists():
         return fail("Project already exists", 409)
 
-    # 1) Extract EXIF coordinates
-    df = get_image_folder_geo(str(src_dir))
-    df = df.rename(columns={"latitude": "LATITUDE", "longitude": "LONGITUDE", "filename": "FILENAME"})
+    src_dirs = []
+    missing_folders = []
+    for selected_folder_name in normalized_folder_names:
+        src_dir = in_path / selected_folder_name
+        if not src_dir.exists() or not src_dir.is_dir():
+            missing_folders.append(selected_folder_name)
+        else:
+            src_dirs.append((selected_folder_name, src_dir))
 
-    # 2) Geocoding + sampling
-    df = cycleRAP_VA.geoCode(df)
-    df = cycleRAP_VA.get_geo_points_by_distance(df, min_distance=10)
-    if "geometry" not in df.columns:
-        return fail("Missing 'geometry' after geocoding", 500)
+    if missing_folders:
+        return fail(f"folders not found: {', '.join(missing_folders)}", 404)
 
-    gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
-
-    # 3) Convert to LineString
-    extracted_geo_data = cycleRAP_VA.convert_points_to_linestrings(gdf)
-    
-    # 4) Initialize project directory structure (create locally)
     project_path.mkdir(parents=True, exist_ok=True)
-
-    # 5) Copy/link images into the project's images/ directory
     images_dir = project_path / global_var.PROJECT_IMAGES_FOLDER
     images_dir.mkdir(parents=True, exist_ok=True)
-    extracted_geo_data = get_All_Img_Folder(src_dir, extracted_geo_data, images_dir)
 
-    # 6) Register project
-    pm.create_project(project_name, extracted_geo_data, folder_name, tags=tags)
+    extracted_geo_data_parts = []
+    use_image_prefix = len(src_dirs) > 1
+    skipped_sources = []
 
-    return ok({"ok": True, "name": project_name})
+    try:
+        for selected_folder_name, src_dir in src_dirs:
+            extracted_geo_data = build_project_geo_data(src_dir, selection_polygon)
+            if extracted_geo_data.empty:
+                skipped_sources.append(selected_folder_name)
+                continue
+            filename_prefix = make_image_namespace(selected_folder_name) if use_image_prefix else None
+            extracted_geo_data = copy_project_images(src_dir, extracted_geo_data, images_dir, filename_prefix)
+            extracted_geo_data_parts.append(extracted_geo_data)
+    except Exception as e:
+        shutil.rmtree(project_path, ignore_errors=True)
+        return fail(str(e), 400)
+
+    if not extracted_geo_data_parts:
+        shutil.rmtree(project_path, ignore_errors=True)
+        return fail("No geotagged images found inside the selected polygon for the chosen roads", 400)
+
+    combined_geo_data = gpd.GeoDataFrame(
+        pd.concat(extracted_geo_data_parts, ignore_index=True),
+        geometry="geometry",
+        crs=extracted_geo_data_parts[0].crs,
+    )
+
+    dataset_name = normalized_folder_names[0] if len(normalized_folder_names) == 1 else "MULTI_FOLDER_SELECTION"
+    pm.create_project(
+        project_name,
+        combined_geo_data,
+        dataset_name,
+        tags=tags,
+        source_folders=normalized_folder_names,
+    )
+
+    return ok({
+        "ok": True,
+        "name": project_name,
+        "source_count": len(normalized_folder_names),
+        "skipped_sources": skipped_sources,
+    })
 
 @bp.post("/folders/upload-images")
 def upload_images_to_source_folder():
@@ -2143,9 +3618,9 @@ def delete_project(project_name: str):
 @bp.patch("/<project_name>")
 def update_project_metadata(project_name: str):
     """
-    Update project metadata (name, tags, verified status, and/or verified segment count):
+    Update project metadata (name, tags, path_key, verified status, and/or counters):
     PATCH /api/projects/<project_name>
-    Body: { "new_name": "...", "tags": [...], "verified": true/false, "verified_segment_count": 0 }
+    Body: { "new_name": "...", "tags": [...], "path_key": "...", "verified": true/false, "verified_segment_count": 0 }
     """
     ctx = get_ctx()
     pm = ctx["pm"]
@@ -2154,6 +3629,7 @@ def update_project_metadata(project_name: str):
         payload = request.get_json(force=True, silent=True) or {}
         new_name = payload.get("new_name")
         new_tags = payload.get("tags")
+        new_path_key = payload.get("path_key")
         new_verified = payload.get("verified")
         new_verified_segment_count = payload.get("verified_segment_count")
         new_autocoded_segment_count = payload.get("autocoded_segment_count")
@@ -2179,6 +3655,13 @@ def update_project_metadata(project_name: str):
             if not isinstance(new_tags, list):
                 return fail("Tags must be an array", 400)
             proj.metadata.tags = new_tags
+            metadata_updated = True
+
+        # Update path_key override if provided. Empty string clears the override.
+        if new_path_key is not None:
+            if not isinstance(new_path_key, str):
+                return fail("path_key must be a string", 400)
+            proj.metadata.path_key = new_path_key.strip() or None
             metadata_updated = True
 
         # Update verified status if provided
@@ -2329,11 +3812,12 @@ def autocode_image(project_name: str):
         if not img_path.exists():
             return fail(f"image not found: {img_path.name}", 404)
 
-        print(f"[Autocode] CV inference: {image_ref}", flush=True)
+        skip_obstacles = bool(payload.get("skipObstacles", False))
+        print(f"[Autocode] CV inference: {image_ref} (skip_obstacles={skip_obstacles})", flush=True)
         global _INFERENCE_DEPTH
         _INFERENCE_DEPTH += 1
         try:
-            updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path) or {}
+            updates = cv_pred.CycleRAP_Coding_Helper.autocode(img_path, skip_obstacles=skip_obstacles) or {}
         finally:
             _INFERENCE_DEPTH -= 1
         updates = {k: v for k, v in updates.items() if v is not None}
@@ -2370,75 +3854,154 @@ def autocode_gis(project_name: str):
         from shapely.geometry import Point
         pt = Point(start_lon, start_lat)
 
+        # Optional field filter: when provided (bulk per-attribute mode), skip GIS queries
+        # whose output field is not in the set. None means run everything (full autocode,
+        # single-segment manual button from the frontend).
+        fields_filter = payload.get("fields")
+        if fields_filter and not isinstance(fields_filter, list):
+            fields_filter = None
+        _needs = lambda *flds: not fields_filter or any(f in fields_filter for f in flds)
+
         _gis = _get_gis()
 
         updates: dict[str, int | float] = {}
 
         # Rules
-        if _gis.is_mrt(pt):
+        if _needs("Peak pedestrian flow along or across facility") and _gis.is_mrt(pt):
             updates["Peak pedestrian flow along or across facility"] = 3
-        if _gis.is_bus_lane(pt):
+        if _needs("Heavy vehicle flow") and _gis.is_bus_lane(pt):
             updates["Heavy vehicle flow"] = 2
-        if _gis.is_parking(pt):
+        if _needs("Adjacent Vehicle Parking 0-1m") and _gis.is_parking(pt):
             updates["Adjacent Vehicle Parking 0-1m"] = 1
-        if _gis.is_bus_stop(pt):
+        if _needs("Peak pedestrian flow along or across facility") and _gis.is_bus_stop(pt):
             # overrides 3 → 2
             updates["Peak pedestrian flow along or across facility"] = 2
 
         # Pedestrian Crossing Detection
         # Set to Present (1) if within 5m of bus stop OR road crossing
-        if _gis.is_bus_stop(pt, dist=5) or _gis.is_road_crossing(pt, dist=5):
+        if _needs("Pedestrian Crossing") and (
+            _gis.is_bus_stop(pt, dist=10)
+            or _gis.is_road_crossing(pt, dist=10)
+            or _gis.is_mrt(pt, dist=10)
+        ):
             updates["Pedestrian Crossing"] = 1  # 1 = Present
 
-        area = _gis.get_area_type(pt)
-        updates["Area type"] = int(area)
+        # Bicycle Crossing Facility Detection
+        # Set Crossing Facility = Present (1) and Crossing Type = "Bicycle Crossing"
+        # if within 2m of a known bicycle crossing point (AMG_BC2025_shp)
+        if _needs("Crossing Facility", "Crossing Type") and _gis.is_bicycle_crossing(pt, dist=2):
+            updates["Crossing Facility"] = 1          # 1 = Present
+            updates["Crossing Type"] = "Bicycle Crossing"
 
-        updates["Road AADT"] = 6000
+        # Intersecting Bicycle Facility Detection
+        # Present (1) if within 5m of a road crossing; Not Present (2) otherwise.
+        # CV will override to Not Present (2) if a dominant traffic/zebra crossing mask is detected.
+        if _needs("Intersecting Bicycle Facility"):
+            if _gis.is_road_crossing(pt, dist=5):
+                updates["Intersecting Bicycle Facility"] = 1  # 1 = Present
+            else:
+                updates["Intersecting Bicycle Facility"] = 2  # 2 = Not Present
 
-        res = _gis.get_peak_pedestrian_flow(pt, dist=10)
-        bpks = (res or {}).get("before_peaks")
-        spks = (res or {}).get("sensor_peaks")
+        if _needs("Area type"):
+            area = _gis.get_area_type(pt)
+            updates["Area type"] = int(area)
 
-        def apply_peak(peaks):
-            if not peaks:
-                return
-            if int(peaks.get("MICROMOBILITY", 0)) > 50:
-                updates["Peak bicycle/LV traffic flow"] = 2
-            if int(peaks.get("OTHER", 0)) > 50:
-                updates["Peak pedestrian flow along or across facility"] = 3
+        if _needs("Road AADT"):
+            updates["Road AADT"] = 6000
 
-        if spks:
-            apply_peak(spks)
-        elif bpks:
-            apply_peak(bpks)
+        if _needs("Peak bicycle/LV traffic flow", "Peak pedestrian flow along or across facility"):
+            res = _gis.get_peak_pedestrian_flow(pt, dist=10)
+            bpks = (res or {}).get("before_peaks")
+            spks = (res or {}).get("sensor_peaks")
+
+            def apply_peak(peaks):
+                if not peaks:
+                    return
+                if int(peaks.get("MICROMOBILITY", 0)) > 50:
+                    updates["Peak bicycle/LV traffic flow"] = 2
+                if int(peaks.get("OTHER", 0)) > 50:
+                    updates["Peak pedestrian flow along or across facility"] = 3
+
+            if spks:
+                apply_peak(spks)
+            elif bpks:
+                apply_peak(bpks)
 
         # Added for Road Operating Speed (mean)
         # Calculate road operating speed based on nearest road link
-        road_speed = _gis.get_road_operating_speed(pt, buffer_dist=20, max_dist=30, default_speed=30.0)
-        updates["Road operating speed (mean)"] = road_speed
+        if _needs("Road operating speed (mean)"):
+            road_speed = _gis.get_road_operating_speed(pt, buffer_dist=20, max_dist=30, default_speed=30.0)
+            updates["Road operating speed (mean)"] = road_speed
 
         # Added for Road Speed Limit
         # Calculate road speed limit based on nearest speed limit segment
-        speed_limit = _gis.get_road_speed_limit(pt, buffer_dist=20, max_dist=30, default_limit=10)
-        updates["Road speed limit"] = speed_limit
+        if _needs("Road speed limit"):
+            speed_limit = _gis.get_road_speed_limit(pt, buffer_dist=20, max_dist=30, default_limit=10)
+            updates["Road speed limit"] = speed_limit
 
         # Added for Heavy Vehicle Flow
         # Calculate heavy vehicle flow based on proximity to bus lanes
-        heavy_vehicle_flow = _gis.get_heavy_vehicle_flow(pt, buffer_dist=15, max_dist=15, default_value=1)
-        updates["Heavy vehicle flow"] = heavy_vehicle_flow
+        if _needs("Heavy vehicle flow"):
+            heavy_vehicle_flow = _gis.get_heavy_vehicle_flow(pt, buffer_dist=15, max_dist=15, default_value=1)
+            updates["Heavy vehicle flow"] = heavy_vehicle_flow
 
         # Added for Curvature
         # Calculate curvature using actual path centerline shapefiles
         # Uses two-stage process from original PathAssignmentTool:
         #   Stage 1: Expanding ring (1m→5m) to find nearest path
         #   Stage 2: Fixed 5m window to calculate curvature from that path
-        curvature = _gis.get_curvature(pt, sharp_turn_threshold=10.0, default_value=2)
-        updates["Curvature"] = curvature
+        if _needs("Curvature", "Curvature Sub-category"):
+            curvature, curvature_subcat = _gis.get_curvature(pt, sharp_turn_threshold=10.0, default_value=2)
+            updates["Curvature"] = curvature
+            if curvature_subcat is not None:
+                updates["Curvature Sub-category"] = curvature_subcat
 
         # Added for Facility Width per Direction
         # Calculate facility width using expanding ring search on path centerline shapefiles
-        facility_width = _gis.get_facility_width(pt, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2)
-        updates["Facility Width per Direction"] = facility_width
+        if _needs("Facility Width per Direction", "Facility Width Sub-category"):
+            facility_width, width_subcat = _gis.get_facility_width(pt, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2)
+            updates["Facility Width per Direction"] = facility_width
+            if width_subcat is not None:
+                updates["Facility Width Sub-category"] = width_subcat
+
+        # Added for Number of lanes – adjacent road
+        # Look up the LANES attribute from the nearest kerb line within 20 m
+        if _needs("Number of lanes – adjacent road"):
+            nol = _gis.get_number_of_lane(pt, dist=20)
+            if nol is not None:
+                updates["Number of lanes – adjacent road"] = nol
+
+        # Defect-based surface condition checks
+        _DEFORM = "Major Surface Deformation or Drain Opening"
+        _SLIP = "Loose or slippery surface"
+        if _needs(_DEFORM, _SLIP):
+            try:
+                from shapely.geometry import LineString as _LineString
+                import geopandas as _gpd
+                from app.services.defects_store import get_defects_store
+                line_raw = _LineString(coords)
+                # Auto-detect CRS: EPSG:3414 easting > 180; WGS84 lon ≈ 103–104
+                if coords[0][0] < 180:
+                    line_metric = _gpd.GeoSeries([line_raw], crs="EPSG:4326").to_crs("EPSG:3414").iloc[0]
+                else:
+                    line_metric = line_raw
+                nearby = get_defects_store().query_near_line(line_metric, 5.0)
+                has_deform = False
+                has_slip = False
+                for d in nearby:
+                    dt = d["type_of_defect"].strip().lower()
+                    if dt == "algae":
+                        has_slip = True
+                    elif dt != "faded marking":
+                        has_deform = True
+                if has_deform and _needs(_DEFORM):
+                    updates[_DEFORM] = 1
+                if has_slip and _needs(_SLIP):
+                    updates[_SLIP] = 1
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
 
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
@@ -2686,7 +4249,8 @@ def get_gis_layers(project_name: str):
             "bus_stop": ["bus_stop", "bus_shelter"], # Try both
             "bus_lane": "bus_lane",
             "parking_lot": "parking",
-            "kerb_line": "kerb_line"
+            "kerb_line": "kerb_line",
+            "bicycle_crossing": "bicycle_crossing"
         }
 
         result_layers = {}
@@ -2704,73 +4268,46 @@ def get_gis_layers(project_name: str):
                 try:
                     gdf = _gis.store.get(layer_name)
                     if gdf is None or gdf.empty:
+                        print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': empty or None — skipped")
                         continue
 
-                    # Ensure metric CRS (EPSG:3414)
-                    try:
-                        # For transit/infrastructure layers, if CRS is missing or suspicious, force SVY21
-                        needs_svy21 = (gdf.crs is None) or (layer_key in ["bus_stop", "mrt_exit", "parking_lot", "kerb_line"])
-                        
-                        if gdf.crs is None:
-                            gdf.set_crs("EPSG:3414", inplace=True)
-                            print(f"[GIS] Assigned EPSG:3414 to naive layer: {layer_name}")
-                        
-                        epsg = getattr(gdf.crs, "to_epsg", lambda: None)()
-                        if epsg != 3414:
-                            gdf = gdf.to_crs("EPSG:3414")
-                    except Exception as crs_err:
-                        print(f"Warning: CRS assignment/transform failed for {layer_name}: {crs_err}")
-
-                    # Remove Z-coordinates if present
-                    # Remove Z-coordinates if present
-                    if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
-                        try:
-                            gdf.geometry = gdf.geometry.apply(
-                                lambda geom: gis.GIS._remove_z_coordinate(geom) if geom is not None else None
-                            )
-                        except Exception as z_err:
-                            print(f"[GIS] Z-coord removal failed for {layer_name}: {z_err}")
-                            import traceback
-                            traceback.print_exc()
-
-                    # Filter to valid geometries
-                    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
-
-                    if gdf.empty:
-                        continue
-
-                    # Spatial query using index
+                    # Spatial query using the CACHED sindex (fast, read-only)
                     candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
 
                     if not candidate_indices:
+                        print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': 0 candidates in spatial index (total features: {len(gdf)})")
                         continue
 
                     candidates = gdf.iloc[candidate_indices]
-
-                    # Filter to features that actually intersect the buffer
-                    intersecting = candidates[candidates.intersects(buffer_geom)]
+                    intersecting = candidates[candidates.geometry.notna() & candidates.intersects(buffer_geom)]
 
                     print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': {len(intersecting)} intersecting features found (candidates: {len(candidates)})")
 
                     if intersecting.empty:
                         continue
 
-                    # Convert to WGS84 for frontend
-                    intersecting_wgs84 = intersecting.to_crs("EPSG:4326")
+                    # Copy only the small result set, then convert to WGS84
+                    intersecting_wgs84 = intersecting.copy().to_crs("EPSG:4326")
 
                     for _, feature in intersecting_wgs84.iterrows():
                         geom = feature.geometry
                         if geom is None or geom.is_empty:
                             continue
 
-                        # Extract properties first to avoid NameError
+                        # Strip Z if present (on single geometry, negligible cost)
+                        if geom.has_z:
+                            try:
+                                geom = gis.GIS._remove_z_coordinate(geom)
+                            except Exception:
+                                pass
+
+                        # Extract properties
                         props = {}
                         if "WIDTH" in feature.index:
                             width_val = feature["WIDTH"]
                             if width_val is not None and not (isinstance(width_val, float) and math.isnan(width_val)):
                                 props["width"] = float(width_val)
                         
-                        # Add other relevant properties if needed (name, etc.)
                         for col in feature.index:
                             if col not in ["geometry", "WIDTH"]:
                                 val = feature[col]
@@ -2785,7 +4322,6 @@ def get_gis_layers(project_name: str):
                             coords = [[float(x), float(y)] for x, y in geom.coords]
                             geom_output_type = "line"
                         elif geom.geom_type == "MultiLineString":
-                            # Leaflet can handle nested arrays or we can unroll
                             for line in geom.geoms:
                                 all_features.append({
                                     "coordinates": [[float(x), float(y)] for x, y in line.coords],
@@ -2833,6 +4369,9 @@ def get_gis_layers(project_name: str):
             result_layers[layer_key] = all_features
 
         # Build response
+        layer_summary = {k: len(v) for k, v in result_layers.items()}
+        print(f"[GIS] Response: {layer_summary}")
+
         response = {
             "ok": True,
             "point": {"lon": lon, "lat": lat},
@@ -2922,6 +4461,7 @@ def autocode_all(project_name: str):
     """
     try:
         payload = request.get_json(force=True, silent=True) or {}
+        want_stream: bool = bool(payload.get("stream", False))
 
         # ---------- detect mode ----------
         run_all: bool = bool(payload.get("all"))
@@ -2989,19 +4529,46 @@ def autocode_all(project_name: str):
                     return [list(c) for c in list(geom.coords)]
             return None
 
-        def _call_autocode_pair(image_ref: str, coords):
+        # Fields produced EXCLUSIVELY by GIS (autocode_gis). CV never produces these.
+        # Safe to skip CV inference when ALL requested fields are in this set.
+        # NOTE: "Peak pedestrian flow along or across facility" is intentionally EXCLUDED —
+        # GIS conditionally overrides CV for that field; if GIS doesn't fire (not near MRT/bus
+        # stop), the CV-computed default is the correct final value, so CV must still run.
+        _GIS_ONLY_FIELDS: frozenset = frozenset({
+            "Area type",
+            "Road AADT",
+            "Road operating speed (mean)",
+            "Road speed limit",
+            "Curvature",
+            "Curvature Sub-category",
+            "Facility Width per Direction",
+            "Facility Width Sub-category",
+            "Heavy vehicle flow",
+            "Adjacent Vehicle Parking 0-1m",
+            "Pedestrian Crossing",
+            "Peak bicycle/LV traffic flow",
+            "Grade",  # from LAZ gradient lookup, not from CV
+            "Number of lanes – adjacent road",  # from kerb_line shapefile LANES column
+        })
+
+        def _call_autocode_pair(image_ref: str, coords, skip_cv: bool = False, skip_gis: bool = False, skip_obstacles: bool = False, fields_filter: "list | None" = None):
             """
-            Call both CV and GIS autocoding for a single image and merge results.
+            Call CV and/or GIS autocoding for a single image and merge results.
 
             This function orchestrates the complete auto-coding process:
-            1. Calls autocode_image (CV model) to analyze the photo
-            2. Calls autocode_gis (GIS rules) to analyze the location
+            1. Calls autocode_image (CV model) to analyze the photo   [skippable]
+            2. Calls autocode_gis (GIS rules) to analyze the location [skippable]
             3. Merges updates (GIS overrides CV if both set the same field)
             4. Tracks the source (CV or GIS) for each updated field
 
             Args:
                 image_ref: Image filename (e.g., "ProjectName_IMG_001.jpg")
                 coords: LineString coordinates as [[lon, lat], ...] for GIS analysis
+                skip_cv: If True, skip CV inference entirely (safe when all requested
+                         fields are in _GIS_ONLY_FIELDS — CV never produces them)
+                skip_gis: If True, skip GIS queries entirely
+                skip_obstacles: If True, skip the obstacle detector model (second YOLO
+                         pass) — safe when no obstacle-related fields are requested
 
             Returns:
                 tuple: (merged_updates, sources, error)
@@ -3009,27 +4576,34 @@ def autocode_all(project_name: str):
                     - sources: dict of {field_name: "CV" or "GIS"}
                     - error: None if success, error message string if failed
             """
-            # Call CV auto-coding endpoint
-            with current_app.test_request_context(method="POST", json={"imageRef": image_ref}):
-                img_resp, img_code = autocode_image(project_name)
-            if img_code >= 400:
-                return None, None, img_resp.get_json().get("error", f"/image {img_code}")
+            img_updates: dict = {}
+            if not skip_cv:
+                # Call CV auto-coding endpoint
+                with current_app.test_request_context(method="POST", json={"imageRef": image_ref, "skipObstacles": skip_obstacles}):
+                    img_resp, img_code = autocode_image(project_name)
+                if img_code >= 400:
+                    return None, None, img_resp.get_json().get("error", f"/image {img_code}")
+                img_updates = (img_resp.get_json() or {}).get("updates", {})
 
-            # Call GIS auto-coding endpoint
-            with current_app.test_request_context(method="POST", json={"coords": coords}):
-                gis_resp, gis_code = autocode_gis(project_name)
-            if gis_code >= 400:
-                return None, None, gis_resp.get_json().get("error", f"/gis {gis_code}")
-
-            img_data = img_resp.get_json() or {}
-            gis_data = gis_resp.get_json() or {}
-
-            img_updates = img_data.get("updates", {})
-            gis_updates = gis_data.get("updates", {})
+            gis_updates: dict = {}
+            if not skip_gis:
+                # Call GIS auto-coding endpoint
+                with current_app.test_request_context(method="POST", json={"coords": coords, "fields": fields_filter}):
+                    gis_resp, gis_code = autocode_gis(project_name)
+                if gis_code >= 400:
+                    return None, None, gis_resp.get_json().get("error", f"/gis {gis_code}")
+                gis_updates = (gis_resp.get_json() or {}).get("updates", {})
 
             # Merge updates: GIS overrides CV if both set the same field
             # Example: If CV sets "Area type"=2 and GIS sets "Area type"=1, final value is 1
             merged = {**img_updates, **gis_updates}
+
+            # Special case: "Crossing Type" — append GIS value to CV value instead of override
+            # e.g. CV="Traffic Crossing" + GIS="Bicycle Crossing" → "Traffic Crossing, Bicycle Crossing"
+            if "Crossing Type" in img_updates and "Crossing Type" in gis_updates:
+                cv_type = img_updates["Crossing Type"]   # may be None
+                gis_type = gis_updates["Crossing Type"]
+                merged["Crossing Type"] = f"{cv_type}, {gis_type}" if cv_type else gis_type
 
             # Track which fields came from CV vs GIS for UI highlighting badges
             sources = {}
@@ -3037,6 +4611,15 @@ def autocode_all(project_name: str):
                 sources[field] = "CV"
             for field in gis_updates:
                 sources[field] = "GIS"  # GIS overrides CV source if both set the same field
+
+            # Special case: "Intersecting Bicycle Facility" — CV wins over GIS only when CV
+            # explicitly detected a dominant traffic/zebra crossing (value is not None).
+            # GIS says Present when a road crossing is within 5 m, but if CV saw a pedestrian
+            # crossing dominating the image it overrides to Not Present.
+            ibf_key = "Intersecting Bicycle Facility"
+            if img_updates.get(ibf_key) is not None and ibf_key in gis_updates:
+                merged[ibf_key] = img_updates[ibf_key]
+                sources[ibf_key] = "CV"
 
             return merged, sources, None
 
@@ -3095,122 +4678,231 @@ def autocode_all(project_name: str):
         # Payload options:
         #   - { all: true, save?: false }              -> Process all rows
         #   - { indices: [0,2,5], save?: false }       -> Process specific rows
+        #   - { ..., stream: true }                    -> SSE streaming (yields progress per row)
 
         # Determine which rows to process
         if not indices:
-            # Process all rows in the project
             indices = list(range(len(ver.attributes.df)))
         else:
-            # Sanitize provided indices (remove invalid values)
             indices = [i for i in indices if isinstance(i, int) and 0 <= i < len(ver.attributes.df)]
 
         # Check if we should save to disk (default: True, but UI passes False for temp changes)
         save = bool(payload.get("save", True))
 
-        # Tracking variables
-        errors = []           # List of {index, reason} for failed rows
-        ok_count = 0          # Number of successfully processed rows
-        changed_by_row = {}   # {row_index: [field_names]} - which fields changed per row
-        sources_by_row = {}   # {row_index: {field_name: "CV"|"GIS"}} - source per field per row
+        # Optional field filter: only apply updates for these specific field names
+        fields_filter = payload.get("fields")  # list[str] | None
+        if fields_filter and not isinstance(fields_filter, list):
+            fields_filter = None  # Ignore malformed value
 
-        # Pre-compute images directory path for performance
-        images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
+        # Determine whether CV inference can be skipped for this batch.
+        # CV is safe to skip only when ALL requested fields are exclusively
+        # produced by GIS (never by CV). This avoids running expensive YOLO
+        # inference when the user selects e.g. only "Area type" or "Curvature".
+        skip_cv = bool(fields_filter and all(f in _GIS_ONLY_FIELDS for f in fields_filter))
+        if skip_cv:
+            print(f"[Autocode] Skipping CV inference — all requested fields are GIS-only: {fields_filter}", flush=True)
 
-        # Process each row
-        # Hold _INFERENCE_DEPTH for the entire bulk loop so PATCH handlers
-        # short-circuit instead of competing for the GIL between images.
-        global _INFERENCE_DEPTH
-        _INFERENCE_DEPTH += 1
-        total = len(indices)
-        print(f"[Autocode] Bulk starting: {total} rows for project '{project_name}'", flush=True)
-        try:
-          for idx in indices:
-            try:
-                # Resolve image filename and coordinates for this row
-                image_ref = _resolve_image_ref(idx)
-                coords = _resolve_coords(idx)
-
-                # Validate we have the required data
-                if not image_ref:
-                    # Provide detailed error message for debugging
-                    geo_row = proj.geo_data.df.iloc[idx] if idx < len(proj.geo_data.df) else None
-                    if geo_row is not None:
-                        img_col = "Image Reference"
-                        img_val = geo_row.get(img_col) if img_col in geo_row else None
-                        errors.append({"index": idx, "reason": f"missing or invalid imageRef (geo_data['{img_col}'] = {repr(img_val)})"})
-                    else:
-                        errors.append({"index": idx, "reason": "missing imageRef (row not in geo_data)"})
-                    continue
-
-                if not coords:
-                    errors.append({"index": idx, "reason": "missing LineString coords"})
-                    continue
-
-                # Run CV + GIS autocoding for this row
-                merged, sources, err = _call_autocode_pair(image_ref, coords)
-                if err:
-                    errors.append({"index": idx, "reason": err})
-                    continue
-
-                # Inject Grade from pre-computed LAZ gradient lookup
-                _inject_grade(image_ref, merged, sources, project_name=project_name)
-
-                # Track which fields actually changed (for UI highlighting)
-                changed_fields = []  # List of field names that changed
-                field_sources = {}   # {field_name: "CV"|"GIS"} for changed fields
-
-                for field, code in (merged or {}).items():
-                    # Get the old value before autocoding
-                    old_val = ver.attributes.df.at[idx, field] if field in ver.attributes.df.columns else None
-
-                    # Only track as "changed" if value actually differs
-                    if old_val != code:
-                        changed_fields.append(field)
-                        field_sources[field] = sources.get(field, "Unknown")
-
-                    # Update the DataFrame with new value
-                    ver.attributes.df.at[idx, field] = code
-
-                # Store tracking info for this row
-                changed_by_row[idx] = changed_fields
-                sources_by_row[idx] = field_sources
-                ok_count += 1
-
-                # Progress every 10 rows
-                if ok_count % 10 == 0:
-                    print(f"[Autocode] Bulk progress: {ok_count}/{total} done ({len(errors)} errors so far)", flush=True)
-
-            except Exception as e:
-                # Catch and log any unexpected errors
-                traceback.print_exc()
-                errors.append({"index": idx, "reason": str(e)})
-        finally:
-          _INFERENCE_DEPTH -= 1
-
-        # Save to disk only if requested and at least one row succeeded
-        # Note: UI typically passes save=False to keep changes temporary until user clicks Save
-        if save and ok_count > 0:
-            print(f"[Autocode] Bulk complete: {ok_count}/{total} OK, {len(errors)} failed. Saving...", flush=True)
-            ver.save_all()
-
-            # Update last_updated
-            proj.metadata.last_updated = datetime.datetime.now()
-            proj.metadata.serialize(proj.project_path)
-
-        # Return the updated attributes DataFrame so frontend can update UI without refetching
-        # This enables temporary (in-memory) changes that aren't persisted until Save is clicked
-        updated_attributes = df_to_records(ver.attributes.df)
-
-        return ok({
-            "saved": bool(save and ok_count > 0),      # Whether changes were persisted to disk
-            "total": len(indices),                      # Total rows attempted
-            "ok": ok_count,                             # Number of rows successfully processed
-            "fail": len(errors),                        # Number of rows that failed
-            "errors": errors,                           # Detailed error info: [{index, reason}, ...]
-            "changed_by_row": changed_by_row,          # {row_idx: [field_names]} for UI highlighting
-            "sources_by_row": sources_by_row,          # {row_idx: {field: "CV"|"GIS"}} for badges
-            "updated_attributes": updated_attributes,   # Complete attributes table with updates applied
+        # Fields that require the obstacle detector model (second YOLO pass).
+        # Safe to skip when none of these are in the requested fields.
+        _CV_OBSTACLE_FIELDS: frozenset = frozenset({
+            "Fixed Obstacle on Facility",
+            "Non-Fixed Obstacle on Facility",
+            "Width Restriction",
+            "FO Type",
+            "NFO Type",
         })
+        skip_obstacles = bool(
+            not skip_cv  # obstacle skip only relevant when CV runs at all
+            and fields_filter
+            and not any(f in _CV_OBSTACLE_FIELDS for f in fields_filter)
+        )
+        if skip_obstacles:
+            print(f"[Autocode] Skipping obstacle detection — no obstacle fields requested: {fields_filter}", flush=True)
+
+        def _bulk_gen():
+            """
+            Generator that processes all rows and yields dicts:
+              {"type": "progress", "processed": N, "total": M, "errors": E}  — after each row
+              {"type": "done", "saved": bool, "total": M, "ok": K, ...}       — after completion
+
+            Streaming mode (want_stream=True): events are serialised to SSE and returned as a
+            Flask streaming Response so the frontend can update the progress counter per segment.
+            Non-streaming mode: events are consumed internally and the "done" event is returned
+            as a normal JSON response (backward-compatible).
+            """
+            import json as _json  # noqa: F401 — used by caller's SSE wrapper
+            global _INFERENCE_DEPTH
+
+            errors: list = []
+            ok_count: int = 0
+            changed_by_row: dict = {}
+            sources_by_row: dict = {}
+
+            total_count = len(indices)
+            print(f"[Autocode] Bulk starting: {total_count} rows for project '{project_name}'", flush=True)
+            _INFERENCE_DEPTH += 1
+            try:
+                for idx in indices:
+                    try:
+                        # Resolve image filename and coordinates for this row
+                        image_ref = _resolve_image_ref(idx)
+                        coords = _resolve_coords(idx)
+
+                        # Validate we have the required data
+                        if not image_ref:
+                            geo_row = proj.geo_data.df.iloc[idx] if idx < len(proj.geo_data.df) else None
+                            if geo_row is not None:
+                                img_col = "Image Reference"
+                                img_val = geo_row.get(img_col) if img_col in geo_row else None
+                                errors.append({"index": idx, "reason": f"missing or invalid imageRef (geo_data['{img_col}'] = {repr(img_val)})"})
+                            else:
+                                errors.append({"index": idx, "reason": "missing imageRef (row not in geo_data)"})
+                            continue
+
+                        if not coords:
+                            errors.append({"index": idx, "reason": "missing LineString coords"})
+                            continue
+
+                        # Run CV + GIS autocoding for this row
+                        merged, sources, err = _call_autocode_pair(image_ref, coords, skip_cv=skip_cv, skip_obstacles=skip_obstacles, fields_filter=fields_filter)
+                        if err:
+                            errors.append({"index": idx, "reason": err})
+                            continue
+
+                        # Inject Grade from pre-computed LAZ gradient lookup
+                        if not skip_cv or (fields_filter and "Grade" in fields_filter):
+                            _inject_grade(image_ref, merged, sources, project_name=project_name)
+
+                        # Apply per-attribute filter: only keep requested fields
+                        if fields_filter:
+                            actual_filter = list(fields_filter)
+                            if "Grade" in actual_filter:
+                                actual_filter.append("Gradient %")
+                            if "Delineation" in actual_filter:
+                                actual_filter.append("Delineation Type")
+                            merged = {k: v for k, v in (merged or {}).items() if k in actual_filter}
+                            sources = {k: v for k, v in (sources or {}).items() if k in actual_filter}
+
+                        # Track which fields actually changed (for UI highlighting)
+                        changed_fields: list = []
+                        field_sources: dict = {}
+                        for field, code in (merged or {}).items():
+                            old_val = ver.attributes.df.at[idx, field] if field in ver.attributes.df.columns else None
+                            if old_val != code:
+                                changed_fields.append(field)
+                                field_sources[field] = sources.get(field, "Unknown")
+                            ver.attributes.df.at[idx, field] = code
+
+                        changed_by_row[idx] = changed_fields
+                        sources_by_row[idx] = field_sources
+                        ok_count += 1
+
+                        # Yield per-row progress event (consumed by SSE wrapper or discarded)
+                        yield {"type": "progress", "processed": ok_count, "total": total_count, "errors": len(errors)}
+
+                        if ok_count % 10 == 0:
+                            print(f"[Autocode] Bulk progress: {ok_count}/{total_count} done ({len(errors)} errors so far)", flush=True)
+
+                    except Exception as e:
+                        traceback.print_exc()
+                        errors.append({"index": idx, "reason": str(e)})
+            finally:
+                _INFERENCE_DEPTH -= 1
+
+            # --- Area Type Smoothing (100m rule) ---
+            try:
+                area_col = "Area type"
+                if len(indices) > 1 and area_col in ver.attributes.df.columns and (not fields_filter or area_col in fields_filter):
+                    import pandas as pd
+                    df_len = len(ver.attributes.df)
+                    area_vals = ver.attributes.df[area_col].copy()
+                    
+                    lengths = pd.Series([10.0] * df_len)
+                    if getattr(proj, "geo_data", None) and getattr(proj.geo_data, "df", None) is not None and "Length" in proj.geo_data.df.columns:
+                        lengths = pd.to_numeric(proj.geo_data.df["Length"], errors='coerce').fillna(10.0)
+                    elif "Length" in ver.attributes.df.columns:
+                        lengths = pd.to_numeric(ver.attributes.df["Length"], errors='coerce').fillna(10.0)
+                    elif "Distance" in ver.attributes.df.columns:
+                        lengths = pd.to_numeric(ver.attributes.df["Distance"], errors='coerce').fillna(10.0)
+                    
+                    i = 0
+                    while i < df_len:
+                        curr_val = area_vals.iloc[i]
+                        run_len = 0.0
+                        j = i
+                        while j < df_len and area_vals.iloc[j] == curr_val:
+                            run_len += lengths.iloc[j]
+                            j += 1
+                        
+                        if run_len < 100.0:
+                            prev_val = area_vals.iloc[i-1] if i > 0 else None
+                            next_val = area_vals.iloc[j] if j < df_len else None
+                            replace_val = curr_val
+                            if prev_val is not None:
+                                replace_val = prev_val
+                            elif next_val is not None:
+                                replace_val = next_val
+                                
+                            for k in range(i, j):
+                                area_vals.iloc[k] = replace_val
+                        i = j
+                        
+                    for idx_ in range(df_len):
+                        new_val = area_vals.iloc[idx_]
+                        if ver.attributes.df.at[idx_, area_col] != new_val:
+                            ver.attributes.df.at[idx_, area_col] = new_val
+                            if idx_ in changed_by_row:
+                                if area_col not in changed_by_row[idx_]:
+                                    changed_by_row[idx_].append(area_col)
+                            else:
+                                changed_by_row[idx_] = [area_col]
+                                
+                            if idx_ not in sources_by_row:
+                                sources_by_row[idx_] = {}
+                            sources_by_row[idx_][area_col] = "GIS (Smoothed)"
+            except Exception as e:
+                print(f"[Autocode] Area type smoothing failed: {e}", flush=True)
+
+            # Save to disk (runs only when the loop completes; skipped on generator abandon/disconnect)
+            if save and ok_count > 0:
+                print(f"[Autocode] Bulk complete: {ok_count}/{total_count} OK, {len(errors)} failed. Saving...", flush=True)
+                ver.save_all()
+                proj.metadata.last_updated = datetime.datetime.now()
+                proj.metadata.serialize(proj.project_path)
+
+            updated_attributes = df_to_records(ver.attributes.df)
+            yield {
+                "type": "done",
+                "saved": bool(save and ok_count > 0),
+                "total": len(indices),
+                "ok": ok_count,
+                "fail": len(errors),
+                "errors": errors,
+                "changed_by_row": changed_by_row,
+                "sources_by_row": sources_by_row,
+                "updated_attributes": updated_attributes,
+            }
+
+        # ── Streaming mode: return SSE response ──────────────────────────────
+        if want_stream:
+            import json as _json
+
+            def _sse():
+                for event in _bulk_gen():
+                    yield f"data: {_json.dumps(event)}\n\n"
+
+            return Response(
+                stream_with_context(_sse()),
+                mimetype="text/event-stream",
+                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+            )
+
+        # ── Non-streaming mode: consume generator, return JSON ───────────────
+        final_event = None
+        for event in _bulk_gen():
+            if event["type"] == "done":
+                final_event = event
+        return ok({k: v for k, v in (final_event or {}).items() if k != "type"})
 
     except ServiceUnavailable as e:
         return fail(str(e), 503)

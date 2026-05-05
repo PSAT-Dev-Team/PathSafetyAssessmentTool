@@ -1,541 +1,400 @@
 # API Reference
 
-All endpoints are prefixed with `/api/`. The backend runs on port `8000`; when accessed through the frontend container the nginx reverse proxy handles routing transparently.
+All endpoints are prefixed with `/api/`.
 
-**Base URL (direct):** `http://localhost:8000/api`  
-**Base URL (via frontend):** `http://localhost/api`
+- Direct backend base URL: `http://localhost:8000/api`
+- Through the frontend: `http://localhost/api`
 
----
+This reference covers the current API surface that backs project creation, coding, analysis, treatments, and GIS-layer management.
 
 ## Health
 
 ### `GET /api/ping`
 
-Returns a liveness check. Use to verify the backend is running.
+Liveness check.
 
-**Response**
 ```json
 { "status": "ok" }
 ```
-
----
 
 ### `GET /api/health`
 
-Identical liveness check, registered directly on the Flask app (not the Blueprint).
+Equivalent liveness check registered directly on the Flask app.
 
-**Response**
 ```json
 { "status": "ok" }
 ```
 
----
-
-## Projects
+## Project listing and metadata
 
 ### `GET /api/projects`
 
-List all projects with metadata.
+Returns the project list used by the Projects, Treatment, and Path Analysis pages.
 
-**Response**
 ```json
 {
   "projects": [
     {
-      "name": "FernvaleSurvey",
-      "tags": ["completed", "pedestrian"],
+      "name": "AMK Analysis Batch",
+      "tags": ["AMK", "Pre"],
+      "dataset": "MULTI_FOLDER_SELECTION",
+      "source_folders": ["ANG MO KIO AVENUE 1", "ANG MO KIO AVENUE 8"],
       "verified": false,
-      "verified_segment_count": 0,
-      "autocoded_segment_count": 12,
-      "total_segments": 45,
-      "date_created": "2025-04-16T09:30:00",
-      "last_updated": "2025-04-17T14:22:11"
+      "verified_segment_count": 42,
+      "autocoded_segment_count": 56,
+      "total_segments": 71,
+      "date_created": "2026-04-25T14:35:11.210000",
+      "last_updated": "2026-04-29T10:42:55.883000"
     }
   ]
 }
 ```
 
----
+Notes:
 
-### `GET /api/projects/<name>`
+- `dataset` is the legacy single-source field and is still returned.
+- `source_folders` is the durable provenance list used by project-or-road fuzzy search.
 
-Get project details and available version dates.
+### `GET /api/projects/<project_name>`
 
-**Response**
+Returns the available version folders and the current latest snapshot.
+
 ```json
 {
-  "name": "FernvaleSurvey",
-  "versions": ["20250416", "20250417"],
-  "latest": "20250417"
+  "name": "AMK Analysis Batch",
+  "versions": ["20260425", "20260429"],
+  "latest": "20260429"
 }
 ```
 
-**Errors**
-- `404` — project not found
+### `GET /api/projects/<project_name>/metadata`
 
----
+Returns the detailed metadata object for one project.
 
-### `GET /api/projects/<name>/metadata`
-
-Get detailed project metadata including verification status.
-
-**Response**
 ```json
 {
-  "name": "FernvaleSurvey",
-  "tags": ["completed"],
+  "name": "AMK Analysis Batch",
+  "tags": ["AMK", "Pre"],
+  "dataset": "MULTI_FOLDER_SELECTION",
+  "source_folders": ["ANG MO KIO AVENUE 1", "ANG MO KIO AVENUE 8"],
   "verified": false,
-  "verified_segment_count": 0,
-  "autocoded_segment_count": 12,
-  "date_created": "2025-04-16T09:30:00",
-  "last_updated": "2025-04-17T14:22:11"
+  "verified_segment_count": 42,
+  "autocoded_segment_count": 56,
+  "path_key": null,
+  "date_created": "2026-04-25T14:35:11.210000",
+  "last_updated": "2026-04-29T10:42:55.883000"
 }
 ```
 
----
+### `PATCH /api/projects/<project_name>`
 
-### `PATCH /api/projects/<name>`
+Updates project metadata and optionally renames the project.
 
-Update project metadata (name, tags, verified status, segment counts).
+Accepted fields:
 
-**Request body** (all fields optional)
 ```json
 {
-  "new_name": "FernvaleCompleted",
-  "tags": ["verified", "bicycle"],
+  "new_name": "AMK Analysis Batch 2",
+  "tags": ["AMK", "Post"],
+  "path_key": "AMK_AVE_1",
   "verified": true,
-  "verified_segment_count": 45,
-  "autocoded_segment_count": 12
+  "verified_segment_count": 71,
+  "autocoded_segment_count": 71
 }
 ```
 
-**Response**
+Response:
+
 ```json
 {
   "ok": true,
-  "name": "FernvaleCompleted",
-  "tags": ["verified", "bicycle"],
-  "verified": true
+  "name": "AMK Analysis Batch 2",
+  "tags": ["AMK", "Post"],
+  "verified": true,
+  "verified_segment_count": 71,
+  "autocoded_segment_count": 71
 }
 ```
 
-**Errors**
-- `404` — project not found
+### `DELETE /api/projects/<project_name>`
 
----
+Deletes the entire project directory.
 
-### `DELETE /api/projects/<name>`
-
-Permanently delete a project and all its data.
-
-**Response**
 ```json
-{ "ok": true, "name": "FernvaleSurvey" }
+{ "ok": true, "name": "AMK Analysis Batch" }
 ```
 
-**Errors**
-- `404` — project not found
+## Project data
 
----
+### `GET /api/projects/<project_name>/versions/latest/attributes`
 
-### `GET /api/projects/<name>/versions/latest/attributes`
+Returns the latest attribute rows. If results exist, score-band columns are merged into the row payload.
 
-Fetch the latest coded attributes for all segments.
-
-If scoring results exist, the response also includes merged **band columns** (`VB Band`, `BB Band`, `SB Band`, `BP Band`, `Overall Risk Level Band`) for each row to support filtering in the UI.
-
-**Response**
 ```json
 {
   "rows": [
     {
-      "Facility Type": 1,
-      "Adjacent Road Lane 0-1m": 2,
-      "Curvature": 2,
-      "Road AADT": 6000,
-      "VB Band": 2,
-      "BB Band": 1,
-      ...
-    }
-  ]
-}
-```
-
----
-
-### `PUT /api/projects/<name>/attributes`
-
-Save edited attributes for all segments. **Also recalculates and persists risk scores automatically.**
-
-**Request body**
-```json
-{
-  "rows": [
-    { "Facility Type": 4, "Adjacent Road Lane 0-1m": 1, ... },
-    ...
-  ]
-}
-```
-
-**Response**
-```json
-{ "ok": true }
-```
-
-**Behaviour:**
-- Writes to the latest version's `attributes.csv`
-- Calculates CycleRAP scores using `calculate_cyclerap_score_native()` and saves to `results.csv`
-- If today's date folder does not exist yet, creates a new versioned snapshot
-
----
-
-### `GET /api/projects/<name>/geodata`
-
-Return the project's road segment geometry as GeoJSON.
-
-**Response** — GeoJSON `FeatureCollection` of `LineString` features. Each feature's properties include `Image Reference`, `Road Name`, and `Distance (Metres)`.
-
-```json
-{
-  "type": "FeatureCollection",
-  "features": [
-    {
-      "type": "Feature",
-      "geometry": { "type": "LineString", "coordinates": [[103.8, 1.3], [103.81, 1.31]] },
-      "properties": {
-        "Image Reference": "IMG_001.jpg",
-        "Road Name": "Fernvale Road",
-        "Distance (Metres)": 45.3
-      }
-    }
-  ]
-}
-```
-
----
-
-### `GET /api/projects/<name>/images/<path:filename>`
-
-Serve a project image file. Includes path-traversal protection and conditional caching (`Cache-Control: public, max-age=86400`).
-
-**Response** — binary image file
-
-**Errors**
-- `400` — invalid path (traversal attempt)
-- `404` — image or folder not found
-
----
-
-### `POST /api/projects/<name>/score`
-
-Run CycleRAP risk scoring using the native Python implementation.
-
-Optionally accepts modified attributes in the request body; if omitted, the latest saved attributes are used. When a single row is sent (`attributes` array of length 1), results are returned but **not saved to disk** (used for real-time score updates in the UI).
-
-**Request body** (optional)
-```json
-{
-  "attributes": [
-    { "Facility Type": 4, "Road AADT": 8000, ... }
-  ]
-}
-```
-
-**Response**
-```json
-{
-  "ok": true,
-  "result_rows": [
-    {
-      "BB": 3.1842,
-      "BB Band": 1,
-      "BP": 0.0,
-      "BP Band": 1,
-      "SB": 8.7231,
-      "SB Band": 2,
-      "VB": 42.1234,
+      "Facility Type": 2,
+      "Curvature": 1,
       "VB Band": 3,
-      "Overall Risk Level": 54.0307,
+      "BB Band": 1,
       "Overall Risk Level Band": 3
     }
   ]
 }
 ```
 
----
+### `PUT /api/projects/<project_name>/attributes`
 
-### `GET /api/projects/<name>/results`
+Persists the latest attributes table and recalculates results.
 
-Retrieve previously saved scoring results.
-
-**Response**
 ```json
 {
-  "ok": true,
-  "result_rows": [
-    { "BB": 3.18, "BB Band": 1, ... }
+  "rows": [
+    { "Facility Type": 2, "Curvature": 1 }
   ]
 }
 ```
 
-Returns `result_rows: []` if no results have been calculated yet.
+Typical response:
 
----
-
-### `POST /api/projects/<name>/treatments`
-
-Generate treatment recommendations using the Excel COM interface (legacy). Returns treatment suggestions based on current attributes and geodata.
-
-**Response**
 ```json
-{ "ok": true, "rows": [ ... ] }
+{ "ok": true }
 ```
 
-> **Note:** The newer treatment workflow uses the attribute-level trigger logic (see below). This endpoint is maintained for compatibility.
+### `GET /api/projects/<project_name>/geodata`
 
----
+Returns project geometry as GeoJSON `FeatureCollection`.
 
-### `POST /api/projects/<name>/treatments/apply`
+### `GET /api/projects/<project_name>/results`
 
-Apply one or more treatments to a specific segment. **Saves the result to `treatment.csv`.**
+Returns saved results rows.
 
-**Request body**
-```json
-{
-  "segment_index": 5,
-  "treatment_ids": [1, 9, 14],
-  "image_ref": "IMG_006.jpg"
-}
-```
-
-**Response**
 ```json
 {
   "ok": true,
-  "segment_index": 5,
-  "treatments_applied": "1,9,14",
-  "modified_attributes": { "Facility Type": 4, "Light Segregation": 1, ... },
-  "before_scores": { "BB": 2.5, "BP": 1.2, "SB": 3.1, "VB": 42.0, "Overall Risk Level": 48.8 },
-  "after_scores":  { "BB": 1.8, "BP": 0.9, "SB": 2.2, "VB": 28.5, "Overall Risk Level": 33.4 }
-}
-```
-
-**Errors**
-- `400` — missing `segment_index`, invalid `treatment_ids`, or index out of range
-- `400` — treatment ID must be 1–25
-
----
-
-### `POST /api/projects/<name>/treatments/preview`
-
-Preview treatment effects without saving. Identical request/response to `/apply` except nothing is written to disk.
-
----
-
-### `GET /api/projects/<name>/treatments/segment/<int:segment_index>`
-
-Get current treatment state for a specific segment.
-
-**Response**
-```json
-{
-  "ok": true,
-  "segment_index": 5,
-  "has_treatments": true,
-  "treatments_applied": [1, 9, 14],
-  "modified_attributes": { "Facility Type": 4, ... },
-  "after_scores": { "BB": 1.8, "BP": 0.9, "SB": 2.2, "VB": 28.5, "Overall Risk Level": 33.4 }
-}
-```
-
-If no treatments have been applied: `"has_treatments": false, "treatments_applied": []`.
-
----
-
-### `POST /api/projects/<name>/treatments/apply-all`
-
-Apply all applicable treatments to every segment. Results are held in memory; **not saved until the user explicitly calls `/treatments/save`.**
-
-**Response**
-```json
-{
-  "ok": true,
-  "total_segments": 50,
-  "segments_treated": 48,
-  "segments_skipped": 2,
-  "details": [
+  "result_rows": [
     {
-      "segment_index": 0,
-      "treatment_ids": [1, 9],
-      "before_scores": { "Overall Risk Level": 48.8, ... },
-      "after_scores":  { "Overall Risk Level": 33.4, ... }
+      "BB": 3.18,
+      "BB Band": 1,
+      "Overall Risk Level": 33.4,
+      "Overall Risk Level Band": 2
     }
   ]
 }
 ```
 
----
+### `POST /api/projects/<project_name>/score`
 
-### `POST /api/projects/<name>/treatments/reset-all`
+Runs native CycleRAP scoring.
 
-Clear all applied treatments for all segments. **Not saved until `/treatments/save` is called.**
+Optional body:
 
-**Response**
 ```json
 {
-  "ok": true,
-  "total_segments": 50,
-  "segments_reset": 48,
-  "message": "All treatments have been reset"
+  "attributes": [
+    { "Facility Type": 2, "Curvature": 1 }
+  ]
 }
 ```
 
----
+If a single row is posted, the result is typically used as an in-memory preview and not persisted.
 
-### `POST /api/projects/<name>/treatments/save`
+### `GET /api/projects/<project_name>/images/<path:filename>`
 
-Persist all pending treatment changes to `treatment.csv`.
+Serves a project image file with path-traversal protection.
 
-**Response**
-```json
-{ "ok": true, "message": "Treatments saved successfully" }
-```
-
----
-
-### `DELETE /api/projects/<name>/segments/<int:segment_index>`
-
-Delete a single segment by index (0-based). Also deletes the associated image file.
-
-**Response**
-```json
-{
-  "ok": true,
-  "message": "Segment 5 deleted successfully",
-  "remaining_segments": 44
-}
-```
-
----
-
-### `POST /api/projects/<name>/segments/delete-batch`
-
-Batch delete segments by a list of indices.
-
-**Request body**
-```json
-{ "indices": [0, 3, 7] }
-```
-
-**Response** — updated project metadata dict
-
----
+## Attribute mappings
 
 ### `GET /api/projects/attribute-mappings`
 
-Return enum option mappings for all discrete attribute fields.
+Returns label mappings for discrete coding fields.
 
-**Response**
 ```json
 {
   "Facility Type": {
     "1": "Sidewalk",
-    "2": "Multi-Use Path",
-    "3": "Off-Road Bicycle Path",
-    "4": "On-road Bicycle Lane",
-    "5": "Road Shoulder",
-    "6": "Mixed Traffic Road Lane"
-  },
-  "Adjacent Road Lane 0-1m": {
-    "1": "Present",
-    "2": "Not Present"
-  },
-  ...
+    "2": "Multi-Use Path"
+  }
 }
 ```
 
-Continuous-value fields (`Road AADT`, `Road operating speed (mean)`) are excluded (their `CHOICES` entry is `null`).
-
----
+## Project creation and source discovery
 
 ### `GET /api/projects/folders`
 
-List available subfolders in the `in/` input directory.
+Lists subfolders under `in/`.
 
-**Response**
 ```json
-{ "items": ["FernvaleSurvey", "YishunSurvey"] }
+{ "items": ["ANG MO KIO AVENUE 1", "ANG MO KIO AVENUE 8"] }
 ```
-
-Returns `{ "items": [] }` if the `in/` directory does not exist.
-
----
 
 ### `POST /api/projects/folders`
 
-Create a new project from an existing image folder.
+Creates a project from one or more input folders.
 
-**Request body**
+Single-folder request:
+
 ```json
 {
-  "project_name": "FernvaleSurvey",
-  "folder_name": "FernvaleSurvey",
-  "tags": ["bicycle", "urban"]
+  "project_name": "AMK Ave 1 Review",
+  "folder_name": "ANG MO KIO AVENUE 1",
+  "tags": ["AMK"]
 }
 ```
 
-**Pipeline steps:**
-1. Extracts GPS EXIF coordinates from all `.jpg`/`.jpeg` files in the folder
-2. Geocodes coordinates (road name lookup) via `cycleRAP_VA.geoCode()`
-3. Samples points by minimum distance (10 m) via `get_geo_points_by_distance()`
-4. Converts point pairs into `LineString` geometries in EPSG:3414
-5. Creates project directory under `data/`
-6. Copies images into `data/<project_name>/images/`
-7. Registers the project in `project_manager`
+Multi-folder plus polygon request:
 
-**Response**
 ```json
-{ "ok": true, "name": "FernvaleSurvey" }
+{
+  "project_name": "AMK Polygon Selection",
+  "folder_names": ["ANG MO KIO AVENUE 1", "ANG MO KIO AVENUE 8"],
+  "tags": ["AMK", "Pre"],
+  "polygon": [
+    [1.3720, 103.8480],
+    [1.3730, 103.8510],
+    [1.3700, 103.8530]
+  ]
+}
 ```
 
-**Errors**
-- `400` — `project_name` is empty
-- `400` — `project_name` contains underscores (e.g. `"Fernvale_Survey"` is invalid)
-- `400` — `folder_name` is missing
-- `404` — source folder not found in `in/`
-- `409` — project with that name already exists
-- `500` — geocoding or geometry conversion failure
+Response:
 
-> **Constraint:** Project names **cannot contain underscores**. The underscore character is reserved internally as a path separator in some URL patterns. Use spaces, hyphens, or camel case instead.
+```json
+{
+  "ok": true,
+  "name": "AMK Polygon Selection",
+  "source_count": 2,
+  "skipped_sources": []
+}
+```
 
----
+Important behavior:
+
+- accepts `folder_name` or `folder_names`
+- rejects underscores in `project_name`
+- when `polygon` is present, only geotagged images whose nodes fall inside the polygon are kept
+- stores `source_folders` in project metadata
+- uses `MULTI_FOLDER_SELECTION` as `dataset` when more than one source folder is used
+
+Common errors:
+
+- `400` missing `project_name`
+- `400` invalid polygon
+- `400` no geotagged images inside the selected polygon
+- `404` one or more folders not found
+- `409` project already exists
 
 ### `POST /api/projects/folders/upload-images`
 
-Upload images directly into a source folder in `in/` via multipart form upload.
+Multipart upload into a source folder under `in/`.
 
-**Form fields**
-- `folder_name` (string) — target subfolder name in `in/`
-- `images` (file[]) — one or more image files
+Form fields:
 
-**Allowed extensions:** `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp`, `.tiff`, `.tif`
+- `folder_name`
+- one or more `images`
 
-**Response**
+Response:
+
 ```json
 {
   "count": 12,
   "errors": [],
-  "message": "Uploaded 12 image(s) to folder 'FernvaleSurvey'"
+  "message": "Uploaded 12 image(s) to folder 'ANG MO KIO AVENUE 1'"
 }
 ```
 
----
+### `POST /api/projects/roads-in-polygon`
+
+Returns road candidates intersecting a user-drawn polygon.
+
+Request:
+
+```json
+{
+  "polygon": [
+    [1.3720, 103.8480],
+    [1.3730, 103.8510],
+    [1.3700, 103.8530]
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "roads": [
+    { "name": "ANG MO KIO AVENUE 1", "points": 12, "exists": true },
+    { "name": "ANG MO KIO AVENUE 8", "points": 5, "exists": false }
+  ],
+  "fallback": false
+}
+```
+
+If the backend can only return planning-area fallback results, `fallback` is `true` and items will not be preselected by the frontend.
+
+### `GET /api/projects/roads-in-bounds`
+
+Returns road polylines for the current viewport.
+
+Query params:
+
+- `minLat`
+- `minLng`
+- `maxLat`
+- `maxLng`
+- optional `limit`
+
+Response:
+
+```json
+{
+  "roads": [
+    {
+      "name": "ANG MO KIO AVENUE 1",
+      "exists": true,
+      "coords": [[1.3720, 103.8480], [1.3722, 103.8485]]
+    }
+  ]
+}
+```
+
+### `GET /api/projects/planning-areas-in-bounds`
+
+Returns planning-area polygon parts for the viewport.
+
+```json
+{
+  "areas": [
+    {
+      "name": "Ang Mo Kio",
+      "region": "North-East",
+      "partIndex": 0,
+      "coords": [[1.37, 103.84], [1.38, 103.84], [1.38, 103.85], [1.37, 103.84]]
+    }
+  ]
+}
+```
+
+## Segment management and copying
+
+### `DELETE /api/projects/<project_name>/segments/<segment_index>`
+
+Deletes a single segment and its associated image reference where applicable.
+
+### `POST /api/projects/<project_name>/segments/delete-batch`
+
+Deletes multiple segments.
+
+```json
+{ "indices": [0, 3, 7] }
+```
 
 ### `POST /api/projects/check-collisions`
 
-Check whether segments from a source project would collide (duplicate image references) with an existing target project.
+Checks image-reference collisions before copying segments between projects.
 
-**Request body**
 ```json
 {
   "sourceProject": "ProjectA",
@@ -544,18 +403,14 @@ Check whether segments from a source project would collide (duplicate image refe
 }
 ```
 
-**Response**
 ```json
 { "ok": true, "collisions": [] }
 ```
 
----
-
 ### `POST /api/projects/copy-segments`
 
-Copy segments from one project to another.
+Copies selected segments into another project.
 
-**Request body**
 ```json
 {
   "sourceProject": "ProjectA",
@@ -567,126 +422,289 @@ Copy segments from one project to another.
 }
 ```
 
-**Response**
+## Autocode endpoints
+
+### `POST /api/projects/<project_name>/autocode/image`
+
+CV auto-code for one image.
+
 ```json
-{
-  "ok": true,
-  "message": "Copied 3 segments to ProjectB",
-  "targetProject": "ProjectB",
-  "count": 3
-}
+{ "imageRef": "AMK_AVE_1__Cam1_0001.jpg" }
 ```
 
----
+Response includes at least `updates` and `changed_fields`, and may also include `gradient_pct` when LAZ-derived grade data is available.
 
-### `POST /api/projects/download-images`
+### `POST /api/projects/<project_name>/autocode/gis`
 
-Generate and download a ZIP archive of filtered images from one or more projects.
+GIS auto-code for one segment.
 
-**Request body**
-```json
-{
-  "projects": {
-    "FernvaleSurvey": ["IMG_001.jpg", "IMG_003.jpg"],
-    "YishunSurvey":   ["IMG_010.jpg"]
-  }
-}
-```
-
-**Response** — `application/zip` file download  
-Filename: `filtered_images_YYYYMMDD_HHMMSS.zip`
-
-Inside the archive:
-```
-FernvaleSurvey images/IMG_001.jpg
-FernvaleSurvey images/IMG_003.jpg
-YishunSurvey images/IMG_010.jpg
-```
-
----
-
-### `POST /api/projects/<name>/autocode/image`
-
-Auto-code a single image using CV models.
-
-**Request body**
-```json
-{ "imageRef": "IMG_005.jpg" }
-```
-
-**Response**
-```json
-{
-  "updates": {
-    "Facility Type": 1,
-    "Adjacent Road Lane 0-1m": 2,
-    "Delineation": 1
-  },
-  "changed_fields": ["Facility Type", "Delineation"]
-}
-```
-
-**Errors**
-- `503` — CV models not initialised (missing model files)
-
----
-
-### `POST /api/projects/<name>/autocode/gis`
-
-Auto-code a segment using GIS / shapefile data.
-
-**Request body**
 ```json
 { "coords": [[103.81, 1.35], [103.82, 1.36]] }
 ```
 
-**Response**
+Optional field filtering is supported through a `fields` array in the request body.
+
+### `POST /api/projects/<project_name>/autocode/all`
+
+Supports three shapes:
+
+| Mode | Example payload |
+|---|---|
+| single segment | `{ "imageRef": "...", "coords": [...], "index": 0 }` |
+| all rows | `{ "all": true, "save": false, "fields": ["Curvature"] }` |
+| selected rows | `{ "indices": [0, 3], "save": false }` |
+
+Bulk response shape:
+
 ```json
 {
-  "updates": {
-    "Road AADT": 12000,
-    "Area type": 1
+  "saved": false,
+  "total": 2,
+  "ok": 2,
+  "fail": 0,
+  "errors": [],
+  "changed_by_row": {
+    "0": ["Curvature"]
   },
-  "changed_fields": ["Road AADT", "Area type"]
+  "sources_by_row": {
+    "0": { "Curvature": "GIS" }
+  },
+  "updated_attributes": [
+    { "Curvature": 1 }
+  ]
 }
 ```
 
----
+### `GET /api/projects/<project_name>/autocode-metadata`
 
-### `POST /api/projects/<name>/autocode/all`
+Reads saved autocode provenance metadata.
 
-Auto-code all or selected segments. Supports three modes via payload shape.
+```json
+{
+  "changedFieldsByRow": { "0": ["Curvature"] },
+  "fieldSourcesByRow": { "0": { "Curvature": "GIS" } }
+}
+```
 
-**Payload options:**
+### `POST /api/projects/<project_name>/autocode-metadata`
 
-| Mode | Shape | Description |
-|---|---|---|
-| Single | `{ "imageRef": "...", "coords": [...], "index": 0 }` | One segment |
-| All | `{ "all": true, "save": false }` | All segments |
-| Selected | `{ "indices": [0, 3], "save": false }` | Specific segments |
+Writes the autocode metadata JSON used by the coding page.
 
-**Response** (bulk modes)
+## Baseline endpoints
+
+### `GET /api/projects/<project_name>/baseline/exists`
+
+```json
+{ "exists": true }
+```
+
+### `GET /api/projects/<project_name>/baseline`
+
+Returns baseline attribute rows, or `rows: []` if none exist yet.
+
+### `POST /api/projects/<project_name>/baseline`
+
+Persists a baseline attribute table.
+
+```json
+{
+  "rows": [
+    { "Facility Type": 2 }
+  ]
+}
+```
+
+## Visualization and GIS-context endpoints
+
+### `POST /api/projects/<project_name>/curvature/visualize`
+
+Returns geometry and numeric context for the curvature visualization panel.
+
+### `POST /api/projects/<project_name>/width/visualize`
+
+Returns geometry and search-ring context for the width visualization panel.
+
+### `POST /api/projects/<project_name>/gis/layers`
+
+Returns nearby GIS features around a point for the coding map overlay.
+
+### `POST /api/projects/<projectName>/gis/detect`
+
+Diagnostic endpoint used to inspect nearby GIS features such as bus stops and bus lanes.
+
+## Treatment endpoints
+
+### `POST /api/projects/<project_name>/treatments/preview`
+
+Preview one or more treatments for a segment without persisting.
+
+### `POST /api/projects/<project_name>/treatments/apply`
+
+Apply one or more treatments to a segment and persist the treatment state.
+
+Request:
+
+```json
+{
+  "segment_index": 5,
+  "treatment_ids": [1, 9, 14],
+  "image_ref": "Cam1_0006.jpg"
+}
+```
+
+Response includes:
+
+- `treatments_applied`
+- `modified_attributes`
+- `before_scores`
+- `after_scores`
+
+### `GET /api/projects/<project_name>/treatments/segment/<segment_index>`
+
+Returns the current treatment state for a specific segment.
+
+### `GET /api/projects/<project_name>/treatments/all`
+
+Returns all stored treatment states in one call. Only segments with treatments are included.
+
+### `POST /api/projects/<project_name>/treatments/apply-all`
+
+Applies all applicable treatments across the project.
+
+### `POST /api/projects/<project_name>/treatments/apply-specific`
+
+Applies one specific treatment ID across all applicable segments.
+
+```json
+{ "treatment_id": 7 }
+```
+
+### `POST /api/projects/<project_name>/treatments/reset-all`
+
+Clears pending treatment state.
+
+### `POST /api/projects/<project_name>/treatments/save`
+
+Persists pending treatment edits.
+
+### `POST /api/projects/<project_name>/treatments/effectiveness`
+
+Ranks treatments by the number of segments whose overall risk band improves when the treatment is applied in isolation.
+
+Optional request:
+
+```json
+{ "treatment_ids": [1, 2, 3] }
+```
+
+Response:
+
 ```json
 {
   "ok": true,
-  "updated_rows": [
-    { "index": 0, "updates": { "Facility Type": 1 }, "sources": { "Facility Type": "CV" } }
-  ],
-  "errors": []
+  "total_segments": 412,
+  "counts": { "1": 180, "2": 0, "3": 45 }
 }
 ```
 
-When `save: true`, the updated attributes are written to `attributes.csv` immediately.
+### `GET /api/projects/<project_name>/treatments/effectiveness/segment/<segment_index>`
 
----
+Returns per-treatment score drops for one segment.
 
-## HTTP Status Codes
+```json
+{
+  "ok": true,
+  "score_drops": { "1": 4.2, "3": 0.0 }
+}
+```
+
+## Image export
+
+### `POST /api/projects/download-images`
+
+Returns a ZIP blob containing filtered images grouped by project.
+
+```json
+{
+  "projects": {
+    "ProjectA": ["IMG_001.jpg"],
+    "ProjectB": ["IMG_010.jpg"]
+  }
+}
+```
+
+## Shapefile management API
+
+These endpoints are served from the `gis_layers` blueprint under `/api/shapefiles`.
+
+### `GET /api/shapefiles`
+
+Lists discovered shapefiles with metadata such as category, year, source, and relative path.
+
+### `GET /api/shapefiles/categories`
+
+Lists immediate shapefile categories (subdirectories).
+
+### `POST /api/shapefiles/geojson`
+
+Reads one shapefile and returns WGS84 GeoJSON.
+
+```json
+{ "path": "Road_name/ROADSECTIONLINE.shp", "max_features": 10000 }
+```
+
+### `POST /api/shapefiles/validate`
+
+Validates an uploaded ZIP before import.
+
+### `POST /api/shapefiles/preview-upload`
+
+Returns temporary GeoJSON preview data for uploaded shapefile files without saving them.
+
+### `POST /api/shapefiles/upload`
+
+Uploads one or more shapefile assets or ZIPs into a category.
+
+Multipart fields:
+
+- `files`
+- optional `category`
+
+### `POST /api/shapefiles/validate-replacement`
+
+Checks whether an uploaded replacement is compatible with an existing layer.
+
+```json
+{
+  "new_file_path": "temp/new.shp",
+  "target_file_path": "Road_name/ROADSECTIONLINE.shp",
+  "layer_name": "road_sections"
+}
+```
+
+### `PUT /api/shapefiles/replace`
+
+Copies uploaded files over target shapefiles and writes `.bak` backups where applicable.
+
+```json
+{
+  "replacements": [
+    { "uploaded_path": "temp/new.shp", "target_path": "Road_name/ROADSECTIONLINE.shp" }
+  ]
+}
+```
+
+### `DELETE /api/shapefiles/<path:shapefile_path>`
+
+Deletes a shapefile and its companion files.
+
+## Common status codes
 
 | Code | Meaning |
 |---|---|
 | `200` | Success |
-| `400` | Bad request (invalid input, constraint violation) |
-| `404` | Not found (project, segment, image, folder) |
-| `409` | Conflict (project already exists) |
-| `500` | Internal server error (unexpected exception) |
-| `503` | Service unavailable (CV models not loaded) |
+| `400` | Bad request |
+| `404` | Project, folder, image, or shapefile not found |
+| `409` | Conflict, usually project already exists |
+| `500` | Unexpected backend error |
+| `503` | Service unavailable, most often due to missing or failed model initialization |

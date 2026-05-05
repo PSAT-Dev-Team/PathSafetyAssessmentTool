@@ -1,106 +1,106 @@
-# Path Safety Assessment Tool — Documentation
+# Path Safety Assessment Tool (PSAT)
 
-> **PSAT Developer & User Guide** | Updated March 2026
+> PSAT Developer & User Guide | Updated April 2026
 
----
+## What PSAT does
 
-## What is PSAT?
+The **Path Safety Assessment Tool (PSAT)** is an internal web application for assessing cycling and active-mobility corridors with the **CycleRAP v2.11** methodology. It combines image-driven coding, GIS lookups, manual review, scoring, and treatment testing in one workflow.
 
-The **Path Safety Assessment Tool (PSAT)** is an internal web application for assessing the safety of cycling infrastructure using the **CycleRAP v2.11** risk-scoring methodology. It assists planners, engineers and safety analysts in:
+PSAT is used to:
 
-- Ingesting street-level photographs of cycling facilities (footpaths, cycling paths, shared roads, etc.)
-- Automatically coding safety-relevant attributes from images using computer-vision (CV) models, GIS infrastructure layer mapping and logit-based models.
-- Manually reviewing and correcting auto-coded attributes in an interactive table + map view
-- Running the CycleRAP risk-scoring algorithm to produce **BB, BP, SB, and VB** risk scores
-- Applying treatment recommendations and evaluating their projected effect on risk scores
-- Visualising results on an interactive map and exporting filtered images
+- turn geotagged survey images into segment-based project data
+- auto-code attributes with CV models, GIS rules, and gradient profiles
+- review and correct coding in a synchronized image-table-map workspace
+- calculate **BB**, **BP**, **SB**, and **VB** risk scores plus overall risk bands
+- analyze one or more projects together with filters, charts, and exports
+- test treatments and compare before/after risk outcomes
+- inspect and manage the GIS layers that power the coding rules
 
-**Primary users:** Transport engineers and road-safety analysts performing field surveys or desktop audits of cycling networks.
+## Recent additions covered by this refresh
 
----
+- multi-road project creation from a drawn polygon or selected planning area
+- fuzzy project search that also matches source road names
+- persisted project provenance via `dataset` and `source_folders`
+- dedicated GIS Layers page with upload, preview, replace, and delete flows
+- baseline and autocode-metadata storage used by validation workflows
+- treatment-effectiveness ranking for both project-wide and per-segment views
 
-## Table of Contents
+## Documentation
 
 | Document | Description |
 |---|---|
-| [Installation](docs/installation.md) | Prerequisites, folder setup, model files, and running via Docker |
-| [Architecture](docs/architecture.md) | System structure, data flow, and key design decisions |
-| [API Reference](docs/api-reference.md) | Every endpoint: method, path, request/response schema, and edge cases |
-| [CV / ML Pipeline](docs/cv-pipeline.md) | How images are ingested, preprocessed, and auto-coded |
-| [Scoring Logic](docs/scoring.md) | CycleRAP risk scoring, the 41 attribute fields, and risk bands |
-| [Frontend](docs/frontend.md) | UI structure, pages, and key user flows |
-| [Common Issues](docs/common-issues.md) | Setup problems and their fixes |
-| [Contributing](docs/contributing.md) | Branch and contribution conventions (placeholder) |
+| [Installation](docs/installation.md) | Local setup, required assets, and Docker / non-Docker run modes |
+| [Architecture](docs/architecture.md) | Application structure, storage model, and key backend/frontend design decisions |
+| [API Reference](docs/api-reference.md) | Current REST endpoints, payloads, and response shapes |
+| [CV / ML Pipeline](docs/cv-pipeline.md) | Image ingestion, model loading, and auto-coding pipeline details |
+| [Scoring Logic](docs/scoring.md) | CycleRAP scoring inputs, mappings, and risk-band behavior |
+| [Frontend](docs/frontend.md) | Route map, page behavior, and client-side data flow |
+| [Common Issues](docs/common-issues.md) | Setup, GIS, and project-creation troubleshooting |
+| [Contributing](docs/contributing.md) | Team conventions and contribution notes |
 
----
-
-## Quick Start
+## Quick start
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/LinXH8/PathSafetyAssessmentTool.git
 cd PathSafetyAssessmentTool
 
-# 2. Create the input folder BEFORE running Docker
+# 2. Create the input folder before Docker creates it for you
 mkdir in
 
-# 3. Copy models and shapefiles from the SSD into backend/
-#    backend/models/      ← YOLO .pt files (path_seg.pt, etc.)
-#    backend/shapefiles/  ← GIS shapefiles
+# 3. Copy required assets into backend/
+#    backend/models/      -> YOLO .pt files
+#    backend/shapefiles/  -> GIS shapefiles
 
 # 4. Build and run
 docker compose up --build
 ```
 
 Once running:
-- **Frontend (UI):** http://localhost
+
+- **Frontend:** http://localhost
 - **Backend API:** http://localhost:8000/api
 
----
+## Repository layout
 
-## Repository Layout
-
-```
+```text
 PathSafetyAssessmentTool/
-├── backend/                        # Flask API server (Python 3.11)
+├── backend/
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── health.py           # /api/ping and /api/health
-│   │   │   └── projects/
-│   │   │       └── routes.py       # All /api/projects/* endpoints
+│   │   │   ├── health.py                # /api/ping and /api/health
+│   │   │   ├── gis_layers/routes.py     # /api/shapefiles/* endpoints
+│   │   │   └── projects/routes.py       # Core /api/projects/* API surface
 │   │   ├── services/
-│   │   │   ├── prediction.py       # CV / YOLO inference (CycleRAP_Coding_Helper)
-│   │   │   ├── cyclerap_scoring.py # Native Python CycleRAP v2.11 scoring
-│   │   │   ├── project_manager.py  # Project & version management (ProjectVersion, Project)
-│   │   │   ├── serializer.py       # Data models, mappings, CSV/GPKG I/O
-│   │   │   ├── cycleRAP_interface.py # CycleRAP Excel COM interface (legacy/optional)
-│   │   │   ├── cycleRAP_VA.py      # GPS → GeoDataFrame helpers
-│   │   │   ├── gis_mapping.py      # GIS layer + shapefile helpers
-│   │   │   ├── platform_compat.py  # pywin32 compatibility shim
-│   │   │   └── global_var.py       # Field name constants & enum mappings
-│   │   ├── config.py
-│   │   └── __init__.py             # create_app() factory
-│   ├── app.py                      # Flask entry point
-│   ├── models/          ← NOT in repo; copy from SSD
-│   ├── shapefiles/      ← NOT in repo; copy from SSD
+│   │   │   ├── prediction.py            # CV inference and bulk autocode helpers
+│   │   │   ├── cyclerap_scoring.py      # Native CycleRAP scoring
+│   │   │   ├── project_manager.py       # Project and snapshot lifecycle
+│   │   │   ├── serializer.py            # Project metadata / CSV / GPKG serialization
+│   │   │   ├── cycleRAP_VA.py           # GPS extraction and LineString generation
+│   │   │   └── gis_mapping.py           # GIS lookups, width, and curvature logic
+│   ├── generate_road_reference.py       # Builds shapefiles/road_reference.csv
+│   ├── models/                          # External CV model files
+│   ├── shapefiles/                      # External GIS layers and road reference CSV
 │   └── requirements.txt
-├── frontend/                       # React + TypeScript SPA
+├── frontend/
+│   ├── public/
+│   │   ├── README.md                    # Help-page overview copy of this README
+│   │   └── docs/                        # In-app mirrored markdown docs
 │   ├── src/
-│   │   ├── api/index.ts            # Typed API client (all fetch calls)
-│   │   ├── pages/                  # Page-level components
-│   │   │   ├── LandingPage/
-│   │   │   ├── Projects/           # Project list & management
-│   │   │   ├── CodingPage/         # Main coding + map + image viewer
-│   │   │   ├── TreatmentPage/      # Treatment recommendations
-│   │   │   ├── PathAnalysisPage/   # Autocode validation view
-│   │   │   └── CreateProjectPage/  # New project wizard
-│   │   ├── components/             # Shared UI components
-│   │   └── App.tsx                 # React Router routes
-│   ├── Dockerfile                  # Multi-stage: Node build → nginx
-│   └── nginx.conf                  # Reverse-proxy /api/ → backend:8000
-├── docs/                           # Developer & user documentation
-├── data/                           # Persisted project data (Docker bind-mount)
-├── in/                             # Input image folders (Docker bind-mount)
-├── backend.Dockerfile              # Backend Docker image
-└── docker-compose.yml              # Orchestrates backend + frontend
+│   │   ├── api/index.ts                # Typed fetch helpers
+│   │   ├── layouts/AppLayout.tsx       # Shared shell + sidebar
+│   │   ├── pages/
+│   │   │   ├── CreateProjectPage/      # Single-folder and polygon-based creation
+│   │   │   ├── CodingPage/             # Main coding workspace
+│   │   │   ├── GisLayersPage/          # GIS layer browser / manager
+│   │   │   ├── HelpPage/               # In-app user and developer guide viewer
+│   │   │   ├── PathAnalysisPage/       # Multi-project analysis workspace
+│   │   │   ├── Projects/               # Project listing and management
+│   │   │   └── TreatmentPage/          # Treatment overview and detail views
+│   │   └── utils/projectSearch.ts      # Shared project-or-road fuzzy matcher
+├── docs/                               # Canonical markdown docs for developers
+├── data/                               # Persisted project storage
+├── in/                                 # Source image folders used to build projects
+├── backend.Dockerfile
+└── docker-compose.yml
 ```

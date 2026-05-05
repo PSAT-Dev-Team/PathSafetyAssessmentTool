@@ -43,6 +43,14 @@ def _load_gdf_cached(path_str: str, metric_crs: str, src_mtime: float):
 CRS_WGS84 = "EPSG:4326"
 CRS_METRIC = "EPSG:3414"
 
+CURVATURE_FINE_STEP_M = 0.5
+CURVATURE_DEDUP_TOLERANCE_M = 0.10
+CURVATURE_MIN_TRIPLET_LEG_M = 0.35
+CURVATURE_MIN_PLAUSIBLE_RADIUS_M = 1.0
+CURVATURE_MIN_KINK_LEG_M = 1.0
+CURVATURE_JUNCTION_SNAP_TOL_M = 0.75
+CURVATURE_MIN_JUNCTION_LEG_M = 1.5
+
 class LayerStore:
     """Lazy-loading shapefile store with parquet caching."""
     def __init__(self, metric_crs=CRS_METRIC):
@@ -79,6 +87,10 @@ class LayerStore:
             if name not in self.paths:
                 raise KeyError(f"未注册图层: {name}")
             shp_path: Path = self.paths[name]
+            if not shp_path.exists() and not shp_path.with_name(shp_path.stem + ".cache.parquet").exists():
+                print(f"Warning: neither {shp_path} nor its parquet cache exists. Returning empty GeoDataFrame.")
+                self.layers[name] = gpd.GeoDataFrame(geometry=[], crs=self.metric_crs)
+                return self.layers[name]
             mtime = shp_path.stat().st_mtime if shp_path.exists() else 0.0
             gdf = _load_gdf_cached(str(shp_path), self.metric_crs, mtime)
             self.layers[name] = gdf
@@ -134,6 +146,7 @@ class LayerStore:
         store.add_path("inner", base / "area_type" / "CentralMB2025.shp")
         store.add_path("industrial", base / "area_type" / "LanduseIndustrial2025.shp")
         store.add_path("rural", base / "area_type" / "LanduseRural2025.shp")
+        store.add_path("recreation", base / "area_type" / "LanduseRecreation2025.shp")
         store.add_path("beforeCount", base / "AMGbeforeCount" / "AMGbeforeCount_export.shp")
         store.add_path("sensorCount", base / "AMGsensorCount" / "AMGsensorCount_export.shp")
         store.add_path("kerb_line", base / "kerb_line" / "kerbline.shp")
@@ -147,6 +160,8 @@ class LayerStore:
         store.add_path("shared_path", base / "path" / "Sharedpathcentreline.shp")
         # Added for Road Crossing Layer
         store.add_path("roadcrossing", base / "roadcrossinglayer" / "ROADCROSSING.shp")
+        # Added for Bicycle Crossing Facility (AMG BC 2025)
+        store.add_path("bicycle_crossing", base / "AMG_BC2025_shp" / "AMG_BC2025_shp.shp")
 
         # Load speed CSV if it exists
         speed_csv_path = base / "LinkID_Shape_File" / "TSE_AdHocReq_ERP2AverageSpeedData_250425.csv"
@@ -250,6 +265,10 @@ class GIS:
         pt = self.store.to_metric_point(point)
         return self._near("roadcrossing", pt, dist)
 
+    def is_bicycle_crossing(self, point, dist=2):
+        pt = self.store.to_metric_point(point)
+        return self._near("bicycle_crossing", pt, dist)
+
     def is_parking(self, point, dist=20):
         pt = self.store.to_metric_point(point)
         return self._near("parking", pt, dist)
@@ -259,6 +278,7 @@ class GIS:
         if self._poly("inner", pt, tol): return 1
         if self._poly("industrial", pt, tol): return 4
         if self._poly("rural", pt, tol): return 3
+        if self._poly("recreation", pt, tol): return 5
         return 2
     
     def get_peak_pedestrian_flow(self, pt, dist=20):
@@ -319,10 +339,13 @@ class GIS:
             "sensor_peaks": sensor_peaks,   # {'MICROMOBILITY': x, 'OTHER': y}
         }
 
-    def get_number_of_lane(self, point, dist=10):
+    def get_number_of_lane(self, point, dist=20):
         """
-        在 kerb_line 中寻找距 point 最近的一条（仅在 dist 米内，找不到返回 None）
-        返回：GeoSeries（该要素整行）或 None
+        Find the nearest kerb line within dist metres of point and return the
+        CycleRAP lane code for "Number of lanes – adjacent road":
+            1 = "1 per Direction/NA"  (LANES == "1")
+            2 = "> 1 per Direction"   (LANES >= 2)
+        Returns None if no kerb line is found within dist or LANES is missing/unparseable.
         """
         pt = self.store.to_metric_point(point)
 
@@ -331,28 +354,26 @@ class GIS:
             return None
         gdf = gdf[gdf.geometry.notna()].copy()
 
-        # 优先用 sindex.nearest，兼容不同版本；失败就全量算
-        nearest_pos = None
-        try:
-            gen = gdf.sindex.nearest(pt)          # 有些版本支持几何
-            nearest_pos = next(iter(gen))
-        except Exception:
-            try:
-                gen = gdf.sindex.nearest(pt.bounds)  # 有些只支持 bounds
-                nearest_pos = next(iter(gen))
-            except Exception:
-                pass
-
-        if nearest_pos is not None and np.isscalar(nearest_pos):
-            # 明确是单个位置索引
-            geom = gdf.geometry.iloc[int(nearest_pos)]
-            return float(geom.distance(pt))
-
-        # 兜底：对全表算距离 -> 直接取最小值
-        dists = gdf.geometry.distance(pt)  # 这是一个 Series
-        if dists.empty:
+        candidates_idx = list(gdf.sindex.query(pt.buffer(dist)))
+        if not candidates_idx:
             return None
-        return float(dists.min())
+
+        candidates = gdf.iloc[candidates_idx]
+        dists = candidates.geometry.distance(pt)
+        within = dists[dists <= dist]
+        if within.empty:
+            return None
+
+        nearest_row = candidates.loc[within.idxmin()]
+        lanes_str = str(nearest_row.get("LANES", "") or "").strip()
+        if not lanes_str:
+            return None
+        try:
+            lanes_count = int(lanes_str)
+        except ValueError:
+            return None
+
+        return 1 if lanes_count <= 1 else 2
 
     # Added for Road Operating Speed (mean)
     def get_road_operating_speed(self, point, buffer_dist=20, max_dist=30, default_speed=30.0):
@@ -819,8 +840,9 @@ class GIS:
                                     if len(original_coords) < 2:
                                         continue
 
-                                    # Use finer densification step (0.25m instead of 1.0m)
-                                    fine_step = 0.25
+                                    # Use moderate densification to preserve bends without
+                                    # overreacting to tiny geometry artifacts.
+                                    fine_step = CURVATURE_FINE_STEP_M
 
                                     # Build combined coordinate list: original vertices + interpolated points
                                     combined_coords = []
@@ -845,12 +867,12 @@ class GIS:
                                     # Add the final original vertex
                                     combined_coords.append(original_coords[-1])
 
-                                    # Remove duplicate consecutive points (within epsilon tolerance)
+                                    # Remove duplicate/near-duplicate consecutive points.
                                     deduped_coords = [combined_coords[0]]
                                     for coord in combined_coords[1:]:
                                         prev = deduped_coords[-1]
                                         dist_sq = (coord[0] - prev[0])**2 + (coord[1] - prev[1])**2
-                                        if dist_sq > epsilon * epsilon:
+                                        if dist_sq > CURVATURE_DEDUP_TOLERANCE_M * CURVATURE_DEDUP_TOLERANCE_M:
                                             deduped_coords.append(coord)
 
                                     # Mark which coordinates are within the analysis window
@@ -882,8 +904,12 @@ class GIS:
                                             b = B.distance(C)
                                             c = A.distance(C)
 
-                                            # Skip degenerate triangles
-                                            if a < epsilon or b < epsilon or c < epsilon:
+                                            # Skip degenerate and micro-scale triangles.
+                                            if (
+                                                a < CURVATURE_MIN_TRIPLET_LEG_M
+                                                or b < CURVATURE_MIN_TRIPLET_LEG_M
+                                                or c < CURVATURE_MIN_TRIPLET_LEG_M
+                                            ):
                                                 continue
 
                                             # Calculate using Heron's formula
@@ -894,6 +920,8 @@ class GIS:
                                                 continue  # Nearly collinear
 
                                             R = (a * b * c) / (4.0 * area_sq**0.5)
+                                            if R < CURVATURE_MIN_PLAUSIBLE_RADIUS_M:
+                                                continue
                                             if R < min_triplet_radius:
                                                 min_triplet_radius = R
 
@@ -950,8 +978,12 @@ class GIS:
             b = np.sqrt((C[0] - B[0])**2 + (C[1] - B[1])**2)  # dist(B, C)
             c = np.sqrt((C[0] - A[0])**2 + (C[1] - A[1])**2)  # dist(A, C)
 
-            # Skip degenerate cases (zero-length segments)
-            if a < epsilon or b < epsilon or c < epsilon:
+            # Skip degenerate and micro-scale triangles.
+            if (
+                a < CURVATURE_MIN_TRIPLET_LEG_M
+                or b < CURVATURE_MIN_TRIPLET_LEG_M
+                or c < CURVATURE_MIN_TRIPLET_LEG_M
+            ):
                 if return_details:
                     all_triplets.append({
                         "index": i,
@@ -983,6 +1015,16 @@ class GIS:
 
             # Calculate circumradius: R = (a * b * c) / (4 * area)
             R = (a * b * c) / (4.0 * area)
+
+            if R < CURVATURE_MIN_PLAUSIBLE_RADIUS_M:
+                if return_details:
+                    all_triplets.append({
+                        "index": i,
+                        "points": [A, B, C],
+                        "skipped": "implausible_radius",
+                        "reason": f"Radius below plausible minimum ({CURVATURE_MIN_PLAUSIBLE_RADIUS_M}m)",
+                    })
+                continue
 
             if return_details:
                 all_triplets.append({
@@ -1119,27 +1161,37 @@ class GIS:
         # Check 1 (along-path curve): circumradius < 10 m → sharp turn
         is_sharp_curve = (min_radius is not None) and (min_radius < sharp_turn_threshold)
 
-        # Check 2 (kink) + Check 3 (side-path junction): angle-based detections
-        # - Sudden kink: any vertex on a path within the window deflects > 45°
-        # - Non-parallel junction: any joining path meets the main path at > 45°
-        has_angle_turn = self._check_angle_curvature(point)
+        # Angle-based detections are split between sharp kinks on one path and
+        # true branch junctions between separate path segments.
+        has_kink, has_path_junction = self._check_angle_curvature(point)
+        is_sharp_bend = is_sharp_curve or has_kink
 
-        if is_sharp_curve or has_angle_turn:
-            return 1  # Sharp Turn Present
+        if is_sharp_bend or has_path_junction:
+            # Determine detection type sub-category
+            if is_sharp_bend and has_path_junction:
+                subcat = "Both"
+            elif is_sharp_bend:
+                subcat = "Sharp Bend"
+            else:
+                subcat = "Path Junction"
+            return 1, subcat  # Sharp Turn Present
         else:
-            return 2  # No Sharp Turn Present
+            if min_radius is not None:
+                subcat = ">18m" if min_radius > 18 else "10\u201318m"
+            else:
+                subcat = None
+            return 2, subcat  # No Sharp Turn Present
 
     def _check_angle_curvature(self, point, collect_radius=5.0, angle_threshold=45.0, epsilon=1e-9):
         """
         Check for two angle-based curvature conditions over all path layers within the window:
 
         1. KINK (along-path): Any original vertex on a path whose deflection angle exceeds
-           `angle_threshold` degrees. This catches sudden direction changes in a single path
-           that are too abrupt to be detected as a small circumradius (e.g. a hard kink
-           encoded as a single vertex rather than a tight curve).
+           `angle_threshold` degrees, with both adjacent legs long enough to represent a
+           meaningful bend rather than micro-geometry noise.
 
         2. NON-PARALLEL JUNCTION (side-path): Any point where two path endpoints meet (within
-           0.5 m tolerance) and the angle between their outgoing directions — normalised to
+           a small tolerance) and the angle between their outgoing directions — normalised to
            [0°, 90°] so direction of traversal does not matter — exceeds `angle_threshold`.
            An exactly parallel continuation scores 0°; a T-junction scores 90°.
 
@@ -1153,7 +1205,7 @@ class GIS:
             epsilon:          Minimum length threshold to skip degenerate segments.
 
         Returns:
-            bool: True if any kink or non-parallel junction is found, False otherwise.
+            tuple[bool, bool]: (has_kink, has_junction)
         """
         import math
 
@@ -1166,7 +1218,7 @@ class GIS:
             "footpath": "footpath",
         }
 
-        # Collect original vertex lists for every segment near the point
+        # Collect original vertex lists for every segment near the point.
         all_segments = []
         for store_key in all_layer_names.values():
             try:
@@ -1187,17 +1239,23 @@ class GIS:
                     continue
                 subset = gdf.iloc[cands]
                 subset = subset[subset.intersects(buf)]
-                for geom in subset.geometry:
+                for feature_idx, geom in zip(subset.index, subset.geometry):
                     if geom.geom_type == "LineString":
-                        all_segments.append(list(geom.coords))
+                        all_segments.append({
+                            "segment_id": f"{store_key}:{feature_idx}:0",
+                            "coords": list(geom.coords),
+                        })
                     elif geom.geom_type == "MultiLineString":
-                        for part in geom.geoms:
-                            all_segments.append(list(part.coords))
+                        for part_idx, part in enumerate(geom.geoms):
+                            all_segments.append({
+                                "segment_id": f"{store_key}:{feature_idx}:{part_idx}",
+                                "coords": list(part.coords),
+                            })
             except Exception:
                 continue
 
         if not all_segments:
-            return False
+            return False, False
 
         # ------------------------------------------------------------------
         # Helper: deflection angle at vertex B along A→B→C (0° = straight)
@@ -1216,19 +1274,89 @@ class GIS:
         # CHECK 1 — Sudden kink on original vertices
         # A vertex is only tested when it lies inside the analysis window.
         # ------------------------------------------------------------------
-        for coords in all_segments:
+        has_kink = False
+        for segment in all_segments:
+            coords = segment["coords"]
             if len(coords) < 3:
                 continue
             for i in range(len(coords) - 2):
-                bx, by = coords[i + 1]
+                ax, ay = coords[i][:2]
+                bx, by = coords[i + 1][:2]
+                cx, cy = coords[i + 2][:2]
                 if (bx - pt.x) ** 2 + (by - pt.y) ** 2 > collect_radius ** 2:
                     continue  # middle vertex outside window
-                ax, ay = coords[i]
-                cx, cy = coords[i + 2]
+                leg_ab = math.sqrt((bx - ax) ** 2 + (by - ay) ** 2)
+                leg_bc = math.sqrt((cx - bx) ** 2 + (cy - by) ** 2)
+                if leg_ab < CURVATURE_MIN_KINK_LEG_M or leg_bc < CURVATURE_MIN_KINK_LEG_M:
+                    continue
                 if deflection_angle(ax, ay, bx, by, cx, cy) > angle_threshold:
-                    return True
+                    has_kink = True
+                    break
+            if has_kink:
+                break
 
-        return False
+        # ------------------------------------------------------------------
+        # CHECK 2 — True branch junctions between separate path endpoints.
+        # ------------------------------------------------------------------
+        endpoint_vectors = []
+        endpoint_search_radius = collect_radius + CURVATURE_JUNCTION_SNAP_TOL_M
+
+        for segment in all_segments:
+            coords = segment["coords"]
+            if len(coords) < 2:
+                continue
+
+            start = coords[0][:2]
+            next_coord = coords[1][:2]
+            end = coords[-1][:2]
+            prev_coord = coords[-2][:2]
+
+            start_leg = math.sqrt((next_coord[0] - start[0]) ** 2 + (next_coord[1] - start[1]) ** 2)
+            end_leg = math.sqrt((end[0] - prev_coord[0]) ** 2 + (end[1] - prev_coord[1]) ** 2)
+
+            if ((start[0] - pt.x) ** 2 + (start[1] - pt.y) ** 2) <= endpoint_search_radius ** 2 and start_leg >= CURVATURE_MIN_JUNCTION_LEG_M:
+                endpoint_vectors.append({
+                    "segment_id": segment["segment_id"],
+                    "point": start,
+                    "vector": (next_coord[0] - start[0], next_coord[1] - start[1]),
+                })
+
+            if ((end[0] - pt.x) ** 2 + (end[1] - pt.y) ** 2) <= endpoint_search_radius ** 2 and end_leg >= CURVATURE_MIN_JUNCTION_LEG_M:
+                endpoint_vectors.append({
+                    "segment_id": segment["segment_id"],
+                    "point": end,
+                    "vector": (prev_coord[0] - end[0], prev_coord[1] - end[1]),
+                })
+
+        has_junction = False
+        for i in range(len(endpoint_vectors)):
+            endpoint_a = endpoint_vectors[i]
+            for j in range(i + 1, len(endpoint_vectors)):
+                endpoint_b = endpoint_vectors[j]
+                if endpoint_a["segment_id"] == endpoint_b["segment_id"]:
+                    continue
+
+                dx = endpoint_a["point"][0] - endpoint_b["point"][0]
+                dy = endpoint_a["point"][1] - endpoint_b["point"][1]
+                if dx * dx + dy * dy > CURVATURE_JUNCTION_SNAP_TOL_M ** 2:
+                    continue
+
+                v1x, v1y = endpoint_a["vector"]
+                v2x, v2y = endpoint_b["vector"]
+                m1 = math.sqrt(v1x * v1x + v1y * v1y)
+                m2 = math.sqrt(v2x * v2x + v2y * v2y)
+                if m1 < epsilon or m2 < epsilon:
+                    continue
+
+                cos_a = max(-1.0, min(1.0, (v1x * v2x + v1y * v2y) / (m1 * m2)))
+                normalized_angle = math.degrees(math.acos(abs(cos_a)))
+                if normalized_angle > angle_threshold:
+                    has_junction = True
+                    break
+            if has_junction:
+                break
+
+        return has_kink, has_junction
 
     def get_curvature_visualization(self, point, collect_radius=5.0):
         """
@@ -1550,13 +1678,21 @@ class GIS:
 
         # Categorize the found width using the same thresholds as PathAssignmentTool
         if width is None:
-            return default_value  # Default: Narrow (2)
+            return default_value, None  # Default: Narrow (2), no sub-category
         elif width > 4:
-            return 3  # Wide
+            category, subcat = 3, ">4m"
         elif width > 2:
-            return 2  # Narrow
+            category = 2
+            subcat = "3.5–4m" if width >= 3.5 else "2–<3.5m"
         else:
-            return 1  # Very Narrow
+            category = 1
+            if width <= 1.5:
+                subcat = "\u22641.5m"
+            elif width <= 1.8:
+                subcat = ">1.5\u20131.8m"
+            else:
+                subcat = ">1.8\u2013<2m"
+        return category, subcat
 
     def get_width_visualization(self, point, start_radius=1.0, max_radius=10.0, step=1.0):
         """

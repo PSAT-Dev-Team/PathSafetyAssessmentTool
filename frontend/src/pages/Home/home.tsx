@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchProjectList, deleteProject as apiDeleteProject, type FileResponse } from "../../api";
+import { fetchProjectList, deleteProject as apiDeleteProject, type FileResponse, type ProjectListItem } from "../../api";
+import { matchesProjectSearch } from "../../utils/projectSearch";
 import {
   Button,
   Dialog,
@@ -9,9 +10,7 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import "./home.css";
-
 export default function Home() {
-
   // Project List
   const [Projectlist, setProjectList] = useState<FileResponse | null>(null);
 
@@ -23,6 +22,8 @@ export default function Home() {
 
   // Delete dialog state
   const [openDelete, setOpenDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
 
@@ -37,7 +38,7 @@ export default function Home() {
   }, []);
 
   // UseMemo projects
-  const projects = useMemo(() => {
+  const projects: ProjectListItem[] = useMemo(() => {
     if (!Projectlist?.projects) return [];
     return Projectlist.projects
       .slice()
@@ -46,9 +47,8 @@ export default function Home() {
 
   // for Filters
   const filtered = useMemo(() => {
-    const q = nameQuery.trim().toLowerCase();
     let list = projects;
-    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+    if (nameQuery.trim()) list = list.filter((p) => matchesProjectSearch(p, nameQuery));
 
     return list;
   }, [projects, nameQuery /*, updatedFrom, updatedTo, createdFrom, createdTo */]);
@@ -80,7 +80,7 @@ export default function Home() {
       // 本地把它从列表移除
       setProjectList((prev) =>
         prev
-          ? { projects: prev.projects.filter((p) => p.name !== selected) }
+          ? { projects: prev.projects.filter((project) => project.name !== selected) }
           : prev
       );
       setSelected(null);
@@ -97,16 +97,17 @@ export default function Home() {
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
-            <label htmlFor="nameQuery">Search by project name</label>
+            <label htmlFor="nameQuery">Search by project or road</label>
             <input
               id="nameQuery"
               type="text"
-              placeholder="Type project name…"
+              placeholder="Type project name or road…"
               value={nameQuery}
               onChange={(e) => setNameQuery(e.target.value)}
             />
           </div>
         </div>
+        {error && <div className="empty">{error}</div>}
       </div>
 
       <div className="table-wrap">
@@ -173,6 +174,11 @@ export default function Home() {
               </Dialog.Header>
               <Dialog.Body>
                 This will permanently remove{" "}<strong>{selected}</strong> and its files.
+                {deleteErr && (
+                  <div style={{ marginTop: 12, color: "var(--chakra-colors-red-500)" }}>
+                    {deleteErr}
+                  </div>
+                )}
               </Dialog.Body>
               <Dialog.Footer>
                 <Dialog.ActionTrigger asChild>

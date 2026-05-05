@@ -1,21 +1,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Box, Text, Flex, Button } from "@chakra-ui/react";
+import { useColorMode } from "../../components/ui/color-mode";
 import DeveloperGuide from "./DeveloperGuide";
-import "./helpPage.css";
+import UserGuide from "./UserGuide";
 
 export default function HelpPage() {
   const navigate = useNavigate();
+  const { colorMode } = useColorMode();
+  const dark = colorMode === "dark";
   const [activeTab, setActiveTab] = useState<"user" | "developer" | "admin">("user");
 
   return (
-<<<<<<< Updated upstream
-    <div className="help-page-container">
-      <div className="help-page-card">
-        <header className="help-header">
-          <h1>Documentation & Guides</h1>
-          <button onClick={() => navigate(-1)} className="help-back-button">Go Back</button>
-        </header>
-=======
     <Box minH="100vh" bg="gray.100" _dark={{ bg: "gray.900" }} p="8" fontFamily="inherit">
       <Box
         maxW="1000px"
@@ -32,13 +28,12 @@ export default function HelpPage() {
           align="center"
           borderBottom="2px solid"
           borderColor="gray.200"
-          _dark={{ borderColor: "gray.600" }}
+          _dark={{ borderColor: "gray.600", bg: "gray.800" }}
           pb="4"
           mb="6"
           position="sticky"
           top="0"
           bg="white"
-          _dark={{ bg: "gray.800" }}
           zIndex="10"
         >
           <Text fontSize="2xl" fontWeight="bold" color="gray.800" _dark={{ color: "gray.100" }}>
@@ -48,97 +43,131 @@ export default function HelpPage() {
             Go Back
           </Button>
         </Flex>
->>>>>>> Stashed changes
-
-        <div className="help-tabs">
-          <button 
-            className={`help-tab ${activeTab === "user" ? "active" : ""}`}
-            onClick={() => setActiveTab("user")}
-          >
-            User Guide
-          </button>
-          <button 
-            className={`help-tab ${activeTab === "developer" ? "active" : ""}`}
-            onClick={() => setActiveTab("developer")}
-          >
-            Developer Guide
-          </button>
-          <button 
-            className={`help-tab ${activeTab === "admin" ? "active" : ""}`}
-            onClick={() => setActiveTab("admin")}
-          >
-            Admin Guide
-          </button>
-        </div>
-
-        <div className="help-content">
-          {activeTab === "user" && (
-            <div className="guide-section">
-              <h2>User Guide</h2>
-              <p>Welcome to the Path Safety Assessment Tool (PSAT). This tool allows you to evaluate active mobility paths using the CycleRAP model.</p>
-              
-              <h3>1. Getting Started</h3>
-              <ul>
-                <li><strong>Start a Project:</strong> From the Home page, click "New Project" to import your shapefiles, mapping data, and street-level imagery.</li>
-                <li><strong>Project Settings:</strong> Ensure your project name is correctly set. You can manage multiple projects simultaneously from the Projects listing.</li>
-              </ul>
-              
-              <h3>2. Coding Page</h3>
-              <ul>
-                <li><strong>Auto-coding:</strong> Use the "Auto-code image" button to leverage AI models that automatically identify risk factors from the image.</li>
-                <li><strong>GIS Coding:</strong> Our GIS backend automatically evaluates contextual data such as proximity to MRT exits, bus stops, and road intersections.</li>
-                <li><strong>Manual Review:</strong> You can meticulously review and override the attributes predicted by the AI directly on the panel.</li>
-              </ul>
-
-              <h3>3. Map View & Analysis</h3>
-              <ul>
-                <li><strong>GIS Layers:</strong> Toggle the map layers to visualize Footpaths, Cycling Paths, and Road Crossings.</li>
-                <li><strong>Risk Bands:</strong> Segments are color-coded based on overall risk logic.</li>
-                <li><strong>Editing:</strong> You can add or delete segment points directly on the Map preview using the cursor tools.</li>
-              </ul>
-            </div>
-          )}
-
-          {activeTab === "developer" && (
-            <div className="guide-section">
-              <DeveloperGuide />
-            </div>
-          )}
 
 
-          {activeTab === "admin" && (
-            <div className="guide-section">
-              <h2>Administrator Guide</h2>
-              <p>This section provides instructions for system administrators on how to deploy, manage, and update the Path Safety Assessment Tool (PSAT).</p>
+        {/* Tabs */}
+        <Flex gap="4" mb="8" borderBottom="2px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
+          {(["user", "developer", "admin"] as const).map((tab) => {
+            const isActive = activeTab === tab;
+            return (
+              <Box
+                key={tab}
+                as="button"
+                px="4"
+                py="2"
+                fontSize="md"
+                fontWeight="semibold"
+                color={isActive
+                  ? (dark ? "white" : "gray.900")
+                  : (dark ? "gray.400" : "gray.500")
+                }
+                position="relative"
+                cursor="pointer"
+                bg="transparent"
+                border="none"
+                outline="none"
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab === "user" ? "User Guide" : tab === "developer" ? "Developer Guide" : "Admin Guide"}
+                {isActive && (
+                  <Box
+                    position="absolute"
+                    bottom="-2px"
+                    left="0"
+                    right="0"
+                    h="3px"
+                    bg="blue.500"
+                    borderRadius="3px 3px 0 0"
+                  />
+                )}
+              </Box>
+            );
+          })}
+        </Flex>
 
-              <h3>1. Deployment & Infrastructure</h3>
-              <ul>
-                <li><strong>Starting the App:</strong> The application is typically orchestrated via Docker Compose. Run <code>docker compose up --build</code> to start both the Flask backend and the React frontend. For direct local launching, you can use the <code>Run-PSAT.bat</code> script.</li>
-                <li><strong>Data Persistence:</strong> User-created projects, images, and results are stored in the <code>data/</code> directory, which is bind-mounted to the backend. Backing up this folder will backup all user work across the system.</li>
-              </ul>
-
-              <h3>2. Managing Machine Learning Models</h3>
-              <ul>
-                <li><strong>YOLO Weights:</strong> The computer-vision prediction models are stored in <code>backend/models/</code>. To deploy a newly trained model, replace the existing <code>.pt</code> files (e.g., <code>path_seg.pt</code>) in this directory and restart the backend container.</li>
-                <li><strong>Hardware Configuration:</strong> The backend loads PyTorch models into memory on initialization. Ensure the host machine has adequate RAM. For GPU acceleration, CUDA drivers must be properly configured.</li>
-              </ul>
-
-              <h3>3. Updating GIS Shapefiles</h3>
-              <ul>
-                <li><strong>Location:</strong> The CycleRAP contextual GIS infrastructure shapefiles (e.g., road crossings, MRT exits, cycling networks) are stored under <code>backend/shapefiles/</code>.</li>
-                <li><strong>Updating Layers:</strong> To update the GIS data, replace the files within their respective category subdirectories (e.g., <code>backend/shapefiles/path/CyclingpathCentreline.shp</code>). The Flask application automatically rescans and loads to its bounding boxes when the server is restarted.</li>
-              </ul>
-              
-              <h3>4. Troubleshooting & Health</h3>
-              <ul>
-                <li><strong>Logs:</strong> If auto-coding fails, check the server output via `docker compose logs -f backend` or the terminal running the bat script to view full Python stack traces.</li>
-                <li><strong>Health Endpoints:</strong> You can query <code>/api/health</code> or <code>/api/ping</code> to verify that the backend API server is responsive and that the CV models loaded correctly.</li>
-              </ul>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+        {/* Content */}
+        <Box>
+          {activeTab === "user" && <UserGuide />}
+          {activeTab === "developer" && <DeveloperGuide />}
+          {activeTab === "admin" && <AdminGuide />}
+        </Box>
+      </Box>
+    </Box>
   );
 }
 
+function AdminGuide() {
+  return (
+    <Box>
+      <Text fontSize="xl" fontWeight="bold" color="gray.800" _dark={{ color: "gray.100" }} mb="4">
+        Administrator Guide
+      </Text>
+      <Text color="gray.600" _dark={{ color: "gray.400" }} lineHeight="1.7" mb="6">
+        This section provides instructions for system administrators on how to deploy, manage, and update the Path Safety Assessment Tool (PSAT).
+      </Text>
+
+      {[
+        {
+          title: "1. Deployment & Infrastructure",
+          items: [
+            { label: "Starting the App:", body: <>The application is typically orchestrated via Docker Compose. Run <Code>docker compose up --build</Code> to start both the Flask backend and the React frontend. For direct local launching, you can use the <Code>Run-PSAT.bat</Code> script.</> },
+            { label: "Data Persistence:", body: <>User-created projects, images, and results are stored in the <Code>data/</Code> directory, which is bind-mounted to the backend. Backing up this folder will backup all user work across the system.</> },
+          ],
+        },
+        {
+          title: "2. Managing Machine Learning Models",
+          items: [
+            { label: "YOLO Weights:", body: <>The computer-vision prediction models are stored in <Code>backend/models/</Code>. To deploy a newly trained model, replace the existing <Code>.pt</Code> files and restart the backend container.</> },
+            { label: "Hardware Configuration:", body: "The backend loads PyTorch models into memory on initialization. Ensure the host machine has adequate RAM. For GPU acceleration, CUDA drivers must be properly configured." },
+          ],
+        },
+        {
+          title: "3. Updating GIS Shapefiles",
+          items: [
+            { label: "Location:", body: <>The CycleRAP contextual GIS infrastructure shapefiles are stored under <Code>backend/shapefiles/</Code>.</> },
+            { label: "Updating Layers:", body: "Replace the files within their respective category subdirectories. The Flask application automatically rescans when the server is restarted." },
+          ],
+        },
+        {
+          title: "4. Troubleshooting & Health",
+          items: [
+            { label: "Logs:", body: <>If auto-coding fails, check the server output via <Code>docker compose logs -f backend</Code> to view full Python stack traces.</> },
+            { label: "Health Endpoints:", body: <>Query <Code>/api/health</Code> or <Code>/api/ping</Code> to verify the backend is responsive and CV models loaded correctly.</> },
+          ],
+        },
+      ].map((section) => (
+        <Box key={section.title}>
+          <Text fontSize="lg" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.200" }} mt="6" mb="3">
+            {section.title}
+          </Text>
+          <Box as="ul" pl="6" color="gray.600" _dark={{ color: "gray.400" }} lineHeight="1.7">
+            {section.items.map((item) => (
+              <Box as="li" key={item.label} mb="2">
+                <Text as="span" fontWeight="bold" color="gray.700" _dark={{ color: "gray.200" }}>{item.label}</Text>{" "}
+                {item.body}
+              </Box>
+            ))}
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function Code({ children }: { children: React.ReactNode }) {
+  return (
+    <Box
+      as="code"
+      bg="gray.100"
+      _dark={{ bg: "gray.700", color: "red.300" }}
+      px="1"
+      py="0.5"
+      borderRadius="sm"
+      fontFamily="mono"
+      fontSize="0.875em"
+      color="red.600"
+    >
+      {children}
+    </Box>
+  );
+}

@@ -6,3 +6,45 @@ model/
 
 # Claude Code settings
 .claude/path_segmentation_inference.ipynb
+
+# Unused/duplicate ML model files and scriptss
+cyclerap_output*/
+# Python bytecode cache
+__pycache__/
+# Added by code-review-graph
+.code-review-graph/
+# Obsidian vault generated from graph.db (regenerable)
+obsidian-vault/
+
+# IDE and AI Tooling
+.claude/
+.cursor/
+.cursorrules
+.mcp.json
+.opencode.json
+.windsurfrules
+AGENTS.md
+GEMINI.md
+
+# POC scripts and outputs
+adjroad_poc.py
+cv_poc.py
+cv_poc_2.py
+obstacle_inference.py
+cv_output_annotated/
+facil_type/
+yck_facil/
+yck_obstacles/
+obstacles/
+scripts/
+Gradient Calculation/
+
+# Data and Models
+CycleRAP - model - generation v2.13 - to suppliers.xlsm
+Obstacles 2/
+completed.csv
+
+
+# OS specific files
+.DS_Store
+**/.DS_Store

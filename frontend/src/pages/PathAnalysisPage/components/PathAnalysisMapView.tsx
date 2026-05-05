@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Text, Tabs, Button, Flex, HStack, createListCollection, Combobox, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
+import { Box, Text, Tabs, Button, Flex, HStack, Portal, Input, IconButton, Dialog } from "@chakra-ui/react";
 import { toaster } from "../../../components/ui/toaster";
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents, Polygon as LeafletPolygon, Polyline as LeafletPolyline, Marker, Pane } from "react-leaflet";
 import { FaDrawPolygon, FaMousePointer, FaPlus, FaTrash } from "react-icons/fa";
-import { Switch } from "../../../components/ui/switch";
+import { Slider } from "../../../components/ui/slider";
+import { NUMERIC_FILTER_ATTRIBUTES, ATTRIBUTE_OPTIONS, ATTRIBUTE_LABELS, getCategoryColor, SUBCATEGORY_MAP, MULTI_VALUE_ATTRS, SUBCATEGORY_CHILD_ATTRS } from "./AttributesDropdown";
 import { AddSegmentsDialog } from "./AddSegmentsDialog";
 import { Menu } from "@chakra-ui/react";
 import { MapCursorController } from "../../../components/common/MapCursorController";
@@ -76,13 +77,12 @@ interface PolygonDrawingToolProps {
 interface DraggableMarkerProps {
   position: [number, number];
   index: number;
-  color: string;
   icon: L.DivIcon;
   onDrag: (index: number, latlng: L.LatLng) => void;
   onDragEnd: (index: number, latlng: L.LatLng) => void;
 }
 
-function DraggableMarker({ position, index, color, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
+function DraggableMarker({ position, index, icon, onDrag, onDragEnd }: DraggableMarkerProps) {
   const eventHandlers = useMemo(
     () => ({
       drag: (e: L.LeafletEvent) => {
@@ -192,7 +192,6 @@ function PolygonDrawingTool({ isPolygonMode, isPolygonAddMode, onPolygonPoint, o
           key={`poly-point-${idx}`}
           position={pt}
           index={idx}
-          color={color}
           icon={icon}
           onDrag={handleDrag}
           onDragEnd={handleDragEnd}
@@ -216,7 +215,7 @@ function PolygonDrawingTool({ isPolygonMode, isPolygonAddMode, onPolygonPoint, o
 
 interface AttributeAnalysisMapViewProps {
   selectedProjects: string[];
-  selectedAttributes: (string | null)[];
+  selectedAttributes: string[];
   onChartDataUpdate?: (data: {
     categoryDistributionData: { category: string; count: number; color: string }[];
     primaryFocusAttribute: string | null;
@@ -242,29 +241,40 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   const [panToBounds, setPanToBounds] = useState<L.LatLngBounds | null>(null);
   const [attrMappings, setAttrMappings] = useState<Record<string, Record<string, string>>>({});
 
-  // Category toggle states - now tracks toggles per filter attribute
-  // Structure: { "attributeName": { "categoryValue": true/false } }
+  // Category toggle states — tracks per-attribute per-value visibility
   const [categoryToggles, setCategoryToggles] = useState<Record<string, Record<string, boolean>>>(() => {
     try {
       const stored = sessionStorage.getItem("pathAnalysisMap_categoryToggles");
       return stored ? JSON.parse(stored) : {};
-    } catch {
-      return {};
-    }
+    } catch { return {}; }
   });
 
-  // Track if we should auto-fit bounds (only on initial project load, not on category changes)
-  const [shouldAutoFit, setShouldAutoFit] = useState(false);
+  // Subcategory toggle states — tracks per-child-attr per-value visibility (Layer 3)
+  const [subcategoryToggles, setSubcategoryToggles] = useState<Record<string, Record<string, boolean>>>(() => {
+    try {
+      const stored = sessionStorage.getItem("pathAnalysisMap_subcategoryToggles");
+      return stored ? JSON.parse(stored) : {};
+    } catch { return {}; }
+  });
 
-  // Track which attribute to show categories for (defaults to first)
+  // Range filter states for numeric attributes
+  const [rangeFilters, setRangeFilters] = useState<Record<string, [number, number]>>(() => {
+    try {
+      const stored = sessionStorage.getItem("pathAnalysisMap_rangeFilters");
+      return stored ? JSON.parse(stored) : {};
+    } catch { return {}; }
+  });
+
+  // Track which attribute to show categories for in the sidebar
   const [categoryFilterAttributeIndex, setCategoryFilterAttributeIndex] = useState<number>(() => {
     try {
       const stored = sessionStorage.getItem("pathAnalysisMap_categoryFilterIndex");
       return stored ? Number(stored) : 0;
-    } catch {
-      return 0;
-    }
+    } catch { return 0; }
   });
+
+  // Track if we should auto-fit bounds (only on initial project load, not on category changes)
+  const [shouldAutoFit, setShouldAutoFit] = useState(false);
 
   // Track which attribute is the primary focus for coloring
   const [primaryFocusAttribute, setPrimaryFocusAttribute] = useState<string | null>(() => {
@@ -275,10 +285,17 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     }
   });
 
-  // Persist states to sessionStorage
   useEffect(() => {
     sessionStorage.setItem("pathAnalysisMap_categoryToggles", JSON.stringify(categoryToggles));
   }, [categoryToggles]);
+
+  useEffect(() => {
+    sessionStorage.setItem("pathAnalysisMap_subcategoryToggles", JSON.stringify(subcategoryToggles));
+  }, [subcategoryToggles]);
+
+  useEffect(() => {
+    sessionStorage.setItem("pathAnalysisMap_rangeFilters", JSON.stringify(rangeFilters));
+  }, [rangeFilters]);
 
   useEffect(() => {
     sessionStorage.setItem("pathAnalysisMap_categoryFilterIndex", String(categoryFilterAttributeIndex));
@@ -291,6 +308,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       sessionStorage.removeItem("pathAnalysisMap_primaryFocus");
     }
   }, [primaryFocusAttribute]);
+
+  // When all filters are reset, revert coloring to by-project
+  useEffect(() => {
+    if (selectedAttributes.length === 0) {
+      setPrimaryFocusAttribute("Project");
+    }
+  }, [selectedAttributes]);
 
   // Mode states (Single Point & Polygon)
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -429,26 +453,23 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Update primaryFocusAttribute when selected attributes change
+  // Active filters = the attributes selected via FilterPanel (passed as prop)
+  const activeFilters = useMemo(() => selectedAttributes, [selectedAttributes]);
+
+  // Auto-focus the newest filter when one is added
+  const prevFiltersRef = useRef<string[]>([]);
   useEffect(() => {
-    const activeAttrs = selectedAttributes.filter(attr => attr !== null);
-    if (activeAttrs.length > 0) {
-      // If current primary focus is not in active attributes or not "Project", reset to first active attribute
-      if (!primaryFocusAttribute || (primaryFocusAttribute !== "Project" && !activeAttrs.includes(primaryFocusAttribute))) {
-        setPrimaryFocusAttribute(activeAttrs[0]);
-      }
-    } else if (primaryFocusAttribute !== "Project") {
-      // Only clear if not set to "Project"
-      setPrimaryFocusAttribute(null);
+    const prev = prevFiltersRef.current;
+    const added = activeFilters.find(f => !prev.includes(f));
+    if (added) {
+      const idx = activeFilters.indexOf(added);
+      setCategoryFilterAttributeIndex(idx);
+      setPrimaryFocusAttribute(added);
     }
-  }, [selectedAttributes]);
+    prevFiltersRef.current = activeFilters;
+  }, [activeFilters]);
 
-  // Get all active filters (non-null attributes)
-  const activeFilters = useMemo(() => {
-    return selectedAttributes.filter(attr => attr !== null);
-  }, [selectedAttributes]);
-
-  // Reset category filter index if it's out of bounds (e.g. when a filter is removed)
+  // Reset sidebar index if out of bounds
   useEffect(() => {
     if (categoryFilterAttributeIndex >= activeFilters.length) {
       setCategoryFilterAttributeIndex(0);
@@ -459,9 +480,19 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   useEffect(() => {
     fetchAttributeMappings()
       .then(mappings => {
+        // Ensure adequacy-mapped attributes are always present (backend may omit them)
+        const adequacyMap: Record<string, string> = { "1": "Adequate", "2": "Inadequate" };
+        if (!mappings["Line of Sight"]) mappings["Line of Sight"] = adequacyMap;
+        if (!mappings["Facility access"]) mappings["Facility access"] = adequacyMap;
         setAttrMappings(mappings);
       })
-      .catch(() => { });
+      .catch(() => {
+        // Minimal fallback so at least adequacy attributes work offline
+        setAttrMappings({
+          "Line of Sight": { "1": "Adequate", "2": "Inadequate" },
+          "Facility access": { "1": "Adequate", "2": "Inadequate" },
+        });
+      });
   }, []);
 
   // Get color for a specific crash type score based on thresholds
@@ -485,17 +516,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   useEffect(() => {
     setCategoryToggles(prev => {
       const updated = { ...prev };
-      // Initialize toggles for new active filters if they don't exist
       for (const filterAttr of activeFilters) {
-        if (!updated[filterAttr]) {
-          updated[filterAttr] = {};
-        }
+        if (!updated[filterAttr]) updated[filterAttr] = {};
       }
       return updated;
     });
   }, [activeFilters]);
 
-  // Get the attribute to show categories for
+  // The attribute whose categories are currently shown in the sidebar
   const categoryFilterAttribute = activeFilters[categoryFilterAttributeIndex];
 
   // Helper function to get Overall Risk Score for a segment
@@ -515,20 +543,41 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Define table columns
   const tableColumns = useMemo(() => {
-    const cols = [
+    const cols: { key: string; label: string }[] = [
       { key: "Project", label: "Project" },
       { key: "Segment #", label: "Segment #" },
       { key: "Image Reference", label: "Image Reference" },
       { key: "Coordinates", label: "Coordinates" },
-      ...activeFilters.map(attr => ({ key: attr, label: attr })),
-      { key: "Overall Risk Score", label: "Overall Risk Score" }
     ];
+    for (const attr of activeFilters) {
+      cols.push({ key: attr, label: ATTRIBUTE_LABELS[attr] ?? attr });
+      const subcat = SUBCATEGORY_MAP[attr];
+      if (subcat) {
+        const childAttr = subcat.childAttr;
+        cols.push({ key: childAttr, label: ATTRIBUTE_LABELS[childAttr] ?? childAttr });
+      }
+    }
+    cols.push({ key: "Overall Risk Score", label: "Overall Risk Score" });
     return cols;
   }, [activeFilters]);
 
 
   // Helper function to convert numeric attribute value to text using mappings
   const getAttrText = (attrName: string, attrValue: any): string => {
+    // Subcategory child attrs: null/empty/undefined → "None"
+    if (SUBCATEGORY_CHILD_ATTRS.has(attrName)) {
+      if (attrValue === null || attrValue === undefined || attrValue === "" || attrValue === "null") {
+        return "None";
+      }
+    }
+
+    // Generic null/empty handling — map to "Not Present" if the attribute supports it
+    if (attrValue === null || attrValue === undefined || attrValue === "" || String(attrValue).toLowerCase() === "null") {
+      const opts = ATTRIBUTE_OPTIONS[attrName];
+      if (opts && opts.includes("Not Present")) return "Not Present";
+      return ""; // no valid category — exclude this segment from toggle counts
+    }
+
     // Handle safety score band values (VB Band, BB Band, SB Band, BP Band)
     // These map to exactly 4 categories based on score thresholds:
     // Low: <10, Medium: 10-25, High: 25-60, Extreme: >60
@@ -746,16 +795,15 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         "Mixed Traffic Road Lane": "#DC2626",
       },
 
-      // Area type (neutral colors)
+      // Area type
       "Area type": {
-        "Urban": "#2563EB",
-        "Suburban": "#3B82F6",
-        "Rural": "#10B981",
-        "Industrial": "#6B7280",
+        "Urban":        "#2563EB", // Blue
+        "Suburban":     "#0891B2", // Cyan
+        "Rural":        "#16A34A", // Green
+        "Industrial":   "#EA580C", // Orange
+        "Recreational": "#9333EA", // Purple
       },
     };
-
-    // Get color for primaryFocusAttribute - handle both direct string values and object mappings
     const attributeColors = categoryColors[primaryFocusAttribute];
     if (typeof attributeColors === "object" && attributeColors !== null) {
       return attributeColors as Record<string, string>;
@@ -775,95 +823,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     // For simple string-to-color mappings, return empty (handled by legend logic)
     return {} as Record<string, string>;
   }, [primaryFocusAttribute]);
-
-  // Helper function to get color for a specific attribute and category value
-  const getCategoryColor = (attribute: string, category: string): string => {
-    // For Safety Score attributes (VB Band, BB Band, SB Band, BP Band, Overall Risk Level), use the category value directly for color lookup
-    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(attribute);
-
-    const categoryColors: Record<string, string | Record<string, string>> = {
-      // Safety Score Band colors (CycleRAP Risk Bands) - these apply to all safety score attributes
-      "Not Selected": "#9CA3AF",
-      "Low": "#87C424",
-      "Medium": "#FFCC1A",
-      "High": "#FF5B1A",
-      "Extreme": "#CD1AFF",
-      // Facility configuration
-      "Adjacent Sidewalk 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Road Lane 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Vehicle Parking 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Severe Hazard 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent object or level change 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Road Lane 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Vehicle Parking 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Severe Hazard 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent object or level change 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      // Facility clear width
-      "Line of Sight": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
-      "Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Light Segregation": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Facility access": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
-      // Facility surface conditions
-      "Loose or slippery surface": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Major Surface Deformation or Drain Opening": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Tram or Train Rails": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Delineation": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Grade": { "< 5 Degrees": "#16A34A", "=/> 5 Degrees": "#DC2626" },
-      "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
-      "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#FFCC1A", "Very Narrow": "#DC2626" },
-      // Flow & Speed
-      "Peak pedestrian flow along or across facility": { "None": "#6B7280", "Low": "#16A34A", "Moderate to high": "#DC2626" },
-      "Peak bicycle/LV traffic flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
-      "Observed proportion of cargo bikes and mopeds": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
-      "Heavy vehicle flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
-      "Bicycle/LV speed – average": { "< 20km/h": "#16A34A", "=/> 20km/h": "#DC2626" },
-      "Bicycle/LV speed differential": { "< 10km/h": "#16A34A", "=/> 10km/h": "#DC2626" },
-      // Intersection
-      "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Property Access": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Intersection Approach": { "Separate/NA": "#16A34A", "Shared": "#DC2626" },
-      "Number of lanes – adjacent road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
-      "Number of lanes – intersecting road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
-      "Flow Direction": { "One Way": "#2563EB", "Two Way": "#9333EA" },
-      "Facility Type": {
-        "Sidewalk": "#2563EB",
-        "Multi-Use Path": "#9333EA",
-        "Off-Road Bicycle Path": "#16A34A",
-        "On-road Bicycle Lane": "#CA8A04",
-        "Road Shoulder": "#F59E0B",
-        "Mixed Traffic Road Lane": "#DC2626",
-      },
-      "Area type": {
-        "Urban": "#2563EB",
-        "Suburban": "#3B82F6",
-        "Rural": "#10B981",
-        "Industrial": "#6B7280",
-      },
-    };
-
-    // For safety score attributes, look up the category value directly (it will be Low, Medium, High, Extreme, Not Selected)
-    if (isSafetyScore) {
-      const color = categoryColors[category] as string || "#6B7280";
-      return color;
-    }
-
-    // For other attributes, look up by attribute name
-    const attributeColors = categoryColors[attribute];
-    if (typeof attributeColors === "object" && attributeColors !== null) {
-      const color = (attributeColors as Record<string, string>)[category] || "#6B7280";
-      return color;
-    }
-    if (typeof attributeColors === "string") {
-      return attributeColors;
-    }
-    return "#6B7280"; // Default gray
-  };
 
   // Helper function to get column value as string
   function getColumnValue(point: any, columnKey: string): string {
@@ -910,6 +869,31 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
     return result;
   }
+
+  // Compute actual min/max from data for each numeric filter attribute
+  // Compute actual min/max from data for each numeric filter attribute (for sidebar slider bounds)
+  const dataRangeBounds = useMemo(() => {
+    const bounds: Record<string, { min: number; max: number }> = {};
+    NUMERIC_FILTER_ATTRIBUTES.forEach(attr => {
+      let min = Infinity;
+      let max = -Infinity;
+      projectsData.forEach(pd => {
+        pd.attributes.forEach(row => {
+          if (!row) return;
+          const v = Number(row[attr]);
+          if (!isNaN(v)) {
+            if (v < min) min = v;
+            if (v > max) max = v;
+          }
+        });
+      });
+      bounds[attr] = {
+        min: isFinite(min) ? min : 0,
+        max: isFinite(max) ? max : 100,
+      };
+    });
+    return bounds;
+  }, [projectsData]);
 
   // Extract all points from all projects with their metadata
   const allPoints = useMemo(() => {
@@ -960,6 +944,19 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               } else {
                 // Generic attribute
                 const attrValue = attributes[filterAttr];
+
+                // Numeric range filter (Road AADT, Road operating speed)
+                if (NUMERIC_FILTER_ATTRIBUTES.has(filterAttr)) {
+                  const numVal = Number(attrValue);
+                  const bounds = dataRangeBounds[filterAttr];
+                  const [rMin, rMax] = rangeFilters[filterAttr] ?? [bounds?.min ?? 0, bounds?.max ?? 100];
+                  if (isNaN(numVal) || numVal < rMin || numVal > rMax) {
+                    matchesAllFilters = false;
+                    break;
+                  }
+                  continue;
+                }
+
                 attrValueText = getAttrText(filterAttr, attrValue);
               }
 
@@ -969,9 +966,33 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               }
 
               // Check category toggles
-              if (categoryToggles[filterAttr] && categoryToggles[filterAttr][attrValueText] === false) {
-                matchesAllFilters = false;
-                break;
+              if (categoryToggles[filterAttr]) {
+                if (categoryToggles[filterAttr][attrValueText] === false) {
+                  matchesAllFilters = false;
+                  break;
+                }
+              }
+
+              // Check subcategory toggles (Layer 3)
+              const subcatConfig = SUBCATEGORY_MAP[filterAttr];
+              if (subcatConfig) {
+                const childOptions = subcatConfig.parentCategories[attrValueText];
+                if (childOptions && subcategoryToggles[subcatConfig.childAttr]) {
+                  const childValue = getAttrText(subcatConfig.childAttr, attributes[subcatConfig.childAttr]);
+                  if (childValue) {
+                    if (MULTI_VALUE_ATTRS.has(subcatConfig.childAttr) && childValue.includes(", ")) {
+                      const parts = childValue.split(", ").map((s: string) => s.trim());
+                      const anyEnabled = parts.some((part: string) => subcategoryToggles[subcatConfig.childAttr][part] !== false);
+                      if (!anyEnabled) {
+                        matchesAllFilters = false;
+                        break;
+                      }
+                    } else if (subcategoryToggles[subcatConfig.childAttr][childValue] === false) {
+                      matchesAllFilters = false;
+                      break;
+                    }
+                  }
+                }
               }
             }
 
@@ -1062,7 +1083,12 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 // Use attribute color for non-safety-band attributes
                 const attrValue = attributes[primaryFocusAttribute];
                 attrValueText = getAttrText(primaryFocusAttribute, attrValue);
-                pointColor = getCategoryColor(primaryFocusAttribute, attrValueText);
+                // Multi-value attributes: use first value for color coding
+                if (MULTI_VALUE_ATTRS.has(primaryFocusAttribute) && attrValueText.includes(", ")) {
+                  pointColor = getCategoryColor(primaryFocusAttribute, attrValueText.split(", ")[0].trim());
+                } else {
+                  pointColor = getCategoryColor(primaryFocusAttribute, attrValueText);
+                }
               }
             }
 
@@ -1081,7 +1107,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
 
     return pts;
-  }, [projectsData, primaryFocusAttribute, activeFilters, attrMappings, categoryToggles]);
+  }, [projectsData, primaryFocusAttribute, activeFilters, attrMappings, categoryToggles, subcategoryToggles, rangeFilters, dataRangeBounds]);
 
   const allLatLngs = useMemo(() => allPoints.map(p => p.latlng), [allPoints]);
 
@@ -1208,130 +1234,112 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
   }, [filteredData, sortConfig]);
 
-  // Get only the categories that exist in the data for the selected category filter attribute
-  // Filters are INDEPENDENT - we show all categories that exist in the full dataset, not filtered by other filters
+  // Get categories available in loaded data for the current sidebar attribute
   const availableCategories = useMemo(() => {
     if (!categoryFilterAttribute) return [];
-
-    // Get unique categories from all segments, independent of other filters
     const categoriesInData = new Set<string>();
 
     projectsData.forEach((projectData) => {
-      // If categoryFilterAttribute is "Project", collect unique project names
       if (categoryFilterAttribute === "Project") {
         categoriesInData.add(projectData.projectName);
         return;
       }
-
-      // Special handling for Overall Risk Level
       if (categoryFilterAttribute === "Overall Risk Level") {
         projectData.geoFeatures.forEach((_, i) => {
           if (projectData.scores && projectData.scores.length > i) {
             const segmentScores = projectData.scores[i];
-            // Overall Risk Level = maximum category from the individual crash type bands
-            // (same logic as Coding Page)
             const bands = [
               segmentScores["VB Band"] ?? 1,
               segmentScores["BB Band"] ?? 1,
               segmentScores["SB Band"] ?? 1,
               segmentScores["BP Band"] ?? 1
             ];
-
             const maxBand = Math.max(...bands);
-
             let category = "Low";
             if (maxBand <= 1) category = "Low";
             else if (maxBand <= 2) category = "Medium";
             else if (maxBand <= 3) category = "High";
             else category = "Extreme";
-
             categoriesInData.add(category);
           }
         });
         return;
       }
-
-      // For other attributes (including safety band attributes like BP Band, VB Band, etc.)
       projectData.geoFeatures.forEach((_, i) => {
         const attributes = projectData.attributes[i];
         if (attributes) {
           const attrValue = attributes[categoryFilterAttribute];
           const attrValueText = getAttrText(categoryFilterAttribute, attrValue);
           if (attrValueText) {
-            categoriesInData.add(attrValueText);
+            // Multi-value attributes: split "Bollards, Fence" into individual categories
+            if (MULTI_VALUE_ATTRS.has(categoryFilterAttribute) && attrValueText.includes(", ")) {
+              attrValueText.split(", ").forEach((part: string) => categoriesInData.add(part.trim()));
+            } else {
+              categoriesInData.add(attrValueText);
+            }
           }
         }
       });
     });
 
-    // Sort categories with special handling for safety score bands and facility width
     const categories = Array.from(categoriesInData);
-    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(categoryFilterAttribute || "");
-
+    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(categoryFilterAttribute);
     if (isSafetyScore) {
-      // For safety score, sort in the order: Low, Medium, High, Extreme
       const riskOrder = ["Low", "Medium", "High", "Extreme"];
       categories.sort((a, b) => {
-        const aIndex = riskOrder.indexOf(a);
-        const bIndex = riskOrder.indexOf(b);
-        // If both are in riskOrder, use their indices; otherwise put them at the end
-        if (aIndex === -1 && bIndex === -1) return 0;
-        if (aIndex === -1) return 1;
-        if (bIndex === -1) return -1;
-        return aIndex - bIndex;
+        const ai = riskOrder.indexOf(a), bi = riskOrder.indexOf(b);
+        if (ai === -1 && bi === -1) return 0;
+        if (ai === -1) return 1; if (bi === -1) return -1;
+        return ai - bi;
       });
     } else if (categoryFilterAttribute === "Facility Width per Direction") {
-      // For facility width, sort in the order: Very Narrow, Narrow, Wide
       const widthOrder = ["Very Narrow", "Narrow", "Wide"];
       categories.sort((a, b) => {
-        const aIndex = widthOrder.indexOf(a);
-        const bIndex = widthOrder.indexOf(b);
-        if (aIndex === -1 && bIndex === -1) return 0;
-        if (aIndex === -1) return 1;
-        if (bIndex === -1) return -1;
-        return aIndex - bIndex;
+        const ai = widthOrder.indexOf(a), bi = widthOrder.indexOf(b);
+        if (ai === -1 && bi === -1) return 0;
+        if (ai === -1) return 1; if (bi === -1) return -1;
+        return ai - bi;
       });
     } else {
       categories.sort();
     }
-
     return categories;
   }, [categoryFilterAttribute, projectsData, attrMappings]);
 
-  // Initialize category toggles when category filter attribute changes or available categories change
+  // Initialise / update category toggles when the sidebar attribute or its available categories change
   useEffect(() => {
-    if (!categoryFilterAttribute) {
-      return;
-    }
-
-    // Initialize/update toggles for the current category filter attribute
+    if (!categoryFilterAttribute) return;
     setCategoryToggles(prev => {
       const newToggles = { ...prev };
-
-      // If this attribute doesn't have toggles yet, create them
-      if (!newToggles[categoryFilterAttribute]) {
-        newToggles[categoryFilterAttribute] = {};
-      }
-
-      // Update toggles to match available categories
-      // Preserve all existing user-set toggles, add new categories with default true
-      const updatedAttributeToggles: Record<string, boolean> = {
-        ...newToggles[categoryFilterAttribute], // Keep all existing toggles
-      };
-
-      // Add any new categories from availableCategories that aren't already toggled
+      if (!newToggles[categoryFilterAttribute]) newToggles[categoryFilterAttribute] = {};
+      const updatedAttributeToggles: Record<string, boolean> = { ...newToggles[categoryFilterAttribute] };
       availableCategories.forEach(category => {
-        if (!(category in updatedAttributeToggles)) {
-          // Only add if not already set by user
-          updatedAttributeToggles[category] = true;
-        }
+        if (!(category in updatedAttributeToggles)) updatedAttributeToggles[category] = true;
       });
-
       newToggles[categoryFilterAttribute] = updatedAttributeToggles;
-
       return newToggles;
     });
   }, [categoryFilterAttribute, availableCategories]);
+
+  // Initialise subcategory toggles when the sidebar attribute has subcategories
+  useEffect(() => {
+    if (!categoryFilterAttribute) return;
+    const subcatConfig = SUBCATEGORY_MAP[categoryFilterAttribute];
+    if (!subcatConfig) return;
+    setSubcategoryToggles(prev => {
+      const childAttr = subcatConfig.childAttr;
+      const allChildOptions = Object.values(subcatConfig.parentCategories).flat();
+      if (!allChildOptions.length) return prev;
+      const existing = prev[childAttr] ?? {};
+      let changed = false;
+      const updated = { ...existing };
+      allChildOptions.forEach(opt => {
+        if (!(opt in updated)) { updated[opt] = true; changed = true; }
+      });
+      if (!changed) return prev;
+      return { ...prev, [childAttr]: updated };
+    });
+  }, [categoryFilterAttribute]);
 
   // Handle column header click for sorting
   const handleHeaderClick = (columnKey: string) => {
@@ -1548,19 +1556,12 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     }
   }, [allPoints, primaryFocusAttribute, attributeCategoryColors, projectColors]);
 
-  // Calculate status of all selected attributes (Active/Inactive)
+  // Calculate status of all selected filter attributes (Active/Inactive categories)
   const categoryStatus = useMemo(() => {
-    // Filter valid attributes
-    const attributesToCheck = selectedAttributes.filter(attr => attr !== null) as string[];
-
-    // Also include Primary Focus Attribute if not in selectedAttributes (e.g. Project)
+    const attributesToCheck = [...selectedAttributes];
     if (primaryFocusAttribute === "Project" && !attributesToCheck.includes("Project")) {
       attributesToCheck.push("Project");
     }
-
-    // Sort attributes to match dropdown order or keep selection order? 
-    // Usually safe to keep selection order, but "Project" usually comes first or last.
-    // Let's just map them.
 
     return attributesToCheck.map(attr => {
       // 1. Get available categories for this attribute
@@ -1626,10 +1627,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               if (attributes) {
                 const attrValue = attributes[attr];
                 if (attrValue !== undefined && attrValue !== null) {
-                  // Use getAttrText if available, otherwise raw value
-                  // Since getAttrText is defined in this file (based on usage at line 883), we can use it.
                   const text = getAttrText(attr, attrValue);
-                  if (text) categoriesSet.add(text);
+                  if (text) {
+                    if (MULTI_VALUE_ATTRS.has(attr) && text.includes(", ")) {
+                      text.split(", ").forEach((part: string) => categoriesSet.add(part.trim()));
+                    } else {
+                      categoriesSet.add(text);
+                    }
+                  }
                 }
               }
             });
@@ -1947,253 +1952,250 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                 ))}
               </Flex>
 
-              {/* Primary Focus Selector - Show when attributes or projects are selected */}
-              {(activeFilters.length > 0 || selectedProjects.length > 0) && (
-                <Box mb="3" pb="3" borderBottom="1px solid" borderColor="gray.200">
-                  <Text fontSize="sm" fontWeight="semibold" mb="2">
-                    Primary Focus:
-                  </Text>
-                  <Flex gap="2" align="center">
-                    <Box flex="1" maxW="300px">
-                      <Combobox.Root
-                        collection={createListCollection({
-                          items: [
-                            { label: "Project", value: "Project" },
-                            ...activeFilters.map((attr) => ({
-                              label: attr,
-                              value: attr,
-                            })),
-                          ],
-                        })}
-                        value={primaryFocusAttribute ? [primaryFocusAttribute] : []}
-                        onValueChange={(e) => setPrimaryFocusAttribute(e.value[0] || null)}
-                      >
-                        <Combobox.Control>
-                          <Combobox.Input
-                            placeholder="Select primary attribute for color coding"
-                            readOnly
-                          />
-                          <Combobox.IndicatorGroup>
-                            <Combobox.Trigger />
-                          </Combobox.IndicatorGroup>
-                        </Combobox.Control>
-                        <Portal>
-                          <Combobox.Positioner>
-                            <Combobox.Content>
-                              <Combobox.Item
-                                item={{ label: "Project", value: "Project" }}
-                              >
-                                Project
-                              </Combobox.Item>
-                              {activeFilters.map((attr) => (
-                                <Combobox.Item
-                                  key={attr}
-                                  item={{ label: attr, value: attr }}
-                                >
-                                  {attr}
-                                </Combobox.Item>
-                              ))}
-                            </Combobox.Content>
-                          </Combobox.Positioner>
-                        </Portal>
-                      </Combobox.Root>
-                    </Box>
-                    {primaryFocusAttribute && (
-                      <Text fontSize="xs" color="gray.500">
-                        Map is color-coded by: <Text as="span" fontWeight="semibold">{primaryFocusAttribute}</Text>
-                      </Text>
-                    )}
-                  </Flex>
+            </Box>
+          )}
+
+          {/* Filter attribute selector + per-category toggles */}
+          {selectedProjects.length > 0 && selectedAttributes.length > 0 && (
+            <Box borderBottom="1px solid" borderColor="gray.200">
+              {/* Tabs: one per active filter — matches FilterPanel tab style */}
+              <Tabs.Root
+                value={String(categoryFilterAttributeIndex)}
+                onValueChange={e => {
+                  const idx = Number(e.value);
+                  setCategoryFilterAttributeIndex(idx);
+                  setPrimaryFocusAttribute(activeFilters[idx]);
+                }}
+                variant="line"
+              >
+                <Box overflowX="auto">
+                  <Tabs.List px="4" minW="max-content">
+                    {selectedAttributes.map((attr, idx) => (
+                      <Tabs.Trigger key={attr} value={String(idx)} fontSize="sm" whiteSpace="nowrap">
+                        {idx + 1}. {(ATTRIBUTE_LABELS[attr] ?? attr).slice(0, 22)}
+                      </Tabs.Trigger>
+                    ))}
+                  </Tabs.List>
                 </Box>
-              )}
 
-              {/* Category/Project Toggles - Show when filtering by categories or Project */}
-              {((primaryFocusAttribute && primaryFocusAttribute !== "Project" && availableCategories.length > 0) || (primaryFocusAttribute === "Project" && selectedProjects.length > 0)) && (
-                <Box mb="3" pb="3" borderBottom="1px solid" borderColor="gray.200">
-                  <Flex justify="space-between" align="center" mb="3">
-                    <Text fontSize="xs" fontWeight="semibold" color="gray.600" _dark={{ color: "gray.300" }}>
-                      Filter Categories:
+                {selectedAttributes.map((attr, idx) => (
+                  <Tabs.Content key={attr} value={String(idx)} p="4">
+                    {/* Per-category toggles for the selected attribute */}
+                    {categoryFilterAttribute && (
+                      <>
+                        {/* Header row: label + reset button */}
+                  <Flex align="center" justify="space-between" mb="2">
+                    <Text fontSize="xs" fontWeight="semibold" color="gray.500" _dark={{ color: "gray.400" }}>
+                      {ATTRIBUTE_LABELS[categoryFilterAttribute] ?? categoryFilterAttribute}
                     </Text>
-                    {activeFilters.length > 1 && (
-                      <Flex gap="2">
-                        {activeFilters.map((_, idx) => (
-                          <Button
-                            key={idx}
-                            size="sm"
-                            variant={categoryFilterAttributeIndex === idx ? "solid" : "outline"}
-                            colorPalette={categoryFilterAttributeIndex === idx ? "blue" : "gray"}
-                            onClick={() => setCategoryFilterAttributeIndex(idx)}
-                          >
-                            {idx + 1}
-                          </Button>
-                        ))}
-                      </Flex>
-                    )}
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      colorPalette="gray"
+                      onClick={() => {
+                        const opts = ATTRIBUTE_OPTIONS[categoryFilterAttribute] ?? availableCategories;
+                        setCategoryToggles(prev => ({
+                          ...prev,
+                          [categoryFilterAttribute]: Object.fromEntries(opts.map(c => [c, true])),
+                        }));
+                        const subcatConfig = SUBCATEGORY_MAP[categoryFilterAttribute];
+                        if (subcatConfig) {
+                          const allChildOpts = Object.values(subcatConfig.parentCategories).flat();
+                          setSubcategoryToggles(prev => ({
+                            ...prev,
+                            [subcatConfig.childAttr]: Object.fromEntries(allChildOpts.map(c => [c, true])),
+                          }));
+                        }
+                      }}
+                    >
+                      Reset
+                    </Button>
                   </Flex>
-                  <Text fontSize="xs" color="gray.500" mb="2">
-                    {activeFilters.length > 1 ? `Showing categories for: ${categoryFilterAttribute}` : categoryFilterAttribute}
-                  </Text>
-                  <HStack gap="4" flexWrap="wrap">
-                    {(categoryFilterAttribute === "Project" ? selectedProjects : availableCategories).map((category) => {
-                      // Get the hex color from getCategoryColor or projectColors for projects
-                      const hexColor = categoryFilterAttribute === "Project"
-                        ? projectColors[category]
-                        : getCategoryColor(categoryFilterAttribute, category);
-
-                      // Map hex colors to Chakra color palettes for Switch component styling
-                      const colorMap: Record<string, string> = {
-                        // Safety Score colors (CycleRAP Risk Bands)
-                        "#87C424": "green",      // Low
-                        "#FFCC1A": "yellow",     // Medium / Narrow
-                        "#FF5B1A": "orange",     // High
-                        "#CD1AFF": "purple",     // Extreme
-                        "#9CA3AF": "gray",       // Not Selected
-                        // Green shades (Safe)
-                        "#16A34A": "green",
-                        "#10B981": "teal",
-                        // Red shades (Danger)
-                        "#DC2626": "red",
-                        // Yellow/Orange shades
-                        "#F59E0B": "orange",
-                        "#CA8A04": "yellow",     // Project Yellow
-                        "#EA580C": "orange",     // Project Orange
-                        // Blue/Purple/Cyan shades
-                        "#2563EB": "blue",
-                        "#9333EA": "purple",
-                        "#0891B2": "cyan",       // Cyan
-                        "#DB2777": "pink",       // Pink
-                        // Default
-                        "#6B7280": "gray",
-                      };
-                      const colorPalette = colorMap[hexColor] || "gray";
-                      const isChecked = categoryToggles[categoryFilterAttribute]?.[category] ?? true;
-
-                      return (
-                        <Flex key={category} align="center" gap="2">
-                          {categoryFilterAttribute === "Project" && (
-                            <Box
-                              w="12px"
-                              h="12px"
-                              borderRadius="full"
-                              bg={hexColor}
+                  {NUMERIC_FILTER_ATTRIBUTES.has(categoryFilterAttribute) ? (
+                    /* Numeric range filter: slider inputs */
+                    <Box>
+                      <Text fontSize="xs" color="gray.500" mb="2">
+                        Range filter for {ATTRIBUTE_LABELS[categoryFilterAttribute] ?? categoryFilterAttribute}:
+                      </Text>
+                      {(() => {
+                        const bounds = dataRangeBounds[categoryFilterAttribute];
+                        const [rMin, rMax] = rangeFilters[categoryFilterAttribute] ?? [bounds?.min ?? 0, bounds?.max ?? 100];
+                        return (
+                          <Box px="2">
+                            <Slider
+                              min={bounds?.min ?? 0}
+                              max={bounds?.max ?? 100}
+                              step={1}
+                              value={[rMin, rMax]}
+                              onValueChange={({ value }) => {
+                                setRangeFilters(prev => ({
+                                  ...prev,
+                                  [categoryFilterAttribute]: [value[0], value[1]] as [number, number],
+                                }));
+                              }}
                             />
-                          )}
-                          <div style={{ fontSize: "14px", fontWeight: "500", color: hexColor }}>
-                            {category}
-                          </div>
-                          <Switch
-                            colorPalette={colorPalette}
-                            size="sm"
-                            checked={isChecked}
-                            onCheckedChange={(e) => {
+                            <Flex justify="space-between" mt="1">
+                              <Text fontSize="xs" color="gray.500">{rMin}</Text>
+                              <Text fontSize="xs" color="gray.500">{rMax}</Text>
+                            </Flex>
+                          </Box>
+                        );
+                      })()}
+                    </Box>
+                ) : (
+                  /* Layer 2 chips each followed immediately by their Layer 3 children */
+                  <Flex direction="column" gap="2">
+                    {(ATTRIBUTE_OPTIONS[categoryFilterAttribute] ?? availableCategories).map(category => {
+                      const isOn = categoryToggles[categoryFilterAttribute]?.[category] ?? true;
+                      const hexColor = getCategoryColor(categoryFilterAttribute, category);
+                      const subcatConfig = SUBCATEGORY_MAP[categoryFilterAttribute];
+                      const childAttr = subcatConfig?.childAttr;
+                      const subcats = subcatConfig?.parentCategories[category];
+                      const hasSubcats = isOn && subcats?.length;
+                      return (
+                        <Box key={category}>
+                          {/* Layer 2 chip */}
+                          <Flex
+                            as="button"
+                            align="center"
+                            gap="2"
+                            px="3"
+                            py="1.5"
+                            borderWidth="1px"
+                            borderRadius="md"
+                            cursor="pointer"
+                            userSelect="none"
+                            transition="all 0.15s"
+                            style={isOn
+                              ? { backgroundColor: hexColor + "22", borderColor: hexColor }
+                              : { backgroundColor: "transparent", borderColor: "#E2E8F0" }
+                            }
+                            onClick={() => {
                               setCategoryToggles(prev => ({
                                 ...prev,
                                 [categoryFilterAttribute]: {
                                   ...prev[categoryFilterAttribute],
-                                  [category]: e.checked
-                                }
+                                  [category]: !isOn,
+                                },
                               }));
                             }}
-                          />
-                        </Flex>
+                          >
+                            <Text
+                              fontSize="sm"
+                              fontWeight={isOn ? "semibold" : "normal"}
+                              color={isOn ? "gray.800" : "gray.400"}
+                              _dark={{ color: isOn ? "gray.100" : "gray.500" }}
+                              userSelect="none"
+                            >
+                              {category}
+                            </Text>
+                            <Box
+                              w="30px"
+                              h="17px"
+                              borderRadius="full"
+                              position="relative"
+                              flexShrink={0}
+                              transition="background 0.15s"
+                              style={{ backgroundColor: isOn ? hexColor : "#CBD5E0" }}
+                            >
+                              <Box
+                                position="absolute"
+                                w="13px"
+                                h="13px"
+                                borderRadius="full"
+                                bg="white"
+                                top="2px"
+                                transition="left 0.15s"
+                                style={{ left: isOn ? "15px" : "2px" }}
+                              />
+                            </Box>
+                          </Flex>
+
+                          {/* Layer 3 chips — only visible when parent is ON */}
+                          {hasSubcats && childAttr && (
+                            <Box
+                              mt="1.5"
+                              ml="3"
+                              pl="3"
+                              borderLeft="2px solid"
+                              style={{ borderColor: hexColor + "66" }}
+                            >
+                              <Flex gap="1.5" flexWrap="wrap">
+                                {subcats!.map(sub => {
+                                  const subOn = subcategoryToggles[childAttr]?.[sub] ?? true;
+                                  const subColor = getCategoryColor(childAttr, sub);
+                                  return (
+                                    <Flex
+                                      key={sub}
+                                      as="button"
+                                      align="center"
+                                      gap="1.5"
+                                      px="2.5"
+                                      py="1"
+                                      borderWidth="1px"
+                                      borderRadius="md"
+                                      cursor="pointer"
+                                      userSelect="none"
+                                      transition="all 0.15s"
+                                      style={subOn
+                                        ? { backgroundColor: subColor + "22", borderColor: subColor }
+                                        : { backgroundColor: "transparent", borderColor: "#E2E8F0" }
+                                      }
+                                      onClick={() => {
+                                        setSubcategoryToggles(prev => ({
+                                          ...prev,
+                                          [childAttr]: {
+                                            ...prev[childAttr],
+                                            [sub]: !subOn,
+                                          },
+                                        }));
+                                      }}
+                                    >
+                                      <Text
+                                        fontSize="xs"
+                                        fontWeight={subOn ? "semibold" : "normal"}
+                                        color={subOn ? "gray.700" : "gray.400"}
+                                        _dark={{ color: subOn ? "gray.200" : "gray.500" }}
+                                        userSelect="none"
+                                      >
+                                        {sub}
+                                      </Text>
+                                      <Box
+                                        w="24px"
+                                        h="14px"
+                                        borderRadius="full"
+                                        position="relative"
+                                        flexShrink={0}
+                                        transition="background 0.15s"
+                                        style={{ backgroundColor: subOn ? subColor : "#CBD5E0" }}
+                                      >
+                                        <Box
+                                          position="absolute"
+                                          w="10px"
+                                          h="10px"
+                                          borderRadius="full"
+                                          bg="white"
+                                          top="2px"
+                                          transition="left 0.15s"
+                                          style={{ left: subOn ? "12px" : "2px" }}
+                                        />
+                                      </Box>
+                                    </Flex>
+                                  );
+                                })}
+                              </Flex>
+                            </Box>
+                          )}
+                        </Box>
                       );
                     })}
-                  </HStack>
-                </Box>
+                  </Flex>
+                  )}
+                </>
               )}
-
-              {/* Legend */}
-              <Box>
-                {primaryFocusAttribute === "Project" ? (
-                  <>
-                    <Text fontSize="xs" fontWeight="semibold" mb="1" color="gray.600" _dark={{ color: "gray.300" }}>
-                      Project Colors:
-                    </Text>
-                    <Flex gap="3" flexWrap="wrap">
-                      {selectedProjects.map((proj) => (
-                        <Flex key={proj} align="center" gap="1.5">
-                          <Box
-                            w="12px"
-                            h="12px"
-                            borderRadius="full"
-                            bg={projectColors[proj]}
-                          />
-                          <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
-                            {proj}
-                          </Text>
-                        </Flex>
-                      ))}
-                    </Flex>
-                  </>
-                ) : primaryFocusAttribute ? (
-                  <>
-                    <Text fontSize="xs" fontWeight="semibold" mb="1" color="gray.600" _dark={{ color: "gray.300" }}>
-                      {primaryFocusAttribute} Categories:
-                    </Text>
-                    <Flex gap="3" flexWrap="wrap">
-                      {/* Get unique attribute values from allPoints */}
-                      {(() => {
-                        let categories = Array.from(new Set(allPoints.map(p => p.attributeValue)))
-                          .filter(val => val); // Remove empty values
-
-                        // Special sorting for safety score attributes and Overall Risk Level
-                        const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(primaryFocusAttribute || "");
-                        if (isSafetyScore) {
-                          const riskOrder = ["Low", "Medium", "High", "Extreme"];
-                          categories.sort((a, b) => {
-                            const aIndex = riskOrder.indexOf(a);
-                            const bIndex = riskOrder.indexOf(b);
-                            if (aIndex === -1 && bIndex === -1) return 0;
-                            if (aIndex === -1) return 1;
-                            if (bIndex === -1) return -1;
-                            return aIndex - bIndex;
-                          });
-                        } else {
-                          categories.sort();
-                        }
-
-                        return categories.map((category) => {
-                          const hexColor = getCategoryColor(primaryFocusAttribute || "", category);
-                          return (
-                            <Flex key={category} align="center" gap="1.5">
-                              <Box
-                                w="12px"
-                                h="12px"
-                                borderRadius="full"
-                                style={{ backgroundColor: hexColor }}
-                              />
-                              <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
-                                {category}
-                              </Text>
-                            </Flex>
-                          );
-                        });
-                      })()}
-                    </Flex>
-                  </>
-                ) : (
-                  <>
-                    <Text fontSize="xs" fontWeight="semibold" mb="1" color="gray.600" _dark={{ color: "gray.300" }}>
-                      Project Colors:
-                    </Text>
-                    <Flex gap="3" flexWrap="wrap">
-                      {selectedProjects.map((proj) => (
-                        <Flex key={proj} align="center" gap="1.5">
-                          <Box
-                            w="12px"
-                            h="12px"
-                            borderRadius="full"
-                            bg={projectColors[proj]}
-                          />
-                          <Text fontSize="xs" color="gray.700" _dark={{ color: "gray.200" }}>
-                            {proj}
-                          </Text>
-                        </Flex>
-                      ))}
-                    </Flex>
-                  </>
-                )}
-              </Box>
+                  </Tabs.Content>
+                ))}
+              </Tabs.Root>
             </Box>
           )}
 
@@ -2243,56 +2245,59 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   {/* Pan to specific project bounds when button clicked */}
                   {panToBounds && <PanToBounds bounds={panToBounds} />}
 
-                  {/* Render all points as markers */}
-                  {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
-                    const radius = 5;
-                    let label = `${projectName} - #${idx + 1}`;
-                    if (f.properties?.["Image Reference"]) {
-                      label += ` ${f.properties["Image Reference"]}`;
-                    }
-                    if (primaryFocusAttribute && attributeValue) {
-                      label += ` | ${primaryFocusAttribute}: ${attributeValue}`;
-                    }
+                  {/* Render all points in a dedicated pane above any overlay layers */}
+                  <Pane name="segmentsPane" style={{ zIndex: 450 }}>
+                    {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
+                      const radius = 5;
+                      let label = `${projectName} - #${idx + 1}`;
+                      if (f.properties?.["Image Reference"]) {
+                        label += ` ${f.properties["Image Reference"]}`;
+                      }
+                      if (primaryFocusAttribute && attributeValue) {
+                        label += ` | ${primaryFocusAttribute}: ${attributeValue}`;
+                      }
 
-                    return (
-                      <CircleMarker
-                        key={`${projectName}-${idx}-${globalIdx}`}
-                        center={latlng}
-                        radius={radius}
-                        pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
-                        eventHandlers={{
-                          click: (e) => {
-                            // If in polygon mode, add this point to the polygon and stop propagation
-                            if (isPolygonMode || isPolygonAddMode) {
-                              L.DomEvent.stopPropagation(e as any);
-                              handlePolygonPoint(L.latLng(latlng[0], latlng[1]));
-                              return;
-                            }
+                      return (
+                        <CircleMarker
+                          key={`${projectName}-${idx}-${globalIdx}`}
+                          center={latlng}
+                          radius={radius}
+                          pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
+                          pane="segmentsPane"
+                          eventHandlers={{
+                            click: (e) => {
+                              // If in polygon mode, add this point to the polygon and stop propagation
+                              if (isPolygonMode || isPolygonAddMode) {
+                                L.DomEvent.stopPropagation(e as any);
+                                handlePolygonPoint(L.latLng(latlng[0], latlng[1]));
+                                return;
+                              }
 
-                            // Check delete modes first
-                            if (isDeleteMode) {
-                              setSegmentToDelete({ projectName: projectName, index: idx });
-                              setDeleteConfirmationOpen(true);
-                              return;
-                            }
-                            if (isPointAddMode) {
-                              setSegmentToAdd({ projectName: projectName, index: idx });
-                              setIsAddSegmentsDialogOpen(true);
-                              return;
-                            }
+                              // Check delete modes first
+                              if (isDeleteMode) {
+                                setSegmentToDelete({ projectName: projectName, index: idx });
+                                setDeleteConfirmationOpen(true);
+                                return;
+                              }
+                              if (isPointAddMode) {
+                                setSegmentToAdd({ projectName: projectName, index: idx });
+                                setIsAddSegmentsDialogOpen(true);
+                                return;
+                              }
 
-                            // Navigate to coding page for this project and segment
-                            const segmentIdx = idx + 1; // 1-based index for UI
-                            navigate(`/coding/${encodeURIComponent(projectName)}?segment=${segmentIdx}`, {
-                              state: { returnToAnalysis: true }
-                            });
-                          }
-                        }}
-                      >
-                        <Tooltip>{label}</Tooltip>
-                      </CircleMarker>
-                    );
-                  })}
+                              // Navigate to coding page for this project and segment
+                              const segmentIdx = idx + 1; // 1-based index for UI
+                              navigate(`/coding/${encodeURIComponent(projectName)}?segment=${segmentIdx}`, {
+                                state: { returnToAnalysis: true }
+                              });
+                            }
+                          }}
+                        >
+                          <Tooltip>{label}</Tooltip>
+                        </CircleMarker>
+                      );
+                    })}
+                  </Pane>
                 </MapContainer>
               </>
             )}

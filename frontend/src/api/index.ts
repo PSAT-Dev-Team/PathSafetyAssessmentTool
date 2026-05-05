@@ -11,6 +11,8 @@ export async function ping(): Promise<{ status: string }> {
 export interface ProjectListItem {
   name: string;
   tags: string[];
+  dataset?: string | null;
+  source_folders?: string[];
   date_created?: string;
   last_updated?: string;
   verified?: boolean;
@@ -98,11 +100,144 @@ export async function listSourceFolders(opts?: { signal?: AbortSignal }) {
   return (data?.items ?? []) as string[];
 }
 
-export async function createProjectFromFolder(project_name: string, folder_name: string, tags: string[] = []) {
+export interface SourceFolderSuggestion {
+  name: string;
+  exists: boolean;
+}
+
+export interface SourceFolderPreview {
+  folder_name: string;
+  image_count: number;
+  geotagged_image_count: number;
+  segment_count: number;
+  segment_error: string | null;
+  earliest_modified_at: string | null;
+  latest_modified_at: string | null;
+  survey_quarter: string | null;
+  survey_quarters: string[];
+}
+
+export async function listSourceFolderSuggestions(opts?: { signal?: AbortSignal }) {
+  const res = await fetch("/api/projects/folders/suggestions", { signal: opts?.signal });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = await res.json();
+  return (data?.items ?? []) as SourceFolderSuggestion[];
+}
+
+export async function fetchSourceFolderPreview(folderName: string, opts?: { signal?: AbortSignal }) {
+  const params = new URLSearchParams({ folder_name: folderName });
+  const res = await fetch(`/api/projects/folders/preview?${params.toString()}`, { signal: opts?.signal });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as SourceFolderPreview;
+}
+
+export async function pickLocalSourceFolder() {
+  const res = await fetch("/api/projects/folders/pick-local", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as {
+    path: string | null;
+    suggested_folder_name: string | null;
+  };
+}
+
+export async function copyLocalImagesToSourceFolder(
+  sourcePath: string,
+  folderName: string,
+): Promise<{ count: number; errors: string[]; folder_name: string }> {
+  const res = await fetch("/api/projects/folders/copy-local", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_path: sourcePath, folder_name: folderName }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export interface RoadInPolygon {
+  name: string;
+  points: number;
+  exists: boolean;
+}
+
+export interface RoadsInPolygonResult {
+  roads: RoadInPolygon[];
+  fallback: boolean;
+}
+
+export interface RoadInBounds {
+  name: string;
+  exists: boolean;
+  coords: [number, number][];
+}
+
+export interface PlanningAreaInBounds {
+  name: string;
+  region?: string | null;
+  partIndex: number;
+  coords: [number, number][];
+}
+
+export async function queryRoadsInPolygon(polygon: [number, number][]): Promise<RoadsInPolygonResult> {
+  const res = await fetch("/api/projects/roads-in-polygon", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ polygon }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return { roads: (data?.roads ?? []) as RoadInPolygon[], fallback: data?.fallback ?? false };
+}
+
+export async function queryRoadsInBounds(
+  bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number },
+  limit = 2000
+): Promise<RoadInBounds[]> {
+  const params = new URLSearchParams({
+    minLat: String(bounds.minLat),
+    minLng: String(bounds.minLng),
+    maxLat: String(bounds.maxLat),
+    maxLng: String(bounds.maxLng),
+    limit: String(limit),
+  });
+  const res = await fetch(`/api/projects/roads-in-bounds?${params.toString()}`);
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return (data?.roads ?? []) as RoadInBounds[];
+}
+
+export async function queryPlanningAreasInBounds(
+  bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number },
+  limit = 500
+): Promise<PlanningAreaInBounds[]> {
+  const params = new URLSearchParams({
+    minLat: String(bounds.minLat),
+    minLng: String(bounds.minLng),
+    maxLat: String(bounds.maxLat),
+    maxLng: String(bounds.maxLng),
+    limit: String(limit),
+  });
+  const res = await fetch(`/api/projects/planning-areas-in-bounds?${params.toString()}`);
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return (data?.areas ?? []) as PlanningAreaInBounds[];
+}
+
+export async function createProjectFromFolder(
+  project_name: string,
+  folder_name: string | string[],
+  tags: string[] = [],
+  polygon?: [number, number][]
+) {
+  const folder_names = Array.isArray(folder_name) ? folder_name : undefined;
+  const single_folder_name = Array.isArray(folder_name) ? undefined : folder_name;
   const res = await fetch("/api/projects/folders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_name, folder_name, tags }),
+    body: JSON.stringify({ project_name, folder_name: single_folder_name, folder_names, tags, polygon }),
   });
   if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
   // 返回形如 { ok: true, name: "<project>" }
@@ -239,12 +374,14 @@ export type AutoCodeSinglePayload = {
 export type AutoCodeBulkAllPayload = {
   all: true;               // Flag to process all rows
   save?: boolean;          // Whether to save to disk (default: false for temp changes)
+  fields?: string[];       // Optional: only update these specific field names (real keys)
 };
 
 // Bulk mode (selected rows): Auto-code specific images
 export type AutoCodeBulkIndicesPayload = {
   indices: number[];       // Row indices to process
   save?: boolean;          // Whether to save to disk (default: false for temp changes)
+  fields?: string[];       // Optional: only update these specific field names (real keys)
 };
 
 // ---------- Response Types ----------
@@ -320,6 +457,57 @@ export async function autocodeAll(project: string, payload: AutoCodeAllPayload):
   return (await res.json()) as AutoCodeAllResult;
 }
 
+/**
+ * Streaming variant of autocodeAll — uses SSE to report per-row progress.
+ *
+ * The backend yields one SSE event per processed segment so the UI counter
+ * can tick up in real time (1/412, 2/412, …).
+ *
+ * @param project    - Project name
+ * @param payload    - Same payload as autocodeAll (stream:true is injected automatically)
+ * @param onProgress - Called after each segment: (processed, total, errorCount)
+ * @returns          - The final AutoCodeBulkResult (same shape as autocodeAll bulk response)
+ */
+export async function autocodeAllStream(
+  project: string,
+  payload: AutoCodeAllPayload,
+  onProgress: (processed: number, total: number, errors: number) => void,
+): Promise<AutoCodeBulkResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/all`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, stream: true }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE events are separated by double newlines
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop()!; // keep incomplete trailing chunk
+
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      const event = JSON.parse(line.slice(5).trim());
+      if (event.type === "progress") {
+        onProgress(event.processed, event.total, event.errors ?? 0);
+      } else if (event.type === "done") {
+        const { type: _type, ...result } = event;
+        return result as AutoCodeBulkResult;
+      }
+    }
+  }
+  throw new Error("SSE stream ended without a 'done' event");
+}
+
 // ---------- Calculate Score ----------
 
 export type CalculateScoreResult = {
@@ -391,6 +579,8 @@ export type ShapefileInfo = {
   type: string;
   year: string;
   source: string;
+  metadata?: ShapefileMetadata;
+  files?: string[];
 };
 
 export type ShapefileCategoryInfo = {
@@ -461,6 +651,20 @@ export async function uploadShapefiles(files: File[], category?: string): Promis
   }
 
   const res = await fetch("/api/shapefiles/upload", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Temporarily upload shapefile files and return GeoJSON preview (not saved permanently)
+ */
+export async function previewUploadedShapefiles(files: File[]): Promise<any> {
+  const formData = new FormData();
+  files.forEach(file => formData.append("files", file));
+  const res = await fetch("/api/shapefiles/preview-upload", {
     method: "POST",
     body: formData,
   });
@@ -639,6 +843,33 @@ export async function getSegmentTreatments(
   return res.json();
 }
 
+export type AllTreatmentsSegment = {
+  has_treatments: boolean;
+  treatments_applied: number[];
+  modified_attributes: Record<string, number | null>;
+  after_scores?: {
+    BB: number;
+    BP: number;
+    SB: number;
+    VB: number;
+    "Overall Risk Level": number;
+  };
+};
+
+/**
+ * Fetch treatment state for all segments in one call (no re-scoring).
+ * Only returns segments that actually have treatments applied.
+ */
+export async function getAllTreatments(
+  project: string
+): Promise<{ ok: boolean; segments: Record<string, AllTreatmentsSegment> }> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/all`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 /**
  * Export modified attributes CSV after treatment is applied
  * @param project - Project name
@@ -700,6 +931,50 @@ export async function previewTreatments(
 }
 
 /**
+ * Fetch per-treatment effectiveness counts for a project. Effectiveness is the
+ * number of segments whose Overall Risk Level Band improves (band decreases)
+ * when that treatment is applied in isolation. Used to rank the "By Treatment"
+ * list top-down by effectiveness.
+ */
+export type TreatmentEffectivenessResult = {
+  ok: boolean;
+  total_segments: number;
+  counts: Record<string, number>;
+};
+
+export async function getTreatmentEffectiveness(
+  project: string,
+  treatmentIds?: number[]
+): Promise<TreatmentEffectivenessResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/effectiveness`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(treatmentIds ? { treatment_ids: treatmentIds } : {}),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export type TreatmentSegmentEffectivenessResult = {
+  ok: boolean;
+  score_drops: Record<string, number>;
+};
+
+export async function getTreatmentSegmentEffectiveness(
+  project: string,
+  segmentIndex: number
+): Promise<TreatmentSegmentEffectivenessResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/effectiveness/segment/${segmentIndex}`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
  * Apply all applicable recommended treatments to all segments in a project
  * @param project - Project name
  * @returns Result with details on how many segments were treated
@@ -725,6 +1000,28 @@ export async function applyAllTreatments(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Apply a specific treatment to all applicable segments in a project
+ * @param project - Project name
+ * @param treatmentId - ID of the treatment to apply
+ * @returns Result with details on how many segments were treated
+ */
+export async function applySpecificTreatment(
+  project: string,
+  treatmentId: number
+): Promise<ApplyAllTreatmentsResult> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(project)}/treatments/apply-specific`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ treatment_id: treatmentId }),
     }
   );
   if (!res.ok) throw new Error(await readError(res));
@@ -792,7 +1089,7 @@ export async function uploadImagesToSourceFolder(
 ): Promise<{ count: number; errors: string[] }> {
   const formData = new FormData();
   formData.append("folder_name", folderName);
-  
+
   files.forEach(file => {
     // If the file was dropped as part of a folder, it will have webkitRelativePath
     // Fallback to name if it's just a regular file selection

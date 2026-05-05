@@ -6,16 +6,9 @@ import {
   Button,
   Tabs,
 } from "@chakra-ui/react";
-import { fetchProjectList } from "../../api";
+import { fetchProjectList, type FileResponse, type ProjectListItem } from "../../api";
+import { matchesProjectSearch } from "../../utils/projectSearch";
 import "../Home/home.css"; // Reuse home page styles
-
-interface FileListResponse {
-  projects: string[];
-}
-
-interface ProjectItem {
-  name: string;
-}
 
 type TreatmentPhase = "pre" | "post";
 
@@ -24,8 +17,8 @@ export default function AnalysisPage() {
   const [phase, setPhase] = useState<TreatmentPhase>("pre");
 
   // Project list state
-  const [projectList, setProjectList] = useState<FileListResponse | null>(null);
-  const [postTreatmentList, setPostTreatmentList] = useState<FileListResponse | null>(null);
+  const [projectList, setProjectList] = useState<FileResponse | null>(null);
+  const [postTreatmentList, setPostTreatmentList] = useState<FileResponse | null>(null);
 
   // Filter and selection states
   const [nameQuery, setNameQuery] = useState("");
@@ -51,20 +44,18 @@ export default function AnalysisPage() {
   }, [phase]);
 
   // Process projects based on current phase
-  const projects: ProjectItem[] = useMemo(() => {
+  const projects: ProjectListItem[] = useMemo(() => {
     const list = phase === "pre" ? projectList : postTreatmentList;
     if (!list?.projects) return [];
     return list.projects
       .slice()
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name }));
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [projectList, postTreatmentList, phase]);
 
   // Apply filters
   const filtered = useMemo(() => {
-    const q = nameQuery.trim().toLowerCase();
     let list = projects;
-    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q));
+    if (nameQuery.trim()) list = list.filter((p) => matchesProjectSearch(p, nameQuery));
     return list;
   }, [projects, nameQuery]);
 
@@ -142,11 +133,11 @@ export default function AnalysisPage() {
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
-            <label htmlFor="nameQuery">Search by project name</label>
+            <label htmlFor="nameQuery">Search by project or road</label>
             <input
               id="nameQuery"
               type="text"
-              placeholder="Type project name…"
+              placeholder="Type project name or road…"
               value={nameQuery}
               onChange={(e) => setNameQuery(e.target.value)}
             />

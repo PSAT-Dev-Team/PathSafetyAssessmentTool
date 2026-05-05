@@ -17,7 +17,7 @@ from pandas.errors import EmptyDataError
 
 # Mapping
 risk_category                   = {'Default': 0,'Low': 1, 'Medium': 2, 'High': 3, 'Extreme': 4}
-area_type_mapping               = {'Urban': 1, 'Suburban': 2, 'Rural': 3, 'Industrial': 4}
+area_type_mapping               = {'Urban': 1, 'Suburban': 2, 'Rural': 3, 'Industrial': 4, 'Recreational': 5}
 facility_type_mapping           = {'Sidewalk': 1, 'Multi-Use Path': 2, 'Off-Road Bicycle Path': 3, 
                                     'On-road Bicycle Lane': 4, 'Road Shoulder': 5, 'Mixed Traffic Road Lane': 6}
 presence_mapping                = {'Present': 1, 'Not Present': 2}
@@ -129,6 +129,16 @@ class BaseTable:
         else:
             raise ValueError(f"Unsupported file type: {ext}")
 
+        # Add missing columns defined in the schema (e.g. for backward compatibility)
+        if hasattr(self, 'fields') and self.fields:
+            for count, col in enumerate(self.fields):
+                if col not in self.df.columns:
+                    # Insert missing column at the schema-defined index if possible
+                    try:
+                        self.df.insert(count, col, None)
+                    except ValueError:
+                        self.df[col] = None
+
         self.df_dirty = False
     
 class Attributes(BaseTable):
@@ -141,8 +151,11 @@ class Attributes(BaseTable):
         TRAM_TRAIN_RAIL_STR             = "Tram or Train Rails"
         DEFORMATION_DRAIN_STR           = "Major Surface Deformation or Drain Opening"
         FIXED_OBSTACLE_STR              = "Fixed Obstacle on Facility"
+        FIXED_OBSTACLE_TYPE_STR         = "FO Type"
         NON_FIXED_OBSTACLE_STR          = "Non-Fixed Obstacle on Facility"
+        NON_FIXED_OBSTACLE_TYPE_STR     = "NFO Type"
         DELINEATION_STR                 = "Delineation"
+        DELINEATION_TYPE_STR            = "Delineation Type"
         LIGHT_SEGREGATION_STR           = "Light Segregation"
         FACILITY_WIDTH_STR              = "Facility Width per Direction"
         FLOW_DIR_STR                    = "Flow Direction"
@@ -165,6 +178,7 @@ class Attributes(BaseTable):
         INTERSECT_APPRCH_STR            = "Intersection Approach"
         INTERSECT_ROAD_CROSS_STR        = "Intersection or Road Crossing"
         CROSS_FACILITY_STR              = "Crossing Facility"
+        CROSSING_TYPE_STR               = "Crossing Type"
         NOL_ADJ_ROAD_STR                = "Number of lanes – adjacent road"
         NOL_INTERSECT_ROAD_STR          = "Number of lanes – intersecting road"
         PROP_ACCESS_STR                 = "Property Access"
@@ -178,6 +192,8 @@ class Attributes(BaseTable):
         SPD_LIMIT_STR                   = "Road speed limit"
         ROAD_OPR_SPEED_AVG_STR          = "Road operating speed (mean)"
         SPEED_UNIT_STR                  = "Road operating speed (unit)"
+        FACILITY_WIDTH_SUBCAT_STR       = "Facility Width Sub-category"
+        CURVATURE_SUBCAT_STR            = "Curvature Sub-category"
 
         @classmethod
         def values(cls) -> list[str]:
@@ -192,8 +208,11 @@ class Attributes(BaseTable):
         Fields.TRAM_TRAIN_RAIL_STR:             presence_mapping,
         Fields.DEFORMATION_DRAIN_STR:           presence_mapping,
         Fields.FIXED_OBSTACLE_STR:              presence_mapping,
+        Fields.FIXED_OBSTACLE_TYPE_STR:         None,
         Fields.NON_FIXED_OBSTACLE_STR:          presence_mapping,
+        Fields.NON_FIXED_OBSTACLE_TYPE_STR:     None,
         Fields.DELINEATION_STR:                 presence_mapping,
+        Fields.DELINEATION_TYPE_STR:            None,
         Fields.LIGHT_SEGREGATION_STR:           presence_mapping,
         Fields.FACILITY_WIDTH_STR:              facility_width_mapping,
         Fields.FLOW_DIR_STR:                    flow_direction_mapping,
@@ -216,6 +235,7 @@ class Attributes(BaseTable):
         Fields.INTERSECT_APPRCH_STR:            shared_mapping,
         Fields.INTERSECT_ROAD_CROSS_STR:        presence_mapping,
         Fields.CROSS_FACILITY_STR:              presence_mapping,
+        Fields.CROSSING_TYPE_STR:               None,
         Fields.NOL_ADJ_ROAD_STR:                NoL_mapping,
         Fields.NOL_INTERSECT_ROAD_STR:          NoL_mapping,
         Fields.PROP_ACCESS_STR:                 presence_mapping,
@@ -363,9 +383,11 @@ class ProjectMetadata:
         self.last_updated : datetime        = None
         self.created_by   : str             = None
         self.dataset      : str             = None
+        self.source_folders : list[str]     = None
         self.progress     : int             = None
         self.size         : int             = None
         self.tags         : list[str]       = None
+        self.path_key     : str             = None
         self.verified     : bool            = False
         self.verified_segment_count : int   = 0
         self.autocoded_segment_count : int  = 0
@@ -390,9 +412,11 @@ class ProjectMetadata:
             self.last_updated = parse_datetime(data.get("last_updated"))
             self.created_by = data.get("created_by")
             self.dataset    = data.get("dataset")
+            self.source_folders = data.get("source_folders") or []
             self.progress   = data.get("progress")
             self.size       = data.get("size")
             self.tags       = data.get("tags")
+            self.path_key   = data.get("path_key")
             self.verified   = data.get("verified", False)
             self.verified_segment_count = data.get("verified_segment_count", 0)
             self.autocoded_segment_count = data.get("autocoded_segment_count", 0)
@@ -404,9 +428,11 @@ class ProjectMetadata:
             "last_updated": self.last_updated.isoformat() if self.last_updated else None,
             "created_by": self.created_by,
             "dataset": self.dataset,
+            "source_folders": self.source_folders or [],
             "progress": self.progress,
             "size": self.size,
             "tags": self.tags,
+            "path_key": self.path_key,
             "verified": self.verified,
             "verified_segment_count": self.verified_segment_count,
             "autocoded_segment_count": self.autocoded_segment_count

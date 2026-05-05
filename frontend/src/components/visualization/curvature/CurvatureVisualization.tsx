@@ -1,4 +1,5 @@
-import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from 'react-leaflet';
+import ThemeAwareTileLayer from "../../common/ThemeAwareTileLayer";
+import { MapContainer, Polyline, CircleMarker, useMap } from 'react-leaflet';
 import { useEffect, useMemo } from 'react';
 import proj4 from 'proj4';
 import 'leaflet/dist/leaflet.css';
@@ -99,11 +100,7 @@ export function CurvatureVisualization({ data }: CurvatureVisualizationProps) {
         scrollWheelZoom={true}
       >
         {/* CartoDB Light basemap - same as Map Preview */}
-        <TileLayer
-          attribution='&copy; OpenStreetMap contributors & CARTO'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          maxZoom={22}
-        />
+        <ThemeAwareTileLayer />
 
         {/* Fit bounds on load */}
         <FitBounds center={center} />

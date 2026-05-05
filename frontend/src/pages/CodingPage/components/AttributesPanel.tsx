@@ -74,7 +74,7 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
     "Light segregation",
     "Fixed obstacle on facility",
     "Non-fixed obstacle on facility",
-    "Facility width per direction",
+    "Facility width",
     "Width restrictions",
     "Adjacent severe hazard 0-1m",
     "Adjacent severe hazard 1-3m",
@@ -82,6 +82,7 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
   ],
   "Facility surface conditions": [
     "Delineation",
+    "Delineation type",
     "Major surface road deformation",
     "Loose or slippery surface",
     "Grade",
@@ -133,7 +134,7 @@ const KEY_ALIASES: Record<string, string> = {
   "Line of Sight": "Line of Sight",
   "Fixed obstacle on facility": "Fixed Obstacle on Facility",
   "Non-fixed obstacle on facility": "Non-Fixed Obstacle on Facility",
-  "Facility width per direction": "Facility Width per Direction",
+  "Facility width": "Facility Width per Direction",
   "Width restrictions": "Width Restriction",
   "Light segregation": "Light Segregation",
   "Adjacent severe hazard 0-1m": "Adjacent Severe Hazard 0-1m",
@@ -141,6 +142,7 @@ const KEY_ALIASES: Record<string, string> = {
 
   // Facility surface conditions
   "Delineation": "Delineation",
+  "Delineation type": "Delineation Type",
   "Major surface road deformation": "Major Surface Deformation or Drain Opening",
   "Loose or slippery surface": "Loose or slippery surface",
   "Grade": "Grade",
@@ -345,7 +347,7 @@ export default function AttributesPanel({
                     let summary = [];
                     if (r.bus_stop.found) summary.push(`Bus Stop is ${r.bus_stop.distance}m away`);
                     if (r.bus_lane.found) summary.push(`Bus Lane is ${r.bus_lane.distance}m away`);
-                    
+
                     if (summary.length > 0) {
                       toaster.create({ title: "Nearby GIS Detected", description: summary.join(". "), type: "success" });
                     } else {

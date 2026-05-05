@@ -1,5 +1,6 @@
+import ThemeAwareTileLayer from "../../../components/common/ThemeAwareTileLayer";
 import {
-  Card, CardHeader, CardBody, Heading, Text, Box, Flex, HStack, IconButton, Button,
+  Card, CardBody, Text, Box, Flex, IconButton, Button,
   Dialog, Portal, Menu
 } from "@chakra-ui/react";
 import { FaMousePointer, FaDrawPolygon, FaPlus, FaTrash } from "react-icons/fa";
@@ -13,11 +14,12 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 
-import { MapContainer, TileLayer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle } from "react-leaflet";
+import { MapContainer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle, Pane } from "react-leaflet";
 import L, { divIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import proj4 from "proj4";
+import type { CurvatureVisualizationResponse } from '../../../api/curvatureVisualization';
 
 type Props = {
   projectName: string;                       // Current project name from parent
@@ -30,6 +32,15 @@ type Props = {
   geoFeatures?: Feature<LineString, any>[];  // Optional pre-loaded geofeatures (for multi-project display)
   startIndex?: number;                       // Start index in global segments array (used with geoFeatures for multi-project)
   onDataChange?: () => void;                 // Callback when data is modified (e.g. deleted)
+  panToBounds?: L.LatLngBounds | null;       // When set, immediately flies map to these bounds (e.g. on project tab switch)
+  panKey?: number;                           // Monotonic counter to force PanToBounds effect re-fire
+  curvData?: CurvatureVisualizationResponse | null;
+  showCurvatureOverlay?: boolean;
+  onToggleCurvatureOverlay?: () => void;
+  overlayContent?: React.ReactNode;
+  widthM?: number | null;
+  grade?: number | null;
+  gradientPct?: number | null;
 };
 
 type GJ = FeatureCollection<LineString, any>;
@@ -59,7 +70,7 @@ const to4326 = (p: Position): [number, number] => {
   return [lat, lon];
 };
 
-// 小组件：根据点集自动 fit bounds (only on first load)
+// 小组件：根据点集自动 fit bounds (only on initial load)
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
   const hasFitRef = useRef(false);
@@ -69,6 +80,29 @@ function FitBounds({ points }: { points: [number, number][] }) {
     map.fitBounds(bounds, { padding: [24, 24] });
     hasFitRef.current = true;
   }, [points, map]);
+  return null;
+}
+
+// Flies map to given bounds whenever bounds/panKey change (not null).
+// panKey is a monotonic counter that forces React to re-fire the effect even when the
+// bounds reference hasn't changed (e.g. clicking the same project tab twice).
+// The fitBounds call is deferred by one tick (setTimeout 0) so that ALL other React
+// effects from the same render commit (MapAutoCenter, ZoomToGIS, etc.) have already
+// completed — preventing any animation race conditions.
+function PanToBounds({ bounds, panKey }: { bounds: L.LatLngBounds | null; panKey: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!bounds) return;
+    const timerId = setTimeout(() => {
+      // Re-measure the container size — critical for small / side-by-side panels
+      // where the layout may have shifted between renders.
+      map.invalidateSize();
+      // Cancel any in-flight Leaflet animation (setView / flyTo) so fitBounds wins.
+      map.stop();
+      map.fitBounds(bounds, { padding: [20, 20], maxZoom: 18 });
+    }, 0);
+    return () => clearTimeout(timerId);
+  }, [bounds, panKey, map]);
   return null;
 }
 
@@ -89,6 +123,14 @@ function ZoomToGIS({ center, anyLayerOn }: { center: [number, number] | null; an
   }, [anyLayerOn, center, map]);
   return null;
 }
+
+// Path Defect marker — ⚠️ emoji used in the "Path Defects" overlay.
+const defectIcon = divIcon({
+  className: "path-defect-marker",
+  html: `<div style="font-size:20px;line-height:20px;text-align:center;opacity:0.5;filter:drop-shadow(0 0 2px rgba(0,0,0,0.5));pointer-events:auto;">⚠️</div>`,
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+});
 
 // Polygon Drawing Tool Component
 // Custom icon to mimic CircleMarker but allow dragging
@@ -254,8 +296,20 @@ const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
 
 // No global cache needed anymore as we use localStorage
 
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <Flex direction="column" align="center" lineHeight="1.1">
+      <Text fontSize="9px" color="gray.400" fontWeight="medium" letterSpacing="wide" textTransform="uppercase">
+        {label}
+      </Text>
+      <Text fontSize="xs" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.200" }}>
+        {value}
+      </Text>
+    </Flex>
+  );
+}
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
@@ -265,8 +319,9 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+
   // Use external geofeatures if provided (for multi-project display), otherwise use fetched data
-  const hasExternalGeoFeatures = externalGeoFeatures && externalGeoFeatures.length > 0;
+  const hasExternalGeoFeatures = externalGeoFeatures !== undefined;
 
   // Internal scores state (fallback if externalScores not provided)
   const [internalScores, setInternalScores] = useState<ScoreRow[]>([]);
@@ -297,31 +352,52 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [showBusLane, setShowBusLane] = useState(cachedLayers.showBusLane ?? false);     // Yellow
   const [showParkingLot, setShowParkingLot] = useState(cachedLayers.showParkingLot ?? false); // Gold
   const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Deep Pink
+  const [showBicycleCrossing, setShowBicycleCrossing] = useState(cachedLayers.showBicycleCrossing ?? false); // Orange
+  const [showPathDefects, setShowPathDefects] = useState(cachedLayers.showPathDefects ?? false); // Red
 
   // Update localStorage whenever these toggles change
   useEffect(() => {
     if (!projectName) return;
     localStorage.setItem(`gisLayerToggles_${projectName}`, JSON.stringify({
-      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine
+      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects
     }));
-  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, projectName]);
+  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects, projectName]);
 
-// Sub-component to pan map to current selection
-function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null; anyLayerOn?: boolean }) {
+// Sub-component to pan map to current selection.
+// When panKey changes (project tab clicked), MapAutoCenter suppresses its setView
+// for a 800ms window. This prevents async treatment-fetch callbacks from causing
+// a re-render that overrides PanToBounds' fitBounds.
+function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number] | null; anyLayerOn?: boolean; panKey?: number }) {
   const map = useMap();
   const prevCenterRef = useRef<[number, number] | null>(null);
+  const prevPanKeyRef = useRef(panKey ?? 0);
+  const suppressUntilRef = useRef(0);
   useEffect(() => {
     if (!center) return;
     const prevCenter = prevCenterRef.current;
     const centerChanged = !prevCenter || prevCenter[0] !== center[0] || prevCenter[1] !== center[1];
     prevCenterRef.current = center;
+
+    // If panKey just changed, start a suppression window.
+    const currentPanKey = panKey ?? 0;
+    if (currentPanKey !== prevPanKeyRef.current) {
+      prevPanKeyRef.current = currentPanKey;
+      suppressUntilRef.current = Date.now() + 800;
+      return;
+    }
+
+    // Still within the suppression window — let PanToBounds' fitBounds stand.
+    if (Date.now() < suppressUntilRef.current) {
+      return;
+    }
+
     if (centerChanged) {
       // When navigating to a new segment, pan to it
       // If GIS layers are on, zoom in close enough to see them
       const targetZoom = anyLayerOn ? Math.max(map.getZoom(), 17) : map.getZoom();
       map.setView(center, targetZoom, { animate: true });
     }
-  }, [center, anyLayerOn, map]);
+  }, [center, anyLayerOn, map, panKey]);
   return null;
 }
 
@@ -366,12 +442,23 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
     shared: GISLayerFeature[];
     roadcrossing: GISLayerFeature[];
     mrt_exit: GISLayerFeature[];
+    bicycle_crossing: GISLayerFeature[];
     bus_stop: GISLayerFeature[];
     bus_lane: GISLayerFeature[];
     parking_lot: GISLayerFeature[];
     kerb_line: GISLayerFeature[];
   };
   const [gisLayers, setGisLayers] = useState<GISLayers | null>(null);
+
+  // Path Defects overlay (xlsx-backed defect inspection records)
+  type PathDefect = {
+    lat: number;
+    lon: number;
+    type_of_defect: string;
+    location: string;
+    date_of_inspection: string;
+  };
+  const [pathDefects, setPathDefects] = useState<PathDefect[] | null>(null);
 
   // 拉取整条 geodata（如果没有 external geofeatures）
   useEffect(() => {
@@ -485,6 +572,30 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
   const activeQueryPoint: [number, number] | null =
     (activeGisLat !== null && activeGisLon !== null) ? [activeGisLat, activeGisLon] : null;
 
+  // Convert triplet points from EPSG:3414 to WGS84 (lat, lon) for display
+  const tripletPoints: [number, number][] | null = useMemo(() => {
+    if (!curvData?.diagnostics?.min_triplet?.points) return null;
+
+    try {
+      if (!proj4.defs('EPSG:3414')) {
+        proj4.defs('EPSG:3414', '+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 +ellps=WGS84 +units=m +no_defs');
+      }
+      return curvData.diagnostics.min_triplet.points.map(([x, y]: [number, number]) => {
+        const [lon, lat] = proj4('EPSG:3414', 'WGS84', [x, y]);
+        return [lat, lon] as [number, number];
+      });
+    } catch (error) {
+      return null;
+    }
+  }, [curvData]);
+  
+  const circleCoords: [number, number][] | null = useMemo(() => {
+    if (!curvData?.circle_geojson?.geometry?.coordinates?.[0]) return null;
+    return curvData.circle_geojson.geometry.coordinates[0].map(
+      ([lon, lat]: [number, number]) => [lat, lon] as [number, number]
+    );
+  }, [curvData]);
+
   // 初始中心（无数据时默认新加坡中心点）
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
 
@@ -499,13 +610,13 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
 
     if (!decodedName || activeGisLat === null || activeGisLon === null) return;
 
-    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine;
+    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing;
     if (!anyLayerEnabled) {
       setGisLayers(null);
       return;
     }
 
-    let aborted = false;
+    const controller = new AbortController();
     (async () => {
       try {
         const lat = activeGisLat;
@@ -517,6 +628,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
         if (showFootpath) layers.push('footpath');
         if (showRoadcrossing) layers.push('roadcrossing');
         if (showMrtExit) layers.push('mrt_exit');
+        if (showBicycleCrossing) layers.push('bicycle_crossing');
         if (showBusStop) layers.push('bus_stop');
         if (showBusLane) layers.push('bus_lane');
         if (showParkingLot) layers.push('parking_lot');
@@ -530,24 +642,60 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
             point: [lon, lat],  // API expects [lon, lat]
             radius: 200,
             layers: layers
-          })
+          }),
+          signal: controller.signal
         });
 
         if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
         const data = await res.json();
 
-        if (!aborted && data.ok) {
+        if (data.ok) {
           setGisLayers(data.layers);
         }
       } catch (e: any) {
-        if (!aborted) {
+        if (e.name !== 'AbortError') {
           console.error("[GIS] Fetch error:", e);
         }
       }
     })();
 
-    return () => { aborted = true; };
-  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, hasExternalGeoFeatures]);
+    return () => { controller.abort(); };
+  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, hasExternalGeoFeatures]);
+
+  // Fetch Path Defects within the search radius around the active query point.
+  // Kept separate from the GIS layers fetch so toggling defects doesn't refetch
+  // every GIS layer (and vice versa).
+  useEffect(() => {
+    if (activeGisLat === null || activeGisLon === null) return;
+    if (!showPathDefects) {
+      setPathDefects(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(`/api/defects/nearby`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            point: [activeGisLon, activeGisLat],
+            radius: 200,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+        const data = await res.json();
+        if (data.ok) setPathDefects(data.defects ?? []);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          console.error("[Defects] Fetch error:", e);
+        }
+      }
+    })();
+
+    return () => { controller.abort(); };
+  }, [activeGisLat, activeGisLon, showPathDefects]);
 
   // Layer colors matching curvature analysis
   const layerColors = {
@@ -556,6 +704,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
     shared: "#A855F7",      // Purple
     roadcrossing: "#10B981", // Emerald/Green
     mrt_exit: "#06B6D4",    // Cyan
+    bicycle_crossing: "#F97316", // Orange
     bus_stop: "#8B5CF6",    // Purple
     bus_lane: "#EAB308",    // Yellow
     parking_lot: "#D97706", // Amber/Gold
@@ -759,159 +908,204 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
 
 
   return (
-    <Card.Root display="flex" flexDirection="column" h={`${containerHeight}px`}>
-      <CardHeader py="2" px="4">
-        <Flex justify="space-between" align="center">
-          <Flex align="center" gap="2">
-            <Heading size="sm">Map Preview</Heading>
-            {subtitle && (
-              <Text fontSize="sm" fontWeight="medium" color="gray.600" _dark={{ color: "gray.400" }}>
-                - {subtitle}
-              </Text>
-            )}
-            {/* Delete Mode Toggle */}
-            {/* Single Point Modes */}
-            <Menu.Root positioning={{ placement: "bottom-end", strategy: "fixed" }}>
-              <Menu.Trigger asChild>
-                <IconButton
-                  aria-label="Single Point Tools"
-                  size="xs"
-                  variant={(isDeleteMode || isPointAddMode) ? "solid" : "ghost"}
-                  colorPalette={(isDeleteMode || isPointAddMode) ? (isDeleteMode ? "red" : "blue") : "gray"}
-                  onClick={(e) => {
-                    if (isDeleteMode || isPointAddMode) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(false);
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(false);
-                      setPolygonPoints([]);
-                    }
-                  }}
-                  title="Single Point Tools"
-                >
-                  {isPointAddMode ? <FaPlus /> : (isDeleteMode ? <FaTrash /> : <FaMousePointer />)}
-                </IconButton>
-              </Menu.Trigger>
-              <Menu.Positioner>
-                <Menu.Content zIndex={1500}>
-                  <Menu.Item
-                    value="delete"
-                    onClick={() => {
-                      setIsDeleteMode(true);
-                      setIsPointAddMode(false);
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(false);
-                      setPolygonPoints([]);
-                    }}
-                  >
-                    <FaMousePointer /> Single Point Delete
-                  </Menu.Item>
-                  <Menu.Item
-                    value="add"
-                    onClick={() => {
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(true);
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(false);
-                      setPolygonPoints([]);
-                    }}
-                  >
-                    <FaPlus /> Single Point Copy
-                  </Menu.Item>
-                </Menu.Content>
-              </Menu.Positioner>
-            </Menu.Root>
-
-            {/* Polygon Mode Toggle */}
-            <Menu.Root positioning={{ placement: "bottom-start", strategy: "fixed" }}>
-              <Menu.Trigger asChild>
-                <IconButton
-                  aria-label="Polygon Tools"
-                  variant={(isPolygonMode || isPolygonAddMode) ? "solid" : "ghost"}
-                  size="xs"
-                  colorPalette={(isPolygonMode || isPolygonAddMode) ? (isPolygonMode ? "orange" : "blue") : "gray"}
-                  title="Polygon Tools"
-                  onClick={(e) => {
-                    if (isPolygonMode || isPolygonAddMode) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(false);
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(false);
-                      setPolygonPoints([]);
-                    }
-                  }}
-                >
-                  {isPolygonAddMode ? <FaPlus /> : (isPolygonMode ? <FaTrash /> : <FaDrawPolygon />)}
-                </IconButton>
-              </Menu.Trigger>
-              <Menu.Positioner>
-                <Menu.Content zIndex={1500}>
-                  <Menu.Item
-                    value="delete"
-                    onClick={() => {
-                      setIsPolygonMode(true);
-                      setIsPolygonAddMode(false);
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(false);
-                      setPolygonPoints([]);
-                      setDeleteConfirmationOpen(false);
-                    }}
-                  >
-                    <FaTrash /> Delete Segments
-                  </Menu.Item>
-                  <Menu.Item
-                    value="add"
-                    onClick={() => {
-                      setIsPolygonMode(false);
-                      setIsPolygonAddMode(true);
-                      setIsDeleteMode(false);
-                      setIsPointAddMode(false);
-                      setPolygonPoints([]);
-                      setDeleteConfirmationOpen(false);
-                    }}
-                  >
-                    <FaPlus /> Copy/Add Segments
-                  </Menu.Item>
-                </Menu.Content>
-              </Menu.Positioner>
-            </Menu.Root>
-
-            {isPolygonMode && (
-              <Button
-                size="xs"
-                variant="outline"
-                colorPalette="orange"
-                disabled={polygonPoints.length < 3}
-                onClick={finishPolygonSelection}
-              >
-                Delete Selected ({
-                  points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
-                } segments)
-              </Button>
-            )}
-
-            {isPolygonAddMode && (
-              <Button
-                size="xs"
-                variant="outline"
-                colorPalette="blue"
-                disabled={polygonPoints.length < 3}
-                onClick={finishAddSegmentsSelection}
-              >
-                Copy Selected ({
-                  points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
-                } segments)
-              </Button>
-            )}
-
+    <Card.Root display="flex" flexDirection="column" h={`${containerHeight}px`} overflow="hidden" borderRadius="none">
+      {/* Clickable title bar restored as a static header */}
+      <Box
+        px="4"
+        py="3"
+        borderBottom="1px solid"
+        borderColor="gray.200"
+        _dark={{ borderColor: "gray.700" }}
+        display="flex"
+        alignItems="center"
+        gap="2"
+      >
+        <Text fontSize="md" fontWeight="bold" color="gray.800" _dark={{ color: "gray.100" }}>
+          Map Preview & Analysis
+        </Text>
+        {subtitle && (
+          <Text fontSize="sm" fontWeight="medium" color="gray.600" _dark={{ color: "gray.400" }}>
+            - {subtitle}
+          </Text>
+        )}
+        {onToggleCurvatureOverlay && curvData && (
+          <Flex align="center" gap="1.5" ml="auto">
+            <Flex align="center" gap="3" mr="2" pr="2" borderRight="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
+              <StatPill
+                label="Curv"
+                value={curvData.radius != null ? `${curvData.radius.toFixed(1)} m` : "∞"}
+              />
+              <StatPill
+                label="Width"
+                value={widthM != null ? `${widthM.toFixed(2)} m` : "—"}
+              />
+              <StatPill
+                label="Grade"
+                value={
+                  gradientPct != null
+                    ? `${(gradientPct as number) >= 0 ? "+" : ""}${(gradientPct as number).toFixed(1)}%`
+                    : grade === 1 ? "<5°"
+                    : grade === 2 ? "≥5°"
+                    : "—"
+                }
+              />
+            </Flex>
+            <Text fontSize="xs" fontWeight="medium" color={showCurvatureOverlay ? "gray.900" : "gray.400"} _dark={{ color: showCurvatureOverlay ? "gray.100" : "gray.500" }}>
+              Analysis Overlay
+            </Text>
+            <Switch
+              colorPalette="gray"
+              size="sm"
+              checked={showCurvatureOverlay}
+              onCheckedChange={onToggleCurvatureOverlay}
+            />
           </Flex>
+        )}
+      </Box>
 
-          {/* GIS Layer Toggles */}
-          <HStack gap="4">
+          {/* Tools + GIS layer toggles */}
+          <Box px="4" pt="2" pb="2" borderBottom="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.700" }}>
+            {/* Tool icon buttons */}
+            <Flex align="center" gap="2" wrap="wrap" mb="2" onClick={(e) => e.stopPropagation()}>
+              <Menu.Root positioning={{ placement: "bottom-end", strategy: "fixed" }}>
+                <Menu.Trigger asChild>
+                  <IconButton
+                    aria-label="Single Point Tools"
+                    size="xs"
+                    variant={(isDeleteMode || isPointAddMode) ? "solid" : "ghost"}
+                    colorPalette={(isDeleteMode || isPointAddMode) ? (isDeleteMode ? "red" : "blue") : "gray"}
+                    onClick={(e) => {
+                      if (isDeleteMode || isPointAddMode) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(false);
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(false);
+                        setPolygonPoints([]);
+                      }
+                    }}
+                    title="Single Point Tools"
+                  >
+                    {isPointAddMode ? <FaPlus /> : (isDeleteMode ? <FaTrash /> : <FaMousePointer />)}
+                  </IconButton>
+                </Menu.Trigger>
+                <Menu.Positioner>
+                  <Menu.Content zIndex={1500}>
+                    <Menu.Item
+                      value="delete"
+                      onClick={() => {
+                        setIsDeleteMode(true);
+                        setIsPointAddMode(false);
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(false);
+                        setPolygonPoints([]);
+                      }}
+                    >
+                      <FaMousePointer /> Single Point Delete
+                    </Menu.Item>
+                    <Menu.Item
+                      value="add"
+                      onClick={() => {
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(true);
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(false);
+                        setPolygonPoints([]);
+                      }}
+                    >
+                      <FaPlus /> Single Point Copy
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu.Positioner>
+              </Menu.Root>
+
+              <Menu.Root positioning={{ placement: "bottom-start", strategy: "fixed" }}>
+                <Menu.Trigger asChild>
+                  <IconButton
+                    aria-label="Polygon Tools"
+                    variant={(isPolygonMode || isPolygonAddMode) ? "solid" : "ghost"}
+                    size="xs"
+                    colorPalette={(isPolygonMode || isPolygonAddMode) ? (isPolygonMode ? "orange" : "blue") : "gray"}
+                    title="Polygon Tools"
+                    onClick={(e) => {
+                      if (isPolygonMode || isPolygonAddMode) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(false);
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(false);
+                        setPolygonPoints([]);
+                      }
+                    }}
+                  >
+                    {isPolygonAddMode ? <FaPlus /> : (isPolygonMode ? <FaTrash /> : <FaDrawPolygon />)}
+                  </IconButton>
+                </Menu.Trigger>
+                <Menu.Positioner>
+                  <Menu.Content zIndex={1500}>
+                    <Menu.Item
+                      value="delete"
+                      onClick={() => {
+                        setIsPolygonMode(true);
+                        setIsPolygonAddMode(false);
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(false);
+                        setPolygonPoints([]);
+                        setDeleteConfirmationOpen(false);
+                      }}
+                    >
+                      <FaTrash /> Delete Segments
+                    </Menu.Item>
+                    <Menu.Item
+                      value="add"
+                      onClick={() => {
+                        setIsPolygonMode(false);
+                        setIsPolygonAddMode(true);
+                        setIsDeleteMode(false);
+                        setIsPointAddMode(false);
+                        setPolygonPoints([]);
+                        setDeleteConfirmationOpen(false);
+                      }}
+                    >
+                      <FaPlus /> Copy/Add Segments
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu.Positioner>
+              </Menu.Root>
+
+              {isPolygonMode && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  colorPalette="orange"
+                  disabled={polygonPoints.length < 3}
+                  onClick={finishPolygonSelection}
+                >
+                  Delete Selected ({
+                    points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
+                  } segments)
+                </Button>
+              )}
+
+              {isPolygonAddMode && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  colorPalette="blue"
+                  disabled={polygonPoints.length < 3}
+                  onClick={finishAddSegmentsSelection}
+                >
+                  Copy Selected ({
+                    points.filter(p => isPointInPolygon(p.latlng, polygonPoints)).length
+                  } segments)
+                </Button>
+              )}
+            </Flex>
+
+            {/* GIS Layer Toggles */}
+            <Flex wrap="wrap" gap="4" onClick={(e) => e.stopPropagation()}>
             <Flex align="center" gap="2">
               <Text fontSize="sm" fontWeight="medium" color={showFootpath ? "blue.600" : "gray.500"}>
                 Footpath
@@ -957,6 +1151,18 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
                 size="sm"
                 checked={showRoadcrossing}
                 onCheckedChange={(e) => setShowRoadcrossing(e.checked)}
+              />
+            </Flex>
+
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showBicycleCrossing ? "orange.600" : "gray.500"}>
+                Bicycle Crossing
+              </Text>
+              <Switch
+                colorPalette="orange"
+                size="sm"
+                checked={showBicycleCrossing}
+                onCheckedChange={(e) => setShowBicycleCrossing(e.checked)}
               />
             </Flex>
 
@@ -1019,11 +1225,22 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
                 onCheckedChange={(e) => setShowKerbLine(e.checked)}
               />
             </Flex>
-          </HStack>
-        </Flex>
-      </CardHeader>
 
-      <CardBody flex="1" minH={0} p={0}>
+            <Flex align="center" gap="2">
+              <Text fontSize="sm" fontWeight="medium" color={showPathDefects ? "red.600" : "gray.500"}>
+                Path Defects
+              </Text>
+              <Switch
+                colorPalette="red"
+                size="sm"
+                checked={showPathDefects}
+                onCheckedChange={(e) => setShowPathDefects(e.checked)}
+              />
+            </Flex>
+
+          </Flex>
+        </Box>
+      <CardBody flex="1" minH={0} p={0} position="relative">
         {loading && <Text color="gray.500">Loading map…</Text>}
         {err && <Text color="red.600">Failed: {err}</Text>}
 
@@ -1040,11 +1257,7 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
                 mode={(isDeleteMode || isPolygonMode) ? 'delete' : (isPointAddMode || isPolygonAddMode) ? 'add' : 'default'}
               />
               {/* CartoDB Light basemap - same as Curvature Analysis */}
-              <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                attribution='&copy; OpenStreetMap contributors & CARTO'
-                maxZoom={22}
-              />
+              <ThemeAwareTileLayer />
 
               {/* 数据范围自适应 (first load only) */}
               {allLatLngs.length > 0 && <FitBounds points={allLatLngs} />}
@@ -1052,14 +1265,18 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
               {/* Auto-zoom to current point when GIS layers active */}
               <ZoomToGIS
                 center={activeQueryPoint}
-                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing || showPathDefects}
               />
 
               {/* 自动跟随当前选中点 */}
               <MapAutoCenter
                 center={current?.latlng ?? null}
-                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine}
+                anyLayerOn={showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing || showPathDefects}
+                panKey={panKey}
               />
+
+              {/* Fly to specific project bounds when tab is clicked — MUST be last so it overrides MapAutoCenter */}
+              <PanToBounds bounds={panToBounds ?? null} panKey={panKey} />
 
 
 
@@ -1289,61 +1506,140 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
                 ))
               )}
 
-              {/* 所有起点 */}
-              {points.map(({ globalIdx, latlng, f }) => {
-                const isActive = globalIdx === index;
-                const baseColor = getSegmentColor(globalIdx);
-                const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
-                const radius = isActive ? 8 : 5;
-                // Handle both new and old column names for backward compatibility
-                const scoreValue = activeScores[globalIdx]?.["Overall Risk Level"] ?? activeScores[globalIdx]?.["CycleRAP score"];
-                const label = `#${globalIdx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
-                // Include score in key to force re-render when score changes
-                const keyWithScore = `${globalIdx}-${scoreValue?.toFixed(2) ?? "loading"}`;
-
-                return (
+              {/* Bicycle Crossing - Point layer rendered as CircleMarkers */}
+              {gisLayers && showBicycleCrossing && gisLayers.bicycle_crossing && (
+                gisLayers.bicycle_crossing.map((feature, i) => (
                   <CircleMarker
-                    key={keyWithScore}
-                    center={latlng}
-                    radius={radius}
-                    pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
-                    eventHandlers={{
-                      click: (e) => {
-                        // If in polygon mode, add this point to the polygon and stop propagation
-                        if (isPolygonMode || isPolygonAddMode) {
-                          L.DomEvent.stopPropagation(e as any);
-                          handlePolygonPoint(latlng);
-                          return;
-                        }
-
-                        if (isDeleteMode) {
-                          setSegmentToDelete(globalIdx);
-                          setDeleteConfirmationOpen(true);
-                        } else if (isPointAddMode) {
-                          setSegmentToAdd(globalIdx);
-                          setIsAddSegmentsDialogOpen(true);
-                        } else {
-                          onJump?.(globalIdx);
-                        }
-                      },
-                      mouseover: (e) => {
-                        if (isDeleteMode) {
-                          e.target.setStyle({ color: "red", weight: 4 });
-                          const target = e.originalEvent.target as HTMLElement;
-                          if (target) target.style.cursor = "pointer";
-                        }
-                      },
-                      mouseout: (e) => {
-                        if (isDeleteMode) {
-                          e.target.setStyle({ color: color, weight: isActive ? 3 : 1 });
-                        }
-                      }
-                    }}   // ← 跳转到全局索引
+                    key={`bicycle_crossing-${i}`}
+                    center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
+                    radius={6}
+                    pathOptions={{
+                      color: layerColors.bicycle_crossing,
+                      weight: 2,
+                      opacity: 0.9,
+                      fillOpacity: 0.7
+                    }}
                   >
-                    <Tooltip>{isDeleteMode ? "Click to Delete" : (isPointAddMode ? "Click to Copy" : label)}</Tooltip>
+                    <Tooltip>Bicycle Crossing</Tooltip>
                   </CircleMarker>
-                );
-              })}
+                ))
+              )}
+
+              {/* Path Defects - ⚠️ markers within the 200m search radius */}
+              {showPathDefects && pathDefects?.map((d, i) => (
+                <Marker
+                  key={`defect-${i}`}
+                  position={[d.lat, d.lon]}
+                  icon={defectIcon}
+                >
+                  <Tooltip>{`${d.type_of_defect || "Defect"} — ${d.location || "Unknown"}${d.date_of_inspection ? ` (${d.date_of_inspection})` : ""}`}</Tooltip>
+                </Marker>
+              ))}
+
+              
+              {/* === Curvature Analysis Overlays === */}
+              {showCurvatureOverlay && curvData && (
+                <>
+                  {/* Black circle outline (5m analysis window) */}
+                  {circleCoords && (
+                    <Polyline
+                      positions={circleCoords}
+                      pathOptions={{ color: '#000000', weight: 5, fill: false, opacity: 1 }}
+                    />
+                  )}
+                  {/* Path centerlines (color-coded) */}
+                  {curvData.paths?.map((path: any, pathIdx: number) => {
+                    const pathCoords = path.coordinates.map(([lon, lat]: [number, number]) => [lat, lon] as [number, number]);
+                    return (
+                      <Polyline
+                        key={`curv-path-${pathIdx}`}
+                        positions={pathCoords}
+                        pathOptions={{
+                          color: `rgb(${path.color.join(',')})`,
+                          weight: path.is_analysis_layer ? 6 : 4,
+                          opacity: path.is_analysis_layer ? 1 : 0.8,
+                        }}
+                      />
+                    );
+                  })}
+                  {/* Red dot (analysis point) */}
+                  {curvData.point && (
+                    <CircleMarker
+                      center={[curvData.point.lat, curvData.point.lon]}
+                      radius={12}
+                      pathOptions={{ fillColor: '#ff0000', fillOpacity: 1, color: '#ffffff', weight: 3 }}
+                    />
+                  )}
+                  {/* Blue triplet points (P1, P2, P3) */}
+                  {tripletPoints?.map((pt, ptIdx) => (
+                    <CircleMarker
+                      key={`triplet-${ptIdx}`}
+                      center={pt}
+                      radius={8}
+                      pathOptions={{ fillColor: '#1E90FF', fillOpacity: 1, color: '#ffffff', weight: 2 }}
+                    />
+                  ))}
+                </>
+              )}
+
+              {/* 所有起点 — rendered in a dedicated pane above GIS overlay layers */}
+              <Pane name="segmentsPane" style={{ zIndex: 610 }}>
+                {points.map(({ globalIdx, latlng, f }) => {
+                  const isActive = globalIdx === index;
+                  const baseColor = getSegmentColor(globalIdx);
+                  const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
+                  const radius = isActive ? 8 : 5;
+                  // Handle both new and old column names for backward compatibility
+                  const scoreValue = activeScores[globalIdx]?.["Overall Risk Level"] ?? activeScores[globalIdx]?.["CycleRAP score"];
+                  const label = `#${globalIdx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
+                  // Include score in key to force re-render when score changes
+                  const keyWithScore = `${globalIdx}-${scoreValue?.toFixed(2) ?? "loading"}`;
+
+                  return (
+                    <CircleMarker
+                      key={keyWithScore}
+                      center={latlng}
+                      radius={radius}
+                      pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
+                      pane="segmentsPane"
+                      eventHandlers={{
+                        click: (e) => {
+                          // If in polygon mode, add this point to the polygon and stop propagation
+                          if (isPolygonMode || isPolygonAddMode) {
+                            L.DomEvent.stopPropagation(e as any);
+                            handlePolygonPoint(latlng);
+                            return;
+                          }
+
+                          if (isDeleteMode) {
+                            setSegmentToDelete(globalIdx);
+                            setDeleteConfirmationOpen(true);
+                          } else if (isPointAddMode) {
+                            setSegmentToAdd(globalIdx);
+                            setIsAddSegmentsDialogOpen(true);
+                          } else {
+                            onJump?.(globalIdx);
+                          }
+                        },
+                        mouseover: (e) => {
+                          if (isDeleteMode) {
+                            e.target.setStyle({ color: "red", weight: 4 });
+                            const target = e.originalEvent.target as HTMLElement;
+                            if (target) target.style.cursor = "pointer";
+                          }
+                        },
+                        mouseout: (e) => {
+                          if (isDeleteMode) {
+                            e.target.setStyle({ color: color, weight: isActive ? 3 : 1 });
+                          }
+                        }
+                      }}
+                    >
+                      <Tooltip>{isDeleteMode ? "Click to Delete" : (isPointAddMode ? "Click to Copy" : label)}</Tooltip>
+                    </CircleMarker>
+                  );
+                })}
+              </Pane>
 
               <PolygonDrawingTool
                 active={isPolygonMode || isPolygonAddMode}
@@ -1360,6 +1656,8 @@ function MapAutoCenter({ center, anyLayerOn }: { center: [number, number] | null
         {!loading && !err && points.length === 0 && (
           <Text color="gray.500" mt="2">No geodata to show.</Text>
         )}
+
+        {overlayContent}
       </CardBody>
 
       {/* Delete Confirmation Dialog */}

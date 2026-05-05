@@ -1,28 +1,46 @@
-import { useState, useEffect, useRef } from "react";
-import { Box, Button, Text, Dialog, Portal, Input } from "@chakra-ui/react";
-import { LuUpload, LuFile, LuX, LuCheck, LuFolder } from "react-icons/lu";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Box,
+  Button,
+  Combobox,
+  createListCollection,
+  Dialog,
+  Input,
+  Portal,
+  Text,
+} from "@chakra-ui/react";
+import { LuCheck, LuFolderSearch, LuImport, LuSearch } from "react-icons/lu";
 import { toaster } from "../../../components/ui/toaster";
 import * as api from "../../../api";
-import "../../ShapefileManagement/shapefileManagement.css";
 
 interface ImageUploadModalProps {
   open: boolean;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (details: { folderName: string }) => void;
 }
 
 type WorkflowStep = "upload" | "success";
 
-const FILES_PER_PAGE = 5;
-
 export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUploadModalProps) {
   const [step, setStep] = useState<WorkflowStep>("upload");
+  const [sourcePath, setSourcePath] = useState("");
   const [folderName, setFolderName] = useState("");
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [dragActive, setDragActive] = useState(false);
+  const [folderInputValue, setFolderInputValue] = useState("");
+  const [folderComboboxOpen, setFolderComboboxOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<api.SourceFolderSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [loadedSuggestions, setLoadedSuggestions] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [displayedCount, setDisplayedCount] = useState(FILES_PER_PAGE);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const filteredSuggestions = useMemo(
+    () => suggestions.filter((item) => item.name.toLowerCase().includes(folderInputValue.toLowerCase())),
+    [folderInputValue, suggestions],
+  );
+  const exactSuggestion = useMemo(
+    () => suggestions.find((item) => item.name.toLowerCase() === folderName.trim().toLowerCase()),
+    [folderName, suggestions],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -32,131 +50,80 @@ export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUplo
 
   function resetState() {
     setStep("upload");
+    setSourcePath("");
     setFolderName("");
-    setUploadedFiles([]);
-    setDragActive(false);
-    setDisplayedCount(FILES_PER_PAGE);
+    setFolderInputValue("");
+    setFolderComboboxOpen(false);
+    setSuggestions([]);
+    setLoadedSuggestions(false);
+    setLoadingSuggestions(false);
+    setBrowsing(false);
+    setUploading(false);
+  }
+
+  async function ensureSuggestionsLoaded() {
+    if (loadedSuggestions || loadingSuggestions) {
+      return;
+    }
+
+    try {
+      setLoadingSuggestions(true);
+      const items = await api.listSourceFolderSuggestions();
+      setSuggestions(items);
+      setLoadedSuggestions(true);
+    } catch (error) {
+      toaster.create({
+        description: `Failed to load folder suggestions: ${error}`,
+        type: "error",
+      });
+    } finally {
+      setLoadingSuggestions(false);
+    }
   }
 
   function handleClose() {
     if (step === "success" && onSuccess) {
-      onSuccess();
+      onSuccess({ folderName });
     }
     resetState();
     onClose();
   }
 
-  // Drag and drop handlers
-  function handleDragEnter(e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(true);
-  }
-
-  function handleDragLeave(e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-  }
-
-  function handleDragOver(e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-  }
-
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-
-    const droppedItems = Array.from(e.dataTransfer.items);
-    const droppedFiles: File[] = [];
-
-    // Process dropped items recursively to handle folders
-    const processEntries = async (entries: FileSystemEntry[]) => {
-      for (const entry of entries) {
-        if (entry.isFile) {
-          const file = await new Promise<File>((resolve) => {
-            (entry as FileSystemFileEntry).file(resolve);
-          });
-          droppedFiles.push(file);
-        } else if (entry.isDirectory) {
-          // Recursively process directory contents
-          const dirReader = (entry as FileSystemDirectoryEntry).createReader();
-          const subEntries = await new Promise<FileSystemEntry[]>((resolve) => {
-            dirReader.readEntries(resolve);
-          });
-          await processEntries(subEntries);
-        }
+  async function handleBrowse() {
+    try {
+      setBrowsing(true);
+      const result = await api.pickLocalSourceFolder();
+      if (!result.path) {
+        return;
       }
-    };
 
-    // Convert DataTransferItem to FileSystemEntry
-    const entries = droppedItems
-      .map((item) => item.webkitGetAsEntry())
-      .filter((entry) => entry !== null) as FileSystemEntry[];
-
-    if (entries.length > 0) {
-      processEntries(entries).then(() => {
-        addFiles(droppedFiles);
-      });
-    } else {
-      // Fallback for browsers that don't support webkitGetAsEntry
-      droppedItems.forEach((item) => {
-        if (item.kind === "file") {
-          const file = item.getAsFile();
-          if (file) {
-            droppedFiles.push(file);
-          }
-        }
-      });
-      addFiles(droppedFiles);
-    }
-  }
-
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files) {
-      const selectedFiles = Array.from(e.target.files);
-      addFiles(selectedFiles);
-    }
-  }
-
-  function addFiles(newFiles: File[]) {
-    // Accept common image formats
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'];
-
-    const validFiles = newFiles.filter((f) => {
-      const fileName = f.name.toLowerCase();
-      return imageExtensions.some(ext => fileName.endsWith(ext));
-    });
-
-    if (validFiles.length === 0) {
+      setSourcePath(result.path);
+      if (!folderName.trim() && result.suggested_folder_name) {
+        setFolderName(result.suggested_folder_name);
+        setFolderInputValue(result.suggested_folder_name);
+      }
+    } catch (error) {
       toaster.create({
-        description: "Please upload image files (.jpg, .png, .gif, etc.)",
-        type: "warning",
+        description: `Browse failed: ${error}`,
+        type: "error",
       });
-      return;
+    } finally {
+      setBrowsing(false);
     }
-
-    setUploadedFiles((prev) => [...prev, ...validFiles]);
-  }
-
-  function removeFile(index: number) {
-    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleUpload() {
-    if (!folderName.trim()) {
+    if (!sourcePath.trim()) {
       toaster.create({
-        description: "Please enter a folder name",
+        description: "Please choose or paste a local folder path",
         type: "warning",
       });
       return;
     }
 
-    if (uploadedFiles.length === 0) {
+    if (!folderName.trim()) {
       toaster.create({
-        description: "Please select image files to upload",
+        description: "Please choose a destination folder name",
         type: "warning",
       });
       return;
@@ -164,25 +131,26 @@ export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUplo
 
     try {
       setUploading(true);
-      const result = await api.uploadImagesToSourceFolder(folderName, uploadedFiles);
+      const result = await api.copyLocalImagesToSourceFolder(sourcePath.trim(), folderName.trim());
 
-      if (result.errors && result.errors.length > 0) {
+      if (result.errors.length > 0) {
         toaster.create({
-          description: `Uploaded ${result.count} image(s) with ${result.errors.length} error(s)`,
+          description: `Imported ${result.count} image(s) with ${result.errors.length} error(s)`,
           type: "warning",
         });
       } else {
         toaster.create({
-          description: `Successfully uploaded ${result.count} image(s) to folder "${folderName}"`,
+          description: `Copied ${result.count} image(s) into folder "${result.folder_name}"`,
           type: "success",
         });
       }
 
-      // Move to success
+      setFolderName(result.folder_name);
+      setFolderInputValue(result.folder_name);
       setStep("success");
     } catch (error) {
       toaster.create({
-        description: `Upload failed: ${error}`,
+        description: `Import failed: ${error}`,
         type: "error",
       });
     } finally {
@@ -190,154 +158,160 @@ export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUplo
     }
   }
 
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-  }
-
   return (
-    <Dialog.Root open={open} onOpenChange={(e) => !e.open && handleClose()} size="xl">
+    <Dialog.Root open={open} onOpenChange={(details) => !details.open && handleClose()} size="xl">
       <Portal>
         <Dialog.Backdrop />
         <Dialog.Positioner>
           <Dialog.Content>
             <Dialog.Header>
               <Dialog.Title>
-                {step === "upload" && "Upload Images"}
-                {step === "success" && "Success!"}
+                {step === "upload" ? "Import Source Folder" : "Success!"}
               </Dialog.Title>
               <Dialog.CloseTrigger />
             </Dialog.Header>
 
             <Dialog.Body>
-              {/* Upload Screen */}
               {step === "upload" && (
-                <Box>
-                  <Text mb={4} color="fg.muted">
-                    Drag and drop a folder of images here, or click to select files. These will be added to a source folder you can use when creating a project.
+                <Box display="grid" gap={5}>
+                  <Text color="fg.muted">
+                    Copy images directly from a local folder on this machine into in/. This avoids slow browser uploads and keeps the import as one source folder instead of hundreds of individual files.
                   </Text>
 
-                  {/* Folder Name Input */}
-                  <Box mb={4}>
-                    <Text fontWeight="600" mb={2}>Folder Name</Text>
-                    <Box display="flex" alignItems="center" gap={2}>
-                      <LuFolder />
+                  <Box>
+                    <Text fontWeight="600" mb={2}>Local Folder Path</Text>
+                    <Box display="flex" gap={2} alignItems="center">
+                      <LuFolderSearch />
                       <Input
-                        placeholder="e.g., FERNVALE ROAD, LORONG 8"
-                        value={folderName}
-                        onChange={(e) => setFolderName(e.target.value)}
+                        placeholder="e.g., C:\\path\\to\\ANG MO KIO AVENUE 1"
+                        value={sourcePath}
+                        onChange={(e) => setSourcePath(e.target.value)}
                       />
+                      <Button
+                        variant="outline"
+                        onClick={handleBrowse}
+                        loading={browsing}
+                        disabled={uploading}
+                      >
+                        Browse
+                      </Button>
                     </Box>
+                    <Text fontSize="xs" color="fg.muted" mt={1}>
+                      Local folder browsing works only when the backend is running on this same machine.
+                    </Text>
                   </Box>
 
-                  {/* Dropzone */}
-                  <div
-                    className={`dropzone ${dragActive ? "drag-active" : ""}`}
-                    onDragEnter={handleDragEnter}
-                    onDragLeave={handleDragLeave}
-                    onDragOver={handleDragOver}
-                    onDrop={handleDrop}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <div className="dropzone-icon">
-                      <LuUpload />
-                    </div>
-                    <Text fontWeight="600" mb={2}>
-                      Drag and drop folder here
-                    </Text>
-                    <Text fontSize="sm" color="fg.muted" mb={3}>
-                      or click to browse
-                    </Text>
-                    <Text fontSize="xs" color="fg.muted">
-                      Accepts image files (.jpg, .png, .gif, .webp, etc.)
-                    </Text>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      accept=".jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff,.tif"
-                      style={{ display: "none" }}
-                      onChange={handleFileSelect}
-                      {...({ webkitdirectory: "true", mozdirectory: "true" } as any)}
-                    />
-                  </div>
-
-                  {/* File List */}
-                  {uploadedFiles.length > 0 && (
-                    <div className="file-list">
-                      <Text fontWeight="600" mb={2}>
-                        Selected Files ({uploadedFiles.length})
-                      </Text>
-                      {uploadedFiles.slice(0, displayedCount).map((file, index) => (
-                        <div key={index} className="file-item">
-                          <div className="file-info">
-                            <div className="file-icon">
-                              <LuFile />
-                            </div>
-                            <div className="file-details">
-                              <div className="file-name">{file.name}</div>
-                              <div className="file-size">{formatBytes(file.size)}</div>
-                            </div>
-                          </div>
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            colorPalette="red"
-                            onClick={() => removeFile(index)}
-                          >
-                            <LuX />
-                          </Button>
-                        </div>
-                      ))}
-                      <Box mt={3} display="flex" gap={2} justifyContent="center">
-                        {displayedCount < uploadedFiles.length && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            colorPalette="gray"
-                            onClick={() => setDisplayedCount(displayedCount + FILES_PER_PAGE)}
-                          >
-                            View More ({uploadedFiles.length - displayedCount} remaining)
-                          </Button>
-                        )}
-                        {displayedCount > FILES_PER_PAGE && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            colorPalette="gray"
-                            onClick={() => setDisplayedCount(FILES_PER_PAGE)}
-                          >
-                            View Less
-                          </Button>
-                        )}
+                  <Box>
+                    <Text fontWeight="600" mb={2}>Destination Source Folder</Text>
+                    <Box display="flex" alignItems="center" gap={2}>
+                      <LuSearch />
+                      <Box flex={1}>
+                        <Combobox.Root
+                          collection={createListCollection({
+                            items: filteredSuggestions.map((item) => ({
+                              label: item.exists ? `${item.name} (existing)` : item.name,
+                              value: item.name,
+                            })),
+                          })}
+                          inputValue={folderInputValue}
+                          onInputValueChange={({ inputValue }) => {
+                            setFolderInputValue(inputValue);
+                            setFolderName(inputValue);
+                          }}
+                          onValueChange={({ value }) => {
+                            if (value.length > 0) {
+                              setFolderName(value[0]);
+                              setFolderInputValue(value[0]);
+                              setFolderComboboxOpen(false);
+                            }
+                          }}
+                          open={folderComboboxOpen}
+                          onOpenChange={(details) => {
+                            setFolderComboboxOpen(details.open);
+                            if (details.open) {
+                              void ensureSuggestionsLoaded();
+                            }
+                          }}
+                          disabled={uploading}
+                        >
+                          <Combobox.Control onClick={() => {
+                            setFolderComboboxOpen(true);
+                            void ensureSuggestionsLoaded();
+                          }}>
+                            <Combobox.Input placeholder={loadingSuggestions ? "Loading roads and folders..." : "Search road or source folder"} />
+                          </Combobox.Control>
+                          <Combobox.Positioner zIndex={2000}>
+                            <Combobox.Content>
+                              {loadingSuggestions && filteredSuggestions.length === 0 && (
+                                <Box px={3} py={2}>
+                                  <Text fontSize="sm" color="gray.500">Loading roads and folders...</Text>
+                                </Box>
+                              )}
+                              {!loadingSuggestions && filteredSuggestions.length === 0 && folderInputValue.trim() !== "" && (
+                                <Box px={3} py={2}>
+                                  <Text fontSize="sm" color="gray.500">No matching roads or folders.</Text>
+                                </Box>
+                              )}
+                              {filteredSuggestions.map((item) => (
+                                <Combobox.Item
+                                  key={item.name}
+                                  item={{
+                                    label: item.exists ? `${item.name} (existing)` : item.name,
+                                    value: item.name,
+                                  }}
+                                >
+                                  <Box display="flex" justifyContent="space-between" width="100%" gap={3}>
+                                    <span>{item.name}</span>
+                                    <Text fontSize="xs" color={item.exists ? "green.600" : "gray.500"}>
+                                      {item.exists ? "existing" : "new"}
+                                    </Text>
+                                  </Box>
+                                </Combobox.Item>
+                              ))}
+                            </Combobox.Content>
+                          </Combobox.Positioner>
+                        </Combobox.Root>
                       </Box>
-                    </div>
-                  )}
+                    </Box>
+                    <Text fontSize="xs" color="fg.muted" mt={1}>
+                      Search an existing source folder or road name. You can still type a new folder name if needed.
+                    </Text>
+                    {folderName.trim() && (
+                      <Text fontSize="xs" color={exactSuggestion?.exists ? "green.600" : "gray.600"} mt={2}>
+                        {exactSuggestion?.exists
+                          ? "Images will be copied into an existing source folder."
+                          : "A new source folder will be created under in/."}
+                      </Text>
+                    )}
+                  </Box>
+
+                  <Box borderWidth="1px" borderRadius="md" p={4} bg="bg.subtle">
+                    <Text fontWeight="600" mb={2}>What this does</Text>
+                    <Text fontSize="sm" color="fg.muted">
+                      The backend copies image files directly from the selected folder into the destination source folder. Nested folders are flattened automatically so project creation can read the images cleanly.
+                    </Text>
+                  </Box>
 
                   {uploading && (
-                    <Box mt={4}>
+                    <Box>
                       <Text fontSize="sm" color="fg.muted" textAlign="center">
-                        Uploading images...
+                        Copying images into the source folder...
                       </Text>
                     </Box>
                   )}
                 </Box>
               )}
 
-              {/* Success Screen */}
               {step === "success" && (
                 <Box textAlign="center" py={6}>
                   <Box fontSize="4xl" color="green.500" mb={4}>
                     <LuCheck />
                   </Box>
                   <Text fontSize="xl" fontWeight="600" mb={2}>
-                    Upload Completed!
+                    Import Completed!
                   </Text>
                   <Text color="fg.muted" mb={6}>
-                    Images have been successfully uploaded to the "{folderName}" folder. You can now select this folder when creating a new project.
+                    The destination folder <strong>{folderName}</strong> is ready to use in project creation.
                   </Text>
                 </Box>
               )}
@@ -346,25 +320,17 @@ export default function ImageUploadModal({ open, onClose, onSuccess }: ImageUplo
             {step !== "success" && (
               <Dialog.Footer>
                 <Box display="flex" gap={3} width="100%" justifyContent="flex-end">
-                  <Button variant="outline" onClick={handleClose}>
+                  <Button variant="outline" onClick={handleClose} disabled={uploading || browsing}>
                     Cancel
                   </Button>
                   <Button
                     colorPalette="blue"
                     onClick={handleUpload}
-                    disabled={uploadedFiles.length === 0 || uploading || !folderName.trim()}
+                    disabled={!sourcePath.trim() || !folderName.trim() || uploading || browsing}
+                    loading={uploading}
                   >
-                    Upload {uploadedFiles.length > 0 && `(${uploadedFiles.length})`}
-                  </Button>
-                </Box>
-              </Dialog.Footer>
-            )}
-
-            {step === "success" && (
-              <Dialog.Footer>
-                <Box display="flex" gap={3} width="100%" justifyContent="flex-end">
-                  <Button colorPalette="blue" onClick={handleClose}>
-                    Done
+                    <LuImport />
+                    Import Folder
                   </Button>
                 </Box>
               </Dialog.Footer>

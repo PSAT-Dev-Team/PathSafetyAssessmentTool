@@ -62,7 +62,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     options: ["Not Selected", "Not present", "Present"]
   },
   {
-    name: "Facility width per direction",
+    name: "Facility width",
     options: ["Not Selected", "Narrow", "Very Narrow", "Wide"]
   },
   {

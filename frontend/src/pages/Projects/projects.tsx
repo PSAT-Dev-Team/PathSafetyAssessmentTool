@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchProjectList, ping, deleteProject as apiDeleteProject, type ProjectListItem } from "../../api";
+import { matchesProjectSearch } from "../../utils/projectSearch";
 import {
   Button,
   Dialog,
@@ -192,15 +193,10 @@ export default function Home() {
 
   // for Filters
   const filtered = useMemo(() => {
-    const q = nameQuery.trim().toLowerCase();
     let list = projects;
 
-    // Filter by name query - searches both project name and tags
-    if (q) {
-      list = list.filter((p) =>
-        p.name.toLowerCase().includes(q) ||
-        (p.tags && p.tags.some(tag => tag.toLowerCase().includes(q)))
-      );
+    if (nameQuery.trim()) {
+      list = list.filter((p) => matchesProjectSearch(p, nameQuery));
     }
 
     // Filter by selected tags - project must have ALL selected tags
@@ -253,6 +249,15 @@ export default function Home() {
     const projectNames = Array.from(selected);
     const encodedNames = projectNames.map(name => encodeURIComponent(name));
     navigate(`/treatment/${encodedNames.join(',')}`);
+  };
+
+  // Load path analysis for selected projects
+  const loadPathAnalysis = () => {
+    if (selected.size === 0) return;
+    const projectNames = Array.from(selected);
+    sessionStorage.setItem("pathAnalysis_selectedProjects", JSON.stringify(projectNames));
+    sessionStorage.setItem("pathAnalysis_loadedProjects", JSON.stringify(projectNames));
+    navigate("/analysis/path");
   };
 
   // Edit success callback
@@ -389,11 +394,11 @@ export default function Home() {
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
-            <label htmlFor="nameQuery">Search by project name or tags</label>
+            <label htmlFor="nameQuery">Search by project, road, or tag</label>
             <input
               id="nameQuery"
               type="text"
-              placeholder="Type project name or tag…"
+              placeholder="Type project name, road, or tag…"
               value={nameQuery}
               onChange={(e) => setNameQuery(e.target.value)}
               className="search-input"
@@ -477,6 +482,9 @@ export default function Home() {
             </Button>
             <Button onClick={loadProject} colorPalette="blue" disabled={!selected || selected.size === 0}>
               Coding
+            </Button>
+            <Button onClick={loadPathAnalysis} style={{ backgroundColor: "#a220e3", color: "white" }} disabled={!selected || selected.size === 0}>
+              Analyse Projects
             </Button>
             <Button onClick={loadTreatment} colorPalette="green" disabled={!selected || selected.size === 0}>
               Treatment Application
@@ -637,7 +645,7 @@ export default function Home() {
       )}
 
       {/* Delete confirmation Dialog */}
-      <Dialog.Root open={openDelete} onOpenChange={(d) => setOpenDelete(d.open)}>
+      <Dialog.Root open={openDelete} onOpenChange={(d) => setOpenDelete(d.open)} unmountOnExit>
         <Portal>
           <Dialog.Backdrop />
           <Dialog.Positioner>

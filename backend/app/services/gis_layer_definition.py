@@ -91,6 +91,14 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
 >>>>>>> Stashed changes
         default_buffer_m=20.0,
     ),
+    "recreation": LayerDefinition(
+        name="recreation",
+        geometry_types=["Polygon", "MultiPolygon"],
+        required_columns=[],
+        query_type="poly",
+        description="Recreation area",
+        default_buffer_m=20.0,
+    ),
 
     # --- Proximity Queries (Point/Line distance queries) ---
     "Mrt_exit": LayerDefinition(

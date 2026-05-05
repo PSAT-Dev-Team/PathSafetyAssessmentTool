@@ -32,15 +32,19 @@ import {
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
-import { autocodeImage, autocodeGIS, autocodeAll } from "../../api";
+import { autocodeImage, autocodeGIS, autocodeAll, autocodeAllStream } from "../../api";
 
 
 import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
 import GeoDataPanel from "./components/GeoDataPanel";
 import { saveAttributes } from "../../api";
-import { AnalysisPanel } from "../../components/visualization/AnalysisPanel";
+import { AnalysisSidebar } from "../../components/visualization/AnalysisSidebar";
 import "../../components/visualization/AnalysisPanel.css";
+import { fetchWidthVisualization } from "../../api/widthVisualization";
+import type { WidthVisualizationResponse } from "../../api/widthVisualization";
+import { fetchCurvatureVisualization } from "../../api/curvatureVisualization";
+import type { CurvatureVisualizationResponse } from "../../api/curvatureVisualization";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
 import AutocodeValidation from "../PathAnalysisPage/components/AutocodeValidation";
 
@@ -155,6 +159,16 @@ export default function CodingPage() {
   // Save confirmation dialog state
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Analysis sidebar state (lifted from AnalysisPanel)
+  const [widthData, setWidthData] = useState<WidthVisualizationResponse | null>(null);
+  const [widthLoading, setWidthLoading] = useState(false);
+  const [widthError, setWidthError] = useState<string | null>(null);
+  const [curvData, setCurvData] = useState<CurvatureVisualizationResponse | null>(null);
+  const [curvLoading, setCurvLoading] = useState(false);
+  const [curvError, setCurvError] = useState<string | null>(null);
+  const [isAnalysisSidebarOpen, setIsAnalysisSidebarOpen] = useState(false);
+  const [showCurvatureOverlay, setShowCurvatureOverlay] = useState(false);
 
   useEffect(() => {
     if (!initialSegment || !currentProjectName || hasInitializedSegmentRef.current) return;
@@ -699,6 +713,101 @@ export default function CodingPage() {
     return () => window.removeEventListener("psat:autocode:all", handler);
   }, [currentProjectName, attrs.length, updateAutocodeBaseline, updateAutocodedSegmentCount]);
 
+  // Auto-code all segments for selected attributes only
+  useEffect(() => {
+    if (!currentProjectName) return;
+
+    const handler = async (e: Event) => {
+      const fields: string[] = (e as CustomEvent).detail?.fields ?? [];
+      if (fields.length === 0) return;
+      if (autoCodingRef.current) return;
+      try {
+        setAutoCoding(true);
+        autoCodingRef.current = true;
+        setAutoCodeMsg(`Autocoding ${fields.length} attribute(s) for all records…`);
+        setProgress(10);
+        const attrLength = attrs.length;
+        setProjectProgress({ [currentProjectName]: { processed: 0, total: attrLength } });
+
+        // Streaming call — progress counter updates as each segment completes
+        const r = await autocodeAllStream(
+          currentProjectName,
+          { all: true, fields, save: false },
+          (processed, total, _errors) => {
+            setProjectProgress({ [currentProjectName]: { processed, total } });
+            setProgress(10 + Math.round((processed / total) * 75)); // 10% → 85%
+          },
+        );
+
+        const allChangedFieldsByRow: Record<number, string[]> =
+          ("changed_by_row" in r && r.changed_by_row) ? r.changed_by_row : {};
+        const allSourcesByRow: Record<number, Record<string, string>> =
+          ("sources_by_row" in r && r.sources_by_row) ? r.sources_by_row : {};
+        const totalOk = ("ok" in r ? r.ok : 0) || 0;
+        const totalFail = ("fail" in r ? r.fail : 0) || 0;
+
+        setProgress(85);
+        try {
+          // Use updated_attributes returned by the batch call — avoids an extra fetchProjectAttributes round trip
+          const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
+          if (rows) {
+            updateProjectData(currentProjectName, {
+              attrs: rows,
+              changedFieldsByRow: allChangedFieldsByRow,
+              fieldSourcesByRow: allSourcesByRow,
+              isDirty: true,
+            });
+
+            saveAutocodeMetadata(currentProjectName, allChangedFieldsByRow, allSourcesByRow);
+            updateAutocodeBaseline(rows);
+
+            const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/score`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ attributes: rows }),
+            });
+
+            if (res.ok) {
+              const result = await res.json();
+              if (result.ok && Array.isArray(result.result_rows)) {
+                updateProjectData(currentProjectName, { scores: result.result_rows });
+              }
+            }
+          }
+        } catch {
+          // score recalculation failure is non-fatal
+        }
+
+        setProgress(100);
+        setAutoCodeMsg("Completed");
+
+        const totalProcessed = totalOk + totalFail;
+        toaster.create({
+          title: "Auto-code (by attribute) done",
+          description: `Total: ${totalProcessed}, OK: ${totalOk}, Failed: ${totalFail}${totalFail > 0 ? " (check console for details)" : ""}`,
+          type: totalFail > 0 ? "warning" : "success",
+        });
+
+      } catch (e: any) {
+        toaster.create({
+          title: "Auto-code failed",
+          description: String(e?.message ?? e),
+          type: "error",
+        });
+      } finally {
+        if (cleanupTimeoutRef.current !== null) {
+          clearTimeout(cleanupTimeoutRef.current);
+        }
+        cleanupTimeoutRef.current = window.setTimeout(() => {
+          clearAutoCodingState();
+        }, 300);
+      }
+    };
+
+    window.addEventListener("psat:autocode:by-field", handler);
+    return () => window.removeEventListener("psat:autocode:by-field", handler);
+  }, [currentProjectName, attrs.length, updateAutocodeBaseline]);
+
   // Auto-code all segments in all loaded projects
   useEffect(() => {
     const handler = async () => {
@@ -1063,6 +1172,30 @@ export default function CodingPage() {
     if (currentIndex < 0 || currentIndex >= baselineRows.length) return null;
     return baselineRows[currentIndex] || null;
   }, [currentIndex, baselineRows]);
+
+  // Fetch width and curvature data when project or segment changes
+  useEffect(() => {
+    if (!currentProjectName || !currentFeature || currentFeature.geometry?.type !== "LineString") {
+      setWidthData(null);
+      setCurvData(null);
+      return;
+    }
+    const coords = (currentFeature.geometry as LineString).coordinates as [number, number][];
+
+    setWidthLoading(true);
+    setWidthError(null);
+    fetchWidthVisualization(currentProjectName, coords, currentIndex)
+      .then(setWidthData)
+      .catch(e => setWidthError(e instanceof Error ? e.message : 'Failed'))
+      .finally(() => setWidthLoading(false));
+
+    setCurvLoading(true);
+    setCurvError(null);
+    fetchCurvatureVisualization(currentProjectName, coords, currentIndex)
+      .then(setCurvData)
+      .catch(e => setCurvError(e instanceof Error ? e.message : 'Failed'))
+      .finally(() => setCurvLoading(false));
+  }, [currentProjectName, currentIndex, currentFeature]);
 
   // Auto-calculate scores on project load
   useEffect(() => {
@@ -1442,7 +1575,7 @@ export default function CodingPage() {
           h="calc(100vh - 150px)"
         >
           <iframe
-            src="/Path Safety Assessment Tool coding sheet.pdf"
+            src="/PSAT coding sheetMar25v2.pdf"
             style={{
               width: "100%",
               height: "100%",
@@ -1782,20 +1915,28 @@ export default function CodingPage() {
             onJump={(i) => gotoPage(i + 1)}
             scores={scores}
             onDataChange={refreshCurrentProject}
+            curvData={curvData}
+            widthM={widthData?.width ?? null}
+            grade={(currentAttr?.["Grade"] as number | null) ?? null}
+            gradientPct={(currentAttr?.["Gradient %"] as number | null) ?? null}
+            showCurvatureOverlay={showCurvatureOverlay}
+            onToggleCurvatureOverlay={() => setShowCurvatureOverlay(v => !v)}
+            overlayContent={
+              <AnalysisSidebar
+                isOpen={isAnalysisSidebarOpen}
+                onToggle={() => setIsAnalysisSidebarOpen(v => !v)}
+                widthData={widthData}
+                widthLoading={widthLoading}
+                widthError={widthError}
+                curvData={curvData}
+                curvLoading={curvLoading}
+                curvError={curvError}
+                grade={currentAttr?.["Grade"] as number | null}
+                gradientPct={currentAttr?.["Gradient %"] as number | null}
+              />
+            }
           />
         </GridItem>
-
-        {currentFeature?.geometry?.type === "LineString" && (
-          <GridItem colSpan={{ base: 1, md: 2 }}>
-            <AnalysisPanel
-              projectName={currentProjectName!}
-              coordinates={(currentFeature.geometry as LineString).coordinates as [number, number][]}
-              segmentIndex={currentIndex}
-              grade={currentAttr?.["Grade"] as number | null}
-              gradientPct={currentAttr?.["Gradient %"] as number | null}
-            />
-          </GridItem>
-        )}
 
         <GridItem colSpan={{ base: 1, md: 2 }}>
           <AutocodeValidation
