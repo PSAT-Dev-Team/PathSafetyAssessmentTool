@@ -6,8 +6,6 @@ import {
   Dialog,
   Portal,
   CloseButton,
-  Combobox,
-  createListCollection,
   Spinner,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
@@ -72,7 +70,7 @@ export default function Home() {
   const [nameQuery, setNameQuery] = useState("");
   const [tagFilters, setTagFilters] = useState<string[]>([]);
   const [tagInputValue, setTagInputValue] = useState("");
-  const [tagComboboxOpen, setTagComboboxOpen] = useState(false);
+  const [tagSuggestionsOpen, setTagSuggestionsOpen] = useState(false);
 
   // Selected Projects (multiple selection)
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -225,19 +223,20 @@ export default function Home() {
   const addTagFilter = (tag: string) => {
     if (!tag || tagFilters.includes(tag)) {
       setTagInputValue("");
+      setTagSuggestionsOpen(true);
       return;
     }
 
     setTagFilters((current) => [...current, tag]);
     setTagInputValue("");
-    setTagComboboxOpen(false);
+    setTagSuggestionsOpen(true);
   };
 
   const clearAllFilters = () => {
     setNameQuery("");
     setTagFilters([]);
     setTagInputValue("");
-    setTagComboboxOpen(false);
+    setTagSuggestionsOpen(false);
   };
 
   // Toggle project selection
@@ -436,76 +435,92 @@ export default function Home() {
             />
           </div>
           <div className="search-item">
-            <label htmlFor="tagFilterCombobox">Filter by tags</label>
-            <Combobox.Root
-              collection={createListCollection({
-                items: allTags.map(tag => ({ label: tag, value: tag }))
-              })}
-              inputValue={tagInputValue}
-              selectionBehavior="clear"
-              onInputValueChange={({ inputValue, reason }) => {
-                if (reason === "input-change") {
-                  setTagInputValue(inputValue);
-                }
-              }}
-              onValueChange={({ value }) => {
-                if (value.length > 0) {
-                  addTagFilter(value[0]);
-                }
-              }}
-              open={tagComboboxOpen}
-              onOpenChange={(details) => setTagComboboxOpen(details.open)}
-            >
-              <Combobox.Control onClick={() => setTagComboboxOpen(true)}>
-                <div className="tag-input-container">
-                  <div className="tag-input-wrapper">
-                    {tagFilters.map((tag) => (
-                      <div
-                        key={tag}
-                        className="tag-chip"
-                        style={{ backgroundColor: getTagColor(tag) }}
+            <label htmlFor="tagFilterInput">Filter by tags</label>
+            <div style={{ position: "relative" }}>
+              <div className="tag-input-container">
+                <div className="tag-input-wrapper">
+                  {tagFilters.map((tag) => (
+                    <div
+                      key={tag}
+                      className="tag-chip"
+                      style={{ backgroundColor: getTagColor(tag) }}
+                    >
+                      <span className="tag-chip-text">{tag}</span>
+                      <button
+                        className="tag-chip-remove"
+                        onClick={() => removeTagFilter(tag)}
+                        type="button"
+                        aria-label={`Remove ${tag} filter`}
                       >
-                        <span className="tag-chip-text">{tag}</span>
-                        <button
-                          className="tag-chip-remove"
-                          onClick={() => removeTagFilter(tag)}
-                          type="button"
-                          aria-label={`Remove ${tag} filter`}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    <Combobox.Input
-                      id="tagFilterCombobox"
-                      placeholder={tagFilters.length === 0 ? "Type or click to select tags..." : "Add more tags..."}
-                      className="tag-input-field"
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && filteredTagOptions.length > 0) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          addTagFilter(filteredTagOptions[0]);
-                          requestAnimationFrame(() => {
-                            setTagInputValue("");
-                          });
-                        }
-                      }}
-                    />
-                  </div>
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <input
+                    id="tagFilterInput"
+                    type="text"
+                    value={tagInputValue}
+                    onChange={(event) => {
+                      setTagInputValue(event.target.value);
+                      setTagSuggestionsOpen(true);
+                    }}
+                    onFocus={() => setTagSuggestionsOpen(true)}
+                    onBlur={() => {
+                      window.setTimeout(() => setTagSuggestionsOpen(false), 100);
+                    }}
+                    placeholder={tagFilters.length === 0 ? "Type or click to select tags..." : "Add more tags..."}
+                    className="tag-input-field"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && filteredTagOptions.length > 0) {
+                        event.preventDefault();
+                        addTagFilter(filteredTagOptions[0]);
+                      }
+                    }}
+                  />
                 </div>
-              </Combobox.Control>
-              <Portal>
-                <Combobox.Positioner>
-                  <Combobox.Content>
-                    {filteredTagOptions.map((tag) => (
-                        <Combobox.Item key={tag} item={{ label: tag, value: tag }}>
-                          {tag}
-                        </Combobox.Item>
-                      ))}
-                  </Combobox.Content>
-                </Combobox.Positioner>
-              </Portal>
-            </Combobox.Root>
+              </div>
+              {tagSuggestionsOpen && filteredTagOptions.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 8px)",
+                    left: 0,
+                    right: 0,
+                    background: "var(--chakra-colors-bg)",
+                    border: "1px solid var(--chakra-colors-border)",
+                    borderRadius: "8px",
+                    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.12)",
+                    maxHeight: "220px",
+                    overflowY: "auto",
+                    zIndex: 20,
+                  }}
+                >
+                  {filteredTagOptions.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "var(--chakra-colors-fg)",
+                        fontSize: "14px",
+                      }}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        addTagFilter(tag);
+                      }}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

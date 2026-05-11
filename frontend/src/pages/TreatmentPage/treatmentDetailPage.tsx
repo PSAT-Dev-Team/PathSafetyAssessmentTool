@@ -13,8 +13,9 @@ import {
   Portal,
   CloseButton,
 } from "@chakra-ui/react";
-import { LuCopy } from "react-icons/lu";
+import { LuCheck, LuCopy, LuImage } from "react-icons/lu";
 import { Switch } from "../../components/ui/switch";
+import { toaster } from "../../components/ui/toaster";
 
 import type { Feature, FeatureCollection, LineString } from "geojson";
 
@@ -49,6 +50,9 @@ type ScoreType = {
   VB: number;
   total: number;
 };
+
+type CopyButtonState = "idle" | "copying" | "copied" | "error";
+type ImageCopyButtonState = "idle" | "copying" | "copied" | "error";
 
 const PANEL_HEIGHT = 400;
 const CONTROLS_H = 32;
@@ -274,6 +278,175 @@ const TREATMENTS: Treatment[] = [
   },
 ];
 
+const TREATMENT_COPY_BASE_PROMPT =
+  "Using this image, execute the following recommendations to improve the cycling or pedestrian facility shown, but do not change the original structure of the facility such that renovations can be done quickly and efficiently:";
+
+const TREATMENT_COPY_PRIORITY = [16, 22, 18, 15, 7, 5, 11, 21, 1, 4, 6, 9, 12, 13, 20];
+
+const TREATMENT_COPY_LINES: Partial<Record<number, string>> = {
+  1: "* Upgrade to on-road bicycle lane with light segregation - Convert the roadside space into a dedicated on-road bicycle lane, separated from moving traffic using light segregation measures. In the Singapore context, this includes flexible delineator posts, painted buffers, or low-profile rubber kerbs as seen in LTA cycling lane pilots.",
+  4: "* Upgrade to cycling-priority street - Redesign the road to give cyclists primary right of way, with motor vehicles as guests. Apply surface treatments, signage, and traffic calming measures consistent with a cycling-priority or bicycle street layout, referencing LTA's low-traffic neighbourhood concepts.",
+  5: "* Upgrade to multi-use path - Convert the existing facility into a clearly designated shared path for both cyclists and pedestrians. Apply shared path markings, the standard cyclist-and-pedestrian dual-symbol signage used on Singapore park connectors, and appropriate surface treatments.",
+  6: "* Upgrade to off-road bicycle path - Physically separate the cycling facility from motor traffic by constructing a dedicated off-road path. This may involve a new alignment set back from the road, kerb separation, or a fully independent corridor consistent with Singapore's Park Connector Network or Cycling Path Network standards.",
+  7: "* Convert to one-way facility - Redesign the facility to carry traffic or cyclists in a single direction only. Apply appropriate one-way signage, directional road markings, and physical channelling consistent with LTA standards for one-way cycling paths or pedestrian flows.",
+  9: "* Install light segregation - Add low-profile physical separators between the cycling facility and adjacent motor traffic or pedestrian zones. In the Singapore context, this includes flexible delineator posts, painted islands, rubber kerb segments, or cat's eye studs as used in LTA on-road cycling infrastructure trials.",
+  11: "* Remove fixed obstacles - Remove permanently installed objects that obstruct or reduce the usable width of the path or road. In the Singapore context, this includes lamp posts, traffic signal poles, bollards, fire hydrant boxes, bus shelter pillars, sheltered walkway columns, utility cabinets, and permanently anchored signage poles.",
+  12: "* Remove non-fixed obstacles - Clear temporary or moveable objects that are obstructing the path or road. This includes traffic cones, water-filled modular barriers, A-frame signs, bicycles or PMDs parked across the path, food cart trolleys, or construction equipment that has not been permanently installed.",
+  13: "* Remove width restrictions - Eliminate physical pinch points that artificially narrow the usable width of the facility. In the Singapore context, this includes anti-motorcyclist A-frames, swing gates, narrow cattle-grid barriers at park connector entry points, and overgrown vegetation or signage encroaching on path edges.",
+  15: "* Redesign sharp curves - Smooth out tight bends or acute-angle turns in the path or road. In the Singapore context, this applies to park connector junctions, underpass entry/exit curves, and footpath corners near road crossings that create blind spots or force cyclists to slow sharply.",
+  16: "* Widen the facility - Increase the width of the existing path, track, or road shown in this image. In the Singapore context, this may involve extending footpath edges, expanding shared paths along park connectors or void decks, or widening cycling strips adjacent to roads.",
+  18: "* Improve delineation - Add or refresh visual markings that separate cyclists from pedestrians or vehicles. This includes painted centrelines, shared path symbols, directional arrows, colour-differentiated surfaces (e.g. red or green asphalt), and tactile guidance strips commonly found on Singapore park connectors and footpaths.",
+  20: "* Improve crossing facility - Upgrade the provision for cyclists or pedestrians to cross a road or junction. In the Singapore context, this includes adding or improving toucan crossings, extending crossing times at signalised junctions, adding kerb ramps, or introducing a dedicated cycling crossing box at signalised intersections.",
+  21: "* Evaluate grade separation - Assess the feasibility of introducing an overpass or underpass to eliminate at-grade conflicts between cyclists/pedestrians and motor vehicles. Reference existing Singapore examples such as PCN underpasses, overhead bridges, and cycling tunnels.",
+  22: "* Reconfigure/remove parking - Remove or relocate on-street parking lots, motorcycle bays, or loading/unloading zones that encroach on or are adjacent to the cycling or pedestrian facility. This includes HDB estate carpark aprons, street-side parking lots marked with yellow kerb lines, and illegally parked vehicles.",
+};
+
+const buildTreatmentCopyMessage = (treatmentIds: number[]): string => {
+  const uniqueIds = Array.from(new Set(treatmentIds));
+  const priorityIndex = new Map(TREATMENT_COPY_PRIORITY.map((id, index) => [id, index]));
+  const treatmentIndex = new Map(TREATMENTS.map((treatment, index) => [treatment.id, index]));
+
+  const sortedIds = uniqueIds.sort((left, right) => {
+    const leftRank = priorityIndex.has(left)
+      ? priorityIndex.get(left)!
+      : TREATMENT_COPY_PRIORITY.length + (treatmentIndex.get(left) ?? Number.MAX_SAFE_INTEGER);
+    const rightRank = priorityIndex.has(right)
+      ? priorityIndex.get(right)!
+      : TREATMENT_COPY_PRIORITY.length + (treatmentIndex.get(right) ?? Number.MAX_SAFE_INTEGER);
+    return leftRank - rightRank;
+  });
+
+  const lines = sortedIds.map((id) => {
+    const predefinedLine = TREATMENT_COPY_LINES[id];
+    if (predefinedLine) {
+      return predefinedLine;
+    }
+
+    const treatment = TREATMENTS.find((item) => item.id === id);
+    if (!treatment) {
+      return `* Treatment ${id} - Apply this intervention in a way that improves the safety and usability of the facility shown.`;
+    }
+
+    return `* ${treatment.name} - Apply this intervention in a way that improves the safety and usability of the cycling or pedestrian facility shown.`;
+  });
+
+  if (lines.length === 0) {
+    return TREATMENT_COPY_BASE_PROMPT;
+  }
+
+  return [TREATMENT_COPY_BASE_PROMPT, "", ...lines].join("\n");
+};
+
+const buildProjectImageUrl = (projectName: string, imageRef: string): string =>
+  `/api/projects/${encodeURIComponent(projectName)}/images/${encodeURIComponent(imageRef)}`;
+
+const copyTextToClipboard = async (text: string): Promise<void> => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "true");
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textArea);
+};
+
+const convertImageBlobToPng = async (blob: Blob): Promise<Blob> => {
+  if (blob.type === "image/png") {
+    return blob;
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new window.Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Failed to decode the current image."));
+      element.src = objectUrl;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Failed to prepare the current image for clipboard copy.");
+    }
+
+    context.drawImage(image, 0, 0);
+
+    const pngBlob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/png");
+    });
+
+    if (!pngBlob) {
+      throw new Error("Failed to convert the current image for clipboard copy.");
+    }
+
+    return pngBlob;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+};
+
+const fetchClipboardImageBlob = async (imageUrl: string): Promise<Blob> => {
+  const response = await fetch(imageUrl, { credentials: "same-origin" });
+  if (!response.ok) {
+    throw new Error("Failed to load the current image.");
+  }
+
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/")) {
+    throw new Error("The current file is not an image.");
+  }
+
+  return convertImageBlobToPng(blob);
+};
+
+const copyRichContentToClipboard = async ({
+  text,
+  imageUrl,
+  imageOnly = false,
+}: {
+  text?: string;
+  imageUrl?: string | null;
+  imageOnly?: boolean;
+}): Promise<"both" | "image" | "text"> => {
+  const trimmedText = text?.trim() ?? "";
+
+  if (imageUrl && navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+    const imageBlob = await fetchClipboardImageBlob(imageUrl);
+    const clipboardItemData: Record<string, Blob> = {
+      "image/png": imageBlob,
+    };
+
+    if (!imageOnly && trimmedText) {
+      clipboardItemData["text/plain"] = new Blob([trimmedText], { type: "text/plain" });
+    }
+
+    await navigator.clipboard.write([new ClipboardItem(clipboardItemData)]);
+    return imageOnly ? "image" : trimmedText ? "both" : "image";
+  }
+
+  if (imageOnly) {
+    throw new Error("Image copy is not supported in this browser.");
+  }
+
+  if (trimmedText) {
+    await copyTextToClipboard(trimmedText);
+    return "text";
+  }
+
+  throw new Error("Nothing to copy.");
+};
+
 // Helper to check if treatment is applicable based on current attributes
 const isTreatmentApplicable = (treatment: Treatment, attrs: Record<string, any>): boolean => {
   if (!treatment.triggers || treatment.triggers.length === 0) return false;
@@ -487,6 +660,8 @@ export default function TreatmentDetailPage() {
   }, [allApplicableTreatments, attrs, treatmentState]);
   const [applyLoading, setApplyLoading] = useState(false);
   const [openConfirmAlert, setOpenConfirmAlert] = useState(false);
+  const [copyButtonState, setCopyButtonState] = useState<CopyButtonState>("idle");
+  const [imageCopyButtonState, setImageCopyButtonState] = useState<ImageCopyButtonState>("idle");
 
   // Preview state
   const [previewScores, setPreviewScores] = useState<ScoreType | null>(null);
@@ -500,6 +675,18 @@ export default function TreatmentDetailPage() {
     () => Math.max(0, Math.min(len - 1, currentPage - 1)),
     [currentPage, len]
   );
+
+  const copyTreatmentIds = useMemo(() => {
+    if (selectedTreatments.size > 0) {
+      return Array.from(selectedTreatments);
+    }
+
+    if (accordionView === "segment") {
+      return treatmentState[currentIndex]?.treatment_ids ?? [];
+    }
+
+    return [];
+  }, [accordionView, currentIndex, selectedTreatments, treatmentState]);
 
   // Helper to resolve index
   const resolveIndex = useCallback((globalIndex: number) => {
@@ -1057,6 +1244,95 @@ export default function TreatmentDetailPage() {
 
   // Resolve current project name for UI display
   const currentCtx = resolveIndex(currentIndex);
+  const currentImageUrl = useMemo(() => {
+    if (!currentCtx?.name || !imgRef) {
+      return null;
+    }
+
+    return buildProjectImageUrl(currentCtx.name, imgRef);
+  }, [currentCtx, imgRef]);
+
+  const handleCopyTreatmentSelection = useCallback(async () => {
+    if (copyTreatmentIds.length === 0) return;
+    const message = buildTreatmentCopyMessage(copyTreatmentIds);
+    setCopyButtonState("copying");
+
+    try {
+      await copyTextToClipboard(message);
+      setCopyButtonState("copied");
+      toaster.create({
+        title: "Prompt copied",
+        description: "The current treatment prompt is ready to paste.",
+        type: "success",
+      });
+    } catch (error) {
+      setCopyButtonState("error");
+      toaster.create({
+        title: "Copy failed",
+        description: error instanceof Error ? error.message : "Failed to copy the current treatment prompt.",
+        type: "error",
+      });
+    }
+  }, [copyTreatmentIds]);
+
+  const handleCopyCurrentImage = useCallback(async () => {
+    if (!currentImageUrl) return;
+    setImageCopyButtonState("copying");
+
+    try {
+      await copyRichContentToClipboard({ imageUrl: currentImageUrl, imageOnly: true });
+      setImageCopyButtonState("copied");
+      toaster.create({
+        title: "Image copied",
+        description: "The current segment image is ready to paste.",
+        type: "success",
+      });
+    } catch (error) {
+      setImageCopyButtonState("error");
+      toaster.create({
+        title: "Image copy failed",
+        description: error instanceof Error ? error.message : "Failed to copy the current image.",
+        type: "error",
+      });
+    }
+  }, [currentImageUrl]);
+
+  useEffect(() => {
+    const hasTransientCopyState =
+      copyButtonState === "copied" ||
+      copyButtonState === "error" ||
+      imageCopyButtonState === "copied" ||
+      imageCopyButtonState === "error";
+
+    if (!hasTransientCopyState) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setCopyButtonState("idle");
+      setImageCopyButtonState("idle");
+    }, 1800);
+
+    return () => window.clearTimeout(timeout);
+  }, [copyButtonState, imageCopyButtonState]);
+
+  const copyButtonLabel =
+    copyButtonState === "copying"
+      ? "Copying..."
+      : copyButtonState === "copied"
+        ? "Copied!"
+        : copyButtonState === "error"
+          ? "Copy failed"
+          : "Copy prompt";
+
+  const imageCopyButtonLabel =
+    imageCopyButtonState === "copying"
+      ? "Copying..."
+      : imageCopyButtonState === "copied"
+        ? "Image copied!"
+        : imageCopyButtonState === "error"
+          ? "Copy failed"
+          : "Copy image";
 
   if (projectNames.length === 0) {
     return (
@@ -1415,17 +1691,38 @@ export default function TreatmentDetailPage() {
                 )}
               </Flex>
 
-              <Flex width="full" gap="2" align="stretch">
+              <Flex width="full" gap="2" align="stretch" wrap="wrap">
                 <Button
                   size="sm"
-                  minW="36px"
-                  px="0"
+                  minW="118px"
                   variant="outline"
-                  aria-label="Copy treatment selection"
-                  title="Copy treatment selection"
-                  onClick={() => {}}
+                  aria-label="Copy treatment prompt"
+                  title="Copy treatment prompt"
+                  disabled={copyTreatmentIds.length === 0}
+                  loading={copyButtonState === "copying"}
+                  gap="1"
+                  onClick={() => {
+                    void handleCopyTreatmentSelection();
+                  }}
                 >
-                  <LuCopy />
+                  {copyButtonState === "copied" ? <LuCheck /> : <LuCopy />}
+                  <span>{copyButtonLabel}</span>
+                </Button>
+                <Button
+                  size="sm"
+                  minW="108px"
+                  variant="outline"
+                  aria-label="Copy current image"
+                  title="Copy current image"
+                  disabled={!currentImageUrl}
+                  loading={imageCopyButtonState === "copying"}
+                  gap="1"
+                  onClick={() => {
+                    void handleCopyCurrentImage();
+                  }}
+                >
+                  {imageCopyButtonState === "copied" ? <LuCheck /> : <LuImage />}
+                  <span>{imageCopyButtonLabel}</span>
                 </Button>
                 <Button
                   size="sm"
