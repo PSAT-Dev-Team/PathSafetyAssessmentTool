@@ -8,6 +8,7 @@ import {
   CloseButton,
   Combobox,
   createListCollection,
+  Spinner,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { LuPencil, LuArrowUpDown, LuArrowUp, LuArrowDown } from "react-icons/lu";
@@ -54,8 +55,8 @@ function getTagColor(tag: string): string {
 export default function Home() {
 
   // Status
-  const [, setStatus] = useState("checking...");
-  const [, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState("checking...");
+  const [error, setError] = useState<string | null>(null);
 
   // Project List
   const [Projectlist, setProjectList] = useState<FileListResponse | null>(null);
@@ -211,7 +212,33 @@ export default function Home() {
 
     return list;
   }, [projects, nameQuery, tagFilters]);
+  const filteredTagOptions = useMemo(
+    () => allTags.filter(tag =>
+      tag.toLowerCase().includes(tagInputValue.toLowerCase()) &&
+      !tagFilters.includes(tag)
+    ),
+    [allTags, tagFilters, tagInputValue]
+  );
   const showCreateProjectPrompt = !loadingProjects && filtered.length === 0 && nameQuery.trim().length > 0;
+  const hasActiveFilters = nameQuery.trim().length > 0 || tagFilters.length > 0;
+
+  const addTagFilter = (tag: string) => {
+    if (!tag || tagFilters.includes(tag)) {
+      setTagInputValue("");
+      return;
+    }
+
+    setTagFilters((current) => [...current, tag]);
+    setTagInputValue("");
+    setTagComboboxOpen(false);
+  };
+
+  const clearAllFilters = () => {
+    setNameQuery("");
+    setTagFilters([]);
+    setTagInputValue("");
+    setTagComboboxOpen(false);
+  };
 
   // Toggle project selection
   const onRowClick = (name: string) => {
@@ -415,11 +442,15 @@ export default function Home() {
                 items: allTags.map(tag => ({ label: tag, value: tag }))
               })}
               inputValue={tagInputValue}
-              onInputValueChange={({ inputValue }) => setTagInputValue(inputValue)}
+              selectionBehavior="clear"
+              onInputValueChange={({ inputValue, reason }) => {
+                if (reason === "input-change") {
+                  setTagInputValue(inputValue);
+                }
+              }}
               onValueChange={({ value }) => {
-                if (value.length > 0 && !tagFilters.includes(value[0])) {
-                  setTagFilters([...tagFilters, value[0]]);
-                  setTagInputValue("");
+                if (value.length > 0) {
+                  addTagFilter(value[0]);
                 }
               }}
               open={tagComboboxOpen}
@@ -449,6 +480,16 @@ export default function Home() {
                       id="tagFilterCombobox"
                       placeholder={tagFilters.length === 0 ? "Type or click to select tags..." : "Add more tags..."}
                       className="tag-input-field"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && filteredTagOptions.length > 0) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          addTagFilter(filteredTagOptions[0]);
+                          requestAnimationFrame(() => {
+                            setTagInputValue("");
+                          });
+                        }
+                      }}
                     />
                   </div>
                 </div>
@@ -456,12 +497,7 @@ export default function Home() {
               <Portal>
                 <Combobox.Positioner>
                   <Combobox.Content>
-                    {allTags
-                      .filter(tag =>
-                        tag.toLowerCase().includes(tagInputValue.toLowerCase()) &&
-                        !tagFilters.includes(tag)
-                      )
-                      .map((tag) => (
+                    {filteredTagOptions.map((tag) => (
                         <Combobox.Item key={tag} item={{ label: tag, value: tag }}>
                           {tag}
                         </Combobox.Item>
@@ -470,6 +506,56 @@ export default function Home() {
                 </Combobox.Positioner>
               </Portal>
             </Combobox.Root>
+          </div>
+        </div>
+
+        <div className="search-summary-row">
+          <div className="search-summary-text">
+            {loadingProjects ? (
+              <span className="search-summary-loading">
+                <Spinner size="sm" />
+                <span>Loading project list from backend...</span>
+              </span>
+            ) : error ? (
+              <span className="search-summary-error">
+                {status === "offline" ? "Backend appears offline." : error}
+              </span>
+            ) : (
+              <>
+                {`Showing ${filtered.length} of ${projects.length} project${projects.length === 1 ? "" : "s"}`}
+                {selected.size > 0 ? ` • ${selected.size} selected` : ""}
+              </>
+            )}
+          </div>
+          <div className="search-summary-actions">
+            {nameQuery.trim() && (
+              <button
+                type="button"
+                className="active-filter-pill"
+                onClick={() => setNameQuery("")}
+              >
+                Search: {nameQuery.trim()} ×
+              </button>
+            )}
+            {tagFilters.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className="active-filter-pill"
+                onClick={() => removeTagFilter(tag)}
+              >
+                Tag: {tag} ×
+              </button>
+            ))}
+            {hasActiveFilters && (
+              <button
+                type="button"
+                className="clear-filters-btn"
+                onClick={clearAllFilters}
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         </div>
 
@@ -516,7 +602,10 @@ export default function Home() {
               {loadingProjects ? (
                 <tr>
                   <td colSpan={8} className="empty">
-                    Loading projects...
+                    <div className="table-loading-state">
+                      <Spinner size="sm" />
+                      <span>Loading projects...</span>
+                    </div>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (

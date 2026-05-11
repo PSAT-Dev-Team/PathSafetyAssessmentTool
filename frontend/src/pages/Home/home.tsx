@@ -6,6 +6,7 @@ import {
   Dialog,
   Portal,
   CloseButton,
+  Spinner,
 } from "@chakra-ui/react";import { useNavigate } from "react-router-dom";
 
 import "./home.css";
@@ -125,7 +126,10 @@ export default function Home() {
             {loadingProjects ? (
               <tr>
                 <td colSpan={2} className="empty">
-                  Loading projects...
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: "10px" }}>
+                    <Spinner size="sm" />
+                    <span>Loading projects...</span>
+                  </div>
                 </td>
               </tr>
             ) : filtered.length === 0 ? (

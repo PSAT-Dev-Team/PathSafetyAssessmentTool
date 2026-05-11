@@ -13,6 +13,7 @@ import {
   Portal,
   CloseButton,
 } from "@chakra-ui/react";
+import { LuCopy } from "react-icons/lu";
 import { Switch } from "../../components/ui/switch";
 
 import type { Feature, FeatureCollection, LineString } from "geojson";
@@ -1414,26 +1415,39 @@ export default function TreatmentDetailPage() {
                 )}
               </Flex>
 
-              <Button
-                size="sm"
-                width="full"
-                variant="solid"
-                colorScheme={accordionView === "segment" && treatmentState[currentIndex]?.applied && selectedTreatments.size === 0 ? "green" : "blue"}
-                disabled={selectedTreatments.size === 0 || applyLoading}
-                loading={applyLoading}
-                onClick={async () => {
-                  if (accordionView === "segment") {
-                    handleApplyTreatments();
-                  } else {
-                     if (selectedTreatments.size === 0 || !currentCtx) return;
-                     setOpenConfirmAlert(true);
-                  }
-                }}
-              >
-                {accordionView === "segment" && treatmentState[currentIndex]?.applied && selectedTreatments.size === 0
-                  ? "Applied ✓"
-                  : `Apply (${selectedTreatments.size})`}
-              </Button>
+              <Flex width="full" gap="2" align="stretch">
+                <Button
+                  size="sm"
+                  minW="36px"
+                  px="0"
+                  variant="outline"
+                  aria-label="Copy treatment selection"
+                  title="Copy treatment selection"
+                  onClick={() => {}}
+                >
+                  <LuCopy />
+                </Button>
+                <Button
+                  size="sm"
+                  flex="1"
+                  variant="solid"
+                  colorScheme={accordionView === "segment" && treatmentState[currentIndex]?.applied && selectedTreatments.size === 0 ? "green" : "blue"}
+                  disabled={selectedTreatments.size === 0 || applyLoading}
+                  loading={applyLoading}
+                  onClick={async () => {
+                    if (accordionView === "segment") {
+                      handleApplyTreatments();
+                    } else {
+                       if (selectedTreatments.size === 0 || !currentCtx) return;
+                       setOpenConfirmAlert(true);
+                    }
+                  }}
+                >
+                  {accordionView === "segment" && treatmentState[currentIndex]?.applied && selectedTreatments.size === 0
+                    ? "Applied ✓"
+                    : `Apply (${selectedTreatments.size})`}
+                </Button>
+              </Flex>
             </Flex>
           </Box>
           </Box>
