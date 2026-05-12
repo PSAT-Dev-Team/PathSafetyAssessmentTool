@@ -1213,27 +1213,31 @@ export default function TreatmentDetailPage() {
               Treatment Options
             </Text>
             <Box mt="2">
-              <select
+              <Box
+                as="select"
                 value={accordionView}
-                onChange={(e) => {
-                  setAccordionView(e.target.value as any);
+                onChange={(e: any) => {
+                  setAccordionView(e.target.value);
                   setSelectedTreatments(new Set());
                 }}
-                style={{
-                  width: '100%',
-                  padding: '6px',
-                  borderRadius: '4px',
-                  border: '1px solid var(--chakra-colors-gray-300)',
-                  backgroundColor: 'white',
-                  color: 'inherit',
-                  fontSize: '14px',
-                  cursor: 'pointer'
+                w="100%"
+                p="6px"
+                borderRadius="md"
+                borderWidth="1px"
+                borderColor="gray.300"
+                bg="white"
+                color="gray.900"
+                fontSize="sm"
+                cursor="pointer"
+                _dark={{
+                  bg: "gray.800",
+                  borderColor: "gray.600",
+                  color: "gray.100"
                 }}
-                className="theme-select"
               >
                 <option value="segment">By Segment</option>
                 <option value="treatment">By Treatment</option>
-              </select>
+              </Box>
             </Box>
           </Box>
 

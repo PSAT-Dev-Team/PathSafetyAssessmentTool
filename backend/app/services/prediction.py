@@ -153,13 +153,13 @@ class CycleRAP_Coding_Helper:
         img_path: Path,
         obstacle_model,
         conf_thresh: float,
-    ) -> tuple[str, str, list[dict]]:
+    ) -> list[dict]:
         results = obstacle_model.predict(source=str(img_path), conf=conf_thresh, verbose=False)
         result = results[0]
 
         boxes = result.boxes
         if boxes is None or len(boxes) == 0:
-            return ("Not Present", "Not Present", [])
+            return []
 
         inv = {v: k for k, v in obstacle_model.names.items()}
         fixed_ids     = {inv[n] for n in FIXED_OBSTACLE_CLASSES     if n in inv}
@@ -172,8 +172,6 @@ class CycleRAP_Coding_Helper:
         img_h, img_w = result.orig_shape
 
         detections: list[dict] = []
-        fixed_present     = False
-        non_fixed_present = False
 
         for i, (cid, conf) in enumerate(zip(class_ids, confidences)):
             if conf < conf_thresh or cid not in relevant_ids:
@@ -189,15 +187,48 @@ class CycleRAP_Coding_Helper:
                 "group": group,
             })
 
-            if group == "fixed":
-                fixed_present = True
+        return detections
+
+    @staticmethod
+    def _obstacle_overlaps_path(det: dict, path_mask: np.ndarray, overlap_thresh: int = 30) -> bool:
+        y2 = det["y2"]
+        if y2 + 10 >= path_mask.shape[0]:
+            return True
+
+        sample_y = y2 + 10
+        path_row = path_mask[sample_y, :]
+        if not np.any(path_row):
+            return False
+
+        path_pixels_x = np.where(path_row > 0)[0]
+        splits = np.where(np.diff(path_pixels_x) > 1)[0] + 1
+        runs = np.split(path_pixels_x, splits)
+        longest_run = max(runs, key=len)
+        run_start, run_end = int(longest_run[0]), int(longest_run[-1])
+
+        overlap = max(0, min(det["x2"], run_end) - max(det["x1"], run_start))
+        return overlap >= overlap_thresh
+
+    @classmethod
+    def _compute_obstacle_presence(
+        cls,
+        detections: list[dict],
+        path_mask: np.ndarray,
+    ) -> tuple[str, str, list[dict], list[dict]]:
+        confirmed_fixed: list[dict] = []
+        confirmed_non_fixed: list[dict] = []
+
+        for det in detections:
+            if not cls._obstacle_overlaps_path(det, path_mask):
+                continue
+            if det["group"] == "fixed":
+                confirmed_fixed.append(det)
             else:
-                non_fixed_present = True
+                confirmed_non_fixed.append(det)
 
-        fixed_result     = "Present" if fixed_present     else "Not Present"
-        non_fixed_result = "Present" if non_fixed_present else "Not Present"
-
-        return (fixed_result, non_fixed_result, detections)
+        fixed_result     = "Present" if confirmed_fixed     else "Not Present"
+        non_fixed_result = "Present" if confirmed_non_fixed else "Not Present"
+        return fixed_result, non_fixed_result, confirmed_fixed, confirmed_non_fixed
 
     # ------------------------------------------------------------------
     # Obstacle-width analysis
@@ -230,14 +261,14 @@ class CycleRAP_Coding_Helper:
         return is_blocking, ratio, path_center_x, obstacle_center_x
 
     @classmethod
-    def _compute_width_restriction(cls, pathway_mask: np.ndarray, detections: list[dict]) -> tuple[str, str | None, str | None]:
+    def _compute_width_restriction(cls, path_mask: np.ndarray, detections: list[dict]) -> tuple[str, str | None, str | None]:
         blocking_fixed = []
         blocking_non_fixed = []
         is_restricted = False
 
         for det in detections:
             box = (det["x1"], det["y1"], det["x2"], det["y2"])
-            is_blocking, _, _, _ = cls._analyze_obstacle(box, pathway_mask)
+            is_blocking, _, _, _ = cls._analyze_obstacle(box, path_mask)
             if is_blocking:
                 is_restricted = True
                 cname = det["class_name"]
@@ -509,25 +540,24 @@ class CycleRAP_Coding_Helper:
         masks = cls._build_masks(result, cls.class_sets, img_h, img_w, CONF_THRESH)
 
         # 3. Detect obstacles (skip when no obstacle-related fields are requested)
+        combined_path_mask = np.clip(masks["pathway"] + masks["red_stripe"], 0, 1)
         if skip_obstacles:
-            fixed_obs, non_fixed_obs, detections = "Not Present", "Not Present", []
-            width_restriction, blocking_fixed, blocking_non_fixed = "Not Present", None, None
+            fixed_obs = non_fixed_obs = "Not Present"
+            fo_type_str = nfo_type_str = None
+            all_confirmed: list[dict] = []
         elif cls.obstacle_detector_model is not None:
-            fixed_obs, non_fixed_obs, detections = cls._detect_obstacles(
-                image_path, cls.obstacle_detector_model, CONF_THRESH
-            )
-            # 4. Compute width restriction
-            width_restriction, blocking_fixed, blocking_non_fixed = cls._compute_width_restriction(masks["pathway"], detections)
+            detections = cls._detect_obstacles(image_path, cls.obstacle_detector_model, CONF_THRESH)
+            fixed_obs, non_fixed_obs, confirmed_fixed, confirmed_non_fixed = cls._compute_obstacle_presence(detections, combined_path_mask)
+            fo_type_str  = ", ".join(sorted({d["class_name"] for d in confirmed_fixed}))     or None
+            nfo_type_str = ", ".join(sorted({d["class_name"] for d in confirmed_non_fixed})) or None
+            all_confirmed = confirmed_fixed + confirmed_non_fixed
         else:
-            fixed_obs, non_fixed_obs, detections = "Not Present", "Not Present", []
-            # 4. Compute width restriction (empty detections → Not Present)
-            width_restriction, blocking_fixed, blocking_non_fixed = cls._compute_width_restriction(masks["pathway"], detections)
+            fixed_obs = non_fixed_obs = "Not Present"
+            fo_type_str = nfo_type_str = None
+            all_confirmed = []
 
-        # 5. Collect all detected obstacle class names for FO Type / NFO Type
-        all_fixed_classes = sorted(set(d["class_name"] for d in detections if d["group"] == "fixed"))
-        all_non_fixed_classes = sorted(set(d["class_name"] for d in detections if d["group"] == "non_fixed"))
-        fo_type_str = ", ".join(all_fixed_classes) if all_fixed_classes else None
-        nfo_type_str = ", ".join(all_non_fixed_classes) if all_non_fixed_classes else None
+        # 4. Compute width restriction using confirmed detections + combined path mask
+        width_restriction, blocking_fixed, blocking_non_fixed = cls._compute_width_restriction(combined_path_mask, all_confirmed)
 
         # 6. Assign attributes (string values)
         str_attrs = cls._assign_attributes(

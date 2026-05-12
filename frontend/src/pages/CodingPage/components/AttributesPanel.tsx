@@ -261,7 +261,7 @@ export default function AttributesPanel({
   const isYellow = highlightColor === "yellow";
   const changedBg = isYellow ? "yellow.50" : "green.100";
   const changedBorder = isYellow ? "yellow.500" : "green.500";
-  const changedText = isYellow ? { base: "yellow.900", _dark: "yellow.200" } : { base: "green.900", _dark: "green.900" };
+  const changedText = isYellow ? { base: "yellow.900", _dark: "black" } : { base: "green.900", _dark: "green.900" };
   const changedInputBg = isYellow ? "#FFFFF0" : "#F0FFF4"; // yellow.50 vs green.50 (approx)
   const changedInputBorder = isYellow ? "#D69E2E" : "#38A169"; // yellow.500 vs green.500
 
