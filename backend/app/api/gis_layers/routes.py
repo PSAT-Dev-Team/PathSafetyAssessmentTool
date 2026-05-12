@@ -398,8 +398,14 @@ def preview_upload():
     tmp_dir = Path(tempfile.mkdtemp(dir=_temp_root()))
     try:
         for f in files:
-            f.save(str(tmp_dir / f.filename))
-        shp_files = list(tmp_dir.glob("*.shp"))
+            tmp_path = tmp_dir / f.filename
+            f.save(str(tmp_path))
+
+            if tmp_path.suffix.lower() == ".zip":
+                with zipfile.ZipFile(str(tmp_path)) as zf:
+                    zf.extractall(str(tmp_dir))
+
+        shp_files = list(tmp_dir.rglob("*.shp"))
         if not shp_files:
             return jsonify({"error": "No .shp file found in the uploaded files"}), 400
         geojson = _read_shapefile_as_geojson(str(shp_files[0]), max_features=5000)

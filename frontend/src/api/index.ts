@@ -682,7 +682,7 @@ export async function uploadShapefiles(files: File[], category?: string): Promis
 /**
  * Temporarily upload shapefile files and return GeoJSON preview (not saved permanently)
  */
-export async function previewUploadedShapefiles(files: File[]): Promise<any> {
+export async function previewUploadedShapefiles(files: File[]): Promise<FeatureCollection> {
   const formData = new FormData();
   files.forEach(file => formData.append("files", file));
   const res = await fetch("/api/shapefiles/preview-upload", {

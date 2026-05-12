@@ -527,7 +527,7 @@ export default function CreateProjectPage() {
               Select Roads
             </Text>
             <Text color="gray.500" fontSize="xs" mb={3}>
-              Draw a polygon or click a planning area to select multiple roads. Project creation uses only nodes inside the selected boundary.
+              Draw a polygon, click a planning area, or import a boundary shapefile to select multiple roads. Project creation uses only nodes inside the selected boundary.
             </Text>
             <SelectRoadsMap
               onSelectionChange={handleRoadSelectionChange}
@@ -537,7 +537,7 @@ export default function CreateProjectPage() {
 
             {usingRoadSelection && unavailableSelectedRoads.length > 0 && (
               <Text color="orange.600" fontSize="xs" mt={3}>
-                Deselect unavailable roads to create the project. {unavailableSelectedRoads.length} selected road{unavailableSelectedRoads.length === 1 ? " is" : "s are"} missing local files.
+                Deselect unavailable roads to create the project. {unavailableSelectedRoads.length} selected road{unavailableSelectedRoads.length === 1 ? " is" : "s are"} missing local files. Use the map list's Deselect Unavailable action to clear them in one click.
               </Text>
             )}
 
