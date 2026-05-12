@@ -1354,6 +1354,29 @@ def get_attribute_mappings():
         mappings[field] = reverse
     return jsonify(mappings)
 
+
+@bp.get("/custom-attribute-options")
+def get_custom_attr_options():
+    opts_path = Path(current_app.config["DATA_DIR"]) / "custom_attr_options.json"
+    if opts_path.exists():
+        return jsonify(json.loads(opts_path.read_text(encoding="utf-8")))
+    return jsonify({})
+
+
+@bp.put("/custom-attribute-options")
+def update_custom_attr_options():
+    data = request.get_json(silent=True) or {}
+    field = data.get("field")
+    options = data.get("options")
+    if not field or not isinstance(options, list):
+        return fail("field and options are required", 400)
+    opts_path = Path(current_app.config["DATA_DIR"]) / "custom_attr_options.json"
+    existing = json.loads(opts_path.read_text(encoding="utf-8")) if opts_path.exists() else {}
+    existing[field] = options
+    opts_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+    return jsonify({"ok": True})
+
+
 def _convert_attribute_types(df: pd.DataFrame) -> pd.DataFrame:
     """
     Convert attribute values to appropriate types for scoring.
@@ -3664,10 +3687,14 @@ def autocode_gis(project_name: str):
                         has_slip = True
                     elif dt != "faded marking":
                         has_deform = True
-                if has_deform and _needs(_DEFORM):
-                    updates[_DEFORM] = 1
-                if has_slip and _needs(_SLIP):
-                    updates[_SLIP] = 1
+                # Always set both fields (1=Present, 2=Not Present) so source tracking
+                # and UI highlighting work the same way as other GIS fields (e.g. Facility Width).
+                if _needs(_DEFORM):
+                    updates[_DEFORM] = 1 if has_deform else 2
+                if _needs(_SLIP):
+                    updates[_SLIP] = 1 if has_slip else 2
+                if _needs("Issue Type (Slippery)", _SLIP):
+                    updates["Issue Type (Slippery)"] = "Algae" if has_slip else None
             except FileNotFoundError:
                 pass
             except Exception:
@@ -4219,6 +4246,8 @@ def autocode_all(project_name: str):
             "Peak bicycle/LV traffic flow",
             "Grade",  # from LAZ gradient lookup, not from CV
             "Number of lanes – adjacent road",  # from kerb_line shapefile LANES column
+            "Major Surface Deformation or Drain Opening",  # from defects store
+            "Loose or slippery surface",  # from defects store
         })
 
         def _call_autocode_pair(image_ref: str, coords, skip_cv: bool = False, skip_gis: bool = False, skip_obstacles: bool = False, fields_filter: "list | None" = None):
@@ -4269,7 +4298,7 @@ def autocode_all(project_name: str):
             merged = {**img_updates, **gis_updates}
 
             # Special case: "Crossing Type" — append GIS value to CV value instead of override
-            # e.g. CV="Traffic Crossing" + GIS="Bicycle Crossing" → "Traffic Crossing, Bicycle Crossing"
+            # e.g. CV="Signalised Crossing" + GIS="Bicycle Crossing" → "Signalised Crossing, Bicycle Crossing"
             if "Crossing Type" in img_updates and "Crossing Type" in gis_updates:
                 cv_type = img_updates["Crossing Type"]   # may be None
                 gis_type = gis_updates["Crossing Type"]
@@ -4450,6 +4479,18 @@ def autocode_all(project_name: str):
                                 actual_filter.append("Gradient %")
                             if "Delineation" in actual_filter:
                                 actual_filter.append("Delineation Type")
+                            if "Fixed Obstacle on Facility" in actual_filter:
+                                actual_filter.append("FO Type")
+                            if "Non-Fixed Obstacle on Facility" in actual_filter:
+                                actual_filter.append("NFO Type")
+                            if "Loose or slippery surface" in actual_filter:
+                                actual_filter.append("Issue Type (Slippery)")
+                            if "Crossing Facility" in actual_filter:
+                                actual_filter.append("Crossing Type")
+                            if "Facility Width per Direction" in actual_filter:
+                                actual_filter.append("Facility Width Sub-category")
+                            if "Curvature" in actual_filter:
+                                actual_filter.append("Curvature Sub-category")
                             merged = {k: v for k, v in (merged or {}).items() if k in actual_filter}
                             sources = {k: v for k, v in (sources or {}).items() if k in actual_filter}
 

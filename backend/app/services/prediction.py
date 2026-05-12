@@ -206,14 +206,19 @@ class CycleRAP_Coding_Helper:
     def _analyze_obstacle(obstacle_box, path_mask, threshold=0.1):
         x_min, y_min, x_max, y_max = map(int, obstacle_box)
         obstacle_center_x = int((x_min + x_max) / 2)
-        bottom_y = min(y_max, path_mask.shape[0] - 1)
+        sample_y = min(y_max + 10, path_mask.shape[0] - 1)
 
-        path_row = path_mask[bottom_y, :]
+        path_row = path_mask[sample_y, :]
         if not np.any(path_row):
             return False, 0.0, 0, 0
 
         path_pixels_x = np.where(path_row > 0)[0]
-        path_center_x = int(np.median(path_pixels_x))
+
+        # Use midpoint of the longest contiguous run to avoid skew when an obstacle splits the mask
+        splits = np.where(np.diff(path_pixels_x) > 1)[0] + 1
+        runs = np.split(path_pixels_x, splits)
+        longest_run = max(runs, key=len)
+        path_center_x = int((longest_run[0] + longest_run[-1]) / 2)
         path_width = np.percentile(path_pixels_x, 95) - np.percentile(path_pixels_x, 5)
 
         if path_width < 10:
@@ -230,13 +235,7 @@ class CycleRAP_Coding_Helper:
         blocking_non_fixed = []
         is_restricted = False
 
-        img_w = pathway_mask.shape[1]
-        img_cx = img_w / 2
-
         for det in detections:
-            obj_cx = (det["x1"] + det["x2"]) / 2
-            if abs(obj_cx - img_cx) / img_w > 0.15:
-                continue
             box = (det["x1"], det["y1"], det["x2"], det["y2"])
             is_blocking, _, _, _ = cls._analyze_obstacle(box, pathway_mask)
             if is_blocking:
@@ -364,9 +363,9 @@ class CycleRAP_Coding_Helper:
             attrs["Delineation"] = "Present"
             delineation_triggers.append("Red Stripe")
 
-        # Step 4 – Traffic Crossing >= 80 % of bottom 10 %
+        # Step 4 – Signalised Crossing >= 80 % of bottom 10 %
         if cls._check_bottom_majority(masks["traffic_crossing"], img_h, img_w):
-            delineation_triggers.append("Traffic Crossing")
+            delineation_triggers.append("Signalised Crossing")
             attrs.update({
                 "Facility Type":                    "Mixed Traffic Road Lane",
                 "Light Segregation":                "Not Present",
@@ -377,7 +376,7 @@ class CycleRAP_Coding_Helper:
                 "Adjacent Object/Level Change 1-3m": "Not Present",
                 "Adjacent Sidewalk 0-1m":           "Not Present",
                 "Crossing Facility":                "Present",
-                "Crossing Type":                    "Traffic Crossing",
+                "Crossing Type":                    "Signalised Crossing",
                 "Peak Pedestrian Flow":             "Low",
                 "Intersection/Road Crossing":       "Present",
                 "No of Lanes on Intersecting Road": ">1 per direction",
@@ -427,7 +426,7 @@ class CycleRAP_Coding_Helper:
         attrs["Non-Fixed Obstacles"] = non_fixed_obstacles
         attrs["FO Type"] = blocking_fixed_classes
         attrs["NFO Type"] = blocking_non_fixed_classes
-        attrs["Delineation Type"] = ", ".join(delineation_triggers) if delineation_triggers else None
+        attrs["Delineation Type"] = ", ".join(delineation_triggers) if delineation_triggers else "Absent"
 
         return attrs
 

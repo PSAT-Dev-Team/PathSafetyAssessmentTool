@@ -1,0 +1,32 @@
+.attr-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background: var(--chakra-colors-bg-subtle);
+  cursor: pointer;
+  transition: all 200ms ease-out;
+  color: var(--chakra-colors-fg);
+  flex-shrink: 0;
+}
+
+.attr-edit-btn:hover {
+  transform: translateY(-2px) rotate(2deg);
+  background: var(--chakra-colors-blue-subtle);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.attr-edit-icon {
+  width: 14px;
+  height: 14px;
+  transition: all 200ms ease-out;
+  stroke-width: 2;
+}
+
+.attr-edit-btn:hover .attr-edit-icon {
+  stroke-width: 2.5;
+  color: var(--chakra-colors-blue-600);
+}
