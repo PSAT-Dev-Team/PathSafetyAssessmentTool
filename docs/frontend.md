@@ -7,6 +7,28 @@ The PSAT frontend is a **React + TypeScript** SPA built with Vite and served by 
 - **Maps:** Leaflet via react-leaflet
 - **Docs renderer:** React Markdown + mirrored files in `frontend/public/docs`
 
+
+## Table of Contents
+
+- [Route map](#route-map)
+- [Page behavior](#page-behavior)
+  - [Landing page](#landing-page)
+  - [Help page](#help-page)
+  - [Projects page](#projects-page)
+  - [Create Project page](#create-project-page)
+  - [Coding page](#coding-page)
+  - [Path Analysis page](#path-analysis-page)
+  - [Treatment pages](#treatment-pages)
+  - [GIS Layers page](#gis-layers-page)
+- [API client highlights](#api-client-highlights)
+- [Visual analysis components](#visual-analysis-components)
+  - [CurvatureVisualizationPanel](#curvaturevisualizationpanel)
+  - [WidthVisualizationPanel](#widthvisualizationpanel)
+  - [GeoDataPanel GIS overlays](#geodatapanel-gis-overlays)
+- [State management](#state-management)
+- [nginx behavior](#nginx-behavior)
+
+
 ## Route map
 
 | URL pattern | Component | Purpose |
@@ -41,6 +63,8 @@ This is why documentation changes must be mirrored into `frontend/public/docs/`,
 
 ### Projects page
 
+> **Recent Addition:** Fuzzy project search that also matches source road names.
+
 `Projects` is the operational home screen.
 
 Current behavior:
@@ -62,6 +86,8 @@ The fuzzy search logic lives in `src/utils/projectSearch.ts` and matches against
 - `source_folders`
 
 ### Create Project page
+
+> **Recent Addition:** Multi-road project creation from a drawn polygon or selected planning area.
 
 `CreateProjectPage` now supports two creation modes:
 
@@ -124,6 +150,8 @@ The page also stores filter and selection state in `sessionStorage`, so analysts
 
 ### Treatment pages
 
+> **Recent Addition:** Treatment-effectiveness ranking for both project-wide and per-segment views.
+
 `TreatmentPage` is the picker / filter view. It mirrors the project-or-road search behavior introduced on the Projects page.
 
 `TreatmentDetailPage` is where treatment work happens. Current capabilities include:
@@ -136,6 +164,8 @@ The page also stores filter and selection state in `sessionStorage`, so analysts
 - saving or resetting pending treatment state
 
 ### GIS Layers page
+
+> **Recent Addition:** Dedicated GIS Layers page with upload, preview, replace, and delete flows.
 
 `GisLayersPage` exposes the shapefile inventory that powers GIS-assisted coding.
 

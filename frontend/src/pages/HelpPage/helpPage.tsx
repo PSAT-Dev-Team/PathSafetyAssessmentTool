@@ -137,6 +137,13 @@ function AdminGuide() {
             { label: "Health Endpoints:", body: <>Query <Code>/api/health</Code> or <Code>/api/ping</Code> to verify the backend is responsive and CV models loaded correctly.</> },
           ],
         },
+        {
+          title: "5. Updating CycleRAP Algorithm",
+          items: [
+            { label: "Algorithm Updates:", body: "Occasionally, CycleRAP may release an updated risk scoring model. Administrators should contact the development team to update the system to the latest algorithm version." },
+            { label: "Implementation Details:", body: "The exact implementation details, required formula modifications, and testing procedures for algorithm updates can be found in the Developer Guide." },
+          ],
+        },
       ].map((section) => (
         <Box key={section.title}>
           <Text fontSize="lg" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.200" }} mt="6" mb="3">

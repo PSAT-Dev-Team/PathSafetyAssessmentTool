@@ -2,118 +2,166 @@
 
 All endpoints are prefixed with `/api/`.
 
-- Direct backend base URL: `http://localhost:8000/api`
-- Through the frontend: `http://localhost/api`
+- **Direct backend:** `http://localhost:8000/api`
+- **Through frontend:** `http://localhost/api`
 
-This mirrored help copy covers the same current API surface as the repository documentation.
+---
 
-## Health
+## Table of Contents
 
-### `GET /api/ping`
+- [1. Health Endpoints](#1-health-endpoints)
+- [2. Project Endpoints](#2-project-endpoints)
+  - [2.1 Project Listing & Metadata](#21-project-listing--metadata)
+  - [2.2 Project Data](#22-project-data)
+  - [2.3 Project Creation & Road Selection](#23-project-creation--road-selection)
+- [3. Coding & Autocode Endpoints](#3-coding--autocode-endpoints)
+  - [3.1 Autocode](#31-autocode)
+  - [3.2 Baseline & Validation](#32-baseline--validation)
+  - [3.3 Visualisation & GIS Context](#33-visualisation--gis-context)
+- [4. Segment Management & Exports](#4-segment-management--exports)
+- [5. Treatment Endpoints](#5-treatment-endpoints)
+- [6. Shapefile Management Endpoints](#6-shapefile-management-endpoints)
+- [7. Common Status Codes](#7-common-status-codes)
 
-```json
-{ "status": "ok" }
-```
+---
 
-### `GET /api/health`
+## 1. Health Endpoints
 
-```json
-{ "status": "ok" }
-```
+| Method | Endpoint | Response |
+|---|---|---|
+| `GET` | `/api/ping` | `{ "status": "ok" }` |
+| `GET` | `/api/health` | `{ "status": "ok" }` |
 
-## Main project endpoints
+---
 
-- `GET /api/projects`
-- `GET /api/projects/<project_name>`
-- `GET /api/projects/<project_name>/metadata`
-- `PATCH /api/projects/<project_name>`
-- `DELETE /api/projects/<project_name>`
-- `GET /api/projects/<project_name>/versions/latest/attributes`
-- `PUT /api/projects/<project_name>/attributes`
-- `GET /api/projects/<project_name>/geodata`
-- `GET /api/projects/<project_name>/results`
-- `POST /api/projects/<project_name>/score`
-- `GET /api/projects/<project_name>/images/<path:filename>`
+## 2. Project Endpoints
 
-Project list responses now include:
+### 2.1 Project Listing & Metadata
 
-- `dataset`
-- `source_folders`
-- `verified_segment_count`
-- `autocoded_segment_count`
-- `total_segments`
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/projects` | List all projects |
+| `GET` | `/api/projects/<name>` | Get project versions |
+| `GET` | `/api/projects/<name>/metadata` | Get detailed project metadata |
+| `PATCH` | `/api/projects/<name>` | Update name, tags, verified status |
+| `DELETE` | `/api/projects/<name>` | Delete entire project |
 
-## Project creation and road selection
+Project list responses include: `dataset`, `source_folders`, `verified_segment_count`, `autocoded_segment_count`, `total_segments`.
 
-- `GET /api/projects/folders`
-- `POST /api/projects/folders`
-- `POST /api/projects/folders/upload-images`
-- `POST /api/projects/roads-in-polygon`
-- `GET /api/projects/roads-in-bounds`
-- `GET /api/projects/planning-areas-in-bounds`
+### 2.2 Project Data
 
-`POST /api/projects/folders` supports both:
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/projects/<name>/versions/latest/attributes` | Latest attribute rows (with score bands if available) |
+| `PUT` | `/api/projects/<name>/attributes` | Save attributes and recalculate scores |
+| `GET` | `/api/projects/<name>/geodata` | Project geometry as GeoJSON FeatureCollection |
+| `GET` | `/api/projects/<name>/results` | Saved results rows (BB, BP, SB, VB, bands) |
+| `POST` | `/api/projects/<name>/score` | Run native CycleRAP scoring |
+| `GET` | `/api/projects/<name>/images/<filename>` | Serve a project image |
+| `GET` | `/api/projects/attribute-mappings` | Label mappings for discrete fields |
 
-- single-folder creation with `folder_name`
-- multi-folder creation with `folder_names`
-- optional polygon filtering with `polygon`
+### 2.3 Project Creation & Road Selection
 
-## Coding, autocode, and validation
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/projects/folders` | List source folders under `in/` |
+| `POST` | `/api/projects/folders` | Create a project (single or multi-folder) |
+| `POST` | `/api/projects/folders/upload-images` | Upload images into a source folder |
+| `POST` | `/api/projects/roads-in-polygon` | Roads intersecting a drawn polygon |
+| `GET` | `/api/projects/roads-in-bounds` | Road polylines for the current viewport |
+| `GET` | `/api/projects/planning-areas-in-bounds` | Planning-area polygons for the viewport |
 
-- `GET /api/projects/attribute-mappings`
-- `POST /api/projects/<project_name>/autocode/image`
-- `POST /api/projects/<project_name>/autocode/gis`
-- `POST /api/projects/<project_name>/autocode/all`
-- `GET /api/projects/<project_name>/autocode-metadata`
-- `POST /api/projects/<project_name>/autocode-metadata`
-- `GET /api/projects/<project_name>/baseline/exists`
-- `GET /api/projects/<project_name>/baseline`
-- `POST /api/projects/<project_name>/baseline`
-- `POST /api/projects/<project_name>/curvature/visualize`
-- `POST /api/projects/<project_name>/width/visualize`
-- `POST /api/projects/<project_name>/gis/layers`
-- `POST /api/projects/<projectName>/gis/detect`
+`POST /api/projects/folders` supports:
+- Single folder: `{ "folder_name": "...", "project_name": "...", "tags": [] }`
+- Multi-folder: `{ "folder_names": [...], "polygon": [...], "project_name": "...", "tags": [] }`
 
-## Segment management and exports
+---
 
-- `DELETE /api/projects/<project_name>/segments/<segment_index>`
-- `POST /api/projects/<project_name>/segments/delete-batch`
-- `POST /api/projects/check-collisions`
-- `POST /api/projects/copy-segments`
-- `POST /api/projects/download-images`
+## 3. Coding & Autocode Endpoints
 
-## Treatment endpoints
+### 3.1 Autocode
 
-- `POST /api/projects/<project_name>/treatments/preview`
-- `POST /api/projects/<project_name>/treatments/apply`
-- `GET /api/projects/<project_name>/treatments/segment/<segment_index>`
-- `GET /api/projects/<project_name>/treatments/all`
-- `POST /api/projects/<project_name>/treatments/apply-all`
-- `POST /api/projects/<project_name>/treatments/apply-specific`
-- `POST /api/projects/<project_name>/treatments/reset-all`
-- `POST /api/projects/<project_name>/treatments/save`
-- `POST /api/projects/<project_name>/treatments/effectiveness`
-- `GET /api/projects/<project_name>/treatments/effectiveness/segment/<segment_index>`
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/projects/<name>/autocode/image` | CV auto-code for one image |
+| `POST` | `/api/projects/<name>/autocode/gis` | GIS auto-code for one segment |
+| `POST` | `/api/projects/<name>/autocode/all` | Bulk auto-code (single / all / selected rows) |
+| `GET` | `/api/projects/<name>/autocode-metadata` | Read saved autocode provenance |
+| `POST` | `/api/projects/<name>/autocode-metadata` | Write autocode provenance metadata |
 
-## Shapefile management endpoints
+### 3.2 Baseline & Validation
 
-- `GET /api/shapefiles`: Returns a list of all shapefiles. Each item includes `required_columns` metadata with source indices, e.g., `"LU_DESC (1), LU_TEXT (3)"`.
-- `GET /api/shapefiles/categories`: Returns a list of all category folders.
-- `POST /api/shapefiles/geojson`: Converts a shapefile to GeoJSON for frontend display.
-- `POST /api/shapefiles/validate`: Basic validation of uploaded shapefile files (checks for .shp, .shx, .dbf).
-- `POST /api/shapefiles/preview-upload`: Temporary upload and GeoJSON preview before saving.
-- `POST /api/shapefiles/upload`: Save new shapefiles into a user-specified category.
-- `POST /api/shapefiles/validate-replacement`: Compares a new shapefile against an existing one to ensure column compatibility.
-- `PUT /api/shapefiles/replace`: Overwrites an existing shapefile with a new one.
-- `DELETE /api/shapefiles/<path:shapefile_path>`: Removes a shapefile and its companion files from disk.
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/projects/<name>/baseline/exists` | Check if baseline exists |
+| `GET` | `/api/projects/<name>/baseline` | Get baseline attribute rows |
+| `POST` | `/api/projects/<name>/baseline` | Save a baseline |
 
-## Common status codes
+### 3.3 Visualisation & GIS Context
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/projects/<name>/curvature/visualize` | Curvature geometry and radius context |
+| `POST` | `/api/projects/<name>/width/visualize` | Width search rings and path candidates |
+| `POST` | `/api/projects/<name>/gis/layers` | Nearby GIS features for coding map overlay |
+| `POST` | `/api/projects/<name>/gis/detect` | Diagnostic GIS feature inspection |
+
+---
+
+## 4. Segment Management & Exports
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `DELETE` | `/api/projects/<name>/segments/<index>` | Delete a single segment |
+| `POST` | `/api/projects/<name>/segments/delete-batch` | Delete multiple segments |
+| `POST` | `/api/projects/check-collisions` | Check image collisions before copy |
+| `POST` | `/api/projects/copy-segments` | Copy segments into another project |
+| `POST` | `/api/projects/download-images` | ZIP download of filtered images |
+
+---
+
+## 5. Treatment Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/projects/<name>/treatments/preview` | Preview treatments without saving |
+| `POST` | `/api/projects/<name>/treatments/apply` | Apply treatments to one segment |
+| `GET` | `/api/projects/<name>/treatments/segment/<index>` | Treatment state for one segment |
+| `GET` | `/api/projects/<name>/treatments/all` | All stored treatment states |
+| `POST` | `/api/projects/<name>/treatments/apply-all` | Apply all applicable treatments |
+| `POST` | `/api/projects/<name>/treatments/apply-specific` | Apply one treatment across all segments |
+| `POST` | `/api/projects/<name>/treatments/reset-all` | Clear pending treatment state |
+| `POST` | `/api/projects/<name>/treatments/save` | Persist pending treatment edits |
+| `POST` | `/api/projects/<name>/treatments/effectiveness` | Rank treatments by risk band improvement |
+| `GET` | `/api/projects/<name>/treatments/effectiveness/segment/<index>` | Per-treatment score drops for one segment |
+
+---
+
+## 6. Shapefile Management Endpoints
+
+All under `/api/shapefiles/`:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/shapefiles` | List all shapefiles with metadata and required columns |
+| `GET` | `/api/shapefiles/categories` | List category folders |
+| `POST` | `/api/shapefiles/geojson` | Convert shapefile to WGS84 GeoJSON |
+| `POST` | `/api/shapefiles/validate` | Validate uploaded ZIP before import |
+| `POST` | `/api/shapefiles/preview-upload` | Temporary GeoJSON preview without saving |
+| `POST` | `/api/shapefiles/upload` | Upload new shapefile assets into a category |
+| `POST` | `/api/shapefiles/validate-replacement` | Check column compatibility of replacement |
+| `PUT` | `/api/shapefiles/replace` | Overwrite existing shapefile (creates `.bak` backup) |
+| `DELETE` | `/api/shapefiles/<path>` | Delete shapefile and companion files |
+
+---
+
+## 7. Common Status Codes
 
 | Code | Meaning |
 |---|---|
 | `200` | Success |
-| `400` | Bad request |
+| `400` | Bad request (missing field, invalid polygon, underscore in project name) |
 | `404` | Project, folder, image, or shapefile not found |
-| `409` | Conflict, usually project already exists |
+| `409` | Conflict — project already exists |
 | `500` | Unexpected backend error |
-| `503` | Service unavailable, most often due to missing or failed model initialization |
+| `503` | Service unavailable — CV models missing or failed to load |

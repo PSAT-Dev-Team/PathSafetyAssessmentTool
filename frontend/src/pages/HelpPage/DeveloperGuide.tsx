@@ -103,10 +103,15 @@ function MarkdownContent({ content }: { content: string }) {
     fontWeight: "bold" as const,
   };
 
+  const getHeadingId = (children: any): string => {
+    const text = Array.isArray(children) ? children.join("") : String(children);
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  };
+
   const components = {
-    h1: ({ children }: any) => <h1 style={{ ...headingStyle, fontSize: "1.4rem" }}>{children}</h1>,
-    h2: ({ children }: any) => <h2 style={{ ...headingStyle, fontSize: "1.2rem" }}>{children}</h2>,
-    h3: ({ children }: any) => <h3 style={{ ...headingStyle, fontSize: "1.05rem" }}>{children}</h3>,
+    h1: ({ children }: any) => <h1 id={getHeadingId(children)} style={{ ...headingStyle, fontSize: "1.4rem" }}>{children}</h1>,
+    h2: ({ children }: any) => <h2 id={getHeadingId(children)} style={{ ...headingStyle, fontSize: "1.2rem" }}>{children}</h2>,
+    h3: ({ children }: any) => <h3 id={getHeadingId(children)} style={{ ...headingStyle, fontSize: "1.05rem" }}>{children}</h3>,
     p: ({ children }: any) => <p style={{ marginBottom: "1rem", color: colors.fgMuted }}>{children}</p>,
     ul: ({ children }: any) => <ul style={{ paddingLeft: "1.5rem", marginBottom: "1rem", color: colors.fgMuted }}>{children}</ul>,
     ol: ({ children }: any) => <ol style={{ paddingLeft: "1.5rem", marginBottom: "1rem", color: colors.fgMuted }}>{children}</ol>,

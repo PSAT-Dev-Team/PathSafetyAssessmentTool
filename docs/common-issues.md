@@ -2,6 +2,37 @@
 
 This page focuses on the issues that show up most often in current PSAT workflows, especially around Docker setup, polygon-based project creation, and GIS-layer management.
 
+
+## Table of Contents
+
+- [Docker and startup](#docker-and-startup)
+  - [Docker Desktop is not running](#docker-desktop-is-not-running)
+  - [Port 80 or 8000 is already in use](#port-80-or-8000-is-already-in-use)
+  - [Backend health check fails after build](#backend-health-check-fails-after-build)
+- [Models and shapefiles](#models-and-shapefiles)
+  - [Auto-code fails because models are missing](#auto-code-fails-because-models-are-missing)
+  - [GIS auto-code or GIS Layers page is empty](#gis-auto-code-or-gis-layers-page-is-empty)
+- [`in/` folder and source images](#in-folder-and-source-images)
+  - [`in/` was created by Docker instead of manually](#in-was-created-by-docker-instead-of-manually)
+  - [Images are directly under `in/` instead of inside subfolders](#images-are-directly-under-in-instead-of-inside-subfolders)
+  - [Images have no GPS EXIF data](#images-have-no-gps-exif-data)
+- [Polygon and road selection](#polygon-and-road-selection)
+  - [Polygon selection returns planning areas instead of roads](#polygon-selection-returns-planning-areas-instead-of-roads)
+  - [Selected roads are marked unavailable](#selected-roads-are-marked-unavailable)
+  - [Create Project says no geotagged images were found inside the polygon](#create-project-says-no-geotagged-images-were-found-inside-the-polygon)
+- [Project metadata and search](#project-metadata-and-search)
+  - [Searching by road name does not return the expected project](#searching-by-road-name-does-not-return-the-expected-project)
+  - [Project name cannot contain underscores](#project-name-cannot-contain-underscores)
+- [Scoring and coding](#scoring-and-coding)
+  - [Scores do not update after save](#scores-do-not-update-after-save)
+  - [First auto-code request is very slow](#first-auto-code-request-is-very-slow)
+- [Documentation drift](#documentation-drift)
+  - [The repository docs were updated, but the Help page still shows old content](#the-repository-docs-were-updated-but-the-help-page-still-shows-old-content)
+- [Data recovery](#data-recovery)
+  - [Projects disappear after container restart](#projects-disappear-after-container-restart)
+  - [A project was deleted accidentally](#a-project-was-deleted-accidentally)
+
+
 ## Docker and startup
 
 ### Docker Desktop is not running

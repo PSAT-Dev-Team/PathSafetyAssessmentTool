@@ -4,6 +4,26 @@ PSAT uses a suite of YOLO-based computer-vision models to automatically infer Cy
 
 ---
 
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Model Files](#model-files)
+  - [Model Loading](#model-loading)
+  - [Replacing or Updating a Model](#replacing-or-updating-a-model)
+  - [Entry Point: `autocode(image_path)`](#entry-point-autocode-image-path)
+  - [Step 1 — Path Segmentation](#step-1-path-segmentation)
+  - [Step 2 — Light Segregation (Default)](#step-2-light-segregation-default)
+  - [Step 3 — Adjacent Road (if road class `1` is present)](#step-3-adjacent-road-if-road-class-1-is-present)
+  - [Step 4 — Off-Road Bicycle Path Classification](#step-4-off-road-bicycle-path-classification)
+  - [Step 5 — Facility Type Decision (via Fixed Obstacle Model)](#step-5-facility-type-decision-via-fixed-obstacle-model)
+  - [Step 6 — Fixed Obstacle & Delineation Detection](#step-6-fixed-obstacle-delineation-detection)
+- [Auto-coding in Bulk](#auto-coding-in-bulk)
+- [Confidence Thresholds (Summary)](#confidence-thresholds-summary)
+- [Attributes Auto-coded by CV](#attributes-auto-coded-by-cv)
+- [GIS Auto-coding](#gis-auto-coding)
+
+
 ## Overview
 
 ```

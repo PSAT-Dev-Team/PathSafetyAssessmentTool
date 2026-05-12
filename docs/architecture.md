@@ -2,6 +2,30 @@
 
 PSAT is a two-container application orchestrated by Docker Compose. The frontend is a React SPA served by nginx, and the backend is a Flask API that owns project storage, GIS lookups, CV inference, scoring, and treatment logic. There is **no database**; the file system under `data/`, `in/`, and `backend/shapefiles/` is the source of truth.
 
+
+## Table of Contents
+
+- [System diagram](#system-diagram)
+- [High-level flow](#high-level-flow)
+- [Backend structure](#backend-structure)
+  - [Registered blueprints](#registered-blueprints)
+  - [Lazy initialization](#lazy-initialization)
+  - [GIS caches and helper assets](#gis-caches-and-helper-assets)
+- [Frontend structure](#frontend-structure)
+- [Project storage model](#project-storage-model)
+  - [`project_metadata.json`](#project-metadata-json)
+  - [Snapshot behavior](#snapshot-behavior)
+  - [Sidecar directories](#sidecar-directories)
+- [Project creation pipeline](#project-creation-pipeline)
+- [Multi-project aggregation pattern](#multi-project-aggregation-pattern)
+- [Shapefile management architecture](#shapefile-management-architecture)
+- [Key design choices](#key-design-choices)
+  - [API-only frontend communication](#api-only-frontend-communication)
+  - [Native scoring path](#native-scoring-path)
+  - [CRS handling](#crs-handling)
+  - [Thread safety](#thread-safety)
+
+
 ## System diagram
 
 ```text
@@ -142,6 +166,8 @@ data/
 
 ### `project_metadata.json`
 
+> **Recent Addition:** Persisted project provenance via `dataset` and `source_folders`.
+
 The metadata model now carries more than name and tags. Relevant fields include:
 
 - `project_name`
@@ -162,6 +188,8 @@ The metadata model now carries more than name and tags. Relevant fields include:
 Version folders are date-based (`YYYYMMDD`). Multiple saves on the same day update the same dated snapshot rather than creating many sub-daily versions.
 
 ### Sidecar directories
+
+> **Recent Addition:** Baseline and autocode-metadata storage used by validation workflows.
 
 Two newer sidecar directories support analysis workflows:
 

@@ -67,11 +67,6 @@ def create_developer_guide():
     doc = Document()
     doc.add_heading('PSAT Developer Guide', 0)
     
-    # README first
-    if os.path.exists('README.md'):
-        with open('README.md', 'r', encoding='utf-8') as f:
-            add_markdown_to_doc(doc, f.read())
-            
     docs_dir = 'docs'
     files = [
         'installation.md',
@@ -84,6 +79,34 @@ def create_developer_guide():
         'contributing.md'
     ]
     
+    # 1. Read all content and extract headings for TOC
+    doc.add_heading('Table of Contents', level=1)
+    
+    # Overview is README
+    if os.path.exists('README.md'):
+        doc.add_paragraph('Overview (README)', style='List Bullet')
+        
+    for filename in files:
+        path = os.path.join(docs_dir, filename)
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # Find H1
+                h1_match = re.search(r'^# (.*)$', content, re.MULTILINE)
+                title = h1_match.group(1) if h1_match else filename
+                doc.add_paragraph(title, style='List Bullet')
+                # Find H2
+                h2s = re.findall(r'^## (.*)$', content, re.MULTILINE)
+                for h2 in h2s:
+                    doc.add_paragraph(h2, style='List Bullet 2')
+    
+    doc.add_page_break()
+
+    # 2. Add actual content
+    if os.path.exists('README.md'):
+        with open('README.md', 'r', encoding='utf-8') as f:
+            add_markdown_to_doc(doc, f.read())
+            
     for filename in files:
         path = os.path.join(docs_dir, filename)
         if os.path.exists(path):
