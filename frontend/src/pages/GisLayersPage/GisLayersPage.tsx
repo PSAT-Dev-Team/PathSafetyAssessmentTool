@@ -294,10 +294,10 @@ export default function GisLayersPage() {
                       </HStack>
                       <Box mt={2} p={2} bg="gray.50" borderRadius="md" fontSize="xs" border="1px solid" borderColor="gray.200">
                         <Text color="gray.700" mb={1}>
-                          <Text as="span" fontWeight="600">Required Columns:</Text> {getLayerMetadata(file.base_name).reqCols}
+                          <Text as="span" fontWeight="600">Required Columns:</Text> {file.required_columns || getLayerMetadata(file.base_name).reqCols}
                         </Text>
                         <Text color="gray.700" whiteSpace="normal" wordBreak="break-word">
-                          <Text as="span" fontWeight="600">Affects PSAT Attribute:</Text> {getLayerMetadata(file.base_name).affects}
+                          <Text as="span" fontWeight="600">Affects PSAT Attribute:</Text> {file.affects || getLayerMetadata(file.base_name).affects}
                         </Text>
                       </Box>
                     </Box>

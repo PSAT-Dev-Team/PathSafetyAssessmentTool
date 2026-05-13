@@ -44,6 +44,7 @@ export default function HelpPage() {
           </Button>
         </Flex>
 
+
         {/* Tabs */}
         <Flex gap="4" mb="8" borderBottom="2px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
           {(["user", "developer", "admin"] as const).map((tab) => {
@@ -121,10 +122,12 @@ function AdminGuide() {
           ],
         },
         {
-          title: "3. Updating GIS Shapefiles",
+          title: "3. Managing GIS Data Layers",
           items: [
-            { label: "Location:", body: <>The CycleRAP contextual GIS infrastructure shapefiles are stored under <Code>backend/shapefiles/</Code>.</> },
-            { label: "Updating Layers:", body: "Replace the files within their respective category subdirectories. The Flask application automatically rescans when the server is restarted." },
+            { label: "Storage Location:", body: <>The CycleRAP contextual GIS infrastructure shapefiles are stored under <Code>backend/shapefiles/</Code>.</> },
+            { label: "Updating via UI:", body: "Administrators can now use the 'Update GIS Layer' button in the sidebar to add or replace layers. This UI handles file validation and ensures that all mandatory companion files (.shx, .dbf, etc.) are present." },
+            { label: "Replacement Safety:", body: "The 'Replace GIS Layer' workflow includes a search filter for quick navigation and a compatibility check that verifies the new file's column structure against the existing layer definition." },
+            { label: "Column Mapping:", body: "Ensure that any new GIS data follows the required column indices documented in the 'Gis Layers' dashboard (e.g., column index 1 for LU_DESC)." },
           ],
         },
         {
@@ -132,6 +135,13 @@ function AdminGuide() {
           items: [
             { label: "Logs:", body: <>If auto-coding fails, check the server output via <Code>docker compose logs -f backend</Code> to view full Python stack traces.</> },
             { label: "Health Endpoints:", body: <>Query <Code>/api/health</Code> or <Code>/api/ping</Code> to verify the backend is responsive and CV models loaded correctly.</> },
+          ],
+        },
+        {
+          title: "5. Updating CycleRAP Algorithm",
+          items: [
+            { label: "Algorithm Updates:", body: "Occasionally, CycleRAP may release an updated risk scoring model. Administrators should contact the development team to update the system to the latest algorithm version." },
+            { label: "Implementation Details:", body: "The exact implementation details, required formula modifications, and testing procedures for algorithm updates can be found in the Developer Guide." },
           ],
         },
       ].map((section) => (

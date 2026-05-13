@@ -36,6 +36,7 @@ export default function PathAnalysisPage() {
     loadState("activeFilters", [])
   );
 
+  // Chart data state
   const [chartData, setChartData] = useState<{
     categoryDistributionData: { category: string; count: number; color: string }[];
     primaryFocusAttribute: string | null;
@@ -91,7 +92,6 @@ export default function PathAnalysisPage() {
           onActiveFiltersChange={setActiveFilters}
         />
       </Box>
-
       <Box mb="6">
         <PathAnalysisMapView
           selectedProjects={loadedProjects}

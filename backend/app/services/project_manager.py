@@ -785,10 +785,19 @@ class project_manager:
         if self.des_path is None:
             raise ValueError("self.des_path is not set. Please initialise it before discovering projects.")
 
-        # NOTE: we might want to change to a random access data structure for more efficient look-up
-        self.projects : list[Project] = [
-            Project(p) for p in self.des_path.iterdir() if p.is_dir()
-        ]
+        print(f"[PM] Discovering projects in: {self.des_path.resolve()}", flush=True)
+        try:
+            # NOTE: we might want to change to a random access data structure for more efficient look-up
+            self.projects : list[Project] = [
+                Project(p) for p in self.des_path.iterdir() if p.is_dir()
+            ]
+            print(f"[PM] Found {len(self.projects)} project(s).", flush=True)
+        except FileNotFoundError:
+            print(f"[PM] ERROR: Project destination folder '{self.des_path}' does not exist.", flush=True)
+            self.projects = []
+        except Exception as e:
+            print(f"[PM] ERROR: Failed to discover projects: {e}", flush=True)
+            self.projects = []
 
     def delete_project(self, project_name: str):
         for proj in self.projects:

@@ -1,12 +1,33 @@
-# Installation
+# Installation Guide
 
 This guide covers local setup for PSAT on Windows. Docker is the standard path, but a non-Docker developer workflow is also supported.
 
 ---
 
-## Prerequisites
+## Table of Contents
 
-### Required Software
+- [1. Prerequisites](#1-prerequisites)
+  - [1.1 Required Software](#11-required-software)
+  - [1.2 Required Assets](#12-required-assets)
+- [2. Step 1 — Obtain the Project Files](#2-step-1--obtain-the-project-files)
+- [3. Step 2 — Prepare the Folder Structure](#3-step-2--prepare-the-folder-structure)
+  - [3.1 Create the `in/` Folder](#31-create-the-in-folder)
+  - [3.2 Copy Models and Shapefiles](#32-copy-models-and-shapefiles)
+  - [3.3 Build the Road Reference CSV (Recommended)](#33-build-the-road-reference-csv-recommended)
+- [4. Step 3 — Run the App](#4-step-3--run-the-app)
+  - [4.1 Start the Stack](#41-start-the-stack)
+  - [4.2 Verify the Backend](#42-verify-the-backend)
+  - [4.3 Stop the App](#43-stop-the-app)
+- [5. Data Persistence](#5-data-persistence)
+- [6. Port Reference](#6-port-reference)
+- [7. Updating the App](#7-updating-the-app)
+- [8. Advanced: Running Without Docker](#8-advanced-running-without-docker)
+
+---
+
+## 1. Prerequisites
+
+### 1.1 Required Software
 
 | Tool | Purpose | Download |
 |---|---|---|
@@ -16,7 +37,7 @@ This guide covers local setup for PSAT on Windows. Docker is the standard path, 
 
 Install all three before proceeding. Docker Desktop must be **running** before you attempt to start the app.
 
-### Required assets
+### 1.2 Required Assets
 
 Two external asset folders must be copied into `backend/` before CV and GIS-assisted coding will work:
 
@@ -29,12 +50,12 @@ If these folders are missing, the app can still boot, but GIS and/or CV features
 
 ---
 
-## Step 1 — Obtain the Project Files
+## 2. Step 1 — Obtain the Project Files
 
 ### Option A: GitHub Desktop
 
 1. Open GitHub Desktop.
-2. Press **Ctrl + Shift + O** (or **File → Clone Repository** if that shortcut opens "Add Repository").
+2. Press **Ctrl + Shift + O** (or **File → Clone Repository**).
 3. Search for `LinXH8/PathSafetyAssessmentTool` and clone it to a local folder of your choice.
 
 ### Option B: Command Line
@@ -44,52 +65,53 @@ git clone https://github.com/LinXH8/PathSafetyAssessmentTool.git
 cd PathSafetyAssessmentTool
 ```
 
-> **Windows line endings:** If your Git is configured with `autocrlf=true`, shell scripts inside the Docker container may break. Set it to false **before cloning**:
+> **Windows line endings:** Set `autocrlf` to false **before cloning** to prevent shell script issues inside Docker:
 > ```bash
 > git config --global core.autocrlf false
 > ```
 
 ---
 
-## Step 2 — Prepare the Folder Structure
+## 3. Step 2 — Prepare the Folder Structure
 
-After cloning, the root of the repository should contain the following:
+After cloning, the root should look like this:
 
-```
+```text
 PathSafetyAssessmentTool/
 ├── backend/
 ├── frontend/
-├── data/                ← created automatically by Docker on first run
+├── data/                ← created automatically on first run
 ├── in/                  ← YOU MUST CREATE THIS MANUALLY
 ├── backend.Dockerfile
 └── docker-compose.yml
 ```
 
-### Create the `in/` folder
+### 3.1 Create the `in/` Folder
 
-**Create the `in/` folder manually before running Docker.** If Docker creates it, it may be owned by root and cause permission errors on subsequent writes.
+**Create `in/` manually before running Docker.** If Docker creates it, it may be owned by root and cause permission errors.
 
 ```bash
-# In the project root:
 mkdir in
 ```
 
 Inside `in/`, each subfolder is a reusable image source. A project can be created from one folder or from multiple folders selected by polygon on the Create Project map.
 
-```
+```text
 in/
-├── FernvaleSurvey/
-│   ├── IMG_001.jpg
-│   ├── IMG_002.jpg
+├── ANG MO KIO AVENUE 1/
+│   ├── Cam1_0001.jpg
 │   └── ...
-└── YishunSurvey/
+├── ANG MO KIO AVENUE 8/
+│   └── ...
+└── BISHAN STREET 11/
     └── ...
 ```
 
-### Copy models and shapefiles
+### 3.2 Copy Models and Shapefiles
 
-```
-# From the SSD:
+Populate the following before running Docker:
+
+```text
 backend/
 ├── models/
 │   ├── path_seg.pt
@@ -100,14 +122,12 @@ backend/
 │   ├── LTA_Dill_4_Best.pt
 │   └── RoadClassification_best.pt
 └── shapefiles/
-    └── <shapefile assets>
+    └── <GIS layer files>
 ```
 
----
+### 3.3 Build the Road Reference CSV (Recommended)
 
-### Optional but recommended: build `road_reference.csv`
-
-After populating `in/`, run:
+After populating `in/`, generate the road-reference CSV used by the polygon road-selection tool:
 
 ```bash
 cd backend
@@ -115,30 +135,34 @@ python generate_road_reference.py
 cd ..
 ```
 
-This creates `backend/shapefiles/road_reference.csv`, which improves polygon-based road selection in the Create Project page.
+This writes `backend/shapefiles/road_reference.csv`. The map-based road selector can still work without it, but the CSV improves matching between the selection polygon and locally available road folders.
 
-## Step 3 — Run the App
+---
 
-Open a terminal (Command Prompt or PowerShell) in the project root and run:
+## 4. Step 3 — Run the App
+
+### 4.1 Start the Stack
+
+Open a terminal in the project root and run:
 
 ```bash
 docker compose up --build
 ```
 
-The first run will take several minutes as Docker downloads the base images and installs Python/Node dependencies. Subsequent runs are much faster.
+The first run takes several minutes. Subsequent runs are much faster.
 
 Once started:
 - **Frontend (UI):** http://localhost
 - **Backend API:** http://localhost:8000/api
 
-### Verify the backend is responding
+### 4.2 Verify the Backend
 
 ```bash
 curl http://localhost:8000/api/ping
 # Expected: {"status": "ok"}
 ```
 
-### Stop the app
+### 4.3 Stop the App
 
 ```bash
 docker compose down
@@ -146,31 +170,31 @@ docker compose down
 
 ---
 
-## Data Persistence
+## 5. Data Persistence
 
 The following folders are bind-mounted as Docker volumes. **Data persists between container restarts.**
 
 | Host path | Container path | Contents |
 |---|---|---|
-| `./data/` | `/app/data` | All project data (attributes, results, geodata) |
+| `./data/` | `/app/data` | All project data (attributes, results, geodata, baselines) |
 | `./in/` | `/app/in` | Input image source folders |
 
 Do **not** delete or move these folders while the container is running.
 
 ---
 
-## Port Reference
+## 6. Port Reference
 
 | Service | Host port | Container port |
 |---|---|---|
 | Frontend (nginx) | 80 | 80 |
 | Backend (Flask) | 8000 | 8000 |
 
-If port 80 or 8000 is already in use on your machine, another service is conflicting. See [Common Issues](common-issues.md).
+If port 80 or 8000 is already in use, see [Common Issues](common-issues.md).
 
 ---
 
-## Updating the App
+## 7. Updating the App
 
 ```bash
 git pull
@@ -181,16 +205,15 @@ The `--build` flag ensures the Docker image is rebuilt with any code changes. Pr
 
 ---
 
-## Advanced: Running Without Docker
+## 8. Advanced: Running Without Docker
 
-For active development, you can run the backend and frontend directly on your machine without Docker. This gives faster iteration (no rebuild required) at the cost of having to manage dependencies yourself.
+For active development, you can run the backend and frontend directly without Docker. This gives faster iteration at the cost of managing dependencies yourself.
 
-### Prerequisites
+**Requirements:**
+- Python 3.11
+- Node.js 20
 
-- **Python 3.11** (match the Docker base image version)
-- **Node.js 20**
-
-### Backend (Flask)
+### 8.1 Backend (Flask)
 
 ```bash
 cd backend
@@ -198,9 +221,9 @@ pip install -r requirements.txt
 python app.py
 ```
 
-The backend starts on `http://localhost:8000`. The `data/` and `in/` paths are resolved relative to the `backend/` directory when running locally (not `/app/`).
+The backend starts on `http://localhost:8000`.
 
-### Frontend (Vite dev server)
+### 8.2 Frontend (Vite dev server)
 
 In a separate terminal:
 
@@ -210,10 +233,6 @@ npm install
 npm run dev
 ```
 
-The Vite dev server starts on `http://localhost:5173`. It is pre-configured to proxy all `/api/*` requests to `http://localhost:8000`, so the backend must be running first.
+The Vite dev server starts on `http://localhost:5173` and proxies all `/api/*` requests to `http://localhost:8000`.
 
-> **Note:** `pywin32` (required for Excel COM automation) is Windows-only and is listed in `requirements.txt`. On non-Windows machines, remove or skip that line, or use:
-> ```bash
-> grep -v 'pywin32' requirements.txt | pip install -r /dev/stdin
-> ```
-
+> **Note:** `pywin32` is Windows-only. On non-Windows platforms, remove or skip that line from `requirements.txt`.

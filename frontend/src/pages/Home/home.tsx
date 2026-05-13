@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchProjectList, deleteProject as apiDeleteProject, type FileResponse, type ProjectListItem } from "../../api";
 import { matchesProjectSearch } from "../../utils/projectSearch";
 import {
@@ -7,10 +8,9 @@ import {
   Portal,
   CloseButton,
   Spinner,
-} from "@chakra-ui/react";import { useNavigate } from "react-router-dom";
+} from "@chakra-ui/react";
 
 import "./home.css";
-
 export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(true);

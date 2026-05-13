@@ -4,6 +4,35 @@ PSAT implements the **CycleRAP v2.11** risk scoring algorithm as a pure Python m
 
 ---
 
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Risk Bands](#risk-bands)
+  - [BB, BP, SB](#bb-bp-sb)
+  - [VB](#vb)
+  - [Overall Risk Level Band](#overall-risk-level-band)
+- [Algorithm: Component Formulas](#algorithm-component-formulas)
+  - [CM3 — Main Cycling Environment Risk](#cm3-main-cycling-environment-risk)
+  - [CM16 — Departure and Fall Scenarios](#cm16-departure-and-fall-scenarios)
+  - [CM25 — Speed-Related Incidents](#cm25-speed-related-incidents)
+  - [CM40 — Vehicle Interaction](#cm40-vehicle-interaction)
+  - [Final Score Combination](#final-score-combination)
+- [Worked Example: CM3](#worked-example-cm3)
+  - [Road Speed Risk Factor](#road-speed-risk-factor)
+- [Attribute Fields Reference](#attribute-fields-reference)
+  - [Facility Configuration](#facility-configuration)
+  - [Facility Clear Width](#facility-clear-width)
+  - [Facility Surface Conditions](#facility-surface-conditions)
+  - [Intersection](#intersection)
+  - [Flow & Speed](#flow-speed)
+- [`cyclerap_scoring.py` — Function Reference](#cyclerap-scoring-py-function-reference)
+  - [Output Columns](#output-columns)
+- [Treatment Logic](#treatment-logic)
+  - [Treatment List](#treatment-list)
+- [Updating the CycleRAP Algorithm](#updating-the-cyclerap-algorithm)
+
+
 ## Overview
 
 CycleRAP produces four independent risk scores for each road segment, each representing a distinct crash scenario:
@@ -386,3 +415,17 @@ Treatments are evaluated by `apply_treatments`, `apply_all_treatments`, and `pre
 | 23 | Review tram/train rails | Tram/train rails present |
 | 24 | Install traffic calming | On-road lane, intersection crossing, adjacent road 0–1m |
 | 25 | Bicycle speed control | Bicycle speed ≥ 20 km/h |
+
+---
+
+## Updating the CycleRAP Algorithm
+
+When CycleRAP releases an updated risk scoring model (e.g., transitioning from v2.11 to a newer version), the development team must update the scoring module. 
+
+Administrators are advised to contact developers when a new model is released. The update process generally involves the following steps:
+
+1. **Reviewing the New Specifications**: Obtain the new CycleRAP methodology documentation or Excel reference tool.
+2. **Updating `LOOKUP_TABLES`**: Modify the attribute-to-risk-factor dictionaries in `backend/app/services/cyclerap_scoring.py` to match the new multipliers.
+3. **Adjusting Formula Equations**: If new formulas are introduced for intermediate components (e.g., `CM3`, `CM16`, `CM25`, `CM40`) or final scores (`BB`, `BP`, `SB`, `VB`), update the corresponding `calculate_cmX()` and `calculate_cyclerap_score()` functions.
+4. **Modifying Attribute Definitions**: If the new model introduces new fields or changes the allowed values (enums) for existing fields, update the data model, including frontend forms and backend shapefile ingestion validation.
+5. **Testing**: Validate the updated Python output against the new official CycleRAP reference tool (typically using a test batch of road segments) to ensure full fidelity.

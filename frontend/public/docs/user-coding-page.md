@@ -2,47 +2,180 @@
 
 The Coding page is the main review workspace. It can open one or more selected projects in a combined session.
 
-### Main layout
+---
+
+## Table of Contents
+
+- [2.1 Main Layout](#21-main-layout)
+- [2.2 Navigating Segments](#22-navigating-segments)
+- [2.3 Attribute Default Values](#23-attribute-default-values)
+- [2.4 Auto-Code Options](#24-auto-code-options)
+  - [2.4.1 Attributes Coded by CV (Image Analysis)](#241-attributes-coded-by-cv-image-analysis)
+  - [2.4.2 Attributes Coded by GIS Layer Mapping](#242-attributes-coded-by-gis-layer-mapping)
+  - [2.4.3 Attributes Coded by Logic Rules](#243-attributes-coded-by-logic-rules)
+- [2.5 Manual Review](#25-manual-review)
+- [2.6 Details and GIS Context](#26-details-and-gis-context)
+- [2.7 Save and Progress Tracking](#27-save-and-progress-tracking)
+
+---
+
+### 2.1 Main Layout
 
 The page keeps three views in sync:
 
-- the current segment image
-- the attributes table
-- the segment map
+- the current **segment image**
+- the **attributes table**
+- the **segment map**
 
-Selecting a segment in one area updates the others.
+Selecting a segment in one area automatically updates the others.
 
-### Auto-code options
+### 2.2 Navigating Segments
 
-PSAT supports several auto-code paths:
+You can navigate through segments in three ways:
 
-- CV auto-code from the image
-- GIS auto-code from the segment geometry
-- bulk auto-code across selected rows or the full project
-- per-attribute auto-code in workflows that target only certain fields
+- Type a segment number in the jump box to go directly to that segment
+- Click **Next** or **Back** to move one segment at a time
+- Click a point on the segment map to select it
 
-Autocode updates are tracked, and the Segments Autocoded counter is updated in the project metadata.
+### 2.3 Attribute Default Values
 
-### Manual review
+When a segment is first created and no auto-code has been run, PSAT assigns the following default values. These represent the most common parameters for paths in Singapore.
+
+| # | Attribute | Default Value | Reason |
+|---|---|---|---|
+| 1 | Area Type | Suburban | GIS fallback when no urban/industrial/rural polygon match |
+| 2 | Facility Type | Sidewalk | Most common facility type |
+| 3 | Adjacent Sidewalk 0–1m | Present | Assumed adjacent sidewalk in urban context |
+| 4 | Adjacent Sidewalk 1–3m | Not Present | — |
+| 5 | Adjacent Road Lane 0–1m | See image logic | Derived from CV image analysis |
+| 6 | Adjacent Road Lane 1–3m | See image logic | Derived from CV image analysis |
+| 7 | Adjacent Vehicle Parking 0–1m | Not Present | Most common |
+| 8 | Adjacent Vehicle Parking 1–3m | Not Present | Most common |
+| 9 | Adjacent Object/Level Change 0–1m | Mirrors Adj. Road 0–1m | Co-occurs with adjacent road |
+| 10 | Adjacent Object/Level Change 1–3m | Mirrors Adj. Road 1–3m | Co-occurs with adjacent road |
+| 11 | Facility Access | Adequate | Most common |
+| 12 | Light Segregation | Present | Assumed when path is detected |
+| 13 | Fixed Obstacle on Facility | Not Present | Most common |
+| 14 | Non-Fixed Obstacle on Facility | Not Present | Most common |
+| 15 | Facility Width per Direction | Narrow | GIS-derived; default when no width data available |
+| 16 | Width Restriction | Not Present | Most common |
+| 17 | Adjacent Severe Hazard 0–1m | Not Present | Most common |
+| 18 | Adjacent Severe Hazard 1–3m | Not Present | Most common |
+| 19 | Line of Sight | Not coded | Not yet in scoring specification |
+| 20 | Delineation | Not Present | Default; overridden by CV if markers detected |
+| 21 | Major Surface Deformation or Drain Opening | Not Present | Most common |
+| 22 | Loose or Slippery Surface | Not Present | Most common |
+| 23 | Grade | < 5 Degrees | Most paths in Singapore are flat |
+| 24 | Curvature | No Sharp Turn | Most common |
+| 25 | Tram or Train Rails | Not Present | Most common |
+| 26 | Street Lighting | Present | Most urban paths have lighting |
+| 27 | Intersection Approach | Separate/NA | Most common |
+| 28 | Intersection or Road Crossing | Not Present | Most common |
+| 29 | Crossing Facility | Not Present | Default; overridden by CV |
+| 30 | Property Access | Not Present | Most common |
+| 31 | Pedestrian Crossing | Not Present | Most common |
+| 32 | Intersecting Bicycle Facility | Not Present | Most common |
+| 33 | Number of Lanes – Adjacent Road | 1 per Direction/NA | Most common |
+| 34 | Number of Lanes – Intersecting Road | 1 per Direction/NA | Default from image logic |
+| 35 | Flow Direction | One Way | Most common for Singapore paths |
+| 36 | Peak Pedestrian Flow | Low | GIS-derived; default when no count data |
+| 37 | Peak Bicycle/LV Traffic Flow | Low | GIS-derived; default when no count data |
+| 38 | Observed Proportion of Cargo Bikes | Low | Most common |
+| 39 | Heavy Vehicle Flow | Low | Most paths away from heavy traffic |
+| 40 | Bicycle/LV Speed – Average | < 20 km/h | Most common cycling speed |
+| 41 | Bicycle/LV Speed Differential | < 10 km/h | Most common |
+| 42 | Road AADT | — | Must be coded manually; no GIS auto-code path |
+| 43 | Road Operating Speed (mean) | — | GIS-derived from LinkID layer |
+| 44 | Road Speed Limit | — | GIS-derived from speed limit layer |
+
+### 2.4 Auto-Code Options
+
+PSAT supports three auto-code methods that can be run individually or in combination:
+
+- **CV auto-code** — reads the segment image using computer vision models
+- **GIS auto-code** — reads GIS shapefiles for the segment location
+- **Logic rules** — applies cascade rules based on detected surface types
+- **Bulk auto-code** — runs across all selected rows or the full project
+- **Per-attribute auto-code** — targets only certain attributes
+
+Autocode progress is tracked in the project listing as **Percentage Segments Autocoded**.
+
+#### 2.4.1 Attributes Coded by CV (Image Analysis)
+
+The following attributes are automatically inferred from street-level photographs using YOLO computer vision models:
+
+| Attribute | How CV Determines the Value |
+|---|---|
+| Facility Type | Off-road bicycle classifier + fixed obstacle decision logic |
+| Light Segregation | Set to Present by default when any path is detected |
+| Adjacent Road Lane 0–1m | Adjacent road classifier (confidence ≥ 0.8) |
+| Adjacent Road Lane 1–3m | Adjacent road classifier (confidence ≥ 0.8) |
+| Adjacent Object/Level Change 0–1m | Inferred from Adjacent Road Lane 0–1m result |
+| Adjacent Object/Level Change 1–3m | Inferred from Adjacent Road Lane 1–3m result |
+| Adjacent Sidewalk 0–1m | Multi-path detection (multiple path segments visible) |
+| Fixed Obstacle on Facility | Fixed obstacle segmentation model |
+| Non-Fixed Obstacle on Facility | Fixed obstacle segmentation (label 9 = non-fixed) |
+| Delineation | Delineation classifier model |
+
+#### 2.4.2 Attributes Coded by GIS Layer Mapping
+
+The following attributes are automatically derived from the GIS shapefiles stored in the system:
+
+| Attribute | GIS Layer Used | Buffer / Method |
+|---|---|---|
+| Area Type (Urban/CBD) | `area_type` polygon | Point-in-polygon containment |
+| Area Type (Industrial) | `area_type` polygon | Point-in-polygon containment |
+| Area Type (Rural) | `LanduseRural2026` / `rural` polygon | Point-in-polygon containment |
+| Area Type (Recreational) | `LanduseRecre2026` / `recreation` polygon | Point-in-polygon containment |
+| Area Type (Suburban) | *(No layer match)* | Default fallback |
+| Facility Width per Direction | `path` / `CyclingPath_Jul2024` / `FootPath_Mar2025` | Nearest within 5 m |
+| Road Operating Speed (mean) | `LinkID_Shape_File` (with speed CSV lookup) | Nearest road link |
+| Road Speed Limit | `Speed_limit` | Nearest road link |
+| Number of Lanes – Adjacent Road | `kerb_line` | Nearest within 10 m |
+| Adjacent Vehicle Parking | `parking_lot` | Within 20 m buffer |
+| Peak Pedestrian Flow | `AMGbeforeCount` / `AMGsensorCount` | Within 20 m buffer |
+| Peak Bicycle/LV Traffic Flow | `AMGbeforeCount` / `AMGsensorCount` | Within 20 m buffer |
+| Intersection or Road Crossing | `roadcrossinglayer` / `AMG_BC2025_shp` | Within 5 m / 2 m buffer |
+| Crossing Facility | `AMG_BC2025_shp` | Within 2 m buffer |
+| Pedestrian Crossing proximity | `Mrt_exit` / `bus_stop` | Within 20 m buffer |
+| Heavy Vehicle Flow | `bus_lane` proximity | Within 20 m buffer |
+
+> **Note:** Road AADT has no GIS auto-coding path — it must be coded manually.
+
+#### 2.4.3 Attributes Coded by Logic Rules
+
+Logic rules apply a **cascade system** based on what surface types the CV model detects in the image. Each step overrides the previous if its trigger condition is met:
+
+| Step | Trigger Condition | Key Attributes Set |
+|---|---|---|
+| **Step 1 — Default** | Always applied first | Facility Type = Sidewalk, Light Seg. = Present, Delineation = Not Present |
+| **Step 2 — Cycling Path** | Cycling/Wet Cycling surface in bottom 20% of image | Facility Type = Off-Road Bicycle Path, Delineation = Present |
+| **Step 3 — Red Stripe** | Red Stripe surface in bottom 20% of image | Facility Type = Multi-Use Path, Delineation = Present |
+| **Step 4 — Traffic Crossing** | Traffic Crossing markings ≥ 80% of bottom 10% | Facility Type = Mixed Traffic, Crossing Facility = Present, Intersection = Present |
+| **Step 5 — Zebra Crossing** | Zebra crossing ≥ 80% of bottom 10% | Same as Step 4, but Lanes on Intersecting Road = 1 |
+| **Step 6 — Road Surface** | Road pixels ≥ 80% of bottom 10% | Facility Type = Mixed Traffic, Light Seg. = Not Present, Adj. Road 0–1m = Present |
+
+### 2.5 Manual Review
 
 You can override any coded value directly in the table. The page also shows:
 
-- score updates for the selected segment
-- a validation summary comparing current rows against the stored baseline
-- field-source provenance for auto-coded changes
+- **risk score updates (on-the-fly)** for the selected segment as you change values
+- **boxed attributes** highlighting fields that have been manually overwritten
+- a **validation summary table** comparing the percentage of attributes overwritten against the stored autocoded baseline
+- **field-source provenance** showing whether each value came from CV, GIS, logic rules, or manual entry
 
-### Details and GIS context
+### 2.6 Details and GIS Context
 
-For supported attributes, the page can show extra spatial detail such as:
+For supported attributes, the page can show extra spatial detail within a **5m radius** of the current segment:
 
-- nearby GIS layers around the current segment
+- nearby GIS layers (e.g. cycling path, footpath, MRT stations, bus stops)
 - curvature visualization
 - width visualization
 - grade or gradient details when profile data is available
 
-### Save and progress tracking
+### 2.7 Save and Progress Tracking
 
 After review:
 
-- save your attribute edits to persist them and recalculate scores
-- update the Segments Verified counter as you complete manual checks
+- save your attribute edits to persist them and recalculate risk scores
+- update the **Segments Verified Percentage** counter as you complete manual checks
