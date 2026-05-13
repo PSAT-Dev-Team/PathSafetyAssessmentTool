@@ -4027,6 +4027,27 @@ def autocode_image(project_name: str):
         return fail(f"autocode_image error: {e}", 500)
 
 
+def _get_segment_midpoint(coords):
+    from shapely.geometry import LineString, Point
+
+    if not coords:
+        raise ValueError("coords (LineString) is required")
+
+    if len(coords) == 1:
+        lon, lat = coords[0]
+        return Point(lon, lat)
+
+    try:
+        line = LineString(coords)
+        if line.is_empty or line.length == 0:
+            lon, lat = coords[0]
+            return Point(lon, lat)
+        return line.interpolate(0.5, normalized=True)
+    except Exception:
+        lon, lat = coords[0]
+        return Point(lon, lat)
+
+
 @bp.post("/<project_name>/autocode/gis")
 def autocode_gis(project_name: str):
     try:
@@ -4036,10 +4057,11 @@ def autocode_gis(project_name: str):
         if not coords or not isinstance(coords, list) or not isinstance(coords[0], list):
             return fail("coords (LineString) is required", 400)
 
-        # Segment starting point (WGS84) - first coordinate of the segment
+        # Most GIS attributes remain anchored to the segment start point.
         start_lon, start_lat = coords[0]
         from shapely.geometry import Point
         pt = Point(start_lon, start_lat)
+        curvature_pt = _get_segment_midpoint(coords)
 
         # Optional field filter: when provided (bulk per-attribute mode), skip GIS queries
         # whose output field is not in the set. None means run everything (full autocode,
@@ -4138,7 +4160,7 @@ def autocode_gis(project_name: str):
         #   Stage 1: Expanding ring (1m→5m) to find nearest path
         #   Stage 2: Fixed 5m window to calculate curvature from that path
         if _needs("Curvature", "Curvature Sub-category"):
-            curvature, curvature_subcat = _gis.get_curvature(pt, sharp_turn_threshold=10.0, default_value=2)
+            curvature, curvature_subcat = _gis.get_curvature(curvature_pt, sharp_turn_threshold=10.0, default_value=2)
             updates["Curvature"] = curvature
             if curvature_subcat is not None:
                 updates["Curvature Sub-category"] = curvature_subcat
@@ -4207,7 +4229,7 @@ def get_curvature_visualization(project_name: str):
     Generate visualization data for curvature analysis at a specific segment.
 
     This endpoint returns all the data needed to display an interactive map showing:
-    - The analysis point (segment starting location)
+    - The analysis point (segment midpoint)
     - The 5-meter analysis window (circular buffer)
     - Path centerlines within the window (color-coded by type)
     - Calculated curvature radius and path width values
@@ -4264,10 +4286,8 @@ def get_curvature_visualization(project_name: str):
         if not coords or not isinstance(coords, list) or not isinstance(coords[0], list):
             return fail("coords (LineString) is required", 400)
 
-        # Segment starting point (WGS84) - first coordinate of the segment
-        start_lon, start_lat = coords[0]
-        from shapely.geometry import Point
-        pt = Point(start_lon, start_lat)
+        # Keep the debug overlay aligned with the same segment midpoint used in autocode.
+        pt = _get_segment_midpoint(coords)
 
         _gis = _get_gis()
 
