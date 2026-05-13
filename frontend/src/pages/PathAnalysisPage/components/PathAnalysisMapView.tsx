@@ -15,9 +15,65 @@ import L, { divIcon } from "leaflet";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
 import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, downloadFilteredImages, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
-import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 
 const SAFETY_FOCUS_ATTRIBUTES = new Set(["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"]);
+type GradeBucket = {
+  label: string;
+  aliases: string[];
+  maxPercent?: number;
+};
+
+const GRADE_BUCKETS: GradeBucket[] = [
+  { label: "<=2% (1:25)", maxPercent: 2, aliases: ["<=2 degrees (1:25)", "<=4% (1:25)"] },
+  { label: "2.9% (1:20)", maxPercent: 2.9, aliases: ["2.9 degrees (1:20)", "5% (1:20)"] },
+  { label: "3.8% (1:15)", maxPercent: 3.8, aliases: ["3.8 degrees (1:15)", "6.7% (1:15)"] },
+  { label: "4.7% (1:12)", maxPercent: 4.7, aliases: ["4.7 degrees (1:12)", "8.3% (1:12)", "< 5 Degrees"] },
+  { label: ">=5%", aliases: [">=5 degrees", ">8.3% (>1:12)", "=/> 5 Degrees"] },
+];
+const GRADE_FILTER_OPTIONS = GRADE_BUCKETS.map(({ label }) => label);
+const ROAD_SPEED_LIMIT_FILTER_OPTIONS = ["NA", "30 km/h", "40 km/h", "50 km/h", "60 km/h", "70 km/h", "80 km/h", "90 km/h"];
+const CROSSING_TYPE_FILTER_OPTIONS = ["Zebra Crossing", "Signalised PC", "Bicycle Crossing", "Unsignalised Junction", "Development Access"];
+
+const compareByOrder = (left: string, right: string, order: string[]): number => {
+  const leftIndex = order.indexOf(left);
+  const rightIndex = order.indexOf(right);
+  if (leftIndex === -1 && rightIndex === -1) return 0;
+  if (leftIndex === -1) return 1;
+  if (rightIndex === -1) return -1;
+  return leftIndex - rightIndex;
+};
+
+const getSemanticCategoryOrder = (attributeName: string | null | undefined): string[] | null => {
+  if (!attributeName) return null;
+  if (SAFETY_FOCUS_ATTRIBUTES.has(attributeName)) return ["Low", "Medium", "High", "Extreme"];
+  if (attributeName === "Facility Width per Direction") return ["Very Narrow", "Narrow", "Wide"];
+  if (attributeName === "Grade") return GRADE_FILTER_OPTIONS;
+  if (attributeName === "Road speed limit") return ROAD_SPEED_LIMIT_FILTER_OPTIONS;
+  if (attributeName === "Crossing Type") return CROSSING_TYPE_FILTER_OPTIONS;
+  return null;
+};
+
+const getGradeBucketFromPercent = (gradientPct: number): string => {
+  const absoluteGradientPercent = Math.abs(gradientPct);
+  return GRADE_BUCKETS.find((bucket) => bucket.maxPercent === undefined || absoluteGradientPercent <= bucket.maxPercent)?.label ?? GRADE_BUCKETS[GRADE_BUCKETS.length - 1].label;
+};
+
+const normalizeGradeLabel = (value: string): string => {
+  const normalizedValue = value.trim();
+  const matchingBucket = GRADE_BUCKETS.find(({ label, aliases }) => label === normalizedValue || aliases.includes(normalizedValue));
+  return matchingBucket?.label ?? normalizedValue;
+};
+
+const normalizeCrossingTypeLabel = (value: string): string | null => {
+  const normalizedValue = value.trim().toLowerCase();
+  if (!normalizedValue) return null;
+  if (normalizedValue.includes("zebra")) return "Zebra Crossing";
+  if (normalizedValue.includes("signalised") || normalizedValue.includes("signalized")) return "Signalised PC";
+  if (normalizedValue.includes("bicycle crossing") || normalizedValue.includes("pedestrian cum bicycle crossing")) return "Bicycle Crossing";
+  if (normalizedValue.includes("unsignalised junction") || normalizedValue.includes("unsignalized junction")) return "Unsignalised Junction";
+  if (normalizedValue.includes("development access")) return "Development Access";
+  return null;
+};
 
 // --- EPSG:3414 (SVY21 / Singapore TM) definition -> EPSG:4326 ---
 proj4.defs(
@@ -507,23 +563,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       });
   }, []);
 
-  // Get color for a specific crash type score based on thresholds
-  const getScoreColor = (score: number, type: string = "VB"): string => {
-    // BB, BP, SB use stricter thresholds
-    if (['BB', 'BP', 'SB'].includes(type)) {
-      if (score < 5) return RISK_BAND_COLORS.LOW;
-      if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
-      if (score <= 20) return RISK_BAND_COLORS.HIGH;
-      return RISK_BAND_COLORS.EXTREME;
-    }
-
-    // VB and others (default)
-    if (score < 10) return RISK_BAND_COLORS.LOW;
-    if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
-    if (score <= 60) return RISK_BAND_COLORS.HIGH;
-    return RISK_BAND_COLORS.EXTREME;
-  };
-
   // Initialize default toggles for all active filters when they change
   useEffect(() => {
     setCategoryToggles(prev => {
@@ -694,6 +733,53 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return "Extreme";
   }, []);
 
+  const getGradeFilterText = useCallback((attributes: AttributeRow): string => {
+    const gradientPct = Number(attributes["Gradient %"]);
+    if (!Number.isNaN(gradientPct)) {
+      return getGradeBucketFromPercent(gradientPct);
+    }
+
+    const fallbackGrade = getAttrText("Grade", attributes["Grade"]);
+    return normalizeGradeLabel(fallbackGrade);
+  }, [attrMappings]);
+
+  const getDerivedCrossingTypes = useCallback((attributes: AttributeRow): string[] => {
+    const derivedTypes = new Set<string>();
+    const rawCrossingType = attributes["Crossing Type"];
+
+    if (rawCrossingType !== null && rawCrossingType !== undefined && String(rawCrossingType).trim() !== "") {
+      String(rawCrossingType)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .forEach((part) => {
+          const normalizedType = normalizeCrossingTypeLabel(part);
+          if (normalizedType) {
+            derivedTypes.add(normalizedType);
+          }
+        });
+    }
+
+    const hasIntersectionOrRoadCrossing = getAttrText("Intersection or Road Crossing", attributes["Intersection or Road Crossing"]) === "Present";
+    const hasPropertyAccess = getAttrText("Property Access", attributes["Property Access"]) === "Present";
+
+    if (hasPropertyAccess) {
+      derivedTypes.add("Development Access");
+    } else if (hasIntersectionOrRoadCrossing && derivedTypes.size === 0) {
+      derivedTypes.add("Unsignalised Junction");
+    }
+
+    return CROSSING_TYPE_FILTER_OPTIONS.filter((option) => derivedTypes.has(option));
+  }, [attrMappings]);
+
+  const getCrossingFacilityFilterText = useCallback((attributes: AttributeRow): string => {
+    const rawCrossingFacility = getAttrText("Crossing Facility", attributes["Crossing Facility"]);
+    if (rawCrossingFacility === "Present") {
+      return "Present";
+    }
+    return getDerivedCrossingTypes(attributes).length > 0 ? "Present" : rawCrossingFacility;
+  }, [attrMappings, getDerivedCrossingTypes]);
+
   const getFilterAttributeText = useCallback((
     attributeName: string,
     projectName: string,
@@ -708,8 +794,34 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       return getSafetyAttributeText(attributeName, segmentScores);
     }
 
+    if (attributeName === "Grade") {
+      return getGradeFilterText(attributes);
+    }
+
+    if (attributeName === "Crossing Type") {
+      return getDerivedCrossingTypes(attributes).join(", ");
+    }
+
+    if (attributeName === "Crossing Facility") {
+      return getCrossingFacilityFilterText(attributes);
+    }
+
+    if (attributeName === "Delineation") {
+      const delineationType = getAttrText("Delineation Type", attributes["Delineation Type"]);
+      if (!delineationType || delineationType === "None") {
+        return "Not Present";
+      }
+      const rawDelineation = getAttrText("Delineation", attributes["Delineation"]);
+      return rawDelineation === "Not Present" ? rawDelineation : "Present";
+    }
+
+    if (attributeName === "Delineation Type") {
+      const delineationType = getAttrText("Delineation Type", attributes["Delineation Type"]);
+      return delineationType === "None" ? "" : delineationType;
+    }
+
     return getAttrText(attributeName, attributes[attributeName]);
-  }, [attrMappings, getSafetyAttributeText]);
+  }, [attrMappings, getCrossingFacilityFilterText, getDerivedCrossingTypes, getGradeFilterText, getSafetyAttributeText]);
 
   const getFocusedAttributeValue = useCallback((attributeName: string, segment: VisibleSegment): string => {
     const valueText = getFilterAttributeText(attributeName, segment.projectName, segment.attributes, segment.scores);
@@ -920,7 +1032,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               if (subcatConfig) {
                 const childOptions = subcatConfig.parentCategories[attrValueText];
                 if (childOptions && subcategoryToggles[subcatConfig.childAttr]) {
-                  const childValue = getAttrText(subcatConfig.childAttr, attributes[subcatConfig.childAttr]);
+                  const childValue = getFilterAttributeText(subcatConfig.childAttr, projectData.projectName, attributes, segmentScores);
                   if (childValue) {
                     if (MULTI_VALUE_ATTRS.has(subcatConfig.childAttr) && childValue.includes(", ")) {
                       const parts = childValue.split(", ").map((s: string) => s.trim());
@@ -1049,7 +1161,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       "Tram or Train Rails": { "Present": "#DC2626", "Not Present": "#16A34A" },
       "Delineation": { "Present": "#16A34A", "Not Present": "#DC2626" },
       "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Grade": { "< 5 Degrees": "#16A34A", "=/> 5 Degrees": "#DC2626" },
+      "Grade": {
+        "<=2% (1:25)": "#16A34A",
+        "2.9% (1:20)": "#65A30D",
+        "3.8% (1:15)": "#CA8A04",
+        "4.7% (1:12)": "#EA580C",
+        ">=5%": "#DC2626",
+      },
       "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
       "Curvature Sub-category": {
         "Sharp Bend": "#DC2626",
@@ -1075,18 +1193,35 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       "Bicycle/LV speed differential": { "< 10km/h": "#16A34A", "=/> 10km/h": "#DC2626" },
       "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
       "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Crossing Type": { "Signalised Crossing": "#2563EB" },
+      "Crossing Type": {
+        "Zebra Crossing": "#CA8A04",
+        "Signalised PC": "#2563EB",
+        "Bicycle Crossing": "#16A34A",
+        "Unsignalised Junction": "#EA580C",
+        "Development Access": "#9333EA",
+      },
       "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
       "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
       "Property Access": { "Present": "#DC2626", "Not Present": "#16A34A" },
       "Intersection Approach": { "Separate/NA": "#16A34A", "Shared": "#DC2626" },
       "Number of lanes – adjacent road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
       "Number of lanes – intersecting road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+      "Road speed limit": {
+        "NA": "#6B7280",
+        "30 km/h": "#16A34A",
+        "40 km/h": "#65A30D",
+        "50 km/h": "#FFCC1A",
+        "60 km/h": "#F59E0B",
+        "70 km/h": "#EA580C",
+        "80 km/h": "#DC2626",
+        "90 km/h": "#991B1B",
+      },
       "Flow Direction": { "One Way": "#2563EB", "Two Way": "#9333EA" },
       "Delineation Type": {
         "Cycling Path": "#2563EB",
         "Red Stripe": "#DC2626",
         "Signalised Crossing": "#EA580C",
+        "Traffic Crossing": "#0891B2",
         "Zebra Crossing": "#CA8A04",
       },
       "Facility Type": {
@@ -1304,8 +1439,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       projectData.geoFeatures.forEach((_, i) => {
         const attributes = projectData.attributes[i];
         if (attributes) {
-          const attrValue = attributes[categoryFilterAttribute];
-          const attrValueText = getAttrText(categoryFilterAttribute, attrValue);
+          const segmentScores = projectData.scores?.[i] ?? null;
+          const attrValueText = getFilterAttributeText(categoryFilterAttribute, projectData.projectName, attributes, segmentScores);
           if (attrValueText) {
             // Multi-value attributes: split "Bollards, Fence" into individual categories
             if (MULTI_VALUE_ATTRS.has(categoryFilterAttribute) && attrValueText.includes(", ")) {
@@ -1319,28 +1454,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
 
     const categories = Array.from(categoriesInData);
-    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(categoryFilterAttribute);
-    if (isSafetyScore) {
-      const riskOrder = ["Low", "Medium", "High", "Extreme"];
-      categories.sort((a, b) => {
-        const ai = riskOrder.indexOf(a), bi = riskOrder.indexOf(b);
-        if (ai === -1 && bi === -1) return 0;
-        if (ai === -1) return 1; if (bi === -1) return -1;
-        return ai - bi;
-      });
-    } else if (categoryFilterAttribute === "Facility Width per Direction") {
-      const widthOrder = ["Very Narrow", "Narrow", "Wide"];
-      categories.sort((a, b) => {
-        const ai = widthOrder.indexOf(a), bi = widthOrder.indexOf(b);
-        if (ai === -1 && bi === -1) return 0;
-        if (ai === -1) return 1; if (bi === -1) return -1;
-        return ai - bi;
-      });
+    const semanticOrder = getSemanticCategoryOrder(categoryFilterAttribute);
+    if (semanticOrder) {
+      categories.sort((a, b) => compareByOrder(a, b, semanticOrder));
     } else {
       categories.sort();
     }
     return categories;
-  }, [categoryFilterAttribute, projectsData, attrMappings]);
+  }, [categoryFilterAttribute, getFilterAttributeText, projectsData]);
 
   // Initialise / update category toggles when the sidebar attribute or its available categories change
   useEffect(() => {
@@ -1563,32 +1684,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           color: attributeCategoryColors[category] || "#6B7280",
         }));
 
-      // Apply semantic ordering for specific attributes
-      if (effectiveFocusAttribute === "Facility Width per Direction") {
-        const widthOrder = ["Very Narrow", "Narrow", "Wide"];
-        return chartData.sort((a, b) => {
-          const aIndex = widthOrder.indexOf(a.category);
-          const bIndex = widthOrder.indexOf(b.category);
-          if (aIndex === -1 && bIndex === -1) return 0;
-          if (aIndex === -1) return 1;
-          if (bIndex === -1) return -1;
-          return aIndex - bIndex;
-        });
-      } else if (SAFETY_FOCUS_ATTRIBUTES.has(effectiveFocusAttribute)) {
-        // For safety score bands and Overall Risk Level, sort in the order: Low, Medium, High, Extreme
-        const riskOrder = ["Low", "Medium", "High", "Extreme"];
-        return chartData.sort((a, b) => {
-          const aIndex = riskOrder.indexOf(a.category);
-          const bIndex = riskOrder.indexOf(b.category);
-          if (aIndex === -1 && bIndex === -1) return 0;
-          if (aIndex === -1) return 1;
-          if (bIndex === -1) return -1;
-          return aIndex - bIndex;
-        });
-      } else {
-        // Default: sort by count descending
-        return chartData.sort((a, b) => b.count - a.count);
+      const semanticOrder = getSemanticCategoryOrder(effectiveFocusAttribute);
+      if (semanticOrder) {
+        return chartData.sort((a, b) => compareByOrder(a.category, b.category, semanticOrder));
       }
+
+      // Default: sort by count descending
+      return chartData.sort((a, b) => b.count - a.count);
     }
   }, [allPoints, effectiveFocusAttribute, attributeCategoryColors, projectColors]);
 
