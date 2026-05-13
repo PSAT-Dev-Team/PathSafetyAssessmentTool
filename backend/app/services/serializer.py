@@ -154,6 +154,7 @@ class Attributes(BaseTable):
         FIXED_OBSTACLE_TYPE_STR         = "FO Type"
         NON_FIXED_OBSTACLE_STR          = "Non-Fixed Obstacle on Facility"
         NON_FIXED_OBSTACLE_TYPE_STR     = "NFO Type"
+        LOOSE_SLIPPERY_ISSUE_TYPE_STR   = "Issue Type (Slippery)"
         DELINEATION_STR                 = "Delineation"
         DELINEATION_TYPE_STR            = "Delineation Type"
         LIGHT_SEGREGATION_STR           = "Light Segregation"
@@ -211,6 +212,7 @@ class Attributes(BaseTable):
         Fields.FIXED_OBSTACLE_TYPE_STR:         None,
         Fields.NON_FIXED_OBSTACLE_STR:          presence_mapping,
         Fields.NON_FIXED_OBSTACLE_TYPE_STR:     None,
+        Fields.LOOSE_SLIPPERY_ISSUE_TYPE_STR:   None,
         Fields.DELINEATION_STR:                 presence_mapping,
         Fields.DELINEATION_TYPE_STR:            None,
         Fields.LIGHT_SEGREGATION_STR:           presence_mapping,

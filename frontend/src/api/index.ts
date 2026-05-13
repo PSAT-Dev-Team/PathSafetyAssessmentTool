@@ -83,6 +83,21 @@ export async function fetchAttributeMappings(): Promise<AttrMappings> {
   return r.json();
 }
 
+export async function fetchCustomAttrOptions(): Promise<Record<string, string[]>> {
+  const r = await fetch("/api/projects/custom-attribute-options");
+  if (!r.ok) throw new Error("Failed to load custom attribute options");
+  return r.json();
+}
+
+export async function updateCustomAttrOptions(field: string, options: string[]): Promise<void> {
+  const r = await fetch("/api/projects/custom-attribute-options", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ field, options }),
+  });
+  if (!r.ok) throw new Error(await r.text().catch(() => r.statusText));
+}
+
 export async function saveAttributes(project: string, rows: AttributeRow[]) {
   const res = await fetch(`/api/projects/${encodeURIComponent(project)}/attributes`, {
     method: "PUT",

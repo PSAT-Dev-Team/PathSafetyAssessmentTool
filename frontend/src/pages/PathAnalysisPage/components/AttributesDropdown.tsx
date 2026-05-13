@@ -359,7 +359,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "Delineation Type",
     label: "Delineation Type",
     group: "Facility surface conditions",
-    options: ["Not Selected", "Cycling Path", "Red Stripe", "Traffic Crossing", "Zebra Crossing"],
+    options: ["Not Selected", "Cycling Path", "Red Stripe", "Signalised Crossing", "Zebra Crossing"],
   },
   {
     name: "Loose or slippery surface",
@@ -419,7 +419,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "Crossing Type",
     label: "Crossing Type",
     group: "Intersection",
-    options: ["Not Selected", "Traffic Crossing"],
+    options: ["Not Selected", "Signalised Crossing"],
   },
   {
     name: "Pedestrian Crossing",
@@ -502,13 +502,13 @@ export const SUBCATEGORY_MAP: Record<
   "Crossing Facility": {
     childAttr: "Crossing Type",
     parentCategories: {
-      "Present": ["Traffic Crossing"],
+      "Present": ["Signalised Crossing"],
     },
   },
   "Delineation": {
     childAttr: "Delineation Type",
     parentCategories: {
-      "Present": ["Cycling Path", "Red Stripe", "Traffic Crossing", "Zebra Crossing"],
+      "Present": ["Cycling Path", "Red Stripe", "Signalised Crossing", "Zebra Crossing"],
     },
   },
 };
@@ -631,7 +631,7 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Delineation Type": {
       "Cycling Path":     "#2563EB",
       "Red Stripe":       "#DC2626",
-      "Traffic Crossing": "#EA580C",
+      "Signalised Crossing": "#EA580C",
       "Zebra Crossing":   "#CA8A04",
     },
     "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
@@ -647,7 +647,7 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Crossing Type": {
-      "Traffic Crossing": "#2563EB",
+      "Signalised Crossing": "#2563EB",
     },
     "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },

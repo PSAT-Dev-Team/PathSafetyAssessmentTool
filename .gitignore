@@ -39,6 +39,11 @@ obstacles/
 scripts/
 tmp/
 Gradient Calculation/
+.Rhistory
+visualize_obstacles.py
+visualize_width_restriction.py
+run_attribute_inference.py
+visualise_width_restriction.py
 
 # Data and Models
 CycleRAP - model - generation v2.13 - to suppliers.xlsm
