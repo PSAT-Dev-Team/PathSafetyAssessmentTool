@@ -15,7 +15,65 @@ import L, { divIcon } from "leaflet";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
 import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, downloadFilteredImages, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
-import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
+
+const SAFETY_FOCUS_ATTRIBUTES = new Set(["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"]);
+type GradeBucket = {
+  label: string;
+  aliases: string[];
+  maxPercent?: number;
+};
+
+const GRADE_BUCKETS: GradeBucket[] = [
+  { label: "<=2% (1:25)", maxPercent: 2, aliases: ["<=2 degrees (1:25)", "<=4% (1:25)"] },
+  { label: "2.9% (1:20)", maxPercent: 2.9, aliases: ["2.9 degrees (1:20)", "5% (1:20)"] },
+  { label: "3.8% (1:15)", maxPercent: 3.8, aliases: ["3.8 degrees (1:15)", "6.7% (1:15)"] },
+  { label: "4.7% (1:12)", maxPercent: 4.7, aliases: ["4.7 degrees (1:12)", "8.3% (1:12)", "< 5 Degrees"] },
+  { label: ">=5%", aliases: [">=5 degrees", ">8.3% (>1:12)", "=/> 5 Degrees"] },
+];
+const GRADE_FILTER_OPTIONS = GRADE_BUCKETS.map(({ label }) => label);
+const ROAD_SPEED_LIMIT_FILTER_OPTIONS = ["NA", "30 km/h", "40 km/h", "50 km/h", "60 km/h", "70 km/h", "80 km/h", "90 km/h"];
+const CROSSING_TYPE_FILTER_OPTIONS = ["Zebra Crossing", "Signalised PC", "Bicycle Crossing", "Unsignalised Junction", "Development Access"];
+
+const compareByOrder = (left: string, right: string, order: string[]): number => {
+  const leftIndex = order.indexOf(left);
+  const rightIndex = order.indexOf(right);
+  if (leftIndex === -1 && rightIndex === -1) return 0;
+  if (leftIndex === -1) return 1;
+  if (rightIndex === -1) return -1;
+  return leftIndex - rightIndex;
+};
+
+const getSemanticCategoryOrder = (attributeName: string | null | undefined): string[] | null => {
+  if (!attributeName) return null;
+  if (SAFETY_FOCUS_ATTRIBUTES.has(attributeName)) return ["Low", "Medium", "High", "Extreme"];
+  if (attributeName === "Facility Width per Direction") return ["Very Narrow", "Narrow", "Wide"];
+  if (attributeName === "Grade") return GRADE_FILTER_OPTIONS;
+  if (attributeName === "Road speed limit") return ROAD_SPEED_LIMIT_FILTER_OPTIONS;
+  if (attributeName === "Crossing Type") return CROSSING_TYPE_FILTER_OPTIONS;
+  return null;
+};
+
+const getGradeBucketFromPercent = (gradientPct: number): string => {
+  const absoluteGradientPercent = Math.abs(gradientPct);
+  return GRADE_BUCKETS.find((bucket) => bucket.maxPercent === undefined || absoluteGradientPercent <= bucket.maxPercent)?.label ?? GRADE_BUCKETS[GRADE_BUCKETS.length - 1].label;
+};
+
+const normalizeGradeLabel = (value: string): string => {
+  const normalizedValue = value.trim();
+  const matchingBucket = GRADE_BUCKETS.find(({ label, aliases }) => label === normalizedValue || aliases.includes(normalizedValue));
+  return matchingBucket?.label ?? normalizedValue;
+};
+
+const normalizeCrossingTypeLabel = (value: string): string | null => {
+  const normalizedValue = value.trim().toLowerCase();
+  if (!normalizedValue) return null;
+  if (normalizedValue.includes("zebra")) return "Zebra Crossing";
+  if (normalizedValue.includes("signalised") || normalizedValue.includes("signalized")) return "Signalised PC";
+  if (normalizedValue.includes("bicycle crossing") || normalizedValue.includes("pedestrian cum bicycle crossing")) return "Bicycle Crossing";
+  if (normalizedValue.includes("unsignalised junction") || normalizedValue.includes("unsignalized junction")) return "Unsignalised Junction";
+  if (normalizedValue.includes("development access")) return "Development Access";
+  return null;
+};
 
 // --- EPSG:3414 (SVY21 / Singapore TM) definition -> EPSG:4326 ---
 proj4.defs(
@@ -230,6 +288,16 @@ type ProjectData = {
   attributes: AttributeRow[];
   scores: Record<string, any>[]; // Raw crash type scores (BB, SB, VB, BP)
   color: string;
+};
+
+type VisibleSegment = {
+  idx: number;
+  latlng: [number, number];
+  f: Feature<LineString, any>;
+  attributes: AttributeRow;
+  projectName: string;
+  projectColor: string;
+  scores: Record<string, any> | null;
 };
 
 export default function AttributeAnalysisMapView({ selectedProjects, selectedAttributes, onChartDataUpdate }: AttributeAnalysisMapViewProps) {
@@ -495,23 +563,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       });
   }, []);
 
-  // Get color for a specific crash type score based on thresholds
-  const getScoreColor = (score: number, type: string = "VB"): string => {
-    // BB, BP, SB use stricter thresholds
-    if (['BB', 'BP', 'SB'].includes(type)) {
-      if (score < 5) return RISK_BAND_COLORS.LOW;
-      if (score <= 10) return RISK_BAND_COLORS.MEDIUM;
-      if (score <= 20) return RISK_BAND_COLORS.HIGH;
-      return RISK_BAND_COLORS.EXTREME;
-    }
-
-    // VB and others (default)
-    if (score < 10) return RISK_BAND_COLORS.LOW;
-    if (score <= 25) return RISK_BAND_COLORS.MEDIUM;
-    if (score <= 60) return RISK_BAND_COLORS.HIGH;
-    return RISK_BAND_COLORS.EXTREME;
-  };
-
   // Initialize default toggles for all active filters when they change
   useEffect(() => {
     setCategoryToggles(prev => {
@@ -629,6 +680,164 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return String(attrValue);
   };
 
+  const getSafetyAttributeText = useCallback((attributeName: string, segmentScores: Record<string, any> | null | undefined): string => {
+    if (!segmentScores) {
+      return "Low";
+    }
+
+    if (attributeName === "Overall Risk Level") {
+      let maxRiskLevel = 0;
+
+      if (segmentScores["Overall Risk Level Band"] !== undefined) {
+        maxRiskLevel = (segmentScores["Overall Risk Level Band"] as number) - 1;
+      } else {
+        ["BB", "BP", "SB", "VB"].forEach((type) => {
+          const scoreValue = Number(segmentScores[type] ?? 0);
+          let riskLevel = 0;
+
+          if (["BB", "BP", "SB"].includes(type)) {
+            if (scoreValue > 20) riskLevel = 3;
+            else if (scoreValue > 10) riskLevel = 2;
+            else if (scoreValue >= 5) riskLevel = 1;
+          } else {
+            if (scoreValue > 60) riskLevel = 3;
+            else if (scoreValue > 25) riskLevel = 2;
+            else if (scoreValue >= 10) riskLevel = 1;
+          }
+
+          if (riskLevel > maxRiskLevel) {
+            maxRiskLevel = riskLevel;
+          }
+        });
+      }
+
+      if (maxRiskLevel === 3) return "Extreme";
+      if (maxRiskLevel === 2) return "High";
+      if (maxRiskLevel === 1) return "Medium";
+      return "Low";
+    }
+
+    const crashTypeKey = attributeName.replace(" Band", "");
+    const scoreValue = Number(segmentScores[crashTypeKey] ?? 0);
+
+    if (["BB", "BP", "SB"].includes(crashTypeKey)) {
+      if (scoreValue < 5) return "Low";
+      if (scoreValue <= 10) return "Medium";
+      if (scoreValue <= 20) return "High";
+      return "Extreme";
+    }
+
+    if (scoreValue < 10) return "Low";
+    if (scoreValue <= 25) return "Medium";
+    if (scoreValue <= 60) return "High";
+    return "Extreme";
+  }, []);
+
+  const getGradeFilterText = useCallback((attributes: AttributeRow): string => {
+    const gradientPct = Number(attributes["Gradient %"]);
+    if (!Number.isNaN(gradientPct)) {
+      return getGradeBucketFromPercent(gradientPct);
+    }
+
+    const fallbackGrade = getAttrText("Grade", attributes["Grade"]);
+    return normalizeGradeLabel(fallbackGrade);
+  }, [attrMappings]);
+
+  const getDerivedCrossingTypes = useCallback((attributes: AttributeRow): string[] => {
+    const derivedTypes = new Set<string>();
+    const rawCrossingType = attributes["Crossing Type"];
+
+    if (rawCrossingType !== null && rawCrossingType !== undefined && String(rawCrossingType).trim() !== "") {
+      String(rawCrossingType)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .forEach((part) => {
+          const normalizedType = normalizeCrossingTypeLabel(part);
+          if (normalizedType) {
+            derivedTypes.add(normalizedType);
+          }
+        });
+    }
+
+    const hasIntersectionOrRoadCrossing = getAttrText("Intersection or Road Crossing", attributes["Intersection or Road Crossing"]) === "Present";
+    const hasPropertyAccess = getAttrText("Property Access", attributes["Property Access"]) === "Present";
+
+    if (hasPropertyAccess) {
+      derivedTypes.add("Development Access");
+    } else if (hasIntersectionOrRoadCrossing && derivedTypes.size === 0) {
+      derivedTypes.add("Unsignalised Junction");
+    }
+
+    return CROSSING_TYPE_FILTER_OPTIONS.filter((option) => derivedTypes.has(option));
+  }, [attrMappings]);
+
+  const getCrossingFacilityFilterText = useCallback((attributes: AttributeRow): string => {
+    const rawCrossingFacility = getAttrText("Crossing Facility", attributes["Crossing Facility"]);
+    if (rawCrossingFacility === "Present") {
+      return "Present";
+    }
+    return getDerivedCrossingTypes(attributes).length > 0 ? "Present" : rawCrossingFacility;
+  }, [attrMappings, getDerivedCrossingTypes]);
+
+  const getFilterAttributeText = useCallback((
+    attributeName: string,
+    projectName: string,
+    attributes: AttributeRow,
+    segmentScores: Record<string, any> | null,
+  ): string => {
+    if (attributeName === "Project") {
+      return projectName;
+    }
+
+    if (SAFETY_FOCUS_ATTRIBUTES.has(attributeName)) {
+      return getSafetyAttributeText(attributeName, segmentScores);
+    }
+
+    if (attributeName === "Grade") {
+      return getGradeFilterText(attributes);
+    }
+
+    if (attributeName === "Crossing Type") {
+      return getDerivedCrossingTypes(attributes).join(", ");
+    }
+
+    if (attributeName === "Crossing Facility") {
+      return getCrossingFacilityFilterText(attributes);
+    }
+
+    if (attributeName === "Delineation") {
+      const delineationType = getAttrText("Delineation Type", attributes["Delineation Type"]);
+      if (!delineationType || delineationType === "None") {
+        return "Not Present";
+      }
+      const rawDelineation = getAttrText("Delineation", attributes["Delineation"]);
+      return rawDelineation === "Not Present" ? rawDelineation : "Present";
+    }
+
+    if (attributeName === "Delineation Type") {
+      const delineationType = getAttrText("Delineation Type", attributes["Delineation Type"]);
+      return delineationType === "None" ? "" : delineationType;
+    }
+
+    return getAttrText(attributeName, attributes[attributeName]);
+  }, [attrMappings, getCrossingFacilityFilterText, getDerivedCrossingTypes, getGradeFilterText, getSafetyAttributeText]);
+
+  const getFocusedAttributeValue = useCallback((attributeName: string, segment: VisibleSegment): string => {
+    const valueText = getFilterAttributeText(attributeName, segment.projectName, segment.attributes, segment.scores);
+    if (!valueText) {
+      return "";
+    }
+
+    if (MULTI_VALUE_ATTRS.has(attributeName) && valueText.includes(", ")) {
+      const parts = valueText.split(", ").map((part) => part.trim()).filter(Boolean);
+      const toggles = subcategoryToggles[attributeName];
+      return parts.find((part) => toggles?.[part] !== false) ?? parts[0] ?? "";
+    }
+
+    return valueText;
+  }, [getFilterAttributeText, subcategoryToggles]);
+
 
   // Generate distinct colors for each project
   const projectColors = useMemo(() => {
@@ -704,126 +913,6 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return () => { aborted = true; };
   }, [selectedProjects, projectColors, refreshTrigger]);
 
-  // Generate colors for attribute categories based on safety implications
-  const attributeCategoryColors = useMemo(() => {
-    if (!primaryFocusAttribute) return {};
-
-    const categoryColors: Record<string, string | Record<string, string>> = {
-      // Safety Score Band colors (CycleRAP Risk Bands) - Only 4 categories
-      "Low": "#87C424", // Green (CycleRAP Low)
-      "Medium": "#FFCC1A", // Yellow (CycleRAP Medium)
-      "High": "#FF5B1A", // Orange (CycleRAP High)
-      "Extreme": "#CD1AFF", // Purple (CycleRAP Extreme)
-
-      // Facility configuration - attributes where Present = Danger (Red), Not Present = Safe (Green)
-      "Adjacent Sidewalk 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Road Lane 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Vehicle Parking 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Severe Hazard 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent object or level change 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Road Lane 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Vehicle Parking 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent Severe Hazard 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Adjacent object or level change 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
-
-      // Facility clear width - attributes where Present = Danger (Red), Not Present = Safe (Green)
-      "Line of Sight": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
-      "Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
-
-      // Light Segregation - Present = Safe (Green), Not Present = Danger (Red)
-      "Light Segregation": { "Present": "#16A34A", "Not Present": "#DC2626" },
-
-      // Facility configuration - Adequate = Safe (Green), Inadequate = Danger (Red)
-      "Facility access": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
-
-      // Facility surface conditions - attributes where Present = Danger (Red), Not Present = Safe (Green)
-      "Loose or slippery surface": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Major Surface Deformation or Drain Opening": { "Present": "#DC2626", "Not Present": "#16A34A" },
-      "Tram or Train Rails": { "Present": "#DC2626", "Not Present": "#16A34A" },
-
-      // Facility surface conditions - Present = Safe (Green), Not Present = Danger (Red)
-      "Delineation": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
-
-      // Facility surface conditions - Grade (Safe = Green, Dangerous = Red)
-      "Grade": { "< 5 Degrees": "#16A34A", "=/> 5 Degrees": "#DC2626" },
-
-      // Facility surface conditions - Curvature
-      "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
-
-      // Facility clear width - Width
-      "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#FFCC1A", "Very Narrow": "#DC2626" },
-
-      // Flow & Speed - Flow
-      "Peak pedestrian flow along or across facility": { "None": "#6B7280", "Low": "#16A34A", "Moderate to high": "#DC2626" },
-      "Peak bicycle/LV traffic flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
-      "Observed proportion of cargo bikes and mopeds": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
-      "Heavy vehicle flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
-
-      // Flow & Speed - Speed (Faster = more dangerous)
-      "Bicycle/LV speed – average": { "< 20km/h": "#16A34A", "=/> 20km/h": "#DC2626" },
-      "Bicycle/LV speed differential": { "< 10km/h": "#16A34A", "=/> 10km/h": "#DC2626" },
-
-      // Intersection - attributes where Present = Safe (Green), Not Present = Danger (Red)
-      "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
-      "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
-
-      // Intersection - Property Access (Present = Danger, Not Present = Safe)
-      "Property Access": { "Present": "#DC2626", "Not Present": "#16A34A" },
-
-      // Intersection approach
-      "Intersection Approach": { "Separate/NA": "#16A34A", "Shared": "#DC2626" },
-
-      // Number of lanes (More = dangerous on adjacent road, Equal = safer)
-      "Number of lanes – adjacent road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
-      "Number of lanes – intersecting road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
-
-      // Flow direction
-      "Flow Direction": { "One Way": "#2563EB", "Two Way": "#9333EA" },
-
-      // Facility Types
-      "Facility Type": {
-        "Sidewalk": "#2563EB",
-        "Multi-Use Path": "#9333EA", // Purple
-        "Off-Road Bicycle Path": "#16A34A", // Green
-        "On-road Bicycle Lane": "#CA8A04",
-        "Road Shoulder": "#F59E0B",
-        "Mixed Traffic Road Lane": "#DC2626",
-      },
-
-      // Area type
-      "Area type": {
-        "Urban":        "#2563EB", // Blue
-        "Suburban":     "#0891B2", // Cyan
-        "Rural":        "#16A34A", // Green
-        "Industrial":   "#EA580C", // Orange
-        "Recreational": "#9333EA", // Purple
-      },
-    };
-    const attributeColors = categoryColors[primaryFocusAttribute];
-    if (typeof attributeColors === "object" && attributeColors !== null) {
-      return attributeColors as Record<string, string>;
-    }
-
-    // For safety score bands (Low, Medium, High, Extreme), return the direct color mapping
-    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(primaryFocusAttribute || "");
-    if (isSafetyScore) {
-      return {
-        "Low": categoryColors["Low"] as string,
-        "Medium": categoryColors["Medium"] as string,
-        "High": categoryColors["High"] as string,
-        "Extreme": categoryColors["Extreme"] as string,
-      };
-    }
-
-    // For simple string-to-color mappings, return empty (handled by legend logic)
-    return {} as Record<string, string>;
-  }, [primaryFocusAttribute]);
-
   // Helper function to get column value as string
   function getColumnValue(point: any, columnKey: string): string {
     if (columnKey === "Project") return point.projectName;
@@ -895,17 +984,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     return bounds;
   }, [projectsData]);
 
-  // Extract all points from all projects with their metadata
-  const allPoints = useMemo(() => {
-    const pts: {
-      idx: number;
-      latlng: [number, number];
-      f: Feature<LineString, any>;
-      attributes: AttributeRow;
-      projectName: string;
-      color: string;
-      attributeValue: string;
-    }[] = [];
+  const visibleSegments = useMemo(() => {
+    const segments: VisibleSegment[] = [];
 
     projectsData.forEach((projectData) => {
       projectData.geoFeatures.forEach((feature, i) => {
@@ -915,50 +995,24 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           const attributes = projectData.attributes[i];
 
           if (attributes) {
+            const segmentScores = projectData.scores?.[i] ?? null;
+
             // Simple check: Does this segment have all active filter attributes with values?
             let matchesAllFilters = true;
             for (const filterAttr of activeFilters) {
-              let attrValueText = "";
-
-              if (filterAttr === "Project") {
-                attrValueText = projectData.projectName;
-              } else if (filterAttr === "Overall Risk Level") {
-                if (projectData.scores && projectData.scores.length > i) {
-                  const segmentScores = projectData.scores[i];
-                  let maxRiskLevel = 0; // 0: Low, 1: Med, 2: High, 3: Extreme
-
-                  // Optimize: If backend sends "Overall Risk Level Band", use it directly (1-4)
-                  if (segmentScores["Overall Risk Level Band"] !== undefined) {
-                    // Backend 1=Low (0), 2=Med (1), 3=High (2), 4=Extreme (3)
-                    maxRiskLevel = (segmentScores["Overall Risk Level Band"] as number) - 1;
-                  }
-
-                  if (maxRiskLevel === 3) attrValueText = "Extreme";
-                  else if (maxRiskLevel === 2) attrValueText = "High";
-                  else if (maxRiskLevel === 1) attrValueText = "Medium";
-                  else attrValueText = "Low";
-                } else {
-                  // Overall Risk Level selected but no scores available -> Low
-                  attrValueText = "Low";
+              // Numeric range filter (Road AADT, Road operating speed)
+              if (NUMERIC_FILTER_ATTRIBUTES.has(filterAttr)) {
+                const numVal = Number(attributes[filterAttr]);
+                const bounds = dataRangeBounds[filterAttr];
+                const [rMin, rMax] = rangeFilters[filterAttr] ?? [bounds?.min ?? 0, bounds?.max ?? 100];
+                if (isNaN(numVal) || numVal < rMin || numVal > rMax) {
+                  matchesAllFilters = false;
+                  break;
                 }
-              } else {
-                // Generic attribute
-                const attrValue = attributes[filterAttr];
-
-                // Numeric range filter (Road AADT, Road operating speed)
-                if (NUMERIC_FILTER_ATTRIBUTES.has(filterAttr)) {
-                  const numVal = Number(attrValue);
-                  const bounds = dataRangeBounds[filterAttr];
-                  const [rMin, rMax] = rangeFilters[filterAttr] ?? [bounds?.min ?? 0, bounds?.max ?? 100];
-                  if (isNaN(numVal) || numVal < rMin || numVal > rMax) {
-                    matchesAllFilters = false;
-                    break;
-                  }
-                  continue;
-                }
-
-                attrValueText = getAttrText(filterAttr, attrValue);
+                continue;
               }
+
+              const attrValueText = getFilterAttributeText(filterAttr, projectData.projectName, attributes, segmentScores);
 
               if (!attrValueText || attrValueText === "Not Selected") {
                 matchesAllFilters = false;
@@ -978,7 +1032,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               if (subcatConfig) {
                 const childOptions = subcatConfig.parentCategories[attrValueText];
                 if (childOptions && subcategoryToggles[subcatConfig.childAttr]) {
-                  const childValue = getAttrText(subcatConfig.childAttr, attributes[subcatConfig.childAttr]);
+                  const childValue = getFilterAttributeText(subcatConfig.childAttr, projectData.projectName, attributes, segmentScores);
                   if (childValue) {
                     if (MULTI_VALUE_ATTRS.has(subcatConfig.childAttr) && childValue.includes(", ")) {
                       const parts = childValue.split(", ").map((s: string) => s.trim());
@@ -1000,114 +1054,231 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               return;
             }
 
-            // Determine color based on primary focus attribute or project
-            let pointColor = projectData.color; // Default to project color
-            let attrValueText = "";
-
-            if (primaryFocusAttribute === "Project") {
-              // Use project color
-              pointColor = projectData.color;
-              attrValueText = projectData.projectName;
-            } else if (primaryFocusAttribute) {
-              // Check if it's a safety band attribute or Overall Risk Level
-              const isSafetyBand = ["VB Band", "BB Band", "SB Band", "BP Band"].includes(primaryFocusAttribute);
-              const isCycleRAPScore = primaryFocusAttribute === "Overall Risk Level";
-
-              if ((isSafetyBand || isCycleRAPScore) && projectData.scores && projectData.scores.length > i) {
-                // For safety bands and Overall Risk Level, use the score value
-                const segmentScores = projectData.scores[i];
-
-                let scoreValue = 0;
-                if (isSafetyBand) {
-                  // Map band name to crash type key (e.g., "SB Band" -> "SB")
-                  let crashTypeKey = primaryFocusAttribute.replace(" Band", "");
-                  scoreValue = segmentScores[crashTypeKey] || 0;
-
-                  // Apply threshold to get color
-                  pointColor = getScoreColor(scoreValue, crashTypeKey);
-
-                  // Get text label
-                  if (['BB', 'BP', 'SB'].includes(crashTypeKey)) {
-                    if (scoreValue < 5) attrValueText = "Low";
-                    else if (scoreValue <= 10) attrValueText = "Medium";
-                    else if (scoreValue <= 20) attrValueText = "High";
-                    else attrValueText = "Extreme";
-                  } else {
-                    if (scoreValue < 10) attrValueText = "Low";
-                    else if (scoreValue <= 25) attrValueText = "Medium";
-                    else if (scoreValue <= 60) attrValueText = "High";
-                    else attrValueText = "Extreme";
-                  }
-                } else if (isCycleRAPScore) {
-                  // For Overall Risk Level, calculate based on the highest risk category
-                  let maxRiskLevel = 0; // 0: Low, 1: Med, 2: High, 3: Extreme
-
-                  if (segmentScores["Overall Risk Level Band"] !== undefined) {
-                    maxRiskLevel = (segmentScores["Overall Risk Level Band"] as number) - 1;
-                  } else {
-                    // Fallback
-                    const crashTypes = ["BB", "BP", "SB", "VB"];
-                    crashTypes.forEach((type) => {
-                      const s = segmentScores[type] || 0;
-                      let r = 0;
-                      if (['BB', 'BP', 'SB'].includes(type)) {
-                        if (s > 20) r = 3; else if (s > 10) r = 2; else if (s >= 5) r = 1; else r = 0;
-                      } else {
-                        if (s > 60) r = 3; else if (s > 25) r = 2; else if (s >= 10) r = 1; else r = 0;
-                      }
-                      if (r > maxRiskLevel) maxRiskLevel = r;
-                    });
-                  }
-
-                  // Set color and text based on max risk level
-                  switch (maxRiskLevel) {
-                    case 3:
-                      pointColor = RISK_BAND_COLORS.EXTREME;
-                      attrValueText = "Extreme";
-                      break;
-                    case 2:
-                      pointColor = RISK_BAND_COLORS.HIGH;
-                      attrValueText = "High";
-                      break;
-                    case 1:
-                      pointColor = RISK_BAND_COLORS.MEDIUM;
-                      attrValueText = "Medium";
-                      break;
-                    default:
-                      pointColor = RISK_BAND_COLORS.LOW;
-                      attrValueText = "Low";
-                      break;
-                  }
-                }
-              } else {
-                // Use attribute color for non-safety-band attributes
-                const attrValue = attributes[primaryFocusAttribute];
-                attrValueText = getAttrText(primaryFocusAttribute, attrValue);
-                // Multi-value attributes: use first value for color coding
-                if (MULTI_VALUE_ATTRS.has(primaryFocusAttribute) && attrValueText.includes(", ")) {
-                  pointColor = getCategoryColor(primaryFocusAttribute, attrValueText.split(", ")[0].trim());
-                } else {
-                  pointColor = getCategoryColor(primaryFocusAttribute, attrValueText);
-                }
-              }
-            }
-
-            pts.push({
+            segments.push({
               idx: i,
               latlng: to4326(g.coordinates[0]),
               f: feature,
               attributes,
               projectName: projectData.projectName,
-              color: pointColor,
-              attributeValue: attrValueText,
+              projectColor: projectData.color,
+              scores: segmentScores,
             });
           }
         }
       });
     });
 
-    return pts;
-  }, [projectsData, primaryFocusAttribute, activeFilters, attrMappings, categoryToggles, subcategoryToggles, rangeFilters, dataRangeBounds]);
+    return segments;
+  }, [projectsData, activeFilters, categoryToggles, subcategoryToggles, rangeFilters, dataRangeBounds, getFilterAttributeText]);
+
+  const effectiveFocusAttribute = useMemo(() => {
+    if (!primaryFocusAttribute) {
+      return null;
+    }
+
+    if (primaryFocusAttribute === "Project") {
+      return primaryFocusAttribute;
+    }
+
+    const subcatConfig = SUBCATEGORY_MAP[primaryFocusAttribute];
+    if (!subcatConfig || visibleSegments.length === 0) {
+      return primaryFocusAttribute;
+    }
+
+    const visibleParentCategories = new Set<string>();
+    visibleSegments.forEach((segment) => {
+      const parentValue = getFocusedAttributeValue(primaryFocusAttribute, segment);
+      if (parentValue) {
+        visibleParentCategories.add(parentValue);
+      }
+    });
+
+    if (visibleParentCategories.size !== 1) {
+      return primaryFocusAttribute;
+    }
+
+    const [remainingParentCategory] = Array.from(visibleParentCategories);
+    const childOptions = subcatConfig.parentCategories[remainingParentCategory];
+    if (!childOptions?.length) {
+      return primaryFocusAttribute;
+    }
+
+    const hasChildValues = visibleSegments.some((segment) => {
+      const parentValue = getFocusedAttributeValue(primaryFocusAttribute, segment);
+      if (parentValue !== remainingParentCategory) {
+        return false;
+      }
+
+      const childValue = getFocusedAttributeValue(subcatConfig.childAttr, segment);
+      return !!childValue && childValue !== "None";
+    });
+
+    return hasChildValues ? subcatConfig.childAttr : primaryFocusAttribute;
+  }, [getFocusedAttributeValue, primaryFocusAttribute, visibleSegments]);
+
+  // Generate colors for attribute categories based on the effective focus level.
+  const attributeCategoryColors = useMemo(() => {
+    if (!effectiveFocusAttribute) return {};
+
+    const categoryColors: Record<string, string | Record<string, string>> = {
+      "Low": "#87C424",
+      "Medium": "#FFCC1A",
+      "High": "#FF5B1A",
+      "Extreme": "#CD1AFF",
+      "Adjacent Sidewalk 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Road Lane 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Vehicle Parking 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Severe Hazard 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent object or level change 0-1m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Road Lane 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Vehicle Parking 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent Severe Hazard 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Adjacent object or level change 1-3m": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Line of Sight": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
+      "Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "FO Type": {
+        "Lamp Post": "#DC2626",
+        "Traffic Light": "#EA580C",
+        "Pillar": "#F59E0B",
+        "Bollards": "#CA8A04",
+        "Fence": "#0891B2",
+        "Vegetation": "#16A34A",
+        "Others": "#6B7280",
+      },
+      "Non-Fixed Obstacle on Facility": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "NFO Type": {
+        "Barrier": "#DC2626",
+        "Bins": "#EA580C",
+        "Bicycle": "#F59E0B",
+        "Cone": "#CA8A04",
+        "Others": "#6B7280",
+      },
+      "Width Restriction": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Light Segregation": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Facility access": { "Adequate": "#16A34A", "Inadequate": "#DC2626" },
+      "Loose or slippery surface": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Major Surface Deformation or Drain Opening": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Tram or Train Rails": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Delineation": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Grade": {
+        "<=2% (1:25)": "#16A34A",
+        "2.9% (1:20)": "#65A30D",
+        "3.8% (1:15)": "#CA8A04",
+        "4.7% (1:12)": "#EA580C",
+        ">=5%": "#DC2626",
+      },
+      "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
+      "Curvature Sub-category": {
+        "Sharp Bend": "#DC2626",
+        "Path Junction": "#EA580C",
+        "Both": "#9333EA",
+        "10–18m": "#16A34A",
+        ">18m": "#2563EB",
+      },
+      "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#FFCC1A", "Very Narrow": "#DC2626" },
+      "Facility Width Sub-category": {
+        "≤1.5m": "#DC2626",
+        ">1.5–1.8m": "#EA580C",
+        ">1.8–<2m": "#F59E0B",
+        "2–<3.5m": "#16A34A",
+        "3.5–4m": "#0891B2",
+        ">4m": "#2563EB",
+      },
+      "Peak pedestrian flow along or across facility": { "None": "#6B7280", "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Peak bicycle/LV traffic flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Observed proportion of cargo bikes and mopeds": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Heavy vehicle flow": { "Low": "#16A34A", "Moderate to high": "#DC2626" },
+      "Bicycle/LV speed – average": { "< 20km/h": "#16A34A", "=/> 20km/h": "#DC2626" },
+      "Bicycle/LV speed differential": { "< 10km/h": "#16A34A", "=/> 10km/h": "#DC2626" },
+      "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Crossing Type": {
+        "Zebra Crossing": "#CA8A04",
+        "Signalised PC": "#2563EB",
+        "Bicycle Crossing": "#16A34A",
+        "Unsignalised Junction": "#EA580C",
+        "Development Access": "#9333EA",
+      },
+      "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
+      "Property Access": { "Present": "#DC2626", "Not Present": "#16A34A" },
+      "Intersection Approach": { "Separate/NA": "#16A34A", "Shared": "#DC2626" },
+      "Number of lanes – adjacent road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+      "Number of lanes – intersecting road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+      "Road speed limit": {
+        "NA": "#6B7280",
+        "30 km/h": "#16A34A",
+        "40 km/h": "#65A30D",
+        "50 km/h": "#FFCC1A",
+        "60 km/h": "#F59E0B",
+        "70 km/h": "#EA580C",
+        "80 km/h": "#DC2626",
+        "90 km/h": "#991B1B",
+      },
+      "Flow Direction": { "One Way": "#2563EB", "Two Way": "#9333EA" },
+      "Delineation Type": {
+        "Cycling Path": "#2563EB",
+        "Red Stripe": "#DC2626",
+        "Signalised Crossing": "#EA580C",
+        "Traffic Crossing": "#0891B2",
+        "Zebra Crossing": "#CA8A04",
+      },
+      "Facility Type": {
+        "Sidewalk": "#2563EB",
+        "Multi-Use Path": "#9333EA",
+        "Off-Road Bicycle Path": "#16A34A",
+        "On-road Bicycle Lane": "#CA8A04",
+        "Road Shoulder": "#F59E0B",
+        "Mixed Traffic Road Lane": "#DC2626",
+      },
+      "Area type": {
+        "Urban": "#2563EB",
+        "Suburban": "#0891B2",
+        "Rural": "#16A34A",
+        "Industrial": "#EA580C",
+        "Recreational": "#9333EA",
+      },
+    };
+
+    const attributeColors = categoryColors[effectiveFocusAttribute];
+    if (typeof attributeColors === "object" && attributeColors !== null) {
+      return attributeColors as Record<string, string>;
+    }
+
+    if (SAFETY_FOCUS_ATTRIBUTES.has(effectiveFocusAttribute || "")) {
+      return {
+        "Low": categoryColors["Low"] as string,
+        "Medium": categoryColors["Medium"] as string,
+        "High": categoryColors["High"] as string,
+        "Extreme": categoryColors["Extreme"] as string,
+      };
+    }
+
+    return {} as Record<string, string>;
+  }, [effectiveFocusAttribute]);
+
+  // Extract visible points and then color them using the deepest surviving focus attribute.
+  const allPoints = useMemo(() => {
+    const focusAttribute = effectiveFocusAttribute ?? "Project";
+
+    return visibleSegments.map((segment) => {
+      const attributeValue = getFocusedAttributeValue(focusAttribute, segment);
+      const color = focusAttribute === "Project"
+        ? segment.projectColor
+        : getCategoryColor(focusAttribute, attributeValue || "Not Selected");
+
+      return {
+        idx: segment.idx,
+        latlng: segment.latlng,
+        f: segment.f,
+        attributes: segment.attributes,
+        projectName: segment.projectName,
+        color,
+        attributeValue,
+      };
+    });
+  }, [effectiveFocusAttribute, getFocusedAttributeValue, visibleSegments]);
 
   const allLatLngs = useMemo(() => allPoints.map(p => p.latlng), [allPoints]);
 
@@ -1268,8 +1439,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       projectData.geoFeatures.forEach((_, i) => {
         const attributes = projectData.attributes[i];
         if (attributes) {
-          const attrValue = attributes[categoryFilterAttribute];
-          const attrValueText = getAttrText(categoryFilterAttribute, attrValue);
+          const segmentScores = projectData.scores?.[i] ?? null;
+          const attrValueText = getFilterAttributeText(categoryFilterAttribute, projectData.projectName, attributes, segmentScores);
           if (attrValueText) {
             // Multi-value attributes: split "Bollards, Fence" into individual categories
             if (MULTI_VALUE_ATTRS.has(categoryFilterAttribute) && attrValueText.includes(", ")) {
@@ -1283,28 +1454,14 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
 
     const categories = Array.from(categoriesInData);
-    const isSafetyScore = ["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(categoryFilterAttribute);
-    if (isSafetyScore) {
-      const riskOrder = ["Low", "Medium", "High", "Extreme"];
-      categories.sort((a, b) => {
-        const ai = riskOrder.indexOf(a), bi = riskOrder.indexOf(b);
-        if (ai === -1 && bi === -1) return 0;
-        if (ai === -1) return 1; if (bi === -1) return -1;
-        return ai - bi;
-      });
-    } else if (categoryFilterAttribute === "Facility Width per Direction") {
-      const widthOrder = ["Very Narrow", "Narrow", "Wide"];
-      categories.sort((a, b) => {
-        const ai = widthOrder.indexOf(a), bi = widthOrder.indexOf(b);
-        if (ai === -1 && bi === -1) return 0;
-        if (ai === -1) return 1; if (bi === -1) return -1;
-        return ai - bi;
-      });
+    const semanticOrder = getSemanticCategoryOrder(categoryFilterAttribute);
+    if (semanticOrder) {
+      categories.sort((a, b) => compareByOrder(a, b, semanticOrder));
     } else {
       categories.sort();
     }
     return categories;
-  }, [categoryFilterAttribute, projectsData, attrMappings]);
+  }, [categoryFilterAttribute, getFilterAttributeText, projectsData]);
 
   // Initialise / update category toggles when the sidebar attribute or its available categories change
   useEffect(() => {
@@ -1488,12 +1645,12 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
 
   // Calculate category distribution data for the chart
   const categoryDistributionData = useMemo(() => {
-    if (!primaryFocusAttribute) return [];
+    if (!effectiveFocusAttribute) return [];
 
     // Count occurrences of each category
     const categoryCounts: Record<string, number> = {};
 
-    if (primaryFocusAttribute === "Project") {
+    if (effectiveFocusAttribute === "Project") {
       // For Project focus, count segments per project
       allPoints.forEach((point) => {
         const project = point.projectName;
@@ -1527,34 +1684,15 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           color: attributeCategoryColors[category] || "#6B7280",
         }));
 
-      // Apply semantic ordering for specific attributes
-      if (primaryFocusAttribute === "Facility Width per Direction") {
-        const widthOrder = ["Very Narrow", "Narrow", "Wide"];
-        return chartData.sort((a, b) => {
-          const aIndex = widthOrder.indexOf(a.category);
-          const bIndex = widthOrder.indexOf(b.category);
-          if (aIndex === -1 && bIndex === -1) return 0;
-          if (aIndex === -1) return 1;
-          if (bIndex === -1) return -1;
-          return aIndex - bIndex;
-        });
-      } else if (["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"].includes(primaryFocusAttribute)) {
-        // For safety score bands and Overall Risk Level, sort in the order: Low, Medium, High, Extreme
-        const riskOrder = ["Low", "Medium", "High", "Extreme"];
-        return chartData.sort((a, b) => {
-          const aIndex = riskOrder.indexOf(a.category);
-          const bIndex = riskOrder.indexOf(b.category);
-          if (aIndex === -1 && bIndex === -1) return 0;
-          if (aIndex === -1) return 1;
-          if (bIndex === -1) return -1;
-          return aIndex - bIndex;
-        });
-      } else {
-        // Default: sort by count descending
-        return chartData.sort((a, b) => b.count - a.count);
+      const semanticOrder = getSemanticCategoryOrder(effectiveFocusAttribute);
+      if (semanticOrder) {
+        return chartData.sort((a, b) => compareByOrder(a.category, b.category, semanticOrder));
       }
+
+      // Default: sort by count descending
+      return chartData.sort((a, b) => b.count - a.count);
     }
-  }, [allPoints, primaryFocusAttribute, attributeCategoryColors, projectColors]);
+  }, [allPoints, effectiveFocusAttribute, attributeCategoryColors, projectColors]);
 
   // Calculate status of all selected filter attributes (Active/Inactive categories)
   const categoryStatus = useMemo(() => {
@@ -1693,11 +1831,11 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     if (onChartDataUpdate) {
       onChartDataUpdate({
         categoryDistributionData,
-        primaryFocusAttribute,
+        primaryFocusAttribute: effectiveFocusAttribute,
         categoryStatus,
       });
     }
-  }, [categoryDistributionData, primaryFocusAttribute, categoryStatus, onChartDataUpdate]);
+  }, [categoryDistributionData, effectiveFocusAttribute, categoryStatus, onChartDataUpdate]);
 
   // Clear polygon points and close dialog when toggling polygon mode
   useEffect(() => {
@@ -2253,8 +2391,8 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                       if (f.properties?.["Image Reference"]) {
                         label += ` ${f.properties["Image Reference"]}`;
                       }
-                      if (primaryFocusAttribute && attributeValue) {
-                        label += ` | ${primaryFocusAttribute}: ${attributeValue}`;
+                      if (effectiveFocusAttribute && attributeValue) {
+                        label += ` | ${effectiveFocusAttribute}: ${attributeValue}`;
                       }
 
                       return (

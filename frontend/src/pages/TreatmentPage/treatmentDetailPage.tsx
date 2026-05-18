@@ -688,6 +688,14 @@ export default function TreatmentDetailPage() {
     return [];
   }, [accordionView, currentIndex, selectedTreatments, treatmentState]);
 
+  const appliedTreatmentIds = useMemo(() => {
+    return treatmentState[currentIndex]?.treatment_ids ?? [];
+  }, [currentIndex, treatmentState]);
+
+  const combinedTreatmentIds = useMemo(() => {
+    return [...new Set([...appliedTreatmentIds, ...Array.from(selectedTreatments)])];
+  }, [appliedTreatmentIds, selectedTreatments]);
+
   // Helper to resolve index
   const resolveIndex = useCallback((globalIndex: number) => {
     for (const p of projectMap) {
@@ -766,22 +774,23 @@ export default function TreatmentDetailPage() {
     });
   }, [scores, treatmentState]);
 
-  // Compute modified attributes and changed attributes for current segment when treatments are applied
+  // Compute modified attributes and changed attributes for the current segment
+  // using both applied treatments and any pending selections.
   const { modifiedAttrs, changedAttributes, changedFieldSources } = useMemo(() => {
-    const state = treatmentState[currentIndex];
-    if (!state?.applied || !state.treatment_ids) {
-      return { modifiedAttrs: attrs[currentIndex] || null, changedAttributes: new Set<string>(), changedFieldSources: {} };
+    const currentAttrs = attrs[currentIndex] || null;
+    if (!currentAttrs || combinedTreatmentIds.length === 0) {
+      return { modifiedAttrs: currentAttrs, changedAttributes: new Set<string>(), changedFieldSources: {} };
     }
     const { modifiedRow, changedAttributes: changed } = applyTreatmentEffects(
-      attrs[currentIndex],
-      state.treatment_ids
+      currentAttrs,
+      combinedTreatmentIds
     );
     const sources: Record<string, string> = {};
     changed.forEach((attr) => {
       sources[attr] = "Treatment";
     });
     return { modifiedAttrs: modifiedRow, changedAttributes: changed, changedFieldSources: sources };
-  }, [treatmentState, currentIndex, attrs]);
+  }, [attrs, combinedTreatmentIds, currentIndex]);
 
   const currentFeature = useMemo<Feature | null>(() => {
     return geoFeatures[currentIndex] ?? null;
@@ -1112,11 +1121,15 @@ export default function TreatmentDetailPage() {
         },
       }));
 
+      setSelectedTreatments(new Set());
+      setPreviewScores(null);
+      setPreviewLoading(false);
+
     } catch (e: any) {
     } finally {
       setApplyLoading(false);
     }
-  }, [resolveIndex, currentIndex, selectedTreatments, imgRef]);
+  }, [resolveIndex, currentIndex, selectedTreatments, imgRef, treatmentState]);
 
   const handleConfirmApplyToAll = async () => {
     if (selectedTreatments.size === 0 || !currentCtx) return;
@@ -1146,11 +1159,14 @@ export default function TreatmentDetailPage() {
   // Fetch preview scores when selection changes
   useEffect(() => {
     const ctx = resolveIndex(currentIndex);
-    // If treatments are already applied, or no treatments selected, or no project/index, skip preview
-    if (!ctx || currentIndex < 0 || treatmentState[currentIndex]?.applied || selectedTreatments.size === 0) {
+    if (!ctx || currentIndex < 0 || selectedTreatments.size === 0) {
       setPreviewScores(null);
+      setPreviewLoading(false);
       return;
     }
+
+    setPreviewScores(null);
+    let cancelled = false;
 
     // Debounce to avoid too many requests
     const timeoutId = setTimeout(async () => {
@@ -1158,27 +1174,34 @@ export default function TreatmentDetailPage() {
       try {
         const result = await previewTreatments(ctx.name, {
           segment_index: ctx.localIndex,
-          treatment_ids: Array.from(selectedTreatments),
+          treatment_ids: combinedTreatmentIds,
         });
 
-        if (result.ok) {
-          setPreviewScores({
-            BB: result.after_scores.BB,
-            BP: result.after_scores.BP,
-            SB: result.after_scores.SB,
-            VB: result.after_scores.VB,
-            total: result.after_scores["Overall Risk Level"],
-          });
+        if (cancelled || !result.ok) {
+          return;
         }
+
+        setPreviewScores({
+          BB: result.after_scores.BB,
+          BP: result.after_scores.BP,
+          SB: result.after_scores.SB,
+          VB: result.after_scores.VB,
+          total: result.after_scores["Overall Risk Level"],
+        });
       } catch (e) {
 
       } finally {
-        setPreviewLoading(false);
+        if (!cancelled) {
+          setPreviewLoading(false);
+        }
       }
     }, 300); // 300ms debounce
 
-    return () => clearTimeout(timeoutId);
-  }, [resolveIndex, currentIndex, selectedTreatments, treatmentState]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [combinedTreatmentIds, currentIndex, resolveIndex, selectedTreatments]);
 
   // Handle resetting treatments
   const handleResetTreatments = useCallback(async () => {
@@ -1204,6 +1227,7 @@ export default function TreatmentDetailPage() {
 
       setSelectedTreatments(new Set());
       setPreviewScores(null); // Clear preview
+      setPreviewLoading(false);
     } catch (e: any) {
     } finally {
       setApplyLoading(false);
@@ -1219,6 +1243,8 @@ export default function TreatmentDetailPage() {
       // Reset selected treatments and preview when navigating to a new segment
       setSelectedTreatments(new Set());
       setPreviewScores(null);
+      setPreviewLoading(false);
+      setSegmentScoreDrops({});
     },
     [len]
   );
@@ -1490,31 +1516,27 @@ export default function TreatmentDetailPage() {
               Treatment Options
             </Text>
             <Box mt="2">
-              <Box
-                as="select"
+              <select
                 value={accordionView}
-                onChange={(e: any) => {
-                  setAccordionView(e.target.value);
+                onChange={(e) => {
+                  setAccordionView(e.target.value as "segment" | "treatment");
                   setSelectedTreatments(new Set());
                 }}
-                w="100%"
-                p="6px"
-                borderRadius="md"
-                borderWidth="1px"
-                borderColor="gray.300"
-                bg="white"
-                color="gray.900"
-                fontSize="sm"
-                cursor="pointer"
-                _dark={{
-                  bg: "gray.800",
-                  borderColor: "gray.600",
-                  color: "gray.100"
+                style={{
+                  width: "100%",
+                  padding: "6px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--chakra-colors-gray-300)",
+                  backgroundColor: "white",
+                  color: "inherit",
+                  fontSize: "14px",
+                  cursor: "pointer",
                 }}
+                className="theme-select"
               >
                 <option value="segment">By Segment</option>
                 <option value="treatment">By Treatment</option>
-              </Box>
+              </select>
             </Box>
           </Box>
 
@@ -1820,23 +1842,28 @@ export default function TreatmentDetailPage() {
           >
             <SegmentScoresCard
               scores={(() => {
+                const originalScores = scores[currentIndex] as any || null;
+                const appliedAfterScores = treatmentState[currentIndex]?.after_scores;
+                const appliedScoreRow = appliedAfterScores
+                  ? {
+                    ...scores[currentIndex],
+                    BB: appliedAfterScores.BB,
+                    BP: appliedAfterScores.BP,
+                    SB: appliedAfterScores.SB,
+                    VB: appliedAfterScores.VB,
+                    "Overall Risk Level": appliedAfterScores.total,
+                  } as any
+                  : originalScores;
+
                 if (!showPostTreatment) {
                   // Pre-treatment: always show original scores
-                  return scores[currentIndex] as any || null;
-                }
-
-                // Post-treatment toggle is on
-                if (treatmentState[currentIndex]?.applied) {
-                  // Treatments have been applied: show real after-treatment scores
-                  return { ...scores[currentIndex], BB: treatmentState[currentIndex]!.after_scores!.BB, BP: treatmentState[currentIndex]!.after_scores!.BP, SB: treatmentState[currentIndex]!.after_scores!.SB, VB: treatmentState[currentIndex]!.after_scores!.VB, "Overall Risk Level": treatmentState[currentIndex]!.after_scores!.total } as any;
+                  return originalScores;
                 }
 
                 if (selectedTreatments.size > 0) {
-                  // Treatments are selected but not applied: show preview scores (if loaded)
+                  // Treatments are selected: show preview scores once loaded.
                   if (previewLoading || !previewScores) {
-                    // Fallback to original scores while loading, or maybe keep previous preview?
-                    // For now, let's keep showing original scores until preview arrives to avoid jumping
-                    return scores[currentIndex] as any || null;
+                    return appliedScoreRow;
                   }
 
                   return {
@@ -1849,8 +1876,13 @@ export default function TreatmentDetailPage() {
                   } as any;
                 }
 
+                if (appliedAfterScores) {
+                  // Treatments have been applied: show real after-treatment scores.
+                  return appliedScoreRow;
+                }
+
                 // No treatments selected or applied: show original scores
-                return scores[currentIndex] as any || null;
+                return originalScores;
               })()}
               beforeScores={
                 showPostTreatment && (treatmentState[currentIndex]?.applied || selectedTreatments.size > 0)
@@ -1864,7 +1896,7 @@ export default function TreatmentDetailPage() {
                   : undefined
               }
               showPreviewBackground={
-                showPostTreatment && selectedTreatments.size > 0 && !treatmentState[currentIndex]?.applied
+                showPostTreatment && selectedTreatments.size > 0
               }
             />
           </Box>
