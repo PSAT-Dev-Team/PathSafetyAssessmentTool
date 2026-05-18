@@ -57,7 +57,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["Polygon", "MultiPolygon"],
         required_columns=["LU_DESC (1)", "LU_TEXT (3)"],
         query_type="poly",
-        description="Affects PSAT Attribute: Area type (Urban, Industrial, Rural, Recreational)",
+        description="Area type (Urban, Industrial, Rural, Recreational)",
         default_buffer_m=20.0,
         column_aliases={
             "LU_DESC": ["LU_DESC", "PARKING_ZO", "STATION_NA", "DESC", "DESCRIPTION", "ZONE", "NAME"],
@@ -69,7 +69,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["Polygon", "MultiPolygon"],
         required_columns=["LU_DESC (1)", "LU_TEXT (3)"],
         query_type="poly",
-        description="Affects PSAT Attribute: Area type (Rural)",
+        description="Area type (Rural)",
         default_buffer_m=20.0,
     ),
     "LanduseRecre2026": LayerDefinition(
@@ -77,7 +77,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["Polygon", "MultiPolygon"],
         required_columns=["LU_DESC (1)", "LU_TEXT (3)"],
         query_type="poly",
-        description="Affects PSAT Attribute: Area type (Recreational)",
+        description="Area type (Recreational)",
         default_buffer_m=20.0,
     ),
     "rural": LayerDefinition(
@@ -103,7 +103,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["Point", "MultiPoint"],
         required_columns=["STATION_NA (1)", "EXIT_CODE (2)"],
         query_type="near",
-        description="Affects PSAT Attribute: Pedestrian Crossing, Peak Flow",
+        description="Pedestrian Crossing, Peak Flow",
         default_buffer_m=20.0,
         column_aliases={
             "STATION_NA": ["STATION_NA", "STATION_NAME", "NAME", "EXIT_CODE", "EXIT_NAME", "CODE"]
@@ -114,7 +114,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["Point", "MultiPoint"],
         required_columns=["BUS_STOP_N (1)", "LOC_DESC (3)"],
         query_type="near",
-        description="Affects PSAT Attribute: Pedestrian Crossing, Peak Flow",
+        description="Pedestrian Crossing, Peak Flow",
         default_buffer_m=20.0,
         column_aliases={
             "BUS_STOP_N": ["BUS_STOP_N", "BUS_STOP_NO", "BUS_STOP_C", "BUS_STOP_CODE", "CODE", "NAME", "LOC_DESC"]
@@ -125,15 +125,39 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["TYP_CD (1)", "TYP_NAM (2)"],
         query_type="near",
-        description="Affects PSAT Attribute: Heavy vehicle flow",
+        description="Heavy vehicle flow; Extracted Type: A1, A6, A7, L, Q, Q1, Q2, Y",
         default_buffer_m=20.0,
+    ),
+    "LIDAR_scan": LayerDefinition(
+        name="LIDAR_scan",
+        geometry_types=["Polygon", "MultiPolygon", "Point"],
+        required_columns=["ELEVATION (1)"],
+        query_type="near",
+        description="Grade",
+        default_buffer_m=5.0,
+    ),
+    "Defects": LayerDefinition(
+        name="Defects",
+        geometry_types=["Point", "MultiPoint", "Polygon", "MultiPolygon"],
+        required_columns=["DEFECT_TYP (1)"],
+        query_type="near",
+        description="Loose/Slippery surface, major surface deformation",
+        default_buffer_m=10.0,
+    ),
+    "pedestrian_crossing": LayerDefinition(
+        name="pedestrian_crossing",
+        geometry_types=["LineString", "MultiLineString", "Point", "MultiPoint", "Polygon", "MultiPolygon"],
+        required_columns=["UNIQUE_ID (1)"],
+        query_type="near",
+        description="Pedestrian crossing, intersecting bicycle facility",
+        default_buffer_m=5.0,
     ),
     "parking_lot": LayerDefinition(
         name="parking_lot",
         geometry_types=["Polygon", "MultiPolygon"],
         required_columns=["PP_CODE (1)", "LOT_NO (2)", "TYPE (3)"],
         query_type="near",
-        description="Affects PSAT Attribute: Adjacent Vehicle Parking",
+        description="Adjacent Vehicle Parking",
         default_buffer_m=20.0,
     ),
     "roadcrossinglayer": LayerDefinition(
@@ -141,7 +165,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString", "Point"],
         required_columns=["UNIQUE_ID (1)"],
         query_type="near",
-        description="Affects PSAT Attribute: Pedestrian Crossing",
+        description="Pedestrian Crossing",
         default_buffer_m=5.0,
     ),
     "AMG_BC2025_shp": LayerDefinition(
@@ -149,7 +173,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString", "Point"],
         required_columns=["UNIQUE_ID (1)"],
         query_type="near",
-        description="Affects PSAT Attribute: Intersection or Road Crossing, Crossing Facility",
+        description="Intersection or Road Crossing, Crossing Facility",
         default_buffer_m=2.0,
     ),
 
@@ -159,7 +183,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["WIDTH (1)"],
         query_type="near",
-        description="Affects PSAT Attribute: Facility Width, Curvature",
+        description="Facility Width, Curvature",
         default_buffer_m=5.0,
         column_aliases={
             "WIDTH": ["WIDTH", "PATH_WIDTH", "W_WIDTH", "width", "Width_m", "WIDTH_M", "Wdth", "WID"]
@@ -171,7 +195,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["WIDTH (1)"],
         query_type="near",
-        description="Affects PSAT Attribute: Facility Width, Curvature",
+        description="Facility Width, Curvature",
         default_buffer_m=5.0,
     ),
     "shared_path": LayerDefinition(
@@ -179,7 +203,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["WIDTH (1)"],
         query_type="near",
-        description="Affects PSAT Attribute: Facility Width, Curvature",
+        description="Facility Width, Curvature",
         default_buffer_m=5.0,
     ),
     "footpath": LayerDefinition(
@@ -187,7 +211,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["WIDTH (1)"],
         query_type="near",
-        description="Affects PSAT Attribute: Facility Width, Curvature",
+        description="Facility Width, Curvature",
         default_buffer_m=5.0,
     ),
     "CyclingPath_Jul2024": LayerDefinition(
@@ -195,7 +219,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["path_width (1)", "path_type (2)"],
         query_type="near",
-        description="Affects PSAT Attribute: Facility Width, Curvature",
+        description="Facility Width, Curvature",
         default_buffer_m=5.0,
         column_aliases={
             "path_width": ["path_width", "WIDTH", "width", "W_WIDTH", "Width_m", "WIDTH_M"]
@@ -206,7 +230,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["WDT_CATG_C (1)", "TYP_CD (2)"],
         query_type="near",
-        description="Affects PSAT Attribute: Facility Width, Curvature",
+        description="Facility Width, Curvature",
         default_buffer_m=5.0,
         column_aliases={
             "WDT_CATG_C": ["WDT_CATG_C", "WIDTH", "width", "WDT_CATG_1"]
@@ -217,9 +241,9 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
     "LinkID_Shape_File": LayerDefinition(
         name="LinkID_Shape_File",
         geometry_types=["LineString", "MultiLineString"],
-        required_columns=["LK_ID_NUM (1)"],
+        required_columns=["LK_ID_NUM (1)", "SPEED (2)"],
         query_type="nearest_with_lookup",
-        description="Affects PSAT Attribute: Road operating speed (mean)",
+        description="Road operating speed (mean)",
         default_buffer_m=20.0,
         column_aliases={
             "LK_ID_NUM": ["LK_ID_NUM", "LINKID", "LINK_ID", "LinkID", "ID", "link_id"]
@@ -230,7 +254,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["SPEEDLIMIT (1)"],
         query_type="nearest_with_attribute",
-        description="Affects PSAT Attribute: Road speed limit",
+        description="Road speed limit",
         default_buffer_m=20.0,
         column_aliases={
             "SPEEDLIMIT": ["SPEEDLIMIT", "SPEED_LIMIT", "SPEED_LIM", "speedlimit", "speed_limit", "LIMIT"]
@@ -241,7 +265,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["LANES (1)", "LOCATION (2)", "DIRECTION (3)"],
         query_type="nearest",
-        description="Affects PSAT Attribute: Number of lanes – adjacent road",
+        description="Number of lanes – adjacent road",
         default_buffer_m=10.0,
         column_aliases={
             "LANES": ["LANES", "NUM_LANES", "LANE_COUNT", "UNIQUE_ID", "ID"]
@@ -254,7 +278,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["Point", "MultiPoint"],
         required_columns=["DataType (1)", "DateTime (2)", "Count_Data (3)"],
         query_type="temporal_aggregation",
-        description="Affects PSAT Attribute: Peak Pedestrian Flow, Peak Bicycle Traffic Flow",
+        description="Peak Pedestrian Flow, Peak Bicycle Traffic Flow",
         default_buffer_m=20.0,
     ),
     "AMGsensorCount": LayerDefinition(
@@ -262,7 +286,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["Point", "MultiPoint"],
         required_columns=["Pivot_user (1)", "Datetime_p (2)", "Count (3)"],
         query_type="temporal_aggregation",
-        description="Affects PSAT Attribute: Peak Pedestrian Flow, Peak Bicycle Traffic Flow",
+        description="Peak Pedestrian Flow, Peak Bicycle Traffic Flow",
         default_buffer_m=20.0,
     ),
 
@@ -272,7 +296,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["Polygon", "MultiPolygon"],
         required_columns=["PLN_AREA_N (1)"],
         query_type="poly",
-        description="Affects PSAT Attribute: Area-based reporting",
+        description="Area-based reporting",
         default_buffer_m=0.0,
     ),
     "Road_name": LayerDefinition(
@@ -280,7 +304,7 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         geometry_types=["LineString", "MultiLineString"],
         required_columns=["RD_TYP_CD (1)"],
         query_type="near",
-        description="Affects PSAT Attribute: Road name reference",
+        description="Road name reference",
         default_buffer_m=10.0,
     ),
 }

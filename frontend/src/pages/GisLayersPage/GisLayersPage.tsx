@@ -79,7 +79,8 @@ export default function GisLayersPage() {
     try {
       setLoading(true);
       const data = await listShapefiles();
-      setShapefiles(data);
+      const sortedData = data.sort((a, b) => a.name.localeCompare(b.name));
+      setShapefiles(sortedData);
       setError(null);
     } catch (err: any) {
       console.error("Failed to load shapefiles", err);
@@ -285,7 +286,12 @@ export default function GisLayersPage() {
                         {file.name}
                       </Text>
                       <HStack mt={1} fontSize="xs" color="gray.500" justify="space-between">
-                        <Badge colorPalette="blue" variant="subtle" size="sm">{file.category}</Badge>
+                        <HStack gap="2">
+                          <Badge colorPalette="blue" variant="subtle" size="sm">{file.category}</Badge>
+                          {file.geom_type && (
+                            <Badge colorPalette="purple" variant="outline" size="sm">{file.geom_type}</Badge>
+                          )}
+                        </HStack>
                         <Text>{formatBytes(file.size)}</Text>
                       </HStack>
                       <HStack mt={1} fontSize="xs" color="gray.500" gap="3">
@@ -297,7 +303,7 @@ export default function GisLayersPage() {
                           <Text as="span" fontWeight="600">Required Columns:</Text> {file.required_columns || getLayerMetadata(file.base_name).reqCols}
                         </Text>
                         <Text color="gray.700" whiteSpace="normal" wordBreak="break-word">
-                          <Text as="span" fontWeight="600">Affects PSAT Attribute:</Text> {file.affects || getLayerMetadata(file.base_name).affects}
+                          <Text as="span" fontWeight="600">Affects:</Text> {file.affects || getLayerMetadata(file.base_name).affects}
                         </Text>
                       </Box>
                     </Box>

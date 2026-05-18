@@ -60,18 +60,30 @@ LAYER_METADATA = {
     "FootPath_Mar2025":     {"year": "2025", "source": "LTA / NParks – Footpath Network"},
     "LanduseRecre2026":     {"year": "2026", "source": "URA – Master Plan Land Use (Recreation)"},
     "LanduseRural2026":     {"year": "2026", "source": "URA – Master Plan Land Use (Rural)"},
-    "LinkID_Shape_File":    {"year": "2024", "source": "LTA – Road Network Link IDs"},
-    "Mrt_exit":             {"year": "2024", "source": "LTA – MRT Station Exits"},
+    "LinkID_Shape_File":    {"year": "2024", "source": "ERP2 data"},
+    "Mrt_exit":             {"year": "2024", "source": "Geospace"},
     "Planning_area":        {"year": "2024", "source": "URA – Planning Area Boundaries"},
-    "Road_name":            {"year": "2024", "source": "LTA / SLA – Road Name Layer"},
-    "Speed_limit":          {"year": "2024", "source": "LTA – Speed Limit Segments"},
+    "Road_name":            {"year": "2024", "source": "LTA – Road Name Layer"},
+    "Speed_limit":          {"year": "2024", "source": "Geospace"},
     "area_type":            {"year": "2024", "source": "URA – Area Type Classification"},
-    "bus_lane":             {"year": "2024", "source": "LTA – Bus Lane Network"},
-    "bus_stop":             {"year": "2024", "source": "LTA – Bus Stop Locations"},
+    "bus_lane":             {"year": "2024", "source": "Geospace lane marking, extracted Type:A1, A6, A7, L, Q, Q1, Q2, Y"},
+    "bus_stop":             {"year": "2024", "source": "Geospace"},
+    "bus_shelter":          {"year": "2024", "source": "Geospace"},
     "kerb_line":            {"year": "2024", "source": "LTA – Kerb Line Layer"},
-    "parking_lot":          {"year": "2024", "source": "HDB / URA – Parking Lot Locations"},
+    "parking_lot":          {"year": "2024", "source": "Geospace"},
+    "HDB_carpark_lots":     {"year": "2024", "source": "Geospace"},
+    "URA_parking_lot":      {"year": "2024", "source": "Geospace"},
+    "landuse":              {"year": "2024", "source": "Geospace"},
+    "Dgp":                  {"year": "2024", "source": "Geospace"},
+    "Road_network_line":    {"year": "2024", "source": "Geospace"},
     "path":                 {"year": "2024", "source": "LTA – Path Centreline Network"},
-    "roadcrossinglayer":    {"year": "2024", "source": "LTA – Road Crossing Points"},
+    "footpath_centreline":  {"year": "2024", "source": "LTA – Footpath Centreline"},
+    "shared_path_centreline": {"year": "2024", "source": "LTA – Shared Path Centreline"},
+    "cycling_path_centreline": {"year": "2024", "source": "LTA – Cycling Path Centreline"},
+    "roadcrossinglayer":    {"year": "2024", "source": "Geospace"},
+    "pedestrian_crossing":  {"year": "2024", "source": "Geospace"},
+    "LIDAR_scan":           {"year": "2024", "source": "Surveys & Lands Div"},
+    "Defects":              {"year": "2024", "source": "PATH"},
 }
 
 def _extract_xml_yearStr(shp_path: Path) -> str | None:
@@ -167,6 +179,10 @@ def _file_info(shp_path: Path, root: Path) -> dict:
     ld = get_layer_definition(ld_key)
     req_cols = ", ".join(ld.required_columns) if ld and ld.required_columns else "None"
     affects = ld.description if ld else "Unknown"
+    
+    geom_type_str = "Unknown"
+    if ld and ld.geometry_types:
+        geom_type_str = ", ".join(ld.geometry_types)
 
     return {
         "name": shp_path.stem.replace("_", " ").title(),
@@ -176,6 +192,7 @@ def _file_info(shp_path: Path, root: Path) -> dict:
         "category": category,
         "size": total_size,
         "type": "Shapefile",
+        "geom_type": geom_type_str,
         "year": year,
         "source": fallback_source,
         "required_columns": req_cols,

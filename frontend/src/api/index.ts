@@ -619,6 +619,7 @@ export type ShapefileInfo = {
   files?: string[];
   required_columns?: string;
   affects?: string;
+  geom_type?: string;
 };
 
 export type ShapefileCategoryInfo = {

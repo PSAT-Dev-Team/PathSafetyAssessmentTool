@@ -85,6 +85,7 @@ The algorithm builds four intermediate components (`CM3`, `CM16`, `CM25`, `CM40`
 ```
 CM3 = (product of CU factors) ^ (1 + CQ_sum × 0.1)
 ```
+*Layman's explanation: This math formula is used to calculate the risk score for the main cycling environment based on various factors like surface and lighting.*
 
 **CU factors** (continuous risk multipliers):
 
@@ -152,6 +153,7 @@ VB = (cj3 + cj25) × factors   [fall/conflict — 0 if condition absent]
    + cj40 ÷ 3                  [intersection term 2 — 0 if condition absent]
    + cj40 ÷ 3                  [intersection term 3 — 0 if condition absent]
 ```
+*Layman's explanation: These equations combine the different risk factors calculated above into the final safety scores you see on the screen.*
 
 **Key takeaway:** BB and BP are driven entirely by CM3 + CM16. SB additionally incorporates CM25 for fall scenarios. VB is the only score that uses CM40 (shared-space and intersection conflicts).
 
@@ -209,6 +211,7 @@ CM3 = CU_product ^ (1 + CQ_sum × 0.1)
     = 1.8 ^ 1.0
     = 1.8
 ```
+*Layman's explanation: This example shows how the computer calculates a risk score of 1.8 for a specific road segment.*
 
 **Now add one CQ trigger — set Intersection or Road Crossing = Present (1):**
 
@@ -254,6 +257,7 @@ Operating speed is converted via a sigmoid formula:
 lookup_speed = round(speed) - 1
 risk = 1 + 27.82 / (1 + exp(5.84 − 0.091 × lookup_speed))
 ```
+*Layman's explanation: This formula is used to calculate how the speed of vehicles on the road affects the safety score.*
 
 > Speed is first rounded to the nearest integer, then decremented by 1 before the sigmoid is applied. Returns 1.0 if speed ≤ 1.
 
