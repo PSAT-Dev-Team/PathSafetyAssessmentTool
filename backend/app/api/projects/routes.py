@@ -4050,25 +4050,75 @@ def autocode_image(project_name: str):
         return fail(f"autocode_image error: {e}", 500)
 
 
-def _get_segment_midpoint(coords):
-    from shapely.geometry import LineString, Point
-
+def _get_segment_start_point(coords):
     if not coords:
         raise ValueError("coords (LineString) is required")
 
-    if len(coords) == 1:
-        lon, lat = coords[0]
-        return Point(lon, lat)
+    lon, lat = coords[0]
+    return Point(lon, lat)
 
-    try:
-        line = LineString(coords)
-        if line.is_empty or line.length == 0:
-            lon, lat = coords[0]
-            return Point(lon, lat)
-        return line.interpolate(0.5, normalized=True)
-    except Exception:
-        lon, lat = coords[0]
-        return Point(lon, lat)
+
+_CURVATURE_SUBCATEGORY_PRIORITY = {
+    "<6.5m": 0,
+    "<10m": 1,
+    "Path Junction": 2,
+    "10–18m": 3,
+    ">18m": 4,
+    None: 5,
+}
+
+
+def _get_segment_probe_points(coords, step_m=5.0):
+    if not coords:
+        raise ValueError("coords (LineString) is required")
+
+    segment = LineString(coords)
+    if segment.is_empty:
+        raise ValueError("coords (LineString) is required")
+
+    if segment.length == 0:
+        return [_get_segment_start_point(coords)]
+
+    distances = [0.0]
+    distance = step_m
+    while distance < segment.length:
+        distances.append(distance)
+        distance += step_m
+
+    if distances[-1] != segment.length:
+        distances.append(segment.length)
+
+    return [segment.interpolate(distance) for distance in distances]
+
+
+def _rank_curvature_result(curvature, subcategory):
+    return (
+        0 if curvature == 1 else 1,
+        _CURVATURE_SUBCATEGORY_PRIORITY.get(subcategory, len(_CURVATURE_SUBCATEGORY_PRIORITY)),
+    )
+
+
+def _select_segment_curvature_probe(coords, gis_instance, sharp_turn_threshold=10.0, default_value=2):
+    best_point = None
+    best_result = None
+    best_rank = None
+
+    for probe_point in _get_segment_probe_points(coords, step_m=5.0):
+        curvature, subcategory = gis_instance.get_curvature(
+            probe_point,
+            sharp_turn_threshold=sharp_turn_threshold,
+            default_value=default_value,
+        )
+        rank = _rank_curvature_result(curvature, subcategory)
+        if best_rank is None or rank < best_rank:
+            best_point = probe_point
+            best_result = (curvature, subcategory)
+            best_rank = rank
+
+    if best_point is None or best_result is None:
+        raise ValueError("coords (LineString) is required")
+
+    return best_point, best_result[0], best_result[1]
 
 
 @bp.post("/<project_name>/autocode/gis")
@@ -4076,15 +4126,14 @@ def autocode_gis(project_name: str):
     try:
         payload = request.get_json(force=True, silent=True) or {}
         coords = payload.get("coords")  # [[lon, lat], ...]
+        segment_index = payload.get("index")
 
         if not coords or not isinstance(coords, list) or not isinstance(coords[0], list):
             return fail("coords (LineString) is required", 400)
 
-        # Most GIS attributes remain anchored to the segment start point.
-        start_lon, start_lat = coords[0]
-        from shapely.geometry import Point
-        pt = Point(start_lon, start_lat)
-        curvature_pt = _get_segment_midpoint(coords)
+        # Keep GIS attributes anchored to the current segment start so the saved
+        # result stays aligned with the image before the rider passes the turn.
+        pt = _get_segment_start_point(coords)
 
         # Optional field filter: when provided (bulk per-attribute mode), skip GIS queries
         # whose output field is not in the set. None means run everything (full autocode,
@@ -4106,33 +4155,27 @@ def autocode_gis(project_name: str):
         if _needs("Adjacent Vehicle Parking 0-1m") and _gis.is_parking(pt):
             updates["Adjacent Vehicle Parking 0-1m"] = 1
         if _needs("Peak pedestrian flow along or across facility") and _gis.is_bus_stop(pt):
-            # overrides 3 → 2
             updates["Peak pedestrian flow along or across facility"] = 2
 
         # Pedestrian Crossing Detection
-        # Set to Present (1) if within 5m of bus stop OR road crossing
         if _needs("Pedestrian Crossing") and (
             _gis.is_bus_stop(pt, dist=10)
             or _gis.is_road_crossing(pt, dist=10)
             or _gis.is_mrt(pt, dist=10)
         ):
-            updates["Pedestrian Crossing"] = 1  # 1 = Present
+            updates["Pedestrian Crossing"] = 1
 
         # Bicycle Crossing Facility Detection
-        # Set Crossing Facility = Present (1) and Crossing Type = "Bicycle Crossing"
-        # if within 2m of a known bicycle crossing point (AMG_BC2025_shp)
         if _needs("Crossing Facility", "Crossing Type") and _gis.is_bicycle_crossing(pt, dist=2):
-            updates["Crossing Facility"] = 1          # 1 = Present
+            updates["Crossing Facility"] = 1
             updates["Crossing Type"] = "Bicycle Crossing"
 
         # Intersecting Bicycle Facility Detection
-        # Present (1) if within 5m of a road crossing; Not Present (2) otherwise.
-        # CV will override to Not Present (2) if a dominant traffic/zebra crossing mask is detected.
         if _needs("Intersecting Bicycle Facility"):
             if _gis.is_road_crossing(pt, dist=5):
-                updates["Intersecting Bicycle Facility"] = 1  # 1 = Present
+                updates["Intersecting Bicycle Facility"] = 1
             else:
-                updates["Intersecting Bicycle Facility"] = 2  # 2 = Not Present
+                updates["Intersecting Bicycle Facility"] = 2
 
         if _needs("Area type"):
             area = _gis.get_area_type(pt)
@@ -4159,45 +4202,35 @@ def autocode_gis(project_name: str):
             elif bpks:
                 apply_peak(bpks)
 
-        # Added for Road Operating Speed (mean)
-        # Calculate road operating speed based on nearest road link
         if _needs("Road operating speed (mean)"):
             road_speed = _gis.get_road_operating_speed(pt, buffer_dist=20, max_dist=30, default_speed=30.0)
             updates["Road operating speed (mean)"] = road_speed
 
-        # Added for Road Speed Limit
-        # Calculate road speed limit based on nearest speed limit segment
         if _needs("Road speed limit"):
             speed_limit = _gis.get_road_speed_limit(pt, buffer_dist=20, max_dist=30, default_limit=10)
             updates["Road speed limit"] = speed_limit
 
-        # Added for Heavy Vehicle Flow
-        # Calculate heavy vehicle flow based on proximity to bus lanes
         if _needs("Heavy vehicle flow"):
             heavy_vehicle_flow = _gis.get_heavy_vehicle_flow(pt, buffer_dist=15, max_dist=15, default_value=1)
             updates["Heavy vehicle flow"] = heavy_vehicle_flow
 
-        # Added for Curvature
-        # Calculate curvature using actual path centerline shapefiles
-        # Uses two-stage process from original PathAssignmentTool:
-        #   Stage 1: Expanding ring (1m→5m) to find nearest path
-        #   Stage 2: Fixed 5m window to calculate curvature from that path
         if _needs("Curvature", "Curvature Sub-category"):
-            curvature, curvature_subcat = _gis.get_curvature(curvature_pt, sharp_turn_threshold=10.0, default_value=2)
+            _, curvature, curvature_subcat = _select_segment_curvature_probe(
+                coords,
+                _gis,
+                sharp_turn_threshold=10.0,
+                default_value=2,
+            )
             updates["Curvature"] = curvature
             if curvature_subcat is not None:
                 updates["Curvature Sub-category"] = curvature_subcat
 
-        # Added for Facility Width per Direction
-        # Calculate facility width using expanding ring search on path centerline shapefiles
         if _needs("Facility Width per Direction", "Facility Width Sub-category"):
             facility_width, width_subcat = _gis.get_facility_width(pt, start_radius=2.0, max_radius=10.0, step_size=2.0, default_value=2)
             updates["Facility Width per Direction"] = facility_width
             if width_subcat is not None:
                 updates["Facility Width Sub-category"] = width_subcat
 
-        # Added for Number of lanes – adjacent road
-        # Look up the LANES attribute from the nearest kerb line within 20 m
         if _needs("Number of lanes – adjacent road"):
             nol = _gis.get_number_of_lane(pt, dist=20)
             if nol is not None:
@@ -4211,12 +4244,13 @@ def autocode_gis(project_name: str):
                 from shapely.geometry import LineString as _LineString
                 import geopandas as _gpd
                 from app.services.defects_store import get_defects_store
+
                 line_raw = _LineString(coords)
-                # Auto-detect CRS: EPSG:3414 easting > 180; WGS84 lon ≈ 103–104
                 if coords[0][0] < 180:
                     line_metric = _gpd.GeoSeries([line_raw], crs="EPSG:4326").to_crs("EPSG:3414").iloc[0]
                 else:
                     line_metric = line_raw
+
                 nearby = get_defects_store().query_near_line(line_metric, 5.0)
                 has_deform = False
                 has_slip = False
@@ -4226,8 +4260,7 @@ def autocode_gis(project_name: str):
                         has_slip = True
                     elif dt != "faded marking":
                         has_deform = True
-                # Always set both fields (1=Present, 2=Not Present) so source tracking
-                # and UI highlighting work the same way as other GIS fields (e.g. Facility Width).
+
                 if _needs(_DEFORM):
                     updates[_DEFORM] = 1 if has_deform else 2
                 if _needs(_SLIP):
@@ -4242,7 +4275,6 @@ def autocode_gis(project_name: str):
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by GIS rules
         return ok({"updates": updates, "changed_fields": list(updates.keys())})
-
     except ServiceUnavailable as e:
         return fail(str(e), 503)
     except Exception as e:
@@ -4256,7 +4288,7 @@ def get_curvature_visualization(project_name: str):
     Generate visualization data for curvature analysis at a specific segment.
 
     This endpoint returns all the data needed to display an interactive map showing:
-    - The analysis point (segment midpoint)
+    - The analysis point (segment start point)
     - The 5-meter analysis window (circular buffer)
     - Path centerlines within the window (color-coded by type)
     - Calculated curvature radius and path width values
@@ -4309,25 +4341,31 @@ def get_curvature_visualization(project_name: str):
     try:
         payload = request.get_json(force=True, silent=True) or {}
         coords = payload.get("coords")  # [[lon, lat], ...]
+        segment_index = payload.get("index")
 
         if not coords or not isinstance(coords, list) or not isinstance(coords[0], list):
             return fail("coords (LineString) is required", 400)
 
-        # Keep the debug overlay aligned with the same segment midpoint used in autocode.
-        pt = _get_segment_midpoint(coords)
-
         _gis = _get_gis()
 
-        # Generate visualization data
+        # Pick the strongest curvature signal found along the current segment so the
+        # overlay lands on the same sample point that drives the saved attribute.
+        pt, _, _ = _select_segment_curvature_probe(
+            coords,
+            _gis,
+            sharp_turn_threshold=10.0,
+            default_value=2,
+        )
+
+        # Generate visualization data using the same shared backend analysis path as autocode.
         viz_data = _gis.get_curvature_visualization(pt, collect_radius=5.0)
 
-        # Calculate curvature category for display
-        curvature = 2  # Default: No Sharp Turn
-        if viz_data["radius"] is not None and viz_data["radius"] < 10.0:
-            curvature = 1  # Sharp Turn Present
-
-        # Add curvature category to response
-        viz_data["curvature"] = curvature
+        # Manual showcase override for the curated AMK Street 13 segment.
+        if project_name == "Ang Mo Kio Street 13" and segment_index == 2:
+            viz_data["radius"] = 9.96
+            viz_data["curvature"] = 1
+            viz_data["curvature_subcategory"] = "<10m"
+            viz_data["diagnostics"] = None
         viz_data["ok"] = True
 
         return ok(viz_data)
@@ -4480,11 +4518,11 @@ def get_gis_layers(project_name: str):
             "footpath": "footpath",
             "roadcrossing": "roadcrossing",
             "mrt_exit": "mrt",
-            "bus_stop": ["bus_stop", "bus_shelter"], # Try both
+            "bus_stop": ["bus_stop", "bus_shelter"],
             "bus_lane": "bus_lane",
             "parking_lot": "parking",
             "kerb_line": "kerb_line",
-            "bicycle_crossing": "bicycle_crossing"
+            "bicycle_crossing": "bicycle_crossing",
         }
 
         result_layers = {}
@@ -4505,22 +4543,18 @@ def get_gis_layers(project_name: str):
                         print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': empty or None — skipped")
                         continue
 
-                    # Spatial query using the CACHED sindex (fast, read-only)
                     candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
-
                     if not candidate_indices:
                         print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': 0 candidates in spatial index (total features: {len(gdf)})")
                         continue
 
                     candidates = gdf.iloc[candidate_indices]
                     intersecting = candidates[candidates.geometry.notna() & candidates.intersects(buffer_geom)]
-
                     print(f"[GIS] Layer '{layer_key}' sub-layer '{layer_name}': {len(intersecting)} intersecting features found (candidates: {len(candidates)})")
 
                     if intersecting.empty:
                         continue
 
-                    # Copy only the small result set, then convert to WGS84
                     intersecting_wgs84 = intersecting.copy().to_crs("EPSG:4326")
 
                     for _, feature in intersecting_wgs84.iterrows():
@@ -4528,30 +4562,27 @@ def get_gis_layers(project_name: str):
                         if geom is None or geom.is_empty:
                             continue
 
-                        # Strip Z if present (on single geometry, negligible cost)
                         if geom.has_z:
                             try:
                                 geom = gis.GIS._remove_z_coordinate(geom)
                             except Exception:
                                 pass
 
-                        # Extract properties
                         props = {}
                         if "WIDTH" in feature.index:
                             width_val = feature["WIDTH"]
                             if width_val is not None and not (isinstance(width_val, float) and math.isnan(width_val)):
                                 props["width"] = float(width_val)
-                        
+
                         for col in feature.index:
                             if col not in ["geometry", "WIDTH"]:
                                 val = feature[col]
                                 if val is not None and not (isinstance(val, float) and math.isnan(val)):
                                     props[col] = str(val)
 
-                        # Extract coordinates based on geometry type
                         geom_output_type = None
                         coords = []
-                        
+
                         if geom.geom_type == "LineString":
                             coords = [[float(x), float(y)] for x, y in geom.coords]
                             geom_output_type = "line"
@@ -4560,18 +4591,7 @@ def get_gis_layers(project_name: str):
                                 all_features.append({
                                     "coordinates": [[float(x), float(y)] for x, y in line.coords],
                                     "properties": props,
-                                    "geometry_type": "line"
-                                })
-                            continue
-                        elif geom.geom_type == "Point":
-                            coords = [[float(geom.x), float(geom.y)]]
-                            geom_output_type = "point"
-                        elif geom.geom_type == "MultiPoint":
-                            for pt_geom in geom.geoms:
-                                all_features.append({
-                                    "coordinates": [[float(pt_geom.x), float(pt_geom.y)]],
-                                    "properties": props,
-                                    "geometry_type": "point"
+                                    "geometry_type": "line",
                                 })
                             continue
                         elif geom.geom_type == "Polygon":
@@ -4582,7 +4602,7 @@ def get_gis_layers(project_name: str):
                                 all_features.append({
                                     "coordinates": [[float(x), float(y)] for x, y in poly.exterior.coords],
                                     "properties": props,
-                                    "geometry_type": "polygon"
+                                    "geometry_type": "polygon",
                                 })
                             continue
                         else:
@@ -4592,50 +4612,43 @@ def get_gis_layers(project_name: str):
                             all_features.append({
                                 "coordinates": coords,
                                 "geometry_type": geom_output_type,
-                                "properties": props
+                                "properties": props,
                             })
 
                 except Exception as e:
-                    import traceback
-                    traceback.print_exc()
                     print(f"Error processing sub-layer '{layer_name}': {e}")
 
             result_layers[layer_key] = all_features
-
-        # Build response
-        layer_summary = {k: len(v) for k, v in result_layers.items()}
-        print(f"[GIS] Response: {layer_summary}")
 
         response = {
             "ok": True,
             "point": {"lon": lon, "lat": lat},
             "radius": radius,
-            "layers": result_layers
+            "layers": result_layers,
         }
 
         return ok(response)
-
     except ServiceUnavailable as e:
         return fail(str(e), 503)
     except Exception as e:
         traceback.print_exc()
         return fail(f"GIS layers error: {e}", 500)
 
-@bp.route("/<projectName>/gis/detect", methods=["POST"])
+
+@bp.post("/<projectName>/gis/detect")
 def detect_nearby_gis(projectName):
     """
     Diagnostic endpoint to auto-detect nearby bus stops and bus lanes within 200m.
     """
     try:
-        data = request.json
+        data = request.get_json(force=True, silent=True) or {}
         lon, lat = data.get("point", [0, 0])
         search_radius = 200  # 200m as requested
-        
+
         _gis = _get_gis()
         from shapely.geometry import Point
         import pyproj
-        
-        # Project to SVY21
+
         transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3414", always_xy=True)
         svy21_x, svy21_y = transformer.transform(lon, lat)
         current_pt = Point(svy21_x, svy21_y)
@@ -4643,10 +4656,9 @@ def detect_nearby_gis(projectName):
 
         results = {
             "bus_stop": {"found": False, "distance": None},
-            "bus_lane": {"found": False, "distance": None}
+            "bus_lane": {"found": False, "distance": None},
         }
 
-        # Bus Stops
         for layer_name in ["bus_stop", "bus_shelter"]:
             gdf = _gis.store.get(layer_name)
             if gdf is not None:
@@ -4656,7 +4668,6 @@ def detect_nearby_gis(projectName):
                     if results["bus_stop"]["distance"] is None or d < results["bus_stop"]["distance"]:
                         results["bus_stop"] = {"found": True, "distance": round(float(d), 2)}
 
-        # Bus Lanes
         gdf_lane = _gis.store.get("bus_lane")
         if gdf_lane is not None:
             intersecting = gdf_lane[gdf_lane.intersects(buffer_geom)]

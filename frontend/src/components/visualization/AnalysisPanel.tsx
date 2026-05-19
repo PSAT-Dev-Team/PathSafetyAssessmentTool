@@ -61,6 +61,30 @@ function LayerDot({ layer }: { layer: string }) {
   );
 }
 
+function getCurvatureAccent(data: CurvatureVisualizationResponse | null): string | undefined {
+  if (!data) return undefined;
+  if (data.curvature !== 1) return '#27AE60';
+  if (data.curvature_subcategory === '<6.5m') return '#DC2626';
+  if (data.curvature_subcategory === '<10m') return '#EA580C';
+  if (data.curvature_subcategory === 'Path Junction') return '#9333EA';
+  if (data.curvature_subcategory === 'Both') return '#9333EA';
+  return '#E74C3C';
+}
+
+function getCurvatureLabel(data: CurvatureVisualizationResponse | null): string | null {
+  if (!data) return null;
+  if (data.curvature !== 1) return '✓ No Sharp Turn';
+  if (data.curvature_subcategory === '<6.5m') return '⚠️ <6.5m Radius';
+  if (data.curvature_subcategory === '<10m') return '⚠️ <10m Radius';
+  if (data.curvature_subcategory === 'Path Junction') return '⚠️ Path Junction';
+  if (data.curvature_subcategory === 'Both') return '⚠️ Sharp Bend + Junction';
+  return '⚠️ Sharp Bend';
+}
+
+function shouldShowCurvatureSummaryRadius(data: CurvatureVisualizationResponse | null): boolean {
+  return !!data && data.radius !== null && data.curvature_subcategory !== 'Path Junction';
+}
+
 // ─── individual data card ─────────────────────────────────────────────────────
 
 interface DataCardProps {
@@ -110,22 +134,54 @@ export function AnalysisPanel({
 
   useEffect(() => {
     if (!projectName || !coordinates?.length) return;
+    const controller = new AbortController();
+    setWidthData(null);
     setWidthLoading(true);
     setWidthError(null);
-    fetchWidthVisualization(projectName, coordinates, segmentIndex)
-      .then(setWidthData)
-      .catch(e => setWidthError(e instanceof Error ? e.message : 'Failed'))
-      .finally(() => setWidthLoading(false));
+    fetchWidthVisualization(projectName, coordinates, segmentIndex, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setWidthData(data);
+        }
+      })
+      .catch((e) => {
+        if (controller.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
+          return;
+        }
+        setWidthError(e instanceof Error ? e.message : 'Failed');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setWidthLoading(false);
+        }
+      });
+    return () => controller.abort();
   }, [projectName, coordinates, segmentIndex]);
 
   useEffect(() => {
     if (!projectName || !coordinates?.length) return;
+    const controller = new AbortController();
+    setCurvData(null);
     setCurvLoading(true);
     setCurvError(null);
-    fetchCurvatureVisualization(projectName, coordinates, segmentIndex)
-      .then(setCurvData)
-      .catch(e => setCurvError(e instanceof Error ? e.message : 'Failed'))
-      .finally(() => setCurvLoading(false));
+    fetchCurvatureVisualization(projectName, coordinates, segmentIndex, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setCurvData(data);
+        }
+      })
+      .catch((e) => {
+        if (controller.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
+          return;
+        }
+        setCurvError(e instanceof Error ? e.message : 'Failed');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setCurvLoading(false);
+        }
+      });
+    return () => controller.abort();
   }, [projectName, coordinates, segmentIndex]);
 
   // ── collapsed quick-summary ──────────────────────────────────────────────
@@ -139,9 +195,9 @@ export function AnalysisPanel({
       )}
       {widthData && curvData && <span className="analysis-summary-sep">·</span>}
       {curvData && (
-        <span style={{ color: curvData.curvature === 1 ? '#E74C3C' : '#27AE60' }}>
-          {curvData.curvature === 1 ? '⚠️ Sharp Turn' : '✓ No Turn'}
-          {curvData.radius !== null && ` (${curvData.radius.toFixed(1)}m)`}
+        <span style={{ color: getCurvatureAccent(curvData) }}>
+          {getCurvatureLabel(curvData) ?? '✓ No Turn'}
+          {shouldShowCurvatureSummaryRadius(curvData) && ` (${curvData.radius!.toFixed(1)}m)`}
         </span>
       )}
     </span>
@@ -220,10 +276,8 @@ export function AnalysisPanel({
               label="Curvature Class"
               loading={curvLoading}
               error={!!curvError}
-              accent={curvData ? (curvData.curvature === 1 ? '#E74C3C' : '#27AE60') : undefined}
-              value={curvData
-                ? (curvData.curvature === 1 ? '⚠️ Sharp Turn' : '✓ No Sharp Turn')
-                : undefined}
+              accent={getCurvatureAccent(curvData)}
+              value={getCurvatureLabel(curvData) ?? undefined}
             />
             <DataCard
               label="Category"

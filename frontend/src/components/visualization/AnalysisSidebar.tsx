@@ -65,6 +65,26 @@ function LayerDot({ layer }: { layer: string }) {
   );
 }
 
+function getCurvatureAccent(data: CurvatureVisualizationResponse | null): string | undefined {
+  if (!data) return undefined;
+  if (data.curvature !== 1) return '#27AE60';
+  if (data.curvature_subcategory === '<6.5m') return '#DC2626';
+  if (data.curvature_subcategory === '<10m') return '#EA580C';
+  if (data.curvature_subcategory === 'Path Junction') return '#9333EA';
+  if (data.curvature_subcategory === 'Both') return '#9333EA';
+  return '#E74C3C';
+}
+
+function getCurvatureLabel(data: CurvatureVisualizationResponse | null): string | null {
+  if (!data) return null;
+  if (data.curvature !== 1) return '✓ No Sharp Turn';
+  if (data.curvature_subcategory === '<6.5m') return '⚠️ <6.5m Radius';
+  if (data.curvature_subcategory === '<10m') return '⚠️ <10m Radius';
+  if (data.curvature_subcategory === 'Path Junction') return '⚠️ Path Junction';
+  if (data.curvature_subcategory === 'Both') return '⚠️ Sharp Bend + Junction';
+  return '⚠️ Sharp Bend';
+}
+
 function DataCard({ label, value, loading, error, accent }: { label: string; value: React.ReactNode; loading?: boolean; error?: boolean; accent?: string }) {
   return (
     <div className="analysis-card">
@@ -165,8 +185,8 @@ export function AnalysisSidebar({
                 label="Curvature Class"
                 loading={curvLoading}
                 error={!!curvError}
-                accent={curvData ? (curvData.curvature === 1 ? '#E74C3C' : '#27AE60') : undefined}
-                value={curvData ? (curvData.curvature === 1 ? '⚠️ Sharp Turn' : '✓ No Sharp Turn') : undefined}
+                accent={getCurvatureAccent(curvData)}
+                value={getCurvatureLabel(curvData) ?? undefined}
               />
               <DataCard
                 label="Curvature Layer"

@@ -19,23 +19,34 @@ export function WidthVisualizationPanel({
   const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
+    const controller = new AbortController();
+
     async function loadVisualization() {
       try {
+        setData(null);
         setLoading(true);
         setError(null);
-        const result = await fetchWidthVisualization(projectName, coordinates, segmentIndex);
-        setData(result);
+        const result = await fetchWidthVisualization(projectName, coordinates, segmentIndex, controller.signal);
+        if (!controller.signal.aborted) {
+          setData(result);
+        }
       } catch (err) {
+        if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+          return;
+        }
         setError(err instanceof Error ? err.message : 'Failed to load visualization');
-        
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     }
 
     if (projectName && coordinates && coordinates.length > 0) {
       loadVisualization();
     }
+
+    return () => controller.abort();
   }, [projectName, coordinates, segmentIndex]);
 
   if (loading) {

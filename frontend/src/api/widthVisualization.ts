@@ -63,12 +63,14 @@ export interface WidthVisualizationResponse {
 export async function fetchWidthVisualization(
   projectName: string,
   coords: [number, number][],
-  index?: number
+  index?: number,
+  signal?: AbortSignal,
 ): Promise<WidthVisualizationResponse> {
   const response = await fetch(
     `${API_BASE_URL}/api/projects/${projectName}/width/visualize`,
     {
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
       },
