@@ -1473,19 +1473,56 @@ export default function CodingPage() {
     }
     const coords = (currentFeature.geometry as LineString).coordinates as [number, number][];
 
+    const widthController = new AbortController();
+    const curvController = new AbortController();
+
+    setWidthData(null);
+    setCurvData(null);
+
     setWidthLoading(true);
     setWidthError(null);
-    fetchWidthVisualization(currentProjectName, coords, currentIndex)
-      .then(setWidthData)
-      .catch(e => setWidthError(e instanceof Error ? e.message : 'Failed'))
-      .finally(() => setWidthLoading(false));
+    fetchWidthVisualization(currentProjectName, coords, currentIndex, widthController.signal)
+      .then((data) => {
+        if (!widthController.signal.aborted) {
+          setWidthData(data);
+        }
+      })
+      .catch((e) => {
+        if (widthController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
+          return;
+        }
+        setWidthError(e instanceof Error ? e.message : 'Failed');
+      })
+      .finally(() => {
+        if (!widthController.signal.aborted) {
+          setWidthLoading(false);
+        }
+      });
 
     setCurvLoading(true);
     setCurvError(null);
-    fetchCurvatureVisualization(currentProjectName, coords, currentIndex)
-      .then(setCurvData)
-      .catch(e => setCurvError(e instanceof Error ? e.message : 'Failed'))
-      .finally(() => setCurvLoading(false));
+    fetchCurvatureVisualization(currentProjectName, coords, currentIndex, curvController.signal)
+      .then((data) => {
+        if (!curvController.signal.aborted) {
+          setCurvData(data);
+        }
+      })
+      .catch((e) => {
+        if (curvController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
+          return;
+        }
+        setCurvError(e instanceof Error ? e.message : 'Failed');
+      })
+      .finally(() => {
+        if (!curvController.signal.aborted) {
+          setCurvLoading(false);
+        }
+      });
+
+    return () => {
+      widthController.abort();
+      curvController.abort();
+    };
   }, [currentProjectName, currentIndex, currentFeature]);
 
   // Auto-calculate scores on project load

@@ -1093,11 +1093,21 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       }
     });
 
-    if (visibleParentCategories.size !== 1) {
+    const enabledParentCategories = new Set(
+      Object.keys(subcatConfig.parentCategories).filter(
+        (parentCategory) => categoryToggles[primaryFocusAttribute]?.[parentCategory] !== false,
+      ),
+    );
+
+    const remainingParentCategories = Array.from(visibleParentCategories).filter(
+      (parentCategory) => enabledParentCategories.has(parentCategory),
+    );
+
+    if (remainingParentCategories.length !== 1) {
       return primaryFocusAttribute;
     }
 
-    const [remainingParentCategory] = Array.from(visibleParentCategories);
+    const [remainingParentCategory] = remainingParentCategories;
     const childOptions = subcatConfig.parentCategories[remainingParentCategory];
     if (!childOptions?.length) {
       return primaryFocusAttribute;
@@ -1114,7 +1124,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
 
     return hasChildValues ? subcatConfig.childAttr : primaryFocusAttribute;
-  }, [getFocusedAttributeValue, primaryFocusAttribute, visibleSegments]);
+  }, [categoryToggles, getFocusedAttributeValue, primaryFocusAttribute, visibleSegments]);
 
   // Generate colors for attribute categories based on the effective focus level.
   const attributeCategoryColors = useMemo(() => {
@@ -1170,8 +1180,10 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       },
       "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
       "Curvature Sub-category": {
-        "Sharp Bend": "#DC2626",
-        "Path Junction": "#EA580C",
+        "<6.5m": "#DC2626",
+        "<10m": "#EA580C",
+        "Path Junction": "#9333EA",
+        "Sharp Bend": "#EA580C",
         "Both": "#9333EA",
         "10–18m": "#16A34A",
         ">18m": "#2563EB",

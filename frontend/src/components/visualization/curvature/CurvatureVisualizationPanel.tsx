@@ -9,6 +9,29 @@ interface CurvatureVisualizationPanelProps {
   segmentIndex?: number;
 }
 
+function getCurvatureAccent(data: CurvatureVisualizationResponse | null): string {
+  if (!data) return '#27AE60';
+  if (data.curvature !== 1) return '#27AE60';
+  if (data.curvature_subcategory === '<6.5m') return '#DC2626';
+  if (data.curvature_subcategory === '<10m') return '#EA580C';
+  if (data.curvature_subcategory === 'Path Junction') return '#9333EA';
+  if (data.curvature_subcategory === 'Both') return '#9333EA';
+  return '#E74C3C';
+}
+
+function getCurvatureLabel(data: CurvatureVisualizationResponse | null): string {
+  if (!data || data.curvature !== 1) return '✓ No Sharp Turn';
+  if (data.curvature_subcategory === '<6.5m') return '⚠️ <6.5m Radius';
+  if (data.curvature_subcategory === '<10m') return '⚠️ <10m Radius';
+  if (data.curvature_subcategory === 'Path Junction') return '⚠️ Path Junction';
+  if (data.curvature_subcategory === 'Both') return '⚠️ Sharp Bend + Junction';
+  return '⚠️ Sharp Bend';
+}
+
+function shouldShowCurvatureSummaryRadius(data: CurvatureVisualizationResponse | null): boolean {
+  return !!data && data.radius !== null && data.curvature_subcategory !== 'Path Junction';
+}
+
 export function CurvatureVisualizationPanel({
   projectName,
   coordinates,
@@ -20,23 +43,34 @@ export function CurvatureVisualizationPanel({
   const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
+    const controller = new AbortController();
+
     async function loadVisualization() {
       try {
+        setData(null);
         setLoading(true);
         setError(null);
-        const result = await fetchCurvatureVisualization(projectName, coordinates, segmentIndex);
-        setData(result);
+        const result = await fetchCurvatureVisualization(projectName, coordinates, segmentIndex, controller.signal);
+        if (!controller.signal.aborted) {
+          setData(result);
+        }
       } catch (err) {
+        if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+          return;
+        }
         setError(err instanceof Error ? err.message : 'Failed to load visualization');
-        
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     }
 
     if (projectName && coordinates && coordinates.length > 0) {
       loadVisualization();
     }
+
+    return () => controller.abort();
   }, [projectName, coordinates, segmentIndex]);
 
   if (loading) {
@@ -78,11 +112,11 @@ export function CurvatureVisualizationPanel({
               style={{
                 fontSize: '14px',
                 fontWeight: 'bold',
-                color: data.curvature === 1 ? '#E74C3C' : '#27AE60'
+                color: getCurvatureAccent(data)
               }}
             >
-              {data.curvature === 1 ? '⚠️ Sharp Turn' : '✓ No Sharp Turn'}
-              {data.radius !== null && ` (${data.radius.toFixed(1)}m)`}
+              {getCurvatureLabel(data)}
+              {shouldShowCurvatureSummaryRadius(data) && ` (${data.radius!.toFixed(1)}m)`}
             </span>
           )}
         </div>
@@ -112,7 +146,7 @@ export function CurvatureVisualizationPanel({
             <div className="info-row">
               <span className="label">Classification:</span>
               <span className={`value ${data.curvature === 1 ? 'sharp-turn' : 'safe'}`}>
-                {data.curvature === 1 ? '⚠️ Sharp Turn' : '✓ No Sharp Turn'}
+                {getCurvatureLabel(data)}
               </span>
             </div>
             {data.layer_used && (

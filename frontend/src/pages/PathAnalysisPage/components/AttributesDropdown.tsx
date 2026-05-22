@@ -495,7 +495,7 @@ export const SUBCATEGORY_MAP: Record<
   "Curvature": {
     childAttr: "Curvature Sub-category",
     parentCategories: {
-      "Sharp Turn Present": ["Sharp Bend", "Path Junction", "Both"],
+      "Sharp Turn Present": ["<6.5m", "<10m", "Path Junction"],
       "No Sharp Turn Present": ["10–18m", ">18m"],
     },
   },
@@ -565,7 +565,7 @@ export const ATTRIBUTE_SUBCATEGORIES: Record<string, Record<string, string>> = {
     ">=5%": "5% gradient or steeper",
   },
   "Curvature": {
-    "Sharp Turn Present": "<6.5 m · 6.5–<10 m",
+    "Sharp Turn Present": "<6.5 m · <10 m · Path Junction",
     "No Sharp Turn Present": "10–18 m · >18 m",
   },
   "Pedestrian Crossing": {
@@ -697,9 +697,11 @@ export function getCategoryColor(attribute: string, category: string): string {
       ">4m":            "#2563EB",
     },
     "Curvature Sub-category": {
-      "Sharp Bend":     "#DC2626",
-      "Path Junction":  "#EA580C",
-      "Both":           "#9333EA",
+      "<6.5m":         "#DC2626",
+      "<10m":          "#EA580C",
+      "Path Junction": "#9333EA",
+      "Sharp Bend":    "#EA580C",
+      "Both":          "#9333EA",
       "10\u201318m":    "#16A34A",
       ">18m":           "#2563EB",
     },
