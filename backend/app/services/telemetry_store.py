@@ -9,6 +9,23 @@ from collections import Counter
 from pathlib import Path
 
 
+def _json_loads_dict(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _coerce_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 _DB_LOCK = threading.RLock()
 _SCHEMA_VERSION = 1
 
@@ -189,6 +206,14 @@ def generate_weekly_report(window_start: dt.datetime | str, window_end: dt.datet
     event_totals: Counter[str] = Counter()
     profiles: dict[str, dict] = {}
     divisions: dict[str, dict] = {}
+    daily_activity: dict[str, dict] = {}
+    page_totals: Counter[str] = Counter()
+    treatment_totals: Counter[int] = Counter()
+    manual_correction_events = 0
+    manual_correction_rows = 0
+    manual_correction_cells = 0
+    project_creation_durations_ms: list[int] = []
+    workflows_using_imported_geometry = 0
 
     for row in rows:
         profile_id = str(row["profile_id"])
@@ -196,8 +221,60 @@ def generate_weekly_report(window_start: dt.datetime | str, window_end: dt.datet
         event_type = str(row["event_type"])
         occurred_at = str(row["occurred_at"])
         project_name = str(row["project_name"] or "") or None
+        payload = _json_loads_dict(row["payload_json"])
+        occurred_dt = _coerce_datetime(occurred_at)
+        day_key = occurred_dt.date().isoformat()
 
         event_totals[event_type] += 1
+
+        day_summary = daily_activity.setdefault(
+            day_key,
+            {
+                "date": day_key,
+                "total_events": 0,
+                "login_count": 0,
+                "page_view_count": 0,
+                "profile_ids": set(),
+            },
+        )
+        day_summary["total_events"] += 1
+        day_summary["profile_ids"].add(profile_id)
+        if event_type == "profile_login":
+            day_summary["login_count"] += 1
+        if event_type == "page_view":
+            day_summary["page_view_count"] += 1
+
+        if event_type == "page_view":
+            page = str(payload.get("page") or "").strip() or "unknown"
+            page_totals[page] += 1
+
+        if event_type == "manual_corrections_saved":
+            manual_correction_events += 1
+            manual_correction_rows += _coerce_int(payload.get("changed_row_count"))
+            manual_correction_cells += _coerce_int(payload.get("changed_cell_count"))
+
+        if event_type == "project_created":
+            duration_ms = _coerce_int(payload.get("duration_ms"), default=-1)
+            if duration_ms >= 0:
+                project_creation_durations_ms.append(duration_ms)
+            if payload.get("used_selection_geometry"):
+                workflows_using_imported_geometry += 1
+
+        if event_type == "treatments_applied":
+            treatment_counts = payload.get("treatment_counts")
+            if isinstance(treatment_counts, dict):
+                for treatment_id, count in treatment_counts.items():
+                    numeric_id = _coerce_int(treatment_id, default=-1)
+                    if numeric_id > 0:
+                        treatment_totals[numeric_id] += max(0, _coerce_int(count))
+            else:
+                segment_count = max(1, _coerce_int(payload.get("segment_count"), default=1))
+                raw_treatment_ids = payload.get("treatment_ids")
+                if isinstance(raw_treatment_ids, list):
+                    for treatment_id in raw_treatment_ids:
+                        numeric_id = _coerce_int(treatment_id, default=-1)
+                        if numeric_id > 0:
+                            treatment_totals[numeric_id] += segment_count
 
         profile_summary = profiles.setdefault(
             profile_id,
@@ -259,6 +336,43 @@ def generate_weekly_report(window_start: dt.datetime | str, window_end: dt.datet
         )
     division_list.sort(key=lambda item: item["division"].lower())
 
+    daily_activity_list = []
+    for day_summary in sorted(daily_activity.values(), key=lambda item: item["date"]):
+        daily_activity_list.append(
+            {
+                "date": day_summary["date"],
+                "total_events": day_summary["total_events"],
+                "login_count": day_summary["login_count"],
+                "session_count_proxy": day_summary["login_count"],
+                "unique_active_profiles": len(day_summary["profile_ids"]),
+                "page_view_count": day_summary["page_view_count"],
+            }
+        )
+
+    if project_creation_durations_ms:
+        project_creation_duration = {
+            "count": len(project_creation_durations_ms),
+            "average_ms": round(sum(project_creation_durations_ms) / len(project_creation_durations_ms), 2),
+            "minimum_ms": min(project_creation_durations_ms),
+            "maximum_ms": max(project_creation_durations_ms),
+        }
+    else:
+        project_creation_duration = {
+            "count": 0,
+            "average_ms": None,
+            "minimum_ms": None,
+            "maximum_ms": None,
+        }
+
+    most_used_pages = [
+        {"page": page, "visit_count": count}
+        for page, count in sorted(page_totals.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    most_used_treatments = [
+        {"treatment_id": treatment_id, "application_count": count}
+        for treatment_id, count in sorted(treatment_totals.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
     return {
         "schema_version": 1,
         "generated_at": _isoformat(_utc_now()),
@@ -280,6 +394,23 @@ def generate_weekly_report(window_start: dt.datetime | str, window_end: dt.datet
             "total_events": len(rows),
             "active_profiles": len(profile_list),
             "division_count": len(division_list),
+        },
+        "daily_activity": daily_activity_list,
+        "derived_metrics": {
+            "session_count_proxy": event_totals.get("profile_login", 0),
+            "projects_created": event_totals.get("project_created", 0),
+            "projects_opened": event_totals.get("project_opened", 0),
+            "projects_deleted": event_totals.get("project_deleted", 0),
+            "page_views": event_totals.get("page_view", 0),
+            "single_item_autocode_runs": event_totals.get("autocode_single_requested", 0),
+            "full_project_autocode_runs": event_totals.get("autocode_bulk_requested", 0),
+            "manual_correction_events": manual_correction_events,
+            "manual_correction_rows": manual_correction_rows,
+            "manual_correction_cells": manual_correction_cells,
+            "workflows_using_imported_geometry": workflows_using_imported_geometry,
+            "project_creation_duration": project_creation_duration,
+            "most_used_pages": most_used_pages,
+            "most_used_treatments": most_used_treatments,
         },
         "event_totals": dict(sorted(event_totals.items())),
         "divisions": division_list,

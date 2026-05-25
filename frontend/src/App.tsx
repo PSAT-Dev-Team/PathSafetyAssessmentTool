@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { useEffect } from "react";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import LandingPage from "./pages/LandingPage/landingPage";
 import Home from "./pages/Projects/projects";
 import CodingPage from "./pages/CodingPage/codingPage"
@@ -13,11 +14,38 @@ import AppLayout from "./layouts/AppLayout";
 import HelpButton from "./components/common/HelpButton";
 import HelpPage from "./pages/HelpPage/helpPage";
 import RequireProfile from "./features/profile/RequireProfile";
+import { recordProfileActivity } from "./api";
+import { useProfile } from "./features/profile/ProfileProvider";
+
+function NavigationTelemetry() {
+  const location = useLocation();
+  const { activeProfile } = useProfile();
+
+  useEffect(() => {
+    if (!activeProfile) {
+      return;
+    }
+
+    const page = location.pathname;
+    const dedupeKey = `${activeProfile.id}:${page}`;
+    const now = Date.now();
+    const lastPageView = (window as any).__psatLastPageView;
+    if (lastPageView && lastPageView.key === dedupeKey && now - lastPageView.at < 1000) {
+      return;
+    }
+
+    (window as any).__psatLastPageView = { key: dedupeKey, at: now };
+    void recordProfileActivity("page_view", { page }).catch(() => {});
+  }, [activeProfile, location.pathname]);
+
+  return null;
+}
 
 export default function App() {
   return (
     <>
       <HelpButton />
+      <NavigationTelemetry />
       <Routes>
 
         <Route path="/" element={<LandingPage />} />

@@ -99,6 +99,13 @@
   gap: 12px;
 }
 
+.profile-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .profile-panel-copy h2 {
   font: 600 1.4rem/1 'Big Noodle Titling', sans-serif;
   letter-spacing: 1px;
@@ -134,7 +141,8 @@
   font-size: 13px;
 }
 
-.profile-create-btn {
+.profile-create-btn,
+.profile-manage-btn {
   min-width: 150px;
   height: 42px;
   border: none;
@@ -148,7 +156,15 @@
   box-shadow: 0 8px 20px rgba(39, 174, 96, 0.2);
 }
 
-.profile-create-btn:disabled {
+.profile-manage-btn {
+  color: #1a4f2f;
+  background: #f5fbf6;
+  border: 1px solid #8cc49a;
+  box-shadow: none;
+}
+
+.profile-create-btn:disabled,
+.profile-manage-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -231,6 +247,33 @@
   margin-top: 16px;
 }
 
+.landing-dialog-status {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #365b42;
+}
+
+.landing-dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.landing-dialog-section-title {
+  font: 600 1rem/1 'Big Noodle Titling', sans-serif;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #153824;
+}
+
+.landing-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .landing-dialog-input {
   height: 44px;
   border: 1px solid var(--chakra-colors-border);
@@ -273,6 +316,20 @@
 
   .start-btn {
     width: 100%;
+  }
+
+  .profile-panel-header {
+    flex-direction: column;
+  }
+
+  .profile-panel-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .profile-create-btn,
+  .profile-manage-btn {
+    flex: 1 1 180px;
   }
 }
 

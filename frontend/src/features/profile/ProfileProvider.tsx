@@ -14,11 +14,15 @@ import {
   loginProfile as apiLoginProfile,
   logoutProfile as apiLogoutProfile,
   migrateLegacyProjects as apiMigrateLegacyProjects,
+  resetProfilePin as apiResetProfilePin,
+  updateProfile as apiUpdateProfile,
   type CreateProfileResult,
   type LoginProfileResult,
   type MigrateLegacyProjectsResult,
   type ProfileSummary,
   type ProfilesOverview,
+  type ResetProfilePinResult,
+  type UpdateProfileResult,
 } from "../../api";
 
 type ProfileContextValue = {
@@ -31,6 +35,8 @@ type ProfileContextValue = {
   createProfile: (name: string, pin: string, division: string) => Promise<CreateProfileResult>;
   login: (profileId: string, pin: string) => Promise<LoginProfileResult>;
   logout: () => Promise<void>;
+  updateProfile: (profileId: string, currentPin: string, name: string, division: string) => Promise<UpdateProfileResult>;
+  resetProfilePin: (profileId: string, currentPin: string, newPin: string) => Promise<ResetProfilePinResult>;
   migrateLegacyProjects: (projectNames?: string[]) => Promise<MigrateLegacyProjectsResult>;
 };
 
@@ -92,6 +98,20 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, [applyOverview]);
 
+  const updateProfile = useCallback(async (profileId: string, currentPin: string, name: string, division: string) => {
+    const result = await apiUpdateProfile(profileId, currentPin, name, division);
+    applyOverview(result.overview);
+    setError(null);
+    return result;
+  }, [applyOverview]);
+
+  const resetProfilePin = useCallback(async (profileId: string, currentPin: string, newPin: string) => {
+    const result = await apiResetProfilePin(profileId, currentPin, newPin);
+    applyOverview(result.overview);
+    setError(null);
+    return result;
+  }, [applyOverview]);
+
   const migrateLegacyProjects = useCallback(async (projectNames?: string[]) => {
     const result = await apiMigrateLegacyProjects(projectNames);
     applyOverview(result.overview);
@@ -109,8 +129,10 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     createProfile,
     login,
     logout,
+    updateProfile,
+    resetProfilePin,
     migrateLegacyProjects,
-  }), [overview, loading, error, refreshOverview, createProfile, login, logout, migrateLegacyProjects]);
+  }), [overview, loading, error, refreshOverview, createProfile, login, logout, updateProfile, resetProfilePin, migrateLegacyProjects]);
 
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
 }

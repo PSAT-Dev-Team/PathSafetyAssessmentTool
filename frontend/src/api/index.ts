@@ -181,6 +181,21 @@ export interface LogoutProfileResult {
   overview: ProfilesOverview;
 }
 
+export interface UpdateProfileResult {
+  profile: ProfileSummary;
+  overview: ProfilesOverview;
+}
+
+export interface ResetProfilePinResult {
+  profile: ProfileSummary;
+  overview: ProfilesOverview;
+}
+
+export interface RecordProfileActivityResult {
+  ok: boolean;
+  recorded: boolean;
+}
+
 export interface MigrateLegacyProjectsResult {
   moved: string[];
   skipped: Array<{ name: string; reason: string }>;
@@ -222,6 +237,49 @@ export async function logoutProfile(): Promise<LogoutProfileResult> {
   });
   if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as LogoutProfileResult;
+}
+
+export async function updateProfile(
+  profileId: string,
+  currentPin: string,
+  name: string,
+  division: string,
+): Promise<UpdateProfileResult> {
+  const res = await fetch(`/api/profiles/${encodeURIComponent(profileId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_pin: currentPin, name, division }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as UpdateProfileResult;
+}
+
+export async function resetProfilePin(
+  profileId: string,
+  currentPin: string,
+  newPin: string,
+): Promise<ResetProfilePinResult> {
+  const res = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/reset-pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_pin: currentPin, new_pin: newPin }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as ResetProfilePinResult;
+}
+
+export async function recordProfileActivity(
+  eventType: string,
+  payload?: Record<string, unknown>,
+  projectName?: string,
+): Promise<RecordProfileActivityResult> {
+  const res = await fetch("/api/profiles/activity", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event_type: eventType, payload, project_name: projectName }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as RecordProfileActivityResult;
 }
 
 export async function migrateLegacyProjects(projectNames?: string[]): Promise<MigrateLegacyProjectsResult> {

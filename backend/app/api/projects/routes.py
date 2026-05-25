@@ -33,6 +33,7 @@ import shutil
 import datetime
 import math
 import ipaddress
+import time
 from app.services.cyclerap_scoring import calculate_cyclerap_score_native
 # ---- init guards (thread-safe & error memo) ----
 import threading
@@ -695,6 +696,19 @@ def _record_active_profile_event(event_type: str, project_name: str | None = Non
         )
     except Exception as exc:
         print(f"[Telemetry] Failed to record '{event_type}': {exc}", flush=True)
+
+
+def _count_attribute_changes(previous_df: pd.DataFrame, next_df: pd.DataFrame) -> tuple[int, int]:
+    columns = list(dict.fromkeys([*previous_df.columns.tolist(), *next_df.columns.tolist()]))
+    row_count = max(len(previous_df), len(next_df))
+    if row_count == 0 or not columns:
+        return 0, 0
+
+    previous = previous_df.reindex(index=range(row_count), columns=columns)
+    current = next_df.reindex(index=range(row_count), columns=columns)
+    equal_mask = previous.eq(current) | (previous.isna() & current.isna())
+    changed_mask = ~equal_mask
+    return int(changed_mask.any(axis=1).sum()), int(changed_mask.to_numpy().sum())
 
 _MODELS_READY = {"cv": False}
 
@@ -2084,6 +2098,18 @@ def apply_treatments(project_name: str):
         proj.metadata.last_updated = datetime.datetime.now()
         proj.metadata.serialize(proj.project_path)
 
+        if treatment_ids:
+            _record_active_profile_event(
+                "treatments_applied",
+                project_name=project_name,
+                payload={
+                    "mode": "segment",
+                    "segment_count": 1,
+                    "segment_index": int(segment_index),
+                    "treatment_ids": [int(treatment_id) for treatment_id in treatment_ids],
+                },
+            )
+
         return jsonify({
             "ok": True,
             "segment_index": segment_index,
@@ -2986,6 +3012,7 @@ def update_attributes(name: str):
 
     # Get latest version for updating
     ver = proj.latest()
+    existing_attrs_df = ver.attributes.df.copy()
 
     # --- INJECTED LOGIC: Calculate Scores & Persist Bands ---
     try:
@@ -3030,6 +3057,17 @@ def update_attributes(name: str):
     # Update last_updated
     proj.metadata.last_updated = datetime.datetime.now()
     proj.metadata.serialize(proj.project_path)
+
+    changed_row_count, changed_cell_count = _count_attribute_changes(existing_attrs_df, new_attrs_df)
+    if changed_cell_count > 0:
+        _record_active_profile_event(
+            "manual_corrections_saved",
+            project_name=name,
+            payload={
+                "changed_row_count": changed_row_count,
+                "changed_cell_count": changed_cell_count,
+            },
+        )
 
     return ok({"ok": True})
 
@@ -3910,6 +3948,7 @@ def create_project_from_folder():
     Body: { "project_name": "My Project", "folder_name": "SomeFolder", "tags": ["tag1", "tag2"] }
     or   { "project_name": "My Project", "folder_names": ["Road A", "Road B"], "tags": ["tag1", "tag2"] }
     """
+    create_started_at = time.perf_counter()
     data = request.get_json(silent=True) or {}
     project_name = (data.get("project_name") or "").strip()
     folder_name = data.get("folder_name")
@@ -4027,6 +4066,9 @@ def create_project_from_folder():
             "dataset": dataset_name,
             "source_count": len(resolved_folder_names),
             "segment_count": len(combined_geo_data),
+            "duration_ms": int(round((time.perf_counter() - create_started_at) * 1000)),
+            "used_selection_geometry": selection_geometry_payload is not None,
+            "selection_kind": selection_kind if selection_geometry_payload is not None else None,
         },
     )
 
@@ -4122,6 +4164,7 @@ def delete_project(project_name: str):
 
     try:
         pm.delete_project(project_name)  # Calls Project._delete() to remove the directory and drop from the list
+        _record_active_profile_event("project_deleted", project_name=project_name)
         return ok({"ok": True, "name": project_name})
     except KeyError:
         return fail("Project not found", 404)
@@ -5216,6 +5259,16 @@ def autocode_all(project_name: str):
                 # Save immediately for single-image autocoding
                 ver.save_all()
 
+                _record_active_profile_event(
+                    "autocode_single_requested",
+                    project_name=project_name,
+                    payload={
+                        "saved": True,
+                        "field_count": len(merged or {}),
+                        "changed_field_count": len(changed_fields),
+                    },
+                )
+
                 return ok({
                     "updates": merged,
                     "saved": True,
@@ -5224,6 +5277,15 @@ def autocode_all(project_name: str):
                 })
 
             # No index provided - return updates without saving
+            _record_active_profile_event(
+                "autocode_single_requested",
+                project_name=project_name,
+                payload={
+                    "saved": False,
+                    "field_count": len(merged or {}),
+                    "changed_field_count": len(merged or {}),
+                },
+            )
             return ok({
                 "updates": merged,
                 "saved": False,

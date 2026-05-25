@@ -73,8 +73,94 @@ def test_login_rejects_wrong_pin(monkeypatch, tmp_path):
         profile_store.login_profile(profile["id"], "1111")
 
 
+def test_update_profile_changes_name_and_division(monkeypatch, tmp_path):
+    profiles_root, _ = _patch_roots(monkeypatch, tmp_path)
+    profile = profile_store.create_profile("Office A", "2468", "Transport Planning")
+
+    updated = profile_store.update_profile(profile["id"], "2468", "Office B", "Road Safety")
+
+    registry = json.loads((profiles_root / "profiles.json").read_text(encoding="utf-8"))
+    stored = registry["profiles"][0]
+    assert updated["name"] == "Office B"
+    assert updated["division"] == "Road Safety"
+    assert updated["slug"] == "office-a"
+    assert stored["name"] == "Office B"
+    assert stored["division"] == "Road Safety"
+
+
+def test_update_profile_rejects_duplicate_name(monkeypatch, tmp_path):
+    _patch_roots(monkeypatch, tmp_path)
+    profile_store.create_profile("Office A", "2468", "Transport Planning")
+    second = profile_store.create_profile("Office B", "1357", "Road Safety")
+
+    with pytest.raises(ValueError, match="already exists"):
+        profile_store.update_profile(second["id"], "1357", "Office A", "Road Safety")
+
+
+def test_reset_profile_pin_replaces_login_pin(monkeypatch, tmp_path):
+    _patch_roots(monkeypatch, tmp_path)
+    profile = profile_store.create_profile("Analyst", "4321", "Data Office")
+
+    profile_store.reset_profile_pin(profile["id"], "4321", "6789")
+
+    with pytest.raises(PermissionError):
+        profile_store.login_profile(profile["id"], "4321")
+
+    active = profile_store.login_profile(profile["id"], "6789")
+    assert active["id"] == profile["id"]
+
+
 def test_create_profile_requires_division(monkeypatch, tmp_path):
     _patch_roots(monkeypatch, tmp_path)
 
     with pytest.raises(ValueError):
         profile_store.create_profile("Analyst", "4321", "")
+
+
+def test_save_state_writes_latest_registry_backup(monkeypatch, tmp_path):
+    profiles_root, _ = _patch_roots(monkeypatch, tmp_path)
+
+    profile_store.create_profile("Alice", "1234", "Road Safety")
+
+    latest_backup = profiles_root / "_registry_backups" / "profiles.latest.json"
+    assert latest_backup.exists()
+    backup_state = json.loads(latest_backup.read_text(encoding="utf-8"))
+    assert backup_state["profiles"][0]["name"] == "Alice"
+
+
+def test_list_profiles_refuses_missing_registry_when_profile_dirs_exist(monkeypatch, tmp_path):
+    profiles_root, _ = _patch_roots(monkeypatch, tmp_path)
+    (profiles_root / "alaster" / "projects").mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(RuntimeError, match="Refusing to initialize empty local state"):
+        profile_store.list_profiles()
+
+    assert not (profiles_root / "profiles.json").exists()
+
+
+def test_list_profiles_restores_latest_backup_when_registry_missing(monkeypatch, tmp_path):
+    profiles_root, _ = _patch_roots(monkeypatch, tmp_path)
+    (profiles_root / "alaster" / "projects").mkdir(parents=True, exist_ok=True)
+    backup_root = profiles_root / "_registry_backups"
+    backup_root.mkdir(parents=True, exist_ok=True)
+    backup_state = {
+        "version": 1,
+        "profiles": [
+            {
+                "id": "abc123",
+                "name": "Alaster",
+                "slug": "alaster",
+                "division": "Road Safety",
+                "created_at": "2026-05-25T00:00:00+00:00",
+                "last_active_at": None,
+                "pin_hash": "hash",
+                "pin_salt": "salt",
+            }
+        ],
+    }
+    (backup_root / "profiles.latest.json").write_text(json.dumps(backup_state, indent=2), encoding="utf-8")
+
+    profiles = profile_store.list_profiles()
+
+    assert profiles[0]["name"] == "Alaster"
+    assert (profiles_root / "profiles.json").exists()
