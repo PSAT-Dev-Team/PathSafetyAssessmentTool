@@ -24,14 +24,26 @@ interface AttributeDistributionChartProps {
   categoryData: { category: string; count: number; color: string }[];
   selectedAttribute: string | null;
   categoryStatus?: { attribute: string; categories: { category: string; isActive: boolean; color: string }[] }[];
+  showPieChart?: boolean;
+  showBarChart?: boolean;
 }
 
 export default function AttributeDistributionChart({
   categoryData,
   selectedAttribute,
   categoryStatus = [],
+  showPieChart = true,
+  showBarChart = true,
 }: AttributeDistributionChartProps) {
-  const [chartType, setChartType] = useState<"pie" | "bar">("pie");
+  const [chartTypeState, setChartTypeState] = useState<"pie" | "bar">("pie");
+
+  const activeChartType = useMemo(() => {
+    if (showPieChart && !showBarChart) return "pie";
+    if (!showPieChart && showBarChart) return "bar";
+    return chartTypeState;
+  }, [showPieChart, showBarChart, chartTypeState]);
+
+  const showToggle = showPieChart && showBarChart;
 
   // Calculate total for percentage
   const total = useMemo(() => {
@@ -164,13 +176,13 @@ export default function AttributeDistributionChart({
             </Box>
           )}
         </Box>
-        <ChartTypeToggle chartType={chartType} onToggle={setChartType} />
+        {showToggle && <ChartTypeToggle chartType={chartTypeState} onToggle={setChartTypeState} />}
       </Flex>
 
       {/* Chart Container */}
       <Box h="500px" w="100%" minH="500px" position="relative">
         <ResponsiveContainer width="100%" height="100%">
-          {chartType === "pie" ? (
+          {activeChartType === "pie" ? (
             <PieChart>
               <Pie
                 data={chartData}

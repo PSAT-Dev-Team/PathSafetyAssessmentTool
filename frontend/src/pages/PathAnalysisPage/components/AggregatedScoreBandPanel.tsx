@@ -7,6 +7,7 @@ import "./AggregatedScoreBandPanel.css";
 
 interface AggregatedScoreBandPanelProps {
   selectedProjects: string[];
+  reportConfig?: Record<string, any>;
 }
 
 type BandDistribution = Record<number, number>;
@@ -49,6 +50,7 @@ const CRASH_TYPE_LABELS: Record<string, string> = {
 
 export function AggregatedScoreBandPanel({
   selectedProjects,
+  reportConfig,
 }: AggregatedScoreBandPanelProps) {
   const [distributions, setDistributions] = useState<CrashTypeDistributions | null>(null);
   const [totalSegments, setTotalSegments] = useState(0);
@@ -298,76 +300,95 @@ export function AggregatedScoreBandPanel({
             totalSegments > 0 && (
               <div className="score-band-charts-container">
                 {/* Overall Risk Level - Full Width at Top */}
-                <div className="score-band-overall">
-                  <ScoreBandPieChart
-                    crashType={CRASH_TYPE_LABELS.Overall}
-                    bandCounts={distributions.Overall}
-                  >
-                    <p style={{
-                      fontSize: "12px",
-                      color: "var(--chakra-colors-gray-500)",
-                      textAlign: "center",
-                      marginTop: "4px",
-                      maxWidth: "400px"
-                    }}>
-                      *The overall risk score is the sum of the crash type scores. The risk level assigned is the
-                      highest of the individual crash types.
-                    </p>
-                  </ScoreBandPieChart>
-                </div>
+                {reportConfig?.showRiskBandsOverall !== false && (
+                  <div className="score-band-overall">
+                    <ScoreBandPieChart
+                      crashType={CRASH_TYPE_LABELS.Overall}
+                      bandCounts={distributions.Overall}
+                    >
+                      <p style={{
+                        fontSize: "12px",
+                        color: "var(--chakra-colors-gray-500)",
+                        textAlign: "center",
+                        marginTop: "4px",
+                        maxWidth: "400px"
+                      }}>
+                        *The overall risk score is the sum of the crash type scores. The risk level assigned is the
+                        highest of the individual crash types.
+                      </p>
+                    </ScoreBandPieChart>
+                  </div>
+                )}
 
                 {/* 4 Crash Types in Grid (Single Row) */}
-                <div style={{ marginTop: "40px", marginBottom: "20px", textAlign: "center" }}>
-                  <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
-                    Risk Level by Crash Type
-                  </h3>
+                {(reportConfig?.showRiskBandsLegend !== false || reportConfig?.showRiskBandsCrashTypes !== false) && (
+                  <div style={{ marginTop: "40px", marginBottom: "20px", textAlign: "center" }}>
+                    {reportConfig?.showRiskBandsCrashTypes !== false && (
+                      <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
+                        Risk Level by Crash Type
+                      </h3>
+                    )}
 
-                  {/* Risk Level Legend */}
-                  <Flex justify="center" gap="8" mt="4" fontSize="sm" textAlign="left">
-                    {/* VB Legend */}
-                    <Box>
-                      <Text fontWeight="bold" mb="1">VB crashes:</Text>
-                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.LOW} borderRadius="sm" /> Low Risk: &lt;10</Flex>
-                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.MEDIUM} borderRadius="sm" /> Medium Risk: 10-25</Flex>
-                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.HIGH} borderRadius="sm" /> High Risk: 25-60</Flex>
-                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.EXTREME} borderRadius="sm" /> Extreme Risk: &gt;60</Flex>
-                    </Box>
-                    {/* Others Legend */}
-                    <Box>
-                      <Text fontWeight="bold" mb="1">BB, BP, SB crashes:</Text>
-                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.LOW} borderRadius="sm" /> Low Risk: &lt;5</Flex>
-                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.MEDIUM} borderRadius="sm" /> Medium Risk: 5-10</Flex>
-                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.HIGH} borderRadius="sm" /> High Risk: 10-20</Flex>
-                      <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.EXTREME} borderRadius="sm" /> Extreme Risk: &gt;20</Flex>
-                    </Box>
-                  </Flex>
-                </div>
-                <div className="aggregated-score-band-grid">
-                  <div className="aggregated-score-band-grid-item">
-                    <ScoreBandPieChart
-                      crashType={CRASH_TYPE_LABELS.VB}
-                      bandCounts={distributions.VB}
-                    />
+                    {/* Risk Level Legend */}
+                    {reportConfig?.showRiskBandsLegend !== false && (
+                      <Flex justify="center" gap="8" mt="4" fontSize="sm" textAlign="left">
+                        {/* VB Legend */}
+                        <Box>
+                          <Text fontWeight="bold" mb="1">VB crashes:</Text>
+                          <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.LOW} borderRadius="sm" /> Low Risk: &lt;10</Flex>
+                          <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.MEDIUM} borderRadius="sm" /> Medium Risk: 10-25</Flex>
+                          <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.HIGH} borderRadius="sm" /> High Risk: 25-60</Flex>
+                          <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.EXTREME} borderRadius="sm" /> Extreme Risk: &gt;60</Flex>
+                        </Box>
+                        {/* Others Legend */}
+                        <Box>
+                          <Text fontWeight="bold" mb="1">BB, BP, SB crashes:</Text>
+                          <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.LOW} borderRadius="sm" /> Low Risk: &lt;5</Flex>
+                          <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.MEDIUM} borderRadius="sm" /> Medium Risk: 5-10</Flex>
+                          <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.HIGH} borderRadius="sm" /> High Risk: 10-20</Flex>
+                          <Flex align="center" gap="2"><Box w="12px" h="12px" bg={RISK_BAND_COLORS.EXTREME} borderRadius="sm" /> Extreme Risk: &gt;20</Flex>
+                        </Box>
+                      </Flex>
+                    )}
                   </div>
-                  <div className="aggregated-score-band-grid-item">
-                    <ScoreBandPieChart
-                      crashType={CRASH_TYPE_LABELS.BB}
-                      bandCounts={distributions.BB}
-                    />
+                )}
+                
+                {reportConfig?.showRiskBandsCrashTypes !== false && (
+                  <div className="aggregated-score-band-grid">
+                    {reportConfig?.showRiskBandsVB !== false && (
+                      <div className="aggregated-score-band-grid-item">
+                        <ScoreBandPieChart
+                          crashType={CRASH_TYPE_LABELS.VB}
+                          bandCounts={distributions.VB}
+                        />
+                      </div>
+                    )}
+                    {reportConfig?.showRiskBandsBB !== false && (
+                      <div className="aggregated-score-band-grid-item">
+                        <ScoreBandPieChart
+                          crashType={CRASH_TYPE_LABELS.BB}
+                          bandCounts={distributions.BB}
+                        />
+                      </div>
+                    )}
+                    {reportConfig?.showRiskBandsSB !== false && (
+                      <div className="aggregated-score-band-grid-item">
+                        <ScoreBandPieChart
+                          crashType={CRASH_TYPE_LABELS.SB}
+                          bandCounts={distributions.SB}
+                        />
+                      </div>
+                    )}
+                    {reportConfig?.showRiskBandsBP !== false && (
+                      <div className="aggregated-score-band-grid-item">
+                        <ScoreBandPieChart
+                          crashType={CRASH_TYPE_LABELS.BP}
+                          bandCounts={distributions.BP}
+                        />
+                      </div>
+                    )}
                   </div>
-                  <div className="aggregated-score-band-grid-item">
-                    <ScoreBandPieChart
-                      crashType={CRASH_TYPE_LABELS.SB}
-                      bandCounts={distributions.SB}
-                    />
-                  </div>
-                  <div className="aggregated-score-band-grid-item">
-                    <ScoreBandPieChart
-                      crashType={CRASH_TYPE_LABELS.BP}
-                      bandCounts={distributions.BP}
-                    />
-                  </div>
-                </div>
+                )}
               </div>
             )}
         </div>

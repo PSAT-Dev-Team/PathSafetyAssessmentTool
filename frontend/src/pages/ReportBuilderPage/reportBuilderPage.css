@@ -1,0 +1,187 @@
+/* ── Page layout ── */
+.rb-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #e0e0e0;
+  overflow: hidden;
+}
+
+/* ── Toolbar ── */
+.rb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.rb-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.rb-toggle-label {
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.rb-toggle {
+  padding: 3px 9px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  background: #f9f9f9;
+  cursor: pointer;
+  font-size: 11px;
+  color: #777;
+  transition: all 0.15s;
+}
+
+.rb-toggle:hover {
+  border-color: #bbb;
+  color: #333;
+}
+
+.rb-toggle.rb-toggle-on {
+  background: #f0e4f8;
+  border-color: #a020d0;
+  color: #a020d0;
+}
+
+.rb-export-group {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ── Buttons ── */
+.rb-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.rb-btn:hover {
+  background: #f5f5f5;
+}
+
+.rb-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.rb-btn-secondary {
+  color: #666;
+}
+
+.rb-btn-primary {
+  background: #a020d0;
+  color: #fff;
+  border-color: #a020d0;
+}
+
+.rb-btn-primary:hover:not(:disabled) {
+  background: #8a1ab0;
+}
+
+/* ── Canvas container ── */
+.rb-canvas-container {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 30px 40px;
+}
+
+.rb-canvas-hint {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+/* ── A4 canvas ── */
+.rb-canvas {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.18);
+  flex-shrink: 0;
+}
+
+/* ── Draggable element ── */
+.rb-element {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: #fff;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
+  box-sizing: border-box;
+}
+
+.rb-element:hover {
+  border-color: #c0a0e0;
+}
+
+.rb-element-handle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: #f5f0fa;
+  border-bottom: 1px solid #e8e0f0;
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.rb-element-handle:active {
+  cursor: grabbing;
+}
+
+.rb-element-handle-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #9060b0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.rb-element-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #bbb;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rb-element-close:hover {
+  color: #555;
+}
+
+.rb-element-body {
+  flex: 1;
+  overflow: hidden;
+}

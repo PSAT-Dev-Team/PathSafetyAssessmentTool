@@ -15,6 +15,34 @@ const LINKS = [
   { to: "/home", label: "Projects" },
 ];
 
+// ─── Report Config: parent → children for cascading checkbox logic ───
+const REPORT_PARENT_CHILDREN: Record<string, string[]> = {
+  showTitle: ['showTitleText', 'showTitleDescription'],
+  showRiskBands: ['showRiskBandsOverall', 'showRiskBandsLegend', 'showRiskBandsCrashTypes', 'showRiskBandsVB', 'showRiskBandsBB', 'showRiskBandsSB', 'showRiskBandsBP'],
+  showRiskBandsCrashTypes: ['showRiskBandsVB', 'showRiskBandsBB', 'showRiskBandsSB', 'showRiskBandsBP'],
+  showMap: ['showMapView'],
+  showCharts: ['showPieChart', 'showBarChart'],
+};
+
+const REPORT_CHILD_PARENT: Record<string, string> = {
+  showTitleText: 'showTitle', showTitleDescription: 'showTitle',
+  showRiskBandsOverall: 'showRiskBands', showRiskBandsLegend: 'showRiskBands', showRiskBandsCrashTypes: 'showRiskBands',
+  showRiskBandsVB: 'showRiskBandsCrashTypes', showRiskBandsBB: 'showRiskBandsCrashTypes',
+  showRiskBandsSB: 'showRiskBandsCrashTypes', showRiskBandsBP: 'showRiskBandsCrashTypes',
+  showMapView: 'showMap',
+  showPieChart: 'showCharts', showBarChart: 'showCharts',
+};
+
+const DEFAULT_REPORT_CONFIG = {
+  showTitle: true, showTitleText: true, showTitleDescription: true,
+  showRiskBands: true, showRiskBandsOverall: true, showRiskBandsLegend: true,
+  showRiskBandsCrashTypes: true, showRiskBandsVB: true, showRiskBandsBB: true,
+  showRiskBandsSB: true, showRiskBandsBP: true,
+  showFilters: true,
+  showMap: true, showMapView: true,
+  showCharts: true, showPieChart: true, showBarChart: true,
+};
+
 
 export default function Sidebar() {
   const { pathname } = useLocation();
@@ -24,6 +52,61 @@ export default function Sidebar() {
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Report visibility options for Path Analysis page
+  const [reportConfigOpen, setReportConfigOpen] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+
+  const toggleSection = useCallback((section: string) => {
+    setExpandedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(section)) { next.delete(section); } else { next.add(section); }
+      return next;
+    });
+  }, []);
+
+  const [reportConfig, setReportConfig] = useState<typeof DEFAULT_REPORT_CONFIG>(() => {
+    try {
+      const stored = sessionStorage.getItem("psat_report_config");
+      if (stored) return { ...DEFAULT_REPORT_CONFIG, ...JSON.parse(stored) };
+      return DEFAULT_REPORT_CONFIG;
+    } catch {
+      return DEFAULT_REPORT_CONFIG;
+    }
+  });
+
+  const updateReportConfig = useCallback((key: string, val: boolean) => {
+    setReportConfig((prev: any) => {
+      const next = { ...prev, [key]: val };
+
+      // Cascade down: toggling a parent sets all its children
+      const children = REPORT_PARENT_CHILDREN[key];
+      if (children) children.forEach((child: string) => { next[child] = val; });
+
+      // Cascade up: checking a child auto-enables the parent chain
+      if (val) {
+        let cur = key;
+        while (REPORT_CHILD_PARENT[cur]) {
+          const par = REPORT_CHILD_PARENT[cur]; next[par] = true; cur = par;
+        }
+      }
+
+      // Cascade up: unchecking a child may disable its parent if all siblings are off
+      if (!val) {
+        let cur = key;
+        while (REPORT_CHILD_PARENT[cur]) {
+          const par = REPORT_CHILD_PARENT[cur];
+          const siblings = REPORT_PARENT_CHILDREN[par] || [];
+          if (siblings.every((s: string) => !next[s])) { next[par] = false; } else { break; }
+          cur = par;
+        }
+      }
+
+      sessionStorage.setItem("psat_report_config", JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent("psat:report:config-changed", { detail: next }));
+      return next;
+    });
+  }, []);
 
   // Get the project name
   const codingMatch = useMatch("/coding/:projectName");
@@ -320,7 +403,167 @@ export default function Sidebar() {
               </Button>
             );
           })}
+          {pathname === "/analysis/path" && (
+            <div className="psat-report-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+              <Button
+                onClick={() => navigate("/analysis/report")}
+                style={{ backgroundColor: "#a220e3", color: "white" }}
+                variant="solid"
+                size="sm"
+                width="100%"
+              >
+                📄 Open Report Builder
+              </Button>
 
+              <div className="psat-report-dropdown-container">
+                <button type="button" className="psat-report-dropdown-trigger" onClick={() => setReportConfigOpen(!reportConfigOpen)}>
+                  <span>Report Options</span>
+                  <span className={`arrow ${reportConfigOpen ? 'open' : ''}`}>▼</span>
+                </button>
+
+                {reportConfigOpen && (
+                  <div className="psat-report-dropdown-content">
+
+                    {/* ── Title & Description ── */}
+                    <div className="psat-report-group">
+                      <div className="psat-report-group-header">
+                        <label className="psat-checkbox-label">
+                          <input type="checkbox" checked={!!reportConfig.showTitle} onChange={(e) => updateReportConfig('showTitle', e.target.checked)} />
+                          <span>Title &amp; Description</span>
+                        </label>
+                        <button type="button" className="psat-section-toggle" onClick={() => toggleSection('title')}>
+                          {expandedSections.has('title') ? '▾' : '▸'}
+                        </button>
+                      </div>
+                      {expandedSections.has('title') && (
+                        <div className="psat-report-sub-options">
+                          <label className="psat-checkbox-label sub-item">
+                            <input type="checkbox" checked={!!reportConfig.showTitleText} onChange={(e) => updateReportConfig('showTitleText', e.target.checked)} />
+                            <span>Page Title</span>
+                          </label>
+                          <label className="psat-checkbox-label sub-item">
+                            <input type="checkbox" checked={!!reportConfig.showTitleDescription} onChange={(e) => updateReportConfig('showTitleDescription', e.target.checked)} />
+                            <span>Subtitle Text</span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Risk Score Bands ── */}
+                    <div className="psat-report-group">
+                      <div className="psat-report-group-header">
+                        <label className="psat-checkbox-label">
+                          <input type="checkbox" checked={!!reportConfig.showRiskBands} onChange={(e) => updateReportConfig('showRiskBands', e.target.checked)} />
+                          <span>Risk Score Bands</span>
+                        </label>
+                        <button type="button" className="psat-section-toggle" onClick={() => toggleSection('riskBands')}>
+                          {expandedSections.has('riskBands') ? '▾' : '▸'}
+                        </button>
+                      </div>
+                      {expandedSections.has('riskBands') && (
+                        <div className="psat-report-sub-options">
+                          <label className="psat-checkbox-label sub-item">
+                            <input type="checkbox" checked={!!reportConfig.showRiskBandsOverall} onChange={(e) => updateReportConfig('showRiskBandsOverall', e.target.checked)} />
+                            <span>Overall Risk Level</span>
+                          </label>
+                          <label className="psat-checkbox-label sub-item">
+                            <input type="checkbox" checked={!!reportConfig.showRiskBandsLegend} onChange={(e) => updateReportConfig('showRiskBandsLegend', e.target.checked)} />
+                            <span>Risk Level Legend</span>
+                          </label>
+                          {/* Nested: Risk by Crash Type */}
+                          <div className="psat-report-group nested">
+                            <div className="psat-report-group-header">
+                              <label className="psat-checkbox-label sub-item">
+                                <input type="checkbox" checked={!!reportConfig.showRiskBandsCrashTypes} onChange={(e) => updateReportConfig('showRiskBandsCrashTypes', e.target.checked)} />
+                                <span>Risk by Crash Type</span>
+                              </label>
+                              <button type="button" className="psat-section-toggle" onClick={() => toggleSection('crashTypes')}>
+                                {expandedSections.has('crashTypes') ? '▾' : '▸'}
+                              </button>
+                            </div>
+                            {expandedSections.has('crashTypes') && (
+                              <div className="psat-report-sub-options">
+                                <label className="psat-checkbox-label sub-item">
+                                  <input type="checkbox" checked={!!reportConfig.showRiskBandsVB} onChange={(e) => updateReportConfig('showRiskBandsVB', e.target.checked)} />
+                                  <span>Vehicle-Bicycle (VB)</span>
+                                </label>
+                                <label className="psat-checkbox-label sub-item">
+                                  <input type="checkbox" checked={!!reportConfig.showRiskBandsBB} onChange={(e) => updateReportConfig('showRiskBandsBB', e.target.checked)} />
+                                  <span>Bicycle-Bicycle (BB)</span>
+                                </label>
+                                <label className="psat-checkbox-label sub-item">
+                                  <input type="checkbox" checked={!!reportConfig.showRiskBandsSB} onChange={(e) => updateReportConfig('showRiskBandsSB', e.target.checked)} />
+                                  <span>Single-Bicycle (SB)</span>
+                                </label>
+                                <label className="psat-checkbox-label sub-item">
+                                  <input type="checkbox" checked={!!reportConfig.showRiskBandsBP} onChange={(e) => updateReportConfig('showRiskBandsBP', e.target.checked)} />
+                                  <span>Bicycle-Pedestrian (BP)</span>
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Filters Panel (no sub-options) ── */}
+                    <label className="psat-checkbox-label">
+                      <input type="checkbox" checked={!!reportConfig.showFilters} onChange={(e) => updateReportConfig('showFilters', e.target.checked)} />
+                      <span>Filters Panel</span>
+                    </label>
+
+                    {/* ── Interactive Map ── */}
+                    <div className="psat-report-group">
+                      <div className="psat-report-group-header">
+                        <label className="psat-checkbox-label">
+                          <input type="checkbox" checked={!!reportConfig.showMap} onChange={(e) => updateReportConfig('showMap', e.target.checked)} />
+                          <span>Interactive Map</span>
+                        </label>
+                        <button type="button" className="psat-section-toggle" onClick={() => toggleSection('map')}>
+                          {expandedSections.has('map') ? '▾' : '▸'}
+                        </button>
+                      </div>
+                      {expandedSections.has('map') && (
+                        <div className="psat-report-sub-options">
+                          <label className="psat-checkbox-label sub-item">
+                            <input type="checkbox" checked={!!reportConfig.showMapView} onChange={(e) => updateReportConfig('showMapView', e.target.checked)} />
+                            <span>Map View</span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Distribution Charts ── */}
+                    <div className="psat-report-group">
+                      <div className="psat-report-group-header">
+                        <label className="psat-checkbox-label">
+                          <input type="checkbox" checked={!!reportConfig.showCharts} onChange={(e) => updateReportConfig('showCharts', e.target.checked)} />
+                          <span>Distribution Charts</span>
+                        </label>
+                        <button type="button" className="psat-section-toggle" onClick={() => toggleSection('charts')}>
+                          {expandedSections.has('charts') ? '▾' : '▸'}
+                        </button>
+                      </div>
+                      {expandedSections.has('charts') && (
+                        <div className="psat-report-sub-options">
+                          <label className="psat-checkbox-label sub-item">
+                            <input type="checkbox" checked={!!reportConfig.showPieChart} onChange={(e) => updateReportConfig('showPieChart', e.target.checked)} />
+                            <span>Pie Chart</span>
+                          </label>
+                          <label className="psat-checkbox-label sub-item">
+                            <input type="checkbox" checked={!!reportConfig.showBarChart} onChange={(e) => updateReportConfig('showBarChart', e.target.checked)} />
+                            <span>Bar Chart</span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        
         </div>
       </div>
 
