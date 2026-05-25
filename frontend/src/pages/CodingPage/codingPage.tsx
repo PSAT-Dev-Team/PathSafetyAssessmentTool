@@ -50,6 +50,7 @@ import type { WidthVisualizationResponse } from "../../api/widthVisualization";
 import { fetchCurvatureVisualization } from "../../api/curvatureVisualization";
 import type { CurvatureVisualizationResponse } from "../../api/curvatureVisualization";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
+import { aggregateTopContributors } from "../../utils/aggregateTopContributors";
 import AutocodeValidation from "../PathAnalysisPage/components/AutocodeValidation";
 
 
@@ -549,6 +550,15 @@ export default function CodingPage() {
     () => Math.max(0, Math.min(len - 1, currentPage - 1)),
     [currentPage, len]
   );
+
+  const projectContributors = useMemo(() => {
+    if (!currentProjectName) return null;
+    const slice = scores as unknown as Array<Record<string, unknown>>;
+    return {
+      projectName: currentProjectName,
+      contributors: aggregateTopContributors(slice),
+    };
+  }, [scores, currentProjectName]);
 
   const currentAttr = useMemo<AttributeRow | null>(
     () => (len > 0 ? attrs[currentIndex] : null),
@@ -2383,6 +2393,7 @@ export default function CodingPage() {
           >
             <SegmentScoresCard
               scores={scores[currentIndex] || null}
+              projectContributors={projectContributors}
             />
           </Box>
 

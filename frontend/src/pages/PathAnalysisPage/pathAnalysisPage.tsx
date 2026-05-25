@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Box,
   Text,
@@ -8,6 +8,7 @@ import FilterPanel from "./components/FilterPanel";
 import PathAnalysisMapView from "./components/PathAnalysisMapView";
 import AttributeDistributionChart from "./components/AttributeDistributionChart";
 import AggregatedScoreBandPanel from "./components/AggregatedScoreBandPanel";
+import AggregatedTopContributorsPanel from "./components/AggregatedTopContributorsPanel";
 import "./pathAnalysisPage.css";
 
 const SESSION_KEY_PREFIX = "pathAnalysis_";
@@ -36,15 +37,37 @@ export default function PathAnalysisPage() {
     loadState("activeFilters", [])
   );
 
+  const [hiddenProjects, setHiddenProjects] = useState<string[]>(() =>
+    loadState("hiddenProjects", [])
+  );
+
+  const visibleProjects = useMemo(
+    () => loadedProjects.filter(p => !hiddenProjects.includes(p)),
+    [loadedProjects, hiddenProjects]
+  );
+
   // Chart data state
   const [chartData, setChartData] = useState<{
     categoryDistributionData: { category: string; count: number; color: string }[];
     primaryFocusAttribute: string | null;
-    categoryStatus: { attribute: string; categories: { category: string; isActive: boolean; color: string }[] }[];
+    categoryStatus: {
+      attribute: string;
+      categories: {
+        category: string;
+        isActive: boolean;
+        color: string;
+        subcategories?: { name: string; isActive: boolean; color: string }[];
+      }[];
+      rangeFilter?: { min: number; max: number; currentMin: number; currentMax: number };
+    }[];
+    totalSegmentsLoaded: number;
+    totalSegmentsViewed: number;
   }>({
     categoryDistributionData: [],
     primaryFocusAttribute: null,
     categoryStatus: [],
+    totalSegmentsLoaded: 0,
+    totalSegmentsViewed: 0,
   });
 
   useEffect(() => {
@@ -67,7 +90,13 @@ export default function PathAnalysisPage() {
   useEffect(() => {
     sessionStorage.setItem(SESSION_KEY_PREFIX + "loadedProjects", JSON.stringify(loadedProjects));
     sessionStorage.setItem(SESSION_KEY_PREFIX + "activeFilters", JSON.stringify(activeFilters));
-  }, [activeFilters, loadedProjects]);
+    sessionStorage.setItem(SESSION_KEY_PREFIX + "hiddenProjects", JSON.stringify(hiddenProjects));
+  }, [activeFilters, loadedProjects, hiddenProjects]);
+
+  // Drop any hidden entries that no longer correspond to a loaded project
+  useEffect(() => {
+    setHiddenProjects(prev => prev.filter(p => loadedProjects.includes(p)));
+  }, [loadedProjects]);
 
   return (
     <Box w="100%" h="100vh" overflowY="auto" p="6">
@@ -80,9 +109,15 @@ export default function PathAnalysisPage() {
         </Text>
       </Box>
 
-      {loadedProjects.length > 0 && (
+      {visibleProjects.length > 0 && (
         <Box mb="6">
-          <AggregatedScoreBandPanel selectedProjects={loadedProjects} />
+          <AggregatedScoreBandPanel selectedProjects={visibleProjects} />
+        </Box>
+      )}
+
+      {visibleProjects.length > 0 && (
+        <Box mb="6">
+          <AggregatedTopContributorsPanel selectedProjects={visibleProjects} />
         </Box>
       )}
 
@@ -94,9 +129,12 @@ export default function PathAnalysisPage() {
       </Box>
       <Box mb="6">
         <PathAnalysisMapView
-          selectedProjects={loadedProjects}
+          selectedProjects={visibleProjects}
           selectedAttributes={activeFilters}
           onChartDataUpdate={setChartData}
+          loadedProjects={loadedProjects}
+          hiddenProjects={hiddenProjects}
+          onHiddenProjectsChange={setHiddenProjects}
         />
       </Box>
 
@@ -112,6 +150,8 @@ export default function PathAnalysisPage() {
             categoryData={chartData.categoryDistributionData}
             selectedAttribute={chartData.primaryFocusAttribute}
             categoryStatus={chartData.categoryStatus}
+            totalSegmentsLoaded={chartData.totalSegmentsLoaded}
+            totalSegmentsViewed={chartData.totalSegmentsViewed}
           />
         </Box>
       )}

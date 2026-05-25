@@ -459,6 +459,16 @@ class CycleRAP_Coding_Helper:
         attrs["NFO Type"] = blocking_non_fixed_classes
         attrs["Delineation Type"] = ", ".join(delineation_triggers) if delineation_triggers else "Absent"
 
+        # Property Access: not present if any crossing detected; otherwise road mask ≥80% of bottom 50%
+        crossing_detected = masks["zebra_crossing"].any() or masks["traffic_crossing"].any()
+        if crossing_detected:
+            prop_access = False
+        else:
+            prop_access = cls._check_bottom_majority(
+                masks["road"], img_h, img_w, fraction=0.50, threshold=0.80
+            )
+        attrs["Property Access"] = "Present" if prop_access else "Not Present"
+
         return attrs
 
     # ------------------------------------------------------------------
@@ -485,6 +495,7 @@ class CycleRAP_Coding_Helper:
             "Intersection/Road Crossing":       F.INTERSECT_ROAD_CROSS_STR,
             "No of Lanes on Intersecting Road": F.NOL_INTERSECT_ROAD_STR,
             "Intersecting Bicycle Facility":    F.INTERSECT_FACILITY_STR,
+            "Property Access":                 F.PROP_ACCESS_STR,
             "Fixed Obstacles":                 F.FIXED_OBSTACLE_STR,
             "Non-Fixed Obstacles":             F.NON_FIXED_OBSTACLE_STR,
             "FO Type":                         F.FIXED_OBSTACLE_TYPE_STR,

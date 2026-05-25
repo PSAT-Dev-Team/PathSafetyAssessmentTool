@@ -268,6 +268,16 @@ class Results(BaseTable):
         SB_BAND_STR                     = "SB Band"
         VB_BAND_STR                     = "VB Band"
         CYCLERAP_SCORE_BAND_STR         = "Overall Risk Level Band"
+        TOP_1_CONTRIBUTOR_STR           = "Top 1 Contributor"
+        TOP_1_CONTRIBUTION_STR          = "Top 1 Contribution"
+        TOP_2_CONTRIBUTOR_STR           = "Top 2 Contributor"
+        TOP_2_CONTRIBUTION_STR          = "Top 2 Contribution"
+        TOP_3_CONTRIBUTOR_STR           = "Top 3 Contributor"
+        TOP_3_CONTRIBUTION_STR          = "Top 3 Contribution"
+        TOP_4_CONTRIBUTOR_STR           = "Top 4 Contributor"
+        TOP_4_CONTRIBUTION_STR          = "Top 4 Contribution"
+        TOP_5_CONTRIBUTOR_STR           = "Top 5 Contributor"
+        TOP_5_CONTRIBUTION_STR          = "Top 5 Contribution"
     
     FIELDS_META = {
         Fields.BB_BAND_STR:             risk_category,

@@ -368,6 +368,7 @@ export function AggregatedScoreBandPanel({
                     />
                   </div>
                 </div>
+
               </div>
             )}
         </div>

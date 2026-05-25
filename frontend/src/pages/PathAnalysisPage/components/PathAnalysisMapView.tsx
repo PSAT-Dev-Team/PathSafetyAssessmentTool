@@ -277,8 +277,22 @@ interface AttributeAnalysisMapViewProps {
   onChartDataUpdate?: (data: {
     categoryDistributionData: { category: string; count: number; color: string }[];
     primaryFocusAttribute: string | null;
-    categoryStatus: { attribute: string; categories: { category: string; isActive: boolean; color: string }[] }[];
+    categoryStatus: {
+      attribute: string;
+      categories: {
+        category: string;
+        isActive: boolean;
+        color: string;
+        subcategories?: { name: string; isActive: boolean; color: string }[];
+      }[];
+      rangeFilter?: { min: number; max: number; currentMin: number; currentMax: number };
+    }[];
+    totalSegmentsLoaded: number;
+    totalSegmentsViewed: number;
   }) => void;
+  loadedProjects: string[];
+  hiddenProjects: string[];
+  onHiddenProjectsChange: (hidden: string[]) => void;
 }
 
 
@@ -300,7 +314,14 @@ type VisibleSegment = {
   scores: Record<string, any> | null;
 };
 
-export default function AttributeAnalysisMapView({ selectedProjects, selectedAttributes, onChartDataUpdate }: AttributeAnalysisMapViewProps) {
+export default function AttributeAnalysisMapView({
+  selectedProjects,
+  selectedAttributes,
+  onChartDataUpdate,
+  loadedProjects,
+  hiddenProjects,
+  onHiddenProjectsChange,
+}: AttributeAnalysisMapViewProps) {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string>("map");
   const [projectsData, setProjectsData] = useState<ProjectData[]>([]);
@@ -333,12 +354,13 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     } catch { return {}; }
   });
 
-  // Track which attribute to show categories for in the sidebar
+  // Track which attribute to show categories for in the sidebar.
+  // Index -1 is reserved for the always-present "Projects" tab (colors by project).
   const [categoryFilterAttributeIndex, setCategoryFilterAttributeIndex] = useState<number>(() => {
     try {
       const stored = sessionStorage.getItem("pathAnalysisMap_categoryFilterIndex");
-      return stored ? Number(stored) : 0;
-    } catch { return 0; }
+      return stored !== null ? Number(stored) : -1;
+    } catch { return -1; }
   });
 
   // Track if we should auto-fit bounds (only on initial project load, not on category changes)
@@ -380,6 +402,7 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
   // When all filters are reset, revert coloring to by-project
   useEffect(() => {
     if (selectedAttributes.length === 0) {
+      setCategoryFilterAttributeIndex(-1);
       setPrimaryFocusAttribute("Project");
     }
   }, [selectedAttributes]);
@@ -537,10 +560,10 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     prevFiltersRef.current = activeFilters;
   }, [activeFilters]);
 
-  // Reset sidebar index if out of bounds
+  // Reset sidebar index if out of bounds (fall back to the Projects tab at -1)
   useEffect(() => {
     if (categoryFilterAttributeIndex >= activeFilters.length) {
-      setCategoryFilterAttributeIndex(0);
+      setCategoryFilterAttributeIndex(-1);
     }
   }, [activeFilters.length, categoryFilterAttributeIndex]);
 
@@ -574,8 +597,11 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     });
   }, [activeFilters]);
 
-  // The attribute whose categories are currently shown in the sidebar
-  const categoryFilterAttribute = activeFilters[categoryFilterAttributeIndex];
+  // The attribute whose categories are currently shown in the sidebar.
+  // Index -1 represents the always-present "Projects" tab (colour by project).
+  const categoryFilterAttribute = categoryFilterAttributeIndex === -1
+    ? "Project"
+    : activeFilters[categoryFilterAttributeIndex];
 
   // Helper function to get Overall Risk Score for a segment
   // Uses the "Overall Risk Level" field from the backend, which is the sum of BB + BP + SB + VB
@@ -852,11 +878,11 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
       "#DB2777", // Pink
     ];
     const colorMap: Record<string, string> = {};
-    selectedProjects.forEach((proj, idx) => {
+    loadedProjects.forEach((proj, idx) => {
       colorMap[proj] = colors[idx % colors.length];
     });
     return colorMap;
-  }, [selectedProjects]);
+  }, [loadedProjects]);
 
   // Load geodata and attributes for all selected projects
   useEffect(() => {
@@ -1714,6 +1740,17 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
     }
 
     return attributesToCheck.map(attr => {
+      // Numeric range filter: no category chips, just show the range bounds
+      if (NUMERIC_FILTER_ATTRIBUTES.has(attr)) {
+        const bounds = dataRangeBounds[attr] ?? { min: 0, max: 100 };
+        const [currentMin, currentMax] = rangeFilters[attr] ?? [bounds.min, bounds.max];
+        return {
+          attribute: attr,
+          categories: [] as { category: string; isActive: boolean; color: string; subcategories?: { name: string; isActive: boolean; color: string }[] }[],
+          rangeFilter: { min: bounds.min, max: bounds.max, currentMin, currentMax },
+        };
+      }
+
       // 1. Get available categories for this attribute
       const categoriesSet = new Set<string>();
 
@@ -1828,26 +1865,53 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
         } else {
           color = getCategoryColor(attr, cat);
         }
-        return { category: cat, isActive, color };
+
+        // Subcategory items (Layer 3) — only for attributes that have a SUBCATEGORY_MAP entry
+        const subcatConfig = SUBCATEGORY_MAP[attr];
+        let subcategories: { name: string; isActive: boolean; color: string }[] | undefined;
+        if (subcatConfig && subcatConfig.parentCategories[cat]) {
+          const childAttr = subcatConfig.childAttr;
+          subcategories = subcatConfig.parentCategories[cat].map(sub => ({
+            name: sub,
+            isActive: subcategoryToggles[childAttr]?.[sub] !== false,
+            color: getCategoryColor(childAttr, sub),
+          }));
+        }
+
+        return { category: cat, isActive, color, subcategories };
       });
 
       return {
         attribute: attr,
-        categories: categoryStatusItems
+        categories: categoryStatusItems,
       };
     });
-  }, [selectedAttributes, primaryFocusAttribute, selectedProjects, projectsData, categoryToggles, projectColors]);
+  }, [selectedAttributes, primaryFocusAttribute, selectedProjects, projectsData, categoryToggles, subcategoryToggles, rangeFilters, dataRangeBounds, projectColors]);
 
   // Notify parent when chart data updates
   useEffect(() => {
     if (onChartDataUpdate) {
+      // Calculate total loaded segments
+      const loadedCount = projectsData.reduce((acc, projectData) => {
+        let count = 0;
+        projectData.geoFeatures.forEach((feature) => {
+          const g = feature.geometry;
+          if (g?.type === "LineString" && Array.isArray(g.coordinates) && g.coordinates.length > 0) {
+            count++;
+          }
+        });
+        return acc + count;
+      }, 0);
+
       onChartDataUpdate({
         categoryDistributionData,
         primaryFocusAttribute: effectiveFocusAttribute,
         categoryStatus,
+        totalSegmentsLoaded: loadedCount,
+        totalSegmentsViewed: allPoints.length,
       });
     }
-  }, [categoryDistributionData, effectiveFocusAttribute, categoryStatus, onChartDataUpdate]);
+  }, [categoryDistributionData, effectiveFocusAttribute, categoryStatus, projectsData, allPoints.length, onChartDataUpdate]);
 
   // Clear polygon points and close dialog when toggling polygon mode
   useEffect(() => {
@@ -2106,12 +2170,17 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
           )}
 
           {/* Filter attribute selector + per-category toggles */}
-          {selectedProjects.length > 0 && selectedAttributes.length > 0 && (
+          {selectedProjects.length > 0 && (
             <Box borderBottom="1px solid" borderColor="gray.200">
-              {/* Tabs: one per active filter — matches FilterPanel tab style */}
+              {/* Tabs: always-present "Projects" tab + one per active filter */}
               <Tabs.Root
-                value={String(categoryFilterAttributeIndex)}
+                value={categoryFilterAttributeIndex === -1 ? "project" : String(categoryFilterAttributeIndex)}
                 onValueChange={e => {
+                  if (e.value === "project") {
+                    setCategoryFilterAttributeIndex(-1);
+                    setPrimaryFocusAttribute("Project");
+                    return;
+                  }
                   const idx = Number(e.value);
                   setCategoryFilterAttributeIndex(idx);
                   setPrimaryFocusAttribute(activeFilters[idx]);
@@ -2120,18 +2189,106 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
               >
                 <Box overflowX="auto">
                   <Tabs.List px="4" minW="max-content">
+                    <Tabs.Trigger value="project" fontSize="sm" whiteSpace="nowrap">
+                      1. Projects
+                    </Tabs.Trigger>
                     {selectedAttributes.map((attr, idx) => (
                       <Tabs.Trigger key={attr} value={String(idx)} fontSize="sm" whiteSpace="nowrap">
-                        {idx + 1}. {(ATTRIBUTE_LABELS[attr] ?? attr).slice(0, 22)}
+                        {idx + 2}. {(ATTRIBUTE_LABELS[attr] ?? attr).slice(0, 22)}
                       </Tabs.Trigger>
                     ))}
                   </Tabs.List>
                 </Box>
 
-                {selectedAttributes.map((attr, idx) => (
-                  <Tabs.Content key={attr} value={String(idx)} p="4">
-                    {/* Per-category toggles for the selected attribute */}
-                    {categoryFilterAttribute && (
+                {[null, ...selectedAttributes].map((attr, i) => {
+                  const isProjectsTab = attr === null;
+                  const idx = i - 1; // -1 for projects, 0..n for attrs
+                  const tabValue = isProjectsTab ? "project" : String(idx);
+                  return (
+                  <Tabs.Content key={tabValue} value={tabValue} p="4">
+                    {isProjectsTab ? (
+                      <>
+                        <Flex align="center" justify="space-between" mb="2">
+                          <Text fontSize="xs" fontWeight="semibold" color="gray.500" _dark={{ color: "gray.400" }}>
+                            Projects (toggle to show/hide on the map)
+                          </Text>
+                          {hiddenProjects.length > 0 && (
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              colorPalette="gray"
+                              onClick={() => onHiddenProjectsChange([])}
+                            >
+                              Show all
+                            </Button>
+                          )}
+                        </Flex>
+                        <Flex flexWrap="wrap" gap="2">
+                          {loadedProjects.map(projectName => {
+                            const hex = projectColors[projectName];
+                            const isOn = !hiddenProjects.includes(projectName);
+                            return (
+                              <Flex
+                                key={projectName}
+                                as="button"
+                                align="center"
+                                gap="2"
+                                px="3"
+                                py="1.5"
+                                borderWidth="1px"
+                                borderRadius="md"
+                                cursor="pointer"
+                                userSelect="none"
+                                transition="all 0.15s"
+                                style={isOn
+                                  ? { backgroundColor: hex + "22", borderColor: hex }
+                                  : { backgroundColor: "transparent", borderColor: "#E2E8F0" }
+                                }
+                                onClick={() => {
+                                  if (isOn) {
+                                    onHiddenProjectsChange([...hiddenProjects, projectName]);
+                                  } else {
+                                    onHiddenProjectsChange(hiddenProjects.filter(p => p !== projectName));
+                                  }
+                                }}
+                              >
+                                <Text
+                                  fontSize="sm"
+                                  fontWeight={isOn ? "semibold" : "normal"}
+                                  color={isOn ? "gray.800" : "gray.400"}
+                                  _dark={{ color: isOn ? "gray.100" : "gray.500" }}
+                                  userSelect="none"
+                                >
+                                  {projectName}
+                                </Text>
+                                <Box
+                                  w="30px"
+                                  h="17px"
+                                  borderRadius="full"
+                                  position="relative"
+                                  flexShrink={0}
+                                  transition="background 0.15s"
+                                  style={{ backgroundColor: isOn ? hex : "#CBD5E0" }}
+                                >
+                                  <Box
+                                    position="absolute"
+                                    w="13px"
+                                    h="13px"
+                                    borderRadius="full"
+                                    bg="white"
+                                    top="2px"
+                                    transition="left 0.15s"
+                                    style={{ left: isOn ? "15px" : "2px" }}
+                                  />
+                                </Box>
+                              </Flex>
+                            );
+                          })}
+                        </Flex>
+                      </>
+                    ) : (
+                    /* Per-category toggles for the selected attribute */
+                    categoryFilterAttribute && (
                       <>
                         {/* Header row: label + reset button */}
                   <Flex align="center" justify="space-between" mb="2">
@@ -2342,9 +2499,11 @@ export default function AttributeAnalysisMapView({ selectedProjects, selectedAtt
                   </Flex>
                   )}
                 </>
-              )}
+              )
+                    )}
                   </Tabs.Content>
-                ))}
+                  );
+                })}
               </Tabs.Root>
             </Box>
           )}

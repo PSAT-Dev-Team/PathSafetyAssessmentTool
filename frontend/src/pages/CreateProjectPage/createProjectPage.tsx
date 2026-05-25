@@ -255,7 +255,7 @@ export default function CreateProjectPage() {
               onChange={(e) => setName(e.target.value)}
             />
             {name.includes("_") && (
-              <Text color="red.600" fontSize="xs" mt={1}>
+              <Text color="red.600" _dark={{ color: "red.400" }} fontSize="xs" mt={1}>
                 Project name cannot contain underscores (_)
               </Text>
             )}
@@ -402,7 +402,7 @@ export default function CreateProjectPage() {
             </Box>
 
             {err && (
-              <Text color="red.600" fontSize="xs" mt={1}>
+              <Text color="red.600" _dark={{ color: "red.400" }} fontSize="xs" mt={1}>
                 {err}
               </Text>
             )}
@@ -414,14 +414,14 @@ export default function CreateProjectPage() {
             )}
 
             {selectedFolderExists && (
-              <Box mt={3} border="1px solid" borderColor="gray.200" borderRadius="md" p={3} bg="gray.50">
+              <Box mt={3} border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.700", bg: "gray.800" }} borderRadius="md" p={3} bg="gray.50">
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={3} flexWrap="wrap" mb={2}>
                   <Box>
                     <Text fontSize="sm" fontWeight="semibold">
                       {folder} Summary
                     </Text>
                     {folderPreview && (
-                      <Text fontSize="xs" color="gray.500">
+                      <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }}>
                         {folderPreview.image_count} image{folderPreview.image_count === 1 ? "" : "s"} in this source folder
                       </Text>
                     )}
@@ -438,68 +438,68 @@ export default function CreateProjectPage() {
                 </Box>
 
                 {loadingFolderPreview && (
-                  <Text fontSize="xs" color="gray.500">
+                  <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }}>
                     Loading folder summary...
                   </Text>
                 )}
 
                 {folderPreviewError && !loadingFolderPreview && (
-                  <Text fontSize="xs" color="red.600">
+                  <Text fontSize="xs" color="red.600" _dark={{ color: "red.400" }}>
                     {folderPreviewError}
                   </Text>
                 )}
 
                 {folderPreview && !loadingFolderPreview && !folderPreviewError && (
                   <>
-                    <Text fontSize="xs" color="gray.600" mb={3}>
+                    <Text fontSize="xs" color="gray.600" _dark={{ color: "gray.400" }} mb={3}>
                       Survey quarter is inferred from the last modified timestamp on the images in this folder, not from EXIF metadata. This summary is cached inside the folder and refreshes automatically when the image set changes.
                     </Text>
 
                     {folderPreview.renamed_from && (
-                      <Text fontSize="xs" color="blue.600" mb={3}>
+                      <Text fontSize="xs" color="blue.600" _dark={{ color: "blue.400" }} mb={3}>
                         Renamed from {folderPreview.renamed_from} to {folderPreview.folder_name} to include the detected survey quarter.
                       </Text>
                     )}
 
                     {folderPreview.mixed_quarters && (
-                      <Text fontSize="xs" color="orange.600" mb={3}>
+                      <Text fontSize="xs" color="orange.600" _dark={{ color: "orange.400" }} mb={3}>
                         This folder spans multiple survey quarters ({folderPreview.survey_quarters.join(", ")}). Keep quarters separated where possible so project creation stays predictable.
                       </Text>
                     )}
 
                     {folderPreview.cached && !folderPreview.renamed_from && (
-                      <Text fontSize="xs" color="green.600" mb={3}>
+                      <Text fontSize="xs" color="green.600" _dark={{ color: "green.400" }} mb={3}>
                         Loaded instantly from cached folder metadata.
                       </Text>
                     )}
 
                     <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(160px, 1fr))" gap={3}>
-                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
-                        <Text fontSize="xs" color="gray.500" mb={1}>Segments</Text>
+                      <Box border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600", bg: "gray.700" }} borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mb={1}>Segments</Text>
                         <Text fontSize="lg" fontWeight="semibold">
                           {folderPreview.segment_count}
                         </Text>
                       </Box>
 
-                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
-                        <Text fontSize="xs" color="gray.500" mb={1}>Survey Quarter</Text>
+                      <Box border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600", bg: "gray.700" }} borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mb={1}>Survey Quarter</Text>
                         <Text fontSize="lg" fontWeight="semibold">
                           {folderPreview.survey_quarter ?? (folderPreview.survey_quarters.length > 0 ? folderPreview.survey_quarters.join(", ") : "Unknown")}
                         </Text>
                       </Box>
 
-                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
-                        <Text fontSize="xs" color="gray.500" mb={1}>Source Images</Text>
+                      <Box border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600", bg: "gray.700" }} borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mb={1}>Source Images</Text>
                         <Text fontSize="lg" fontWeight="semibold">
                           {folderPreview.image_count}
                         </Text>
-                        <Text fontSize="xs" color="gray.500" mt={1}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mt={1}>
                           {folderPreview.geotagged_image_count} geotagged
                         </Text>
                       </Box>
 
-                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
-                        <Text fontSize="xs" color="gray.500" mb={1}>Last Modified</Text>
+                      <Box border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600", bg: "gray.700" }} borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mb={1}>Last Modified</Text>
                         <Text fontSize="sm" fontWeight="semibold">
                           {folderPreview.earliest_modified_at && folderPreview.latest_modified_at
                             ? folderPreview.earliest_modified_at === folderPreview.latest_modified_at
@@ -511,7 +511,7 @@ export default function CreateProjectPage() {
                     </Box>
 
                     {folderPreview.segment_error && (
-                      <Text fontSize="xs" color="orange.600" mt={3}>
+                      <Text fontSize="xs" color="orange.600" _dark={{ color: "orange.400" }} mt={3}>
                         Segment summary fallback: {folderPreview.segment_error}
                       </Text>
                     )}
@@ -537,13 +537,13 @@ export default function CreateProjectPage() {
             />
 
             {usingRoadSelection && unavailableSelectedRoads.length > 0 && (
-              <Text color="orange.600" fontSize="xs" mt={3}>
+              <Text color="orange.600" _dark={{ color: "orange.400" }} fontSize="xs" mt={3}>
                 Deselect unavailable roads to create the project. {unavailableSelectedRoads.length} selected road{unavailableSelectedRoads.length === 1 ? " is" : "s are"} missing local files. Use the map list's Deselect Unavailable action to clear them in one click.
               </Text>
             )}
 
             {usingRoadSelection && unavailableSelectedRoads.length === 0 && (
-              <Text color="green.600" fontSize="xs" mt={3}>
+              <Text color="green.600" _dark={{ color: "green.400" }} fontSize="xs" mt={3}>
                 Project will be created from nodes inside the boundary across {selectedRoadFolders.length} selected road{selectedRoadFolders.length === 1 ? "" : "s"}.
               </Text>
             )}

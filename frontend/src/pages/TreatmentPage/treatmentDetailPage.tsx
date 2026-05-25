@@ -39,6 +39,7 @@ import ImagePanel from "../CodingPage/components/ImagePanel";
 import AttributesPanel from "../CodingPage/components/AttributesPanel";
 import GeoDataPanel from "../CodingPage/components/GeoDataPanel";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
+import { aggregateTopContributors } from "../../utils/aggregateTopContributors";
 import OverallTreatmentAnalysis from "../../components/visualization/scoreband/OverallTreatmentAnalysis";
 
 type ProjectDetail = { name: string; versions: string[]; latest: string };
@@ -233,6 +234,7 @@ const TREATMENTS: Treatment[] = [
     name: "Improve crossing facility",
     triggers: [
       { "Crossing Facility": [2] },
+      { "Property Access": [1], "Crossing Facility": [2] },
     ],
     effects: { "Crossing Facility": 1 },
   },
@@ -1270,6 +1272,17 @@ export default function TreatmentDetailPage() {
 
   // Resolve current project name for UI display
   const currentCtx = resolveIndex(currentIndex);
+
+  const projectContributors = useMemo(() => {
+    if (!currentCtx?.name) return null;
+    const entry = projectMap.find((p) => p.name === currentCtx.name);
+    if (!entry) return null;
+    const slice = scores.slice(entry.startIndex, entry.startIndex + entry.count) as Array<Record<string, unknown>>;
+    return {
+      projectName: currentCtx.name,
+      contributors: aggregateTopContributors(slice),
+    };
+  }, [scores, projectMap, currentCtx?.name]);
   const currentImageUrl = useMemo(() => {
     if (!currentCtx?.name || !imgRef) {
       return null;
@@ -1898,6 +1911,7 @@ export default function TreatmentDetailPage() {
               showPreviewBackground={
                 showPostTreatment && selectedTreatments.size > 0
               }
+              projectContributors={projectContributors}
             />
           </Box>
 
