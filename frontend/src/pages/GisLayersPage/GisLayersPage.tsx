@@ -6,9 +6,7 @@ import ShapefileModal from "../sidebar/components/ShapefileModal";
 import { MapContainer, Polyline, CircleMarker, Polygon as LeafletPolygon, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-
-import "./gisLayersPage.css";
-
+import { useColorModeValue } from "../../components/ui/color-mode";
 const getLayerMetadata = (fileName: string) => {
   const name = fileName.toLowerCase();
   
@@ -74,6 +72,28 @@ export default function GisLayersPage() {
   const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
   
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
+
+  // Color Mode Values
+  const rootBg = useColorModeValue("gray.50", "gray.900");
+  const titleColor = useColorModeValue("gray.900", "white");
+  const subtitleColor = useColorModeValue("gray.600", "gray.400");
+  const panelBg = useColorModeValue("white", "gray.800");
+  const panelHeaderBg = useColorModeValue("gray.50", "gray.850"); // Using something close to 900 or 800
+  const panelHeaderBorder = useColorModeValue("gray.200", "gray.700");
+  const borderColor = useColorModeValue("gray.200", "gray.700");
+  const itemBorderColor = useColorModeValue("gray.100", "gray.700");
+  const itemBg = useColorModeValue("white", "gray.800");
+  const itemHoverBg = useColorModeValue("gray.50", "gray.700");
+  const selectedItemBg = useColorModeValue("blue.50", "blue.900");
+  const selectedItemHoverBg = useColorModeValue("blue.100", "blue.800");
+  const metaBg = useColorModeValue("gray.50", "gray.700");
+  const metaBorder = useColorModeValue("gray.200", "gray.600");
+  const textColor = useColorModeValue("gray.700", "gray.200");
+  const mutedTextColor = useColorModeValue("gray.500", "gray.400");
+  const mapContainerBg = useColorModeValue("gray.100", "gray.800");
+  const emptyStateColor = useColorModeValue("gray.500", "gray.400");
+  const mapOverlayBg = useColorModeValue("whiteAlpha.800", "blackAlpha.700");
+  const mapOverlayTextColor = useColorModeValue("gray.600", "gray.300");
 
   const loadLayers = async () => {
     try {
@@ -227,13 +247,13 @@ export default function GisLayersPage() {
   );
 
   return (
-    <div className="gis-layers-root">
-      <Flex className="gis-layers-header" justify="space-between" align="flex-start">
+    <Box display="flex" flexDirection="column" h="100%" p={6} bg={rootBg} overflowY="auto">
+      <Flex mb={6} justify="space-between" align="flex-start">
         <Box>
-          <h1 className="gis-layers-title">GIS Layers Mapping</h1>
-          <p className="gis-layers-subtitle">
+          <Text fontSize="2xl" fontWeight="600" color={titleColor} mb={2}>GIS Layers Mapping</Text>
+          <Text fontSize="sm" color={subtitleColor}>
             View all the shapefiles currently available in the system on the interactive map below.
-          </p>
+          </Text>
         </Box>
         <Button onClick={() => setShapefileModalOpen(true)} colorPalette="blue" size="sm">
           Update GIS Layer
@@ -244,27 +264,28 @@ export default function GisLayersPage() {
         {/* Left Side: Table of Layers */}
         <Box 
           flex="0 0 400px" 
-          bg="white" 
+          bg={panelBg} 
           borderRadius="lg" 
           boxShadow="sm" 
           overflow="hidden"
           display="flex"
           flexDirection="column"
           borderWidth="1px"
+          borderColor={borderColor}
         >
-          <Box p={4} borderBottom="1px solid" borderColor="gray.200" bg="gray.50">
-            <Text fontWeight="600">Available Shapefiles</Text>
+          <Box p={4} borderBottom="1px solid" borderColor={panelHeaderBorder} bg={useColorModeValue("gray.50", "gray.800")}>
+            <Text fontWeight="600" color={titleColor}>Available Shapefiles</Text>
           </Box>
           
           <Box flex="1" overflowY="auto">
             {loading ? (
               <Flex justify="center" align="center" h="100%" p={4}>
-                <Spinner /><Text ml={3}>Loading files...</Text>
+                <Spinner /><Text ml={3} color={textColor}>Loading files...</Text>
               </Flex>
             ) : error ? (
                  <Box p={4} color="red.500">{error}</Box>
             ) : shapefiles.length === 0 ? (
-                 <Box p={4} color="gray.500">No shapefiles found.</Box>
+                 <Box p={4} color={emptyStateColor}>No shapefiles found.</Box>
             ) : (
               <div className="layer-list-container">
                 {shapefiles.map(file => {
@@ -274,29 +295,29 @@ export default function GisLayersPage() {
                       key={file.path} 
                       p={3} 
                       borderBottom="1px solid" 
-                      borderColor="gray.100"
+                      borderColor={itemBorderColor}
                       cursor="pointer"
-                      bg={isSelected ? "blue.50" : "white"}
-                      _hover={{ bg: isSelected ? "blue.100" : "gray.50" }}
+                      bg={isSelected ? selectedItemBg : itemBg}
+                      _hover={{ bg: isSelected ? selectedItemHoverBg : itemHoverBg }}
                       onClick={() => setSelectedLayer(isSelected ? null : file)}
                       transition="background-color 0.2s"
                     >
-                      <Text fontWeight="600" fontSize="sm" truncate title={file.name}>
+                      <Text fontWeight="600" fontSize="sm" truncate title={file.name} color={titleColor}>
                         {file.name}
                       </Text>
-                      <HStack mt={1} fontSize="xs" color="gray.500" justify="space-between">
+                      <HStack mt={1} fontSize="xs" color={mutedTextColor} justify="space-between">
                         <Badge colorPalette="blue" variant="subtle" size="sm">{file.category}</Badge>
                         <Text>{formatBytes(file.size)}</Text>
                       </HStack>
-                      <HStack mt={1} fontSize="xs" color="gray.500" gap="3">
+                      <HStack mt={1} fontSize="xs" color={mutedTextColor} gap="3">
                         <Text><strong>Year:</strong> {file.year}</Text>
                         <Text truncate title={file.source}><strong>Source:</strong> {file.source}</Text>
                       </HStack>
-                      <Box mt={2} p={2} bg="gray.50" borderRadius="md" fontSize="xs" border="1px solid" borderColor="gray.200">
-                        <Text color="gray.700" mb={1}>
+                      <Box mt={2} p={2} bg={metaBg} borderRadius="md" fontSize="xs" border="1px solid" borderColor={metaBorder}>
+                        <Text color={textColor} mb={1}>
                           <Text as="span" fontWeight="600">Required Columns:</Text> {file.required_columns || getLayerMetadata(file.base_name).reqCols}
                         </Text>
-                        <Text color="gray.700" whiteSpace="normal" wordBreak="break-word">
+                        <Text color={textColor} whiteSpace="normal" wordBreak="break-word">
                           <Text as="span" fontWeight="600">Affects PSAT Attribute:</Text> {file.affects || getLayerMetadata(file.base_name).affects}
                         </Text>
                       </Box>
@@ -311,14 +332,15 @@ export default function GisLayersPage() {
         {/* Right Side: Map */}
         <Box 
           flex="1" 
-          bg="gray.100" 
+          bg={mapContainerBg} 
           borderRadius="lg" 
           boxShadow="sm"
           borderWidth="1px" 
+          borderColor={borderColor}
           overflow="hidden"
           position="relative"
         >
-          {matchMapState(selectedLayer, mapLoading, mapError, mapFeatures)}
+          {matchMapState(selectedLayer, mapLoading, mapError, mapFeatures, mapOverlayBg, mapOverlayTextColor)}
           <MapContainer
             center={initialCenter.current}
             zoom={12}
@@ -385,7 +407,6 @@ export default function GisLayersPage() {
         </Box>
       </Flex>
 
-      {/* Shapefile Management Modal */}
       <ShapefileModal 
         open={shapefileModalOpen} 
         onClose={() => {
@@ -393,29 +414,29 @@ export default function GisLayersPage() {
           loadLayers();
         }} 
       />
-    </div>
+    </Box>
   );
 }
 
-function matchMapState(selectedLayer: any, loading: boolean, error: string | null, features: any) {
+function matchMapState(selectedLayer: any, loading: boolean, error: string | null, features: any, mapOverlayBg: string, mapOverlayTextColor: string) {
     if (!selectedLayer) {
       return (
-        <Flex position="absolute" inset="0" zIndex="1000" bg="whiteAlpha.800" justify="center" align="center">
-           <Text color="gray.600" fontWeight="medium">Select a layer from the list to view it on the map</Text>
+        <Flex position="absolute" inset="0" zIndex="1000" bg={mapOverlayBg} justify="center" align="center">
+           <Text color={mapOverlayTextColor} fontWeight="medium">Select a layer from the list to view it on the map</Text>
         </Flex>
       );
     }
     if (loading) {
         return (
-          <Flex position="absolute" inset="0" zIndex="1000" bg="whiteAlpha.800" justify="center" align="center" direction="column" gap={3}>
+          <Flex position="absolute" inset="0" zIndex="1000" bg={mapOverlayBg} justify="center" align="center" direction="column" gap={3}>
              <Spinner size="xl" color="blue.500" />
-             <Text color="gray.600" fontWeight="medium">Loading layer: {selectedLayer.name}...</Text>
+             <Text color={mapOverlayTextColor} fontWeight="medium">Loading layer: {selectedLayer.name}...</Text>
           </Flex>
         );
     }
     if (error) {
        return (
-          <Flex position="absolute" inset="0" zIndex="1000" bg="whiteAlpha.800" justify="center" align="center">
+          <Flex position="absolute" inset="0" zIndex="1000" bg={mapOverlayBg} justify="center" align="center">
              <Text color="red.500" fontWeight="medium">Failed to render layer: {error}</Text>
           </Flex>
         );
@@ -424,8 +445,8 @@ function matchMapState(selectedLayer: any, loading: boolean, error: string | nul
     if (features && features.totalCount === 0) {
       return (
          <Flex position="absolute" inset="0" zIndex="1000" bg="transparent" justify="center" align="flex-end" pb={10} pointerEvents="none">
-             <Box bg="white" px={4} py={2} borderRadius="md" boxShadow="md">
-               <Text color="orange.600" fontWeight="medium">Layer loaded but contains no renderable geometries.</Text>
+             <Box bg={useColorModeValue("white", "gray.800")} px={4} py={2} borderRadius="md" boxShadow="md">
+               <Text color="orange.500" fontWeight="medium">Layer loaded but contains no renderable geometries.</Text>
              </Box>
          </Flex>
        );

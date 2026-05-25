@@ -112,6 +112,52 @@ SPEED_UNIT = Attributes.Fields.SPEED_UNIT_STR
 LINE_OF_SIGHT = Attributes.Fields.LINE_OF_SIGHT_STR
 
 
+BASELINE_VALUES = {
+    FACILITY_TYPE: 3,
+    FACILITY_ACCESS: 1,
+    LOOSE_SURFACE: 2,
+    TRAM_RAILS: 2,
+    SURFACE_DEFORMATION: 2,
+    FIXED_OBSTACLE: 2,
+    NON_FIXED_OBSTACLE: 2,
+    DELINEATION: 1,
+    LIGHT_SEGREGATION: 1,
+    FACILITY_WIDTH: 3,
+    FLOW_DIRECTION: 1,
+    WIDTH_RESTRICTION: 2,
+    ADJACENT_ROAD_0_1M: 2,
+    ADJACENT_PARKING_0_1M: 2,
+    ADJACENT_HAZARD_0_1M: 2,
+    ADJACENT_OBJECT_0_1M: 2,
+    ADJACENT_SIDEWALK_0_1M: 2,
+    ADJACENT_ROAD_1_3M: 2,
+    ADJACENT_PARKING_1_3M: 2,
+    ADJACENT_HAZARD_1_3M: 2,
+    ADJACENT_OBJECT_1_3M: 2,
+    ADJACENT_SIDEWALK_1_3M: 2,
+    GRADE: 1,
+    CURVATURE: 2,
+    STREET_LIGHTING: 1,
+    PEDESTRIAN_CROSSING: 2,
+    INTERSECTING_FACILITY: 2,
+    INTERSECTION_APPROACH: 2,
+    INTERSECTION_CROSSING: 2,
+    CROSSING_FACILITY: 1,
+    NUM_LANES_ADJACENT: 1,
+    NUM_LANES_INTERSECTING: 1,
+    PROPERTY_ACCESS: 2,
+    PEDESTRIAN_FLOW: 1,
+    BICYCLE_FLOW: 1,
+    CARGO_BIKES: 1,
+    BICYCLE_SPEED: 1,
+    SPEED_DIFFERENTIAL: 1,
+    HEAVY_VEHICLE: 1,
+    ROAD_AADT: 0,
+    ROAD_SPEED: 1,
+    LINE_OF_SIGHT: 1,
+}
+
+
 def get_risk(attr_key: str, value: int) -> float:
     """Get risk factor from lookup table"""
     return LOOKUP_TABLES.get(attr_key, {}).get(value, {}).get('risk', 1.0)
@@ -463,6 +509,49 @@ def calculate_risk_band_for_type(score: float, crash_type: str = "VB") -> int:
             return 4
 
 
+def calculate_top_contributing_attributes(row: pd.Series, base_total_score: float) -> list:
+    """
+    Calculate the marginal impact (score reduction) of each attribute if set to its safest value.
+    Returns the top 5 attributes that contribute most to the score.
+    """
+    contributions = []
+    for attr, safest_val in BASELINE_VALUES.items():
+        # Check if attribute exists in row
+        current_val = row.get(attr)
+        if pd.isna(current_val):
+            continue
+            
+        # Avoid calculating if it is already the safest value
+        try:
+            if float(current_val) == float(safest_val):
+                continue
+        except (ValueError, TypeError):
+            if current_val == safest_val:
+                continue
+            
+        # Create a modified row
+        mod_row = row.copy()
+        mod_row[attr] = safest_val
+        
+        # Recalculate score
+        cm3 = calculate_cm3(mod_row)
+        cm16 = calculate_cm16(mod_row)
+        cm25 = calculate_cm25(mod_row)
+        cm40 = calculate_cm40(mod_row)
+        _, _, _, _, mod_total_score = calculate_cyclerap_score(mod_row, cm3, cm16, cm25, cm40)
+        
+        reduction = float(base_total_score - mod_total_score)
+        if reduction > 0.001:  # Only consider meaningful reductions
+            contributions.append({
+                "name": attr,
+                "contribution": round(reduction, 4)
+            })
+            
+    # Sort by contribution descending
+    contributions.sort(key=lambda x: x["contribution"], reverse=True)
+    return contributions[:5]
+
+
 def calculate_cyclerap_score_native(attributes_df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate cycleRAP scores using accurate v2.11 algorithm.
@@ -501,8 +590,11 @@ def calculate_cyclerap_score_native(attributes_df: pd.DataFrame) -> pd.DataFrame
         # Overall Risk Level Band is now determined by the MAXIMUM band among the components
         # This aligns with the "Highest Risk Category" logic used in the frontend
         total_band = max(bb_band, bp_band, sb_band, vb_band)
+        
+        # Calculate top contributing attributes
+        top_contributors = calculate_top_contributing_attributes(row, total_score)
 
-        results.append({
+        result_dict = {
             'BB': round(bb_score, 4),
             'BB Band': bb_band,
             'BP': round(bp_score, 4),
@@ -512,7 +604,20 @@ def calculate_cyclerap_score_native(attributes_df: pd.DataFrame) -> pd.DataFrame
             'VB': round(vb_score, 4),
             'VB Band': vb_band,
             'Overall Risk Level': round(total_score, 4),
-            'Overall Risk Level Band': total_band
-        })
+            'Overall Risk Level Band': total_band,
+        }
+        
+        # Populate Top 1-5 Contributors
+        for i in range(5):
+            name_key = f'Top {i+1} Contributor'
+            contrib_key = f'Top {i+1} Contribution'
+            if i < len(top_contributors):
+                result_dict[name_key] = top_contributors[i]["name"]
+                result_dict[contrib_key] = top_contributors[i]["contribution"]
+            else:
+                result_dict[name_key] = None
+                result_dict[contrib_key] = None
+                
+        results.append(result_dict)
 
     return pd.DataFrame(results)

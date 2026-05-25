@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { Box, Flex, Text } from "@chakra-ui/react";
 import ScoreBandPieChart from "../../../components/visualization/scoreband/ScoreBandPieChart";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 import "../../../components/visualization/scoreband/ScoreBandDistributionPanel.css";
@@ -368,6 +367,7 @@ export function AggregatedScoreBandPanel({
                     />
                   </div>
                 </div>
+
               </div>
             )}
         </div>

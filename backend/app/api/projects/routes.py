@@ -313,6 +313,7 @@ TREATMENTS = [
         "name": "Improve crossing facility",
         "triggers": [
             {"Crossing Facility": [2]},
+            {"Property Access": [1], "Crossing Facility": [2]},
         ],
         "effects": {"Crossing Facility": 1}
     },
@@ -364,6 +365,8 @@ def ok(data, code=200):
 
 def fail(message, code=400):
     return jsonify({"error": message}), code
+
+import ast
 
 def df_to_records(df) -> list:
     """Convert a DataFrame to JSON-safe records, replacing NaN/Inf with None."""
@@ -1600,9 +1603,19 @@ def get_results(project_name: str):
 
         # Get results if they exist
         if ver.results and ver.results.df is not None and len(ver.results.df) > 0:
+            res_df = ver.results.df
+            # Auto-calculate Top Contributors for legacy projects
+            # Note: serializer auto-adds missing schema columns with None, so we must check for null values
+            if "Top 1 Contributor" not in res_df.columns or res_df["Top 1 Contributor"].isnull().all():
+                from app.services.cyclerap_scoring import calculate_cyclerap_score_native
+                res_df = calculate_cyclerap_score_native(ver.attributes.df)
+                ver.results.df = res_df
+                ver.results.df_dirty = True
+                proj.save_all()
+
             return jsonify({
                 "ok": True,
-                "result_rows": df_to_records(ver.results.df)
+                "result_rows": df_to_records(res_df)
             })
         else:
             # No results yet
@@ -4038,7 +4051,9 @@ def autocode_image(project_name: str):
 
         # Return both updates and changed_fields for change tracking/highlighting in UI
         # changed_fields: list of field names that were updated by CV model
-        resp: dict = {"updates": updates, "changed_fields": list(updates.keys())}
+        # Property Access is only highlighted when autocoded as Present (value=1)
+        changed_fields = [k for k in updates.keys() if k != "Property Access" or updates[k] == 1]
+        resp: dict = {"updates": updates, "changed_fields": changed_fields}
         if gradient_pct is not None:
             resp["gradient_pct"] = round(gradient_pct, 3)
         return ok(resp)
@@ -4857,6 +4872,13 @@ def autocode_all(project_name: str):
                 merged[ibf_key] = img_updates[ibf_key]
                 sources[ibf_key] = "CV"
 
+            # Invariant: Crossing Facility and Property Access cannot both be Present.
+            # If Crossing Facility=Present (1) ends up in the merged result (from CV or GIS),
+            # force Property Access=Not Present (2).
+            if merged.get("Crossing Facility") == 1 and "Property Access" in merged:
+                merged["Property Access"] = 2
+                sources["Property Access"] = sources.get("Crossing Facility", "CV")
+
             return merged, sources, None
 
         # ========================================================================
@@ -5037,7 +5059,9 @@ def autocode_all(project_name: str):
                         for field, code in (merged or {}).items():
                             old_val = ver.attributes.df.at[idx, field] if field in ver.attributes.df.columns else None
                             if old_val != code:
-                                changed_fields.append(field)
+                                # Property Access is only highlighted when autocoded as Present (value=1)
+                                if not (field == "Property Access" and code != 1):
+                                    changed_fields.append(field)
                                 field_sources[field] = sources.get(field, "Unknown")
                             ver.attributes.df.at[idx, field] = code
 

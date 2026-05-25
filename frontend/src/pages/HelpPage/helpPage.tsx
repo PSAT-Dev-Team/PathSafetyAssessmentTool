@@ -39,7 +39,7 @@ export default function HelpPage() {
           <Text fontSize="2xl" fontWeight="bold" color="gray.800" _dark={{ color: "gray.100" }}>
             Documentation & Guides
           </Text>
-          <Button size="sm" colorPalette="blue" onClick={() => navigate(-1)}>
+          <Button size="sm" colorPalette="blue" onClick={() => navigate("/projects")}>
             Go Back
           </Button>
         </Flex>

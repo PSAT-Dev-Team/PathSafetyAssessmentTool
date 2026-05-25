@@ -23,8 +23,7 @@ obsidian-vault/
 .mcp.json
 .opencode.json
 .windsurfrules
-AGENTS.md
-GEMINI.md
+
 
 # POC scripts and outputs
 adjroad_poc.py
@@ -54,3 +53,7 @@ completed.csv
 # OS specific files
 .DS_Store
 **/.DS_Store
+
+# Documentation and explanations
+*.md
+
