@@ -1,0 +1,44 @@
+{
+  "changedFieldsByRow": {
+    "86": [
+      "Facility Type",
+      "Fixed Obstacle on Facility",
+      "Non-Fixed Obstacle on Facility",
+      "Delineation",
+      "Light Segregation",
+      "Adjacent Road Lane 0-1m",
+      "Adjacent object or level change 0-1m",
+      "Adjacent Road Lane 1-3m",
+      "Adjacent object or level change 1-3m",
+      "Property Access",
+      "Area type",
+      "Road AADT",
+      "Road operating speed (mean)",
+      "Road speed limit",
+      "Heavy vehicle flow",
+      "Curvature",
+      "Facility Width per Direction"
+    ]
+  },
+  "fieldSourcesByRow": {
+    "86": {
+      "Facility Type": "CV",
+      "Fixed Obstacle on Facility": "CV",
+      "Non-Fixed Obstacle on Facility": "CV",
+      "Delineation": "CV",
+      "Light Segregation": "CV",
+      "Adjacent Road Lane 0-1m": "CV",
+      "Adjacent object or level change 0-1m": "CV",
+      "Adjacent Road Lane 1-3m": "CV",
+      "Adjacent object or level change 1-3m": "CV",
+      "Property Access": "CV",
+      "Area type": "GIS",
+      "Road AADT": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS",
+      "Heavy vehicle flow": "GIS",
+      "Curvature": "GIS",
+      "Facility Width per Direction": "GIS"
+    }
+  }
+}

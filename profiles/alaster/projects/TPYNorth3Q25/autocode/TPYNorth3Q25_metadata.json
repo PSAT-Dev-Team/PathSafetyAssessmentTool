@@ -1,0 +1,96 @@
+{
+  "changedFieldsByRow": {
+    "0": [],
+    "1": [],
+    "2": [
+      "FO Type"
+    ],
+    "3": [
+      "Fixed Obstacle on Facility"
+    ],
+    "4": [
+      "Fixed Obstacle on Facility"
+    ],
+    "5": [
+      "Fixed Obstacle on Facility"
+    ],
+    "6": [
+      "FO Type"
+    ],
+    "7": [
+      "FO Type"
+    ],
+    "8": [
+      "Fixed Obstacle on Facility"
+    ],
+    "9": [
+      "Fixed Obstacle on Facility"
+    ],
+    "10": [],
+    "11": [],
+    "12": [],
+    "13": [],
+    "14": [],
+    "15": [],
+    "16": [],
+    "17": [],
+    "18": [],
+    "19": [],
+    "20": [],
+    "21": [],
+    "22": [],
+    "23": [],
+    "24": [],
+    "25": [],
+    "26": [],
+    "27": [],
+    "28": []
+  },
+  "fieldSourcesByRow": {
+    "0": {},
+    "1": {},
+    "2": {
+      "FO Type": "CV"
+    },
+    "3": {
+      "Fixed Obstacle on Facility": "CV"
+    },
+    "4": {
+      "Fixed Obstacle on Facility": "CV"
+    },
+    "5": {
+      "Fixed Obstacle on Facility": "CV"
+    },
+    "6": {
+      "FO Type": "CV"
+    },
+    "7": {
+      "FO Type": "CV"
+    },
+    "8": {
+      "Fixed Obstacle on Facility": "CV"
+    },
+    "9": {
+      "Fixed Obstacle on Facility": "CV"
+    },
+    "10": {},
+    "11": {},
+    "12": {},
+    "13": {},
+    "14": {},
+    "15": {},
+    "16": {},
+    "17": {},
+    "18": {},
+    "19": {},
+    "20": {},
+    "21": {},
+    "22": {},
+    "23": {},
+    "24": {},
+    "25": {},
+    "26": {},
+    "27": {},
+    "28": {}
+  }
+}

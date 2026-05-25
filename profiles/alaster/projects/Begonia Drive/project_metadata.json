@@ -1,0 +1,20 @@
+{
+    "project_name": "Begonia Drive",
+    "date_created": "2026-05-20T12:48:10.219766",
+    "last_updated": "2026-05-20T12:48:10.219766",
+    "created_by": "default",
+    "dataset": "BEGONIA DRIVE_1Q2026",
+    "source_folders": [
+        "BEGONIA DRIVE_1Q2026"
+    ],
+    "progress": [],
+    "size": 89,
+    "tags": [
+        "Gradient",
+        "May20"
+    ],
+    "path_key": "begonia_drive",
+    "verified": false,
+    "verified_segment_count": 0,
+    "autocoded_segment_count": 0
+}

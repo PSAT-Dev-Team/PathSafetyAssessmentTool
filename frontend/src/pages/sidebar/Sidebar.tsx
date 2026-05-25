@@ -3,6 +3,7 @@ import { Button, Separator } from "@chakra-ui/react";
 import { useMemo, useCallback, useState } from "react";
 import { toaster } from "../../components/ui/toaster";
 import { applyAllTreatments, resetAllTreatments, saveTreatments } from "../../api";
+import { useProfile } from "../../features/profile/ProfileProvider";
 
 import CodingSidebar from "./components/CodingSidebar";
 import TreatmentSidebar from "./components/TreatmentSidebar";
@@ -19,11 +20,13 @@ const LINKS = [
 export default function Sidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const { activeProfile, logout } = useProfile();
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [treatmentExitDialogOpen, setTreatmentExitDialogOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Get the project name
   const codingMatch = useMatch("/coding/:projectName");
@@ -40,6 +43,44 @@ export default function Sidebar() {
 
   const inCoding = pathname.startsWith("/coding");
   const onTreatmentDetail = pathname.startsWith("/treatment/") && projectName;
+
+  const completeLogout = useCallback(async () => {
+    try {
+      setIsLoggingOut(true);
+      await logout();
+      navigate("/");
+    } catch (error) {
+      toaster.create({
+        title: "Logout failed",
+        description: error instanceof Error ? error.message : "Failed to log out.",
+        type: "error",
+      });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }, [logout, navigate]);
+
+  const consumePendingNavigation = useCallback((defaultPath: string) => {
+    const pendingNavigation = (window as any).psat_pendingNavigation;
+    (window as any).psat_pendingNavigation = null;
+    return pendingNavigation || defaultPath;
+  }, []);
+
+  const consumePendingLogout = useCallback(() => {
+    const pendingLogout = Boolean((window as any).psat_pendingLogout);
+    (window as any).psat_pendingLogout = null;
+    return pendingLogout;
+  }, []);
+
+  const completeExitAction = useCallback(async (defaultPath: string) => {
+    const shouldLogout = consumePendingLogout();
+    const nextPath = consumePendingNavigation(defaultPath);
+    if (shouldLogout) {
+      await completeLogout();
+      return;
+    }
+    navigate(nextPath);
+  }, [completeLogout, consumePendingLogout, consumePendingNavigation, navigate]);
 
   // Navigate with exit prompt for coding page
   const navigateSidebar = useCallback((to: string) => {
@@ -179,6 +220,24 @@ export default function Sidebar() {
     setExitDialogOpen(true);
   }, []);
 
+  const onLogout = useCallback(() => {
+    if (inCoding) {
+      (window as any).psat_pendingNavigation = "/";
+      (window as any).psat_pendingLogout = true;
+      setExitDialogOpen(true);
+      return;
+    }
+
+    if (onTreatmentDetail) {
+      (window as any).psat_pendingNavigation = "/";
+      (window as any).psat_pendingLogout = true;
+      setTreatmentExitDialogOpen(true);
+      return;
+    }
+
+    void completeLogout();
+  }, [completeLogout, inCoding, onTreatmentDetail]);
+
 
   const handleSaveAndExit = useCallback(() => {
     setIsSaving(true);
@@ -189,34 +248,21 @@ export default function Sidebar() {
       setIsSaving(false);
       setExitDialogOpen(false);
 
-      // Navigate to pending location or home
-      const pendingNavigation = (window as any).psat_pendingNavigation;
-      if (pendingNavigation) {
-        navigate(pendingNavigation);
-        (window as any).psat_pendingNavigation = null;
-      } else {
-        navigate(`/home`);
-      }
+      void completeExitAction("/home");
     }, 500);
-  }, [navigate]);
+  }, [completeExitAction]);
 
   const handleDiscardAndExit = useCallback(() => {
     setExitDialogOpen(false);
 
-    // Navigate to pending location or home
-    const pendingNavigation = (window as any).psat_pendingNavigation;
-    if (pendingNavigation) {
-      navigate(pendingNavigation);
-      (window as any).psat_pendingNavigation = null;
-    } else {
-      navigate(`/home`);
-    }
-  }, [navigate]);
+    void completeExitAction("/home");
+  }, [completeExitAction]);
 
   const handleExitCancel = useCallback(() => {
     setExitDialogOpen(false);
     // Clear pending navigation
     (window as any).psat_pendingNavigation = null;
+    (window as any).psat_pendingLogout = null;
   }, []);
 
   // Treatment save and exit handlers
@@ -271,7 +317,7 @@ export default function Sidebar() {
     onTreatmentSave().then(() => {
       setIsSaving(false);
       setTreatmentExitDialogOpen(false);
-      navigate(`/home`);
+      void completeExitAction("/home");
     }).catch(() => {
       setIsSaving(false);
       toaster.create({
@@ -280,15 +326,17 @@ export default function Sidebar() {
         type: "error",
       });
     });
-  }, [navigate, onTreatmentSave]);
+  }, [completeExitAction, onTreatmentSave]);
 
   const handleTreatmentDiscardAndExit = useCallback(() => {
     setTreatmentExitDialogOpen(false);
-    navigate(`/home`);
-  }, [navigate]);
+    void completeExitAction("/home");
+  }, [completeExitAction]);
 
   const handleTreatmentExitCancel = useCallback(() => {
     setTreatmentExitDialogOpen(false);
+    (window as any).psat_pendingNavigation = null;
+    (window as any).psat_pendingLogout = null;
   }, []);
 
   return (
@@ -297,6 +345,23 @@ export default function Sidebar() {
       <div className="psat-side-top">
         <img src={psatLogo} alt="PSAT" className="psat-brand-logo" />
         <h1 className="psat-sidebar-title">Path Safety Assessment Tool</h1>
+
+        {activeProfile && (
+          <div className="psat-profile-panel">
+            <div className="psat-profile-label">Current Profile</div>
+            <div className="psat-profile-name">{activeProfile.name}</div>
+            <div className="psat-profile-division">{activeProfile.division}</div>
+            <Button
+              onClick={onLogout}
+              colorPalette="red"
+              variant="outline"
+              size="sm"
+              loading={isLoggingOut}
+            >
+              Log Out
+            </Button>
+          </div>
+        )}
 
         <div className="psat-actions">
           {LINKS.filter(({ to }) => pathname !== to).map(({ to, label }) => {

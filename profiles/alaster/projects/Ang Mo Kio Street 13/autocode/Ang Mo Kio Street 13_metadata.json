@@ -1,0 +1,308 @@
+{
+  "changedFieldsByRow": {
+    "0": [
+      "Facility Type",
+      "Fixed Obstacle on Facility",
+      "Non-Fixed Obstacle on Facility",
+      "Delineation",
+      "Delineation Type",
+      "Light Segregation",
+      "Width Restriction",
+      "Adjacent Road Lane 0-1m",
+      "Adjacent object or level change 0-1m",
+      "Adjacent Sidewalk 0-1m",
+      "Adjacent Road Lane 1-3m",
+      "Adjacent object or level change 1-3m",
+      "Intersection or Road Crossing",
+      "Crossing Facility",
+      "Number of lanes – intersecting road",
+      "Peak pedestrian flow along or across facility",
+      "Grade",
+      "Gradient %",
+      "Gradient Status",
+      "Intersecting Bicycle Facility",
+      "Area type",
+      "Road AADT",
+      "Road operating speed (mean)",
+      "Road speed limit",
+      "Heavy vehicle flow",
+      "Curvature",
+      "Curvature Sub-category",
+      "Facility Width per Direction",
+      "Facility Width Sub-category",
+      "Number of lanes – adjacent road",
+      "Major Surface Deformation or Drain Opening",
+      "Loose or slippery surface",
+      "Issue Type (Slippery)"
+    ],
+    "1": [
+      "Curvature Sub-category"
+    ],
+    "2": [
+      "Curvature Sub-category"
+    ],
+    "3": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "4": [],
+    "5": [],
+    "6": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "7": [],
+    "8": [
+      "Curvature Sub-category"
+    ],
+    "9": [],
+    "10": [],
+    "11": [],
+    "12": [
+      "Curvature Sub-category"
+    ],
+    "13": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "14": [],
+    "15": [],
+    "16": [],
+    "17": [],
+    "18": [],
+    "19": [
+      "Curvature Sub-category"
+    ],
+    "20": [
+      "Curvature Sub-category"
+    ],
+    "21": [],
+    "22": [],
+    "23": [],
+    "24": [
+      "Curvature Sub-category"
+    ],
+    "25": [],
+    "26": [],
+    "27": [],
+    "28": [],
+    "29": [
+      "Curvature Sub-category"
+    ],
+    "30": [
+      "Curvature Sub-category"
+    ],
+    "31": [],
+    "32": [],
+    "33": [
+      "Curvature Sub-category"
+    ],
+    "34": [
+      "Curvature Sub-category"
+    ],
+    "35": [
+      "Curvature Sub-category"
+    ],
+    "36": [
+      "Curvature Sub-category"
+    ],
+    "37": [
+      "Curvature Sub-category"
+    ],
+    "38": [
+      "Curvature Sub-category"
+    ],
+    "39": [
+      "Curvature Sub-category"
+    ],
+    "40": [
+      "Curvature Sub-category"
+    ],
+    "41": [],
+    "42": [
+      "Curvature Sub-category"
+    ],
+    "43": [],
+    "44": [
+      "Curvature Sub-category"
+    ],
+    "45": [
+      "Curvature Sub-category"
+    ],
+    "46": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "47": [
+      "Curvature Sub-category"
+    ],
+    "48": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "49": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "50": [],
+    "51": [],
+    "52": [],
+    "53": [],
+    "54": [],
+    "55": [],
+    "56": []
+  },
+  "fieldSourcesByRow": {
+    "0": {
+      "Facility Type": "CV",
+      "Fixed Obstacle on Facility": "CV",
+      "Non-Fixed Obstacle on Facility": "CV",
+      "Delineation": "CV",
+      "Delineation Type": "CV",
+      "Light Segregation": "CV",
+      "Width Restriction": "CV",
+      "Adjacent Road Lane 0-1m": "CV",
+      "Adjacent object or level change 0-1m": "CV",
+      "Adjacent Sidewalk 0-1m": "CV",
+      "Adjacent Road Lane 1-3m": "CV",
+      "Adjacent object or level change 1-3m": "CV",
+      "Intersection or Road Crossing": "CV",
+      "Crossing Facility": "CV",
+      "Number of lanes – intersecting road": "CV",
+      "Peak pedestrian flow along or across facility": "CV",
+      "Grade": "CV",
+      "Gradient %": "CV",
+      "Gradient Status": "CV",
+      "Intersecting Bicycle Facility": "GIS",
+      "Area type": "GIS",
+      "Road AADT": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS",
+      "Heavy vehicle flow": "GIS",
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS",
+      "Facility Width per Direction": "GIS",
+      "Facility Width Sub-category": "GIS",
+      "Number of lanes – adjacent road": "GIS",
+      "Major Surface Deformation or Drain Opening": "GIS",
+      "Loose or slippery surface": "GIS",
+      "Issue Type (Slippery)": "GIS"
+    },
+    "1": {
+      "Curvature Sub-category": "GIS"
+    },
+    "2": {
+      "Curvature Sub-category": "GIS"
+    },
+    "3": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "4": {},
+    "5": {},
+    "6": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "7": {},
+    "8": {
+      "Curvature Sub-category": "GIS"
+    },
+    "9": {},
+    "10": {},
+    "11": {},
+    "12": {
+      "Curvature Sub-category": "GIS"
+    },
+    "13": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "14": {},
+    "15": {},
+    "16": {},
+    "17": {},
+    "18": {},
+    "19": {
+      "Curvature Sub-category": "GIS"
+    },
+    "20": {
+      "Curvature Sub-category": "GIS"
+    },
+    "21": {},
+    "22": {},
+    "23": {},
+    "24": {
+      "Curvature Sub-category": "GIS"
+    },
+    "25": {},
+    "26": {},
+    "27": {},
+    "28": {},
+    "29": {
+      "Curvature Sub-category": "GIS"
+    },
+    "30": {
+      "Curvature Sub-category": "GIS"
+    },
+    "31": {},
+    "32": {},
+    "33": {
+      "Curvature Sub-category": "GIS"
+    },
+    "34": {
+      "Curvature Sub-category": "GIS"
+    },
+    "35": {
+      "Curvature Sub-category": "GIS"
+    },
+    "36": {
+      "Curvature Sub-category": "GIS"
+    },
+    "37": {
+      "Curvature Sub-category": "GIS"
+    },
+    "38": {
+      "Curvature Sub-category": "GIS"
+    },
+    "39": {
+      "Curvature Sub-category": "GIS"
+    },
+    "40": {
+      "Curvature Sub-category": "GIS"
+    },
+    "41": {},
+    "42": {
+      "Curvature Sub-category": "GIS"
+    },
+    "43": {},
+    "44": {
+      "Curvature Sub-category": "GIS"
+    },
+    "45": {
+      "Curvature Sub-category": "GIS"
+    },
+    "46": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "47": {
+      "Curvature Sub-category": "GIS"
+    },
+    "48": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "49": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "50": {},
+    "51": {},
+    "52": {},
+    "53": {},
+    "54": {},
+    "55": {},
+    "56": {}
+  }
+}

@@ -1,0 +1,434 @@
+{
+  "changedFieldsByRow": {
+    "0": [
+      "Delineation",
+      "Facility Type",
+      "Intersection or Road Crossing",
+      "Light Segregation",
+      "Property Access",
+      "Area type",
+      "Curvature",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "1": [
+      "Delineation",
+      "Facility Type",
+      "Intersection or Road Crossing",
+      "Light Segregation",
+      "Property Access",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "2": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "3": [
+      "Adjacent Road Lane 0-1m",
+      "Adjacent object or level change 0-1m",
+      "Delineation",
+      "Facility Type",
+      "Light Segregation",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "4": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Curvature",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "5": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "6": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "7": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "8": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "9": [
+      "Delineation",
+      "Facility Type",
+      "Fixed Obstacle on Facility",
+      "Width Restriction",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "10": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "11": [
+      "Delineation",
+      "Facility Type",
+      "Light Segregation",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "12": [
+      "Adjacent Road Lane 0-1m",
+      "Adjacent object or level change 0-1m",
+      "Delineation",
+      "Facility Type",
+      "Intersection or Road Crossing",
+      "Light Segregation",
+      "Property Access",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "13": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Curvature",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "14": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "15": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "16": [
+      "Adjacent Road Lane 0-1m",
+      "Adjacent Sidewalk 0-1m",
+      "Adjacent object or level change 0-1m",
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "17": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "18": [
+      "Delineation",
+      "Facility Type",
+      "Light Segregation",
+      "Area type",
+      "Curvature",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "19": [
+      "Adjacent Road Lane 0-1m",
+      "Adjacent object or level change 0-1m",
+      "Delineation",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "20": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Curvature",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "21": [
+      "Delineation",
+      "Facility Type",
+      "Area type",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ],
+    "22": [
+      "Adjacent Road Lane 0-1m",
+      "Adjacent object or level change 0-1m",
+      "Delineation",
+      "Facility Type",
+      "Light Segregation",
+      "Curvature",
+      "Facility Width per Direction",
+      "Road operating speed (mean)",
+      "Road speed limit"
+    ]
+  },
+  "fieldSourcesByRow": {
+    "0": {
+      "Area type": "GIS",
+      "Curvature": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Intersection or Road Crossing": "CV",
+      "Light Segregation": "CV",
+      "Property Access": "CV",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "1": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Intersection or Road Crossing": "CV",
+      "Light Segregation": "CV",
+      "Property Access": "CV",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "2": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "3": {
+      "Adjacent Road Lane 0-1m": "CV",
+      "Adjacent object or level change 0-1m": "CV",
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Light Segregation": "CV",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "4": {
+      "Area type": "GIS",
+      "Curvature": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "5": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "6": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "7": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "8": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "9": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Fixed Obstacle on Facility": "CV",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS",
+      "Width Restriction": "CV"
+    },
+    "10": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "11": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Light Segregation": "CV",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "12": {
+      "Adjacent Road Lane 0-1m": "CV",
+      "Adjacent object or level change 0-1m": "CV",
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Intersection or Road Crossing": "CV",
+      "Light Segregation": "CV",
+      "Property Access": "CV",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "13": {
+      "Area type": "GIS",
+      "Curvature": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "14": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "15": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "16": {
+      "Adjacent Road Lane 0-1m": "CV",
+      "Adjacent Sidewalk 0-1m": "CV",
+      "Adjacent object or level change 0-1m": "CV",
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "17": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "18": {
+      "Area type": "GIS",
+      "Curvature": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Light Segregation": "CV",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "19": {
+      "Adjacent Road Lane 0-1m": "CV",
+      "Adjacent object or level change 0-1m": "CV",
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "20": {
+      "Area type": "GIS",
+      "Curvature": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "21": {
+      "Area type": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    },
+    "22": {
+      "Adjacent Road Lane 0-1m": "CV",
+      "Adjacent object or level change 0-1m": "CV",
+      "Curvature": "GIS",
+      "Delineation": "CV",
+      "Facility Type": "CV",
+      "Facility Width per Direction": "GIS",
+      "Light Segregation": "CV",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "id": "1934ffbe3031bb14",
+      "name": "Alaster",
+      "slug": "alaster",
+      "created_at": "2026-05-21T04:16:28.070429+00:00",
+      "pin_hash": "09fe11f4b55f8c3482b9e70e389828de74311ded23b1cccbf41f8f94989eebe1",
+      "pin_salt": "d0ba58c80e21d81567b7a6d81258d1dd",
+      "division": "Unassigned",
+      "last_active_at": "2026-05-25T00:44:25.736428+00:00"
+    },
+    {
+      "id": "a3de8b5d2e15fba6",
+      "name": "Test Profile A",
+      "slug": "test-profile-a",
+      "created_at": "2026-05-21T04:16:53.319944+00:00",
+      "pin_hash": "008f0e65fa54fa3623e2d1d87e8ef2401e86933aeffc7811903426c64f2bfdb6",
+      "pin_salt": "a821e4b9c20fb245ae4ebe580172623a",
+      "division": "Unassigned",
+      "last_active_at": null
+    },
+    {
+      "id": "23832717431875aa",
+      "name": "Test Profile B",
+      "slug": "test-profile-b",
+      "created_at": "2026-05-21T05:50:25.769608+00:00",
+      "pin_hash": "d761ac915a7c5e32fade6528c503890947488f2aadb1957fb8d86864a2f12170",
+      "pin_salt": "3006545ec01a1f93030bc3ec4b3c5c92",
+      "division": "Unassigned",
+      "last_active_at": null
+    },
+    {
+      "id": "b467478a4d1b4e66",
+      "name": "Test Profile C",
+      "slug": "test-profile-c",
+      "created_at": "2026-05-21T09:18:45.778486+00:00",
+      "pin_hash": "ee7d3bd80f5ea4ca06ea0701168b9133197e930cd3826e41a5b8c9fd119f9b2b",
+      "pin_salt": "414b911bf80971a691bc43f03aaeeff7",
+      "division": "Unassigned",
+      "last_active_at": null
+    }
+  ]
+}

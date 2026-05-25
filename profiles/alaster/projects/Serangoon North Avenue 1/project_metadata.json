@@ -1,0 +1,21 @@
+{
+    "project_name": "Serangoon North Avenue 1",
+    "date_created": "2026-05-11T10:07:33.999590",
+    "last_updated": "2026-05-13T16:18:52.480911",
+    "created_by": "default",
+    "dataset": "SERANGOON NORTH AVENUE 1",
+    "source_folders": [
+        "SERANGOON NORTH AVENUE 1"
+    ],
+    "progress": [],
+    "size": 266,
+    "tags": [
+        "Gradient",
+        "Serangoon",
+        "May11"
+    ],
+    "path_key": "serangoon_north_avenue_1",
+    "verified": false,
+    "verified_segment_count": 0,
+    "autocoded_segment_count": 0
+}

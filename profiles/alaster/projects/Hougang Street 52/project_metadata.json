@@ -1,0 +1,19 @@
+{
+    "project_name": "Hougang Street 52",
+    "date_created": "2026-04-28T10:10:00.344977",
+    "last_updated": "2026-05-13T15:36:13.483005",
+    "created_by": "default",
+    "dataset": "HOUGANG STREET 52",
+    "source_folders": [],
+    "progress": [],
+    "size": 40,
+    "tags": [
+        "Apr28",
+        "Hougang",
+        "Gradient"
+    ],
+    "path_key": "hougang_street_52",
+    "verified": false,
+    "verified_segment_count": 0,
+    "autocoded_segment_count": 0
+}

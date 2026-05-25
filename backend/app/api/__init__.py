@@ -1,10 +1,12 @@
 from .projects import bp as projects_bp
+from .profiles import bp as profiles_bp
 from .health import bp as health_bp
 from .cycleRAP import bp as cyclerap_bp
 
 
 def register_blueprints(app):
     app.register_blueprint(projects_bp, url_prefix="/api/projects")
+    app.register_blueprint(profiles_bp, url_prefix="/api/profiles")
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(cyclerap_bp, url_prefix="/api/cyclerap")
 

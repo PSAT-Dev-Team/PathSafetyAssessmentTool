@@ -1,0 +1,6 @@
+project_name,chainage_m,x_svy21,y_svy21,elevation_m_raw,elevation_m_smooth,gradient_pct,Grade
+TPYIndustrialPark3Q25,0.0,30954.203,35650.546,3.614,3.61,-2.925,1.0
+TPYIndustrialPark3Q25,2.0,30954.472,35648.564,3.61,3.552,-2.813,1.0
+TPYIndustrialPark3Q25,4.0,30954.741,35646.582,3.494,3.494,-2.756,1.0
+TPYIndustrialPark3Q25,6.0,30955.009,35644.6,3.386,3.442,-2.7,1.0
+TPYIndustrialPark3Q25,8.0,30955.278,35642.618,3.39,3.39,-2.587,1.0

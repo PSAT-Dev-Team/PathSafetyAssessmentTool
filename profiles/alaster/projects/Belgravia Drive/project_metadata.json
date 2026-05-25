@@ -1,0 +1,20 @@
+{
+    "project_name": "Belgravia Drive",
+    "date_created": "2026-05-20T12:48:10.829486",
+    "last_updated": "2026-05-20T12:48:10.829486",
+    "created_by": "default",
+    "dataset": "BELGRAVIA DRIVE_1Q2026",
+    "source_folders": [
+        "BELGRAVIA DRIVE_1Q2026"
+    ],
+    "progress": [],
+    "size": 25,
+    "tags": [
+        "Gradient",
+        "May20"
+    ],
+    "path_key": "belgravia_drive",
+    "verified": false,
+    "verified_segment_count": 0,
+    "autocoded_segment_count": 0
+}

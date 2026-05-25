@@ -1,0 +1,21 @@
+{
+    "project_name": "Boundary Road",
+    "date_created": "2026-05-11T11:20:06.984623",
+    "last_updated": "2026-05-13T15:36:13.258707",
+    "created_by": "default",
+    "dataset": "BOUNDARY ROAD",
+    "source_folders": [
+        "BOUNDARY ROAD"
+    ],
+    "progress": [],
+    "size": 77,
+    "tags": [
+        "Gradient",
+        "Boundary",
+        "May11"
+    ],
+    "path_key": "boundary_road",
+    "verified": false,
+    "verified_segment_count": 0,
+    "autocoded_segment_count": 0
+}

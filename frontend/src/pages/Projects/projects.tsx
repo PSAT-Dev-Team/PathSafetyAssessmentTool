@@ -11,6 +11,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import { LuPencil, LuArrowUpDown, LuArrowUp, LuArrowDown } from "react-icons/lu";
 import EditProjectModal from "./components/EditProjectModal";
+import { toaster } from "../../components/ui/toaster";
+import { useProfile } from "../../features/profile/ProfileProvider";
 
 import "./projects.css";
 import "./components/EditProjectModal.css";
@@ -51,6 +53,7 @@ function getTagColor(tag: string): string {
 }
 
 export default function Home() {
+  const { activeProfile, legacyProjects, migrateLegacyProjects } = useProfile();
 
   // Status
   const [status, setStatus] = useState("checking...");
@@ -82,8 +85,20 @@ export default function Home() {
   // Edit dialog state
   const [openEdit, setOpenEdit] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectListItem | null>(null);
+  const [migratingLegacyProjects, setMigratingLegacyProjects] = useState(false);
 
   const navigate = useNavigate();
+
+  const loadProjects = useMemo(() => {
+    return () => {
+      setLoadingProjects(true);
+      setError(null);
+      return fetchProjectList()
+        .then((data) => setProjectList(data))
+        .catch((nextError) => setError(String(nextError)))
+        .finally(() => setLoadingProjects(false));
+    };
+  }, []);
 
 
   // Use effect
@@ -92,12 +107,8 @@ export default function Home() {
       .then((r) => setStatus(r.status))
       .catch(() => setStatus("offline"));
 
-    setLoadingProjects(true);
-    fetchProjectList()
-      .then((data) => setProjectList(data))
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoadingProjects(false));
-  }, []);
+    void loadProjects();
+  }, [loadProjects]);
 
   // Listen for project verified status changes from coding page
   useEffect(() => {
@@ -219,6 +230,29 @@ export default function Home() {
   );
   const showCreateProjectPrompt = !loadingProjects && filtered.length === 0 && nameQuery.trim().length > 0;
   const hasActiveFilters = nameQuery.trim().length > 0 || tagFilters.length > 0;
+
+  const moveLegacyProjects = async () => {
+    try {
+      setMigratingLegacyProjects(true);
+      const result = await migrateLegacyProjects();
+      await loadProjects();
+      toaster.create({
+        title: "Shared projects moved",
+        description: result.moved.length > 0
+          ? `${result.moved.length} project${result.moved.length === 1 ? "" : "s"} moved into ${activeProfile?.name ?? "the active profile"}.`
+          : "No shared projects were moved.",
+        type: "success",
+      });
+    } catch (nextError) {
+      toaster.create({
+        title: "Move failed",
+        description: nextError instanceof Error ? nextError.message : "Failed to move shared projects.",
+        type: "error",
+      });
+    } finally {
+      setMigratingLegacyProjects(false);
+    }
+  };
 
   const addTagFilter = (tag: string) => {
     if (!tag || tagFilters.includes(tag)) {
@@ -421,6 +455,26 @@ export default function Home() {
 
   return (
     <div className="projects-root">
+      {activeProfile && legacyProjects.length > 0 && (
+        <div className="profile-migration-banner">
+          <div>
+            <div className="profile-migration-title">Shared projects are still outside this profile</div>
+            <div className="profile-migration-copy">
+              {legacyProjects.length} existing project{legacyProjects.length === 1 ? " is" : "s are"} still in the shared project area.
+              Move them into {activeProfile.name} so they appear in this profile's project list.
+            </div>
+          </div>
+          <Button
+            colorPalette="teal"
+            variant="solid"
+            loading={migratingLegacyProjects}
+            onClick={() => void moveLegacyProjects()}
+          >
+            Move Shared Projects
+          </Button>
+        </div>
+      )}
+
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">

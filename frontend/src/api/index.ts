@@ -149,6 +149,91 @@ export async function fetchSourceFolderPreview(folderName: string, opts?: { sign
   return (await res.json()) as SourceFolderPreview;
 }
 
+export interface ProfileSummary {
+  id: string;
+  name: string;
+  slug: string;
+  division: string;
+  created_at: string;
+  last_active_at: string | null;
+  project_count: number;
+  has_pin: boolean;
+}
+
+export interface ProfilesOverview {
+  profiles: ProfileSummary[];
+  active_profile: ProfileSummary | null;
+  legacy_projects: string[];
+}
+
+export interface CreateProfileResult {
+  profile: ProfileSummary;
+  overview: ProfilesOverview;
+}
+
+export interface LoginProfileResult {
+  active_profile: ProfileSummary;
+  overview: ProfilesOverview;
+}
+
+export interface LogoutProfileResult {
+  ok: boolean;
+  overview: ProfilesOverview;
+}
+
+export interface MigrateLegacyProjectsResult {
+  moved: string[];
+  skipped: Array<{ name: string; reason: string }>;
+  missing: string[];
+  overview: ProfilesOverview;
+}
+
+export async function fetchProfilesOverview(): Promise<ProfilesOverview> {
+  const res = await fetch("/api/profiles");
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as ProfilesOverview;
+}
+
+export async function createProfile(name: string, pin: string, division: string): Promise<CreateProfileResult> {
+  const res = await fetch("/api/profiles", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, pin, division }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as CreateProfileResult;
+}
+
+export async function loginProfile(profileId: string, pin: string): Promise<LoginProfileResult> {
+  const res = await fetch("/api/profiles/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile_id: profileId, pin }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as LoginProfileResult;
+}
+
+export async function logoutProfile(): Promise<LogoutProfileResult> {
+  const res = await fetch("/api/profiles/logout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as LogoutProfileResult;
+}
+
+export async function migrateLegacyProjects(projectNames?: string[]): Promise<MigrateLegacyProjectsResult> {
+  const res = await fetch("/api/profiles/migrate-legacy-projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_names: projectNames }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as MigrateLegacyProjectsResult;
+}
+
 export async function pickLocalSourceFolder() {
   const res = await fetch("/api/projects/folders/pick-local", {
     method: "POST",
@@ -194,6 +279,12 @@ export interface RoadsInPolygonResult {
   fallback: boolean;
 }
 
+export type ProjectSelectionGeometry =
+  | { type: "Polygon"; coordinates: number[][][] }
+  | { type: "MultiPolygon"; coordinates: number[][][][] }
+  | { type: "LineString"; coordinates: number[][] }
+  | { type: "MultiLineString"; coordinates: number[][][] };
+
 export interface RoadInBounds {
   name: string;
   exists: boolean;
@@ -212,6 +303,17 @@ export async function queryRoadsInPolygon(polygon: [number, number][]): Promise<
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ polygon }),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return { roads: (data?.roads ?? []) as RoadInPolygon[], fallback: data?.fallback ?? false };
+}
+
+export async function queryRoadsInSelection(selectionGeometry: ProjectSelectionGeometry): Promise<RoadsInPolygonResult> {
+  const res = await fetch("/api/projects/roads-in-polygon", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selection_geometry: selectionGeometry }),
   });
   if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
   const data = await res.json();
@@ -256,14 +358,20 @@ export async function createProjectFromFolder(
   project_name: string,
   folder_name: string | string[],
   tags: string[] = [],
-  polygon?: [number, number][]
+  selectionGeometry?: ProjectSelectionGeometry
 ) {
   const folder_names = Array.isArray(folder_name) ? folder_name : undefined;
   const single_folder_name = Array.isArray(folder_name) ? undefined : folder_name;
   const res = await fetch("/api/projects/folders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_name, folder_name: single_folder_name, folder_names, tags, polygon }),
+    body: JSON.stringify({
+      project_name,
+      folder_name: single_folder_name,
+      folder_names,
+      tags,
+      selection_geometry: selectionGeometry,
+    }),
   });
   if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
   // 返回形如 { ok: true, name: "<project>" }

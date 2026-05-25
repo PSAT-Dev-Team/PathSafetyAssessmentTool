@@ -23,12 +23,13 @@ import {
   previewUploadedShapefiles,
   queryPlanningAreasInBounds,
   queryRoadsInBounds,
-  queryRoadsInPolygon,
+  queryRoadsInSelection,
   type PlanningAreaInBounds,
+  type ProjectSelectionGeometry,
   type RoadInBounds,
 } from "../../api";
 import { toaster } from "../../components/ui/toaster";
-import type { Feature, FeatureCollection, GeoJsonProperties, MultiPolygon, Polygon } from "geojson";
+import type { Feature, FeatureCollection, GeoJsonProperties, LineString, MultiLineString, MultiPolygon, Polygon } from "geojson";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -44,7 +45,11 @@ type PolygonSource = "manual" | "planning-area" | "uploaded-shapefile" | null;
 interface UploadedBoundaryFeature {
   key: string;
   label: string;
-  coords: [number, number][];
+  kind: "polygon" | "line";
+  selectionGeometry: ProjectSelectionGeometry;
+  focusPoints: [number, number][];
+  coords?: [number, number][];
+  lineCoordsSets?: [number, number][][];
 }
 
 const SHAPEFILE_ACCEPT = ".zip,.shp,.shx,.dbf,.prj,.cpg,.sbn,.sbx";
@@ -93,8 +98,25 @@ function toLeafletCoords(ring: number[][]): [number, number][] {
     .map(([lng, lat]) => [lat, lng]);
 }
 
+function toPolygonSelectionGeometry(points: [number, number][]): ProjectSelectionGeometry | null {
+  if (points.length < 3) {
+    return null;
+  }
+
+  const ring = points.map(([lat, lng]) => [lng, lat]);
+  const [firstLng, firstLat] = ring[0];
+  const [lastLng, lastLat] = ring[ring.length - 1];
+  if (firstLng !== lastLng || firstLat !== lastLat) {
+    ring.push([firstLng, firstLat]);
+  }
+
+  return { type: "Polygon", coordinates: [ring] };
+}
+
 function extractUploadedBoundaryFeatures(collection: FeatureCollection): UploadedBoundaryFeature[] {
   const boundaries: UploadedBoundaryFeature[] = [];
+  const aggregatedLineCoords: number[][][] = [];
+  const aggregatedLineLabels: string[] = [];
 
   collection.features.forEach((feature: Feature, featureIndex) => {
     const baseLabel = getUploadedBoundaryLabel(feature.properties, featureIndex);
@@ -113,8 +135,23 @@ function extractUploadedBoundaryFeatures(collection: FeatureCollection): Uploade
       boundaries.push({
         key: `${featureIndex}-${partIndex}`,
         label: totalParts > 1 ? `${baseLabel} (part ${partIndex + 1})` : baseLabel,
+        kind: "polygon",
+        selectionGeometry: {
+          type: "Polygon",
+          coordinates: [ring],
+        },
+        focusPoints: cloneCoords(coords),
         coords,
       });
+    };
+
+    const appendLine = (lineCoords: number[][]) => {
+      const coords = toLeafletCoords(lineCoords);
+      if (coords.length < 2) {
+        return;
+      }
+      aggregatedLineCoords.push(lineCoords);
+      aggregatedLineLabels.push(baseLabel);
     };
 
     if (geometry.type === "Polygon") {
@@ -132,8 +169,37 @@ function extractUploadedBoundaryFeatures(collection: FeatureCollection): Uploade
           appendBoundary(polygonCoords[0] as number[][], partIndex, multiPolygon.coordinates.length);
         }
       });
+      return;
+    }
+
+    if (geometry.type === "LineString") {
+      appendLine((geometry as LineString).coordinates as number[][]);
+      return;
+    }
+
+    if (geometry.type === "MultiLineString") {
+      (geometry as MultiLineString).coordinates.forEach((lineCoords) => {
+        appendLine(lineCoords as number[][]);
+      });
     }
   });
+
+  if (aggregatedLineCoords.length > 0) {
+    const lineCoordsSets = aggregatedLineCoords.map((lineCoords) => toLeafletCoords(lineCoords)).filter((coords) => coords.length >= 2);
+    const focusPoints = lineCoordsSets.flatMap((coords) => cloneCoords(coords));
+    boundaries.push({
+      key: "uploaded-lines",
+      label: aggregatedLineLabels.length === 1
+        ? aggregatedLineLabels[0]
+        : `Uploaded Lines (${aggregatedLineCoords.length} features)`,
+      kind: "line",
+      selectionGeometry: aggregatedLineCoords.length === 1
+        ? { type: "LineString", coordinates: aggregatedLineCoords[0] }
+        : { type: "MultiLineString", coordinates: aggregatedLineCoords },
+      focusPoints,
+      lineCoordsSets,
+    });
+  }
 
   return boundaries;
 }
@@ -269,11 +335,11 @@ export interface SelectedRoad {
 
 interface SelectRoadsMapProps {
   onSelectionChange: (roads: SelectedRoad[]) => void;
-  onPolygonChange: (polygon: [number, number][]) => void;
+  onSelectionGeometryChange: (selectionGeometry: ProjectSelectionGeometry | null) => void;
   refreshKey?: number;
 }
 
-export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, refreshKey = 0 }: SelectRoadsMapProps) {
+export default function SelectRoadsMap({ onSelectionChange, onSelectionGeometryChange, refreshKey = 0 }: SelectRoadsMapProps) {
   // Polygon state
   const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
   const [polygonSource, setPolygonSource] = useState<PolygonSource>(null);
@@ -300,8 +366,10 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
   const [overlayPlanningAreas, setOverlayPlanningAreas] = useState<PlanningAreaInBounds[]>([]);
   const [planningAreaLoading, setPlanningAreaLoading] = useState(false);
   const [highlightPlanningAreaKey, setHighlightPlanningAreaKey] = useState<string | null>(null);
+  const [selectedUploadedBoundary, setSelectedUploadedBoundary] = useState<UploadedBoundaryFeature | null>(null);
   const roadsRef = useRef<SelectedRoad[]>([]);
   const polygonSourceRef = useRef<PolygonSource>(null);
+  const currentSelectionGeometry = selectedUploadedBoundary?.selectionGeometry ?? toPolygonSelectionGeometry(polygonPoints);
 
   useEffect(() => {
     roadsRef.current = roads;
@@ -313,6 +381,7 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
 
   // ─ Handlers ─────────────────────────────────────────────────────
   const addPoint = useCallback((latlng: L.LatLng) => {
+    setSelectedUploadedBoundary(null);
     setHighlightPlanningAreaKey(null);
     setHighlightUploadedBoundaryKey(null);
     setPolygonSource("manual");
@@ -324,6 +393,7 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
   }, []);
 
   const movePoint = useCallback((index: number, latlng: L.LatLng) => {
+    setSelectedUploadedBoundary(null);
     setHighlightUploadedBoundaryKey(null);
     setPolygonSource("manual");
     setPolygonPoints((prev) =>
@@ -336,18 +406,20 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
   const clearPolygon = useCallback(() => {
     setPolygonPoints([]);
     setPolygonSource(null);
+    setSelectedUploadedBoundary(null);
     setRoads([]);
     setQueryError(null);
     setIsFallback(false);
     setHighlightPlanningAreaKey(null);
     setHighlightUploadedBoundaryKey(null);
     onSelectionChange([]);
-    onPolygonChange([]);
-  }, [onPolygonChange, onSelectionChange]);
+    onSelectionGeometryChange(null);
+  }, [onSelectionChange, onSelectionGeometryChange]);
 
   const selectPlanningArea = useCallback((area: PlanningAreaInBounds) => {
     setIsDrawing(false);
     setPolygonSource("planning-area");
+    setSelectedUploadedBoundary(null);
     setQueryError(null);
     setIsFallback(false);
     setHighlightPlanningAreaKey(`${area.name}-${area.partIndex}`);
@@ -359,12 +431,13 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
   const selectUploadedBoundary = useCallback((boundary: UploadedBoundaryFeature) => {
     setIsDrawing(false);
     setPolygonSource("uploaded-shapefile");
+    setSelectedUploadedBoundary(boundary);
     setQueryError(null);
     setIsFallback(false);
     setHighlightPlanningAreaKey(null);
     setHighlightUploadedBoundaryKey(boundary.key);
-    setPolygonPoints(boundary.coords);
-    setMapFocusPoints(cloneCoords(boundary.coords));
+    setPolygonPoints(boundary.kind === "polygon" ? cloneCoords(boundary.coords ?? []) : []);
+    setMapFocusPoints(cloneCoords(boundary.focusPoints));
   }, []);
 
   const clearUploadedBoundaries = useCallback(() => {
@@ -401,34 +474,36 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
       const geojson = await previewUploadedShapefiles(files);
       const boundaries = extractUploadedBoundaryFeatures(geojson);
       if (boundaries.length === 0) {
-        throw new Error("No polygon features were found in the uploaded shapefile.");
+        throw new Error("No polygon or line features were found in the uploaded shapefile.");
       }
 
       setUploadedBoundaryName(sourceFile.name);
       setUploadedBoundaries(boundaries);
       setHighlightUploadedBoundaryKey(null);
-      setMapFocusPoints(cloneCoords(boundaries.flatMap((boundary) => boundary.coords)));
+      setMapFocusPoints(cloneCoords(boundaries.flatMap((boundary) => boundary.focusPoints)));
 
       if (boundaries.length === 1) {
         selectUploadedBoundary(boundaries[0]);
         toaster.create({
-          title: "Boundary imported",
-          description: `${sourceFile.name} was imported and its only polygon was selected automatically.`,
+          title: "Shapefile imported",
+          description: boundaries[0].kind === "line"
+            ? `${sourceFile.name} was imported and its line network was selected automatically.`
+            : `${sourceFile.name} was imported and its only polygon was selected automatically.`,
           type: "success",
         });
       } else {
         toaster.create({
-          title: "Boundary imported",
-          description: `${sourceFile.name} was imported. Click one of the polygons on the map to use it.`,
+          title: "Shapefile imported",
+          description: `${sourceFile.name} was imported. Click one of the shapes on the map to use it.`,
           type: "success",
         });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to import boundary shapefile.";
+      const message = error instanceof Error ? error.message : "Failed to import shapefile.";
       setUploadedBoundaries([]);
       setUploadedBoundaryName(null);
       setUploadedBoundaryError(message);
-      toaster.create({ title: "Boundary import failed", description: message, type: "error" });
+      toaster.create({ title: "Shapefile import failed", description: message, type: "error" });
     } finally {
       setUploadedBoundaryLoading(false);
     }
@@ -512,24 +587,25 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
     };
   }, [showPlanningAreaOverlay, viewportState]);
 
-  // ─ Query backend when polygon has ≥3 points ─────────────────────
   useEffect(() => {
-    if (polygonPoints.length < 3) {
+    onSelectionGeometryChange(currentSelectionGeometry ?? null);
+  }, [currentSelectionGeometry, onSelectionGeometryChange]);
+
+  // ─ Query backend when a selection geometry is active ────────────
+  useEffect(() => {
+    if (currentSelectionGeometry == null) {
       setRoads([]);
       roadsRef.current = [];
       onSelectionChange([]);
-      onPolygonChange([]);
       return;
     }
-
-    onPolygonChange(polygonPoints);
 
     let cancelled = false;
     const timeout = setTimeout(async () => {
       setQuerying(true);
       setQueryError(null);
       try {
-        const { roads: result, fallback } = await queryRoadsInPolygon(polygonPoints);
+        const { roads: result, fallback } = await queryRoadsInSelection(currentSelectionGeometry);
         if (cancelled) return;
         setIsFallback(fallback);
         const mapped = mergeRoadSelection(roadsRef.current, result, fallback);
@@ -547,7 +623,7 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [onPolygonChange, onSelectionChange, polygonPoints, refreshKey]);
+  }, [currentSelectionGeometry, onSelectionChange, refreshKey]);
 
   // ─ Selection helpers ────────────────────────────────────────────
   const toggleRoad = useCallback(
@@ -591,6 +667,8 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
 
   const allSelected = roads.length > 0 && roads.every((r) => r.selected);
   const selectedUnavailableCount = roads.filter((road) => road.selected && !road.exists).length;
+  const availableRoadCount = roads.filter((road) => road.exists).length;
+  const unavailableRoadCount = roads.length - availableRoadCount;
   const toolbarStatus = isDrawing
     ? "Click on the map to place vertices. Draw at least 3 points."
     : polygonSource === "manual" && polygonPoints.length > 0
@@ -606,21 +684,21 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
     roadStatus = { text: "Searching for roads...", color: "gray.500" };
   } else if (queryError) {
     roadStatus = { text: queryError, color: "red.500" };
-  } else if (polygonPoints.length >= 3 && roads.length === 0) {
-    roadStatus = { text: "No roads found in selected area.", color: "gray.500" };
+  } else if (currentSelectionGeometry != null && roads.length === 0) {
+    roadStatus = { text: "No roads found in the selected area or path.", color: "gray.500" };
   } else if (showPlanningAreaOverlay && !planningAreaLoading && viewportState && viewportState.zoom < 10) {
     roadStatus = { text: "Zoom in to level 10 or above to view planning areas.", color: "gray.500" };
   }
 
   const uploadedBoundaryStatus = uploadedBoundaryLoading
-    ? { text: "Importing shapefile boundary...", color: "blue.500" }
+    ? { text: "Importing shapefile...", color: "blue.500" }
     : uploadedBoundaryError
       ? { text: uploadedBoundaryError, color: "red.500" }
       : uploadedBoundaries.length > 0
         ? {
             text: polygonSource === "uploaded-shapefile"
-              ? `Using uploaded boundary from ${uploadedBoundaryName ?? "shapefile"}.`
-              : `Imported ${uploadedBoundaryName ?? "shapefile"}. Click a polygon on the map to use it.`,
+              ? `Using imported selection from ${uploadedBoundaryName ?? "shapefile"}.`
+              : `Imported ${uploadedBoundaryName ?? "shapefile"}. Click a shape on the map to use it.`,
             color: "blue.600",
           }
         : null;
@@ -751,28 +829,55 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
           {uploadedBoundaries.map((boundary) => {
             const isHighlighted = highlightUploadedBoundaryKey === boundary.key;
             return (
-              <LeafletPolygon
-                key={boundary.key}
-                positions={boundary.coords}
-                pathOptions={{
-                  color: isHighlighted ? "#C2410C" : "#EA580C",
-                  weight: isHighlighted ? 3 : 1.5,
-                  opacity: 0.95,
-                  fillColor: isHighlighted ? "#FB923C" : "#FDBA74",
-                  fillOpacity: isHighlighted ? 0.28 : 0.14,
-                }}
-                eventHandlers={{
-                  click: (e) => {
-                    L.DomEvent.stopPropagation(e as any);
-                    selectUploadedBoundary(boundary);
-                  },
-                }}
-              >
-                <Popup>
-                  <Text fontSize="sm" fontWeight="semibold">{boundary.label}</Text>
-                  <Text fontSize="xs" color="orange.700">Imported boundary</Text>
-                </Popup>
-              </LeafletPolygon>
+              boundary.kind === "polygon" && boundary.coords ? (
+                <LeafletPolygon
+                  key={boundary.key}
+                  positions={boundary.coords}
+                  pathOptions={{
+                    color: isHighlighted ? "#C2410C" : "#EA580C",
+                    weight: isHighlighted ? 3 : 1.5,
+                    opacity: 0.95,
+                    fillColor: isHighlighted ? "#FB923C" : "#FDBA74",
+                    fillOpacity: isHighlighted ? 0.28 : 0.14,
+                  }}
+                  eventHandlers={{
+                    click: (e) => {
+                      L.DomEvent.stopPropagation(e as any);
+                      selectUploadedBoundary(boundary);
+                    },
+                  }}
+                >
+                  <Popup>
+                    <Text fontSize="sm" fontWeight="semibold">{boundary.label}</Text>
+                    <Text fontSize="xs" color="orange.700">Imported area selection</Text>
+                  </Popup>
+                </LeafletPolygon>
+              ) : (
+                <>
+                  {(boundary.lineCoordsSets ?? []).map((lineCoords, partIndex) => (
+                    <LeafletPolyline
+                      key={`${boundary.key}-${partIndex}`}
+                      positions={lineCoords}
+                      pathOptions={{
+                        color: isHighlighted ? "#C2410C" : "#EA580C",
+                        weight: isHighlighted ? 4 : 2.5,
+                        opacity: 0.95,
+                      }}
+                      eventHandlers={{
+                        click: (e) => {
+                          L.DomEvent.stopPropagation(e as any);
+                          selectUploadedBoundary(boundary);
+                        },
+                      }}
+                    >
+                      <Popup>
+                        <Text fontSize="sm" fontWeight="semibold">{boundary.label}</Text>
+                        <Text fontSize="xs" color="orange.700">Imported path selection</Text>
+                      </Popup>
+                    </LeafletPolyline>
+                  ))}
+                </>
+              )
             );
           })}
           {showRoadOverlay && overlayRoads.map((road, idx) => (
@@ -834,7 +939,7 @@ export default function SelectRoadsMap({ onSelectionChange, onPolygonChange, ref
         <Box mt={3}>
           <Flex justifyContent="space-between" alignItems="center" mb={2}>
             <Text fontSize="sm" fontWeight="bold">
-              Roads Found ({roads.filter((r) => r.selected).length}/{roads.length} selected)
+              Roads Found ({roads.filter((r) => r.selected).length}/{roads.length} selected, {availableRoadCount} available{unavailableRoadCount > 0 ? `, ${unavailableRoadCount} not downloaded` : ""})
             </Text>
             <HStack gap={2}>
               {selectedUnavailableCount > 0 && (

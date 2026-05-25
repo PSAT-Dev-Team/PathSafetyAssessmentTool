@@ -20,6 +20,7 @@ import {
   fetchProjectList,
   fetchSourceFolderPreview,
   type SourceFolderPreview,
+  type ProjectSelectionGeometry,
 } from "../../api";
 import ImageUploadModal from "../sidebar/components/ImageUploadModal";
 import SelectRoadsMap, { type SelectedRoad } from "./SelectRoadsMap";
@@ -77,7 +78,7 @@ export default function CreateProjectPage() {
   const [loadingFolderPreview, setLoadingFolderPreview] = useState(false);
   const [folderPreviewError, setFolderPreviewError] = useState<string | null>(null);
   const [selectedRoads, setSelectedRoads] = useState<SelectedRoad[]>([]);
-  const [selectedPolygon, setSelectedPolygon] = useState<[number, number][]>([]);
+  const [selectedSelectionGeometry, setSelectedSelectionGeometry] = useState<ProjectSelectionGeometry | null>(null);
 
   const selectedRoadFolders = useMemo(
     () => selectedRoads.filter((road) => road.selected),
@@ -166,8 +167,8 @@ export default function CreateProjectPage() {
     setSelectedRoads(roads);
   }, []);
 
-  const handlePolygonChange = useCallback((polygon: [number, number][]) => {
-    setSelectedPolygon(polygon);
+  const handleSelectionGeometryChange = useCallback((selectionGeometry: ProjectSelectionGeometry | null) => {
+    setSelectedSelectionGeometry(selectionGeometry);
   }, []);
 
   const commitTag = useCallback((rawTag: string) => {
@@ -222,7 +223,7 @@ export default function CreateProjectPage() {
         name.trim(),
         sourceSelection,
         tags,
-        usingRoadSelection ? selectedPolygon : undefined
+        usingRoadSelection ? (selectedSelectionGeometry ?? undefined) : undefined
       );
       const proj = data?.name ?? name.trim();
       nav(`/coding/${encodeURIComponent(proj)}`);
@@ -240,7 +241,7 @@ export default function CreateProjectPage() {
         <CardHeader>
           <Heading size="md">Create Project from Folder</Heading>
           <Text mt="1" color="gray.500" fontSize="sm">
-            Use either a single source folder or a polygon-selected set of roads to create a project.
+            Use either a single source folder or a geometry-selected set of roads to create a project.
           </Text>
         </CardHeader>
         <CardBody display="grid" gap={4}>
@@ -527,11 +528,11 @@ export default function CreateProjectPage() {
               Select Roads
             </Text>
             <Text color="gray.500" fontSize="xs" mb={3}>
-              Draw a polygon, click a planning area, or import a boundary shapefile to select multiple roads. Project creation uses only nodes inside the selected boundary.
+              Draw a polygon, click a planning area, or import polygon or line shapefiles to select multiple roads. Project creation keeps only nodes inside the selected area, or near imported path lines.
             </Text>
             <SelectRoadsMap
               onSelectionChange={handleRoadSelectionChange}
-              onPolygonChange={handlePolygonChange}
+              onSelectionGeometryChange={handleSelectionGeometryChange}
               refreshKey={roadAvailabilityVersion}
             />
 

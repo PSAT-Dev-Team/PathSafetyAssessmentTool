@@ -1,0 +1,410 @@
+{
+  "changedFieldsByRow": {
+    "0": [
+      "Facility Type",
+      "Fixed Obstacle on Facility",
+      "Non-Fixed Obstacle on Facility",
+      "Delineation",
+      "Delineation Type",
+      "Light Segregation",
+      "Width Restriction",
+      "Adjacent Road Lane 0-1m",
+      "Adjacent object or level change 0-1m",
+      "Adjacent Sidewalk 0-1m",
+      "Adjacent Road Lane 1-3m",
+      "Adjacent object or level change 1-3m",
+      "Intersection or Road Crossing",
+      "Crossing Facility",
+      "Number of lanes – intersecting road",
+      "Peak pedestrian flow along or across facility",
+      "Grade",
+      "Gradient %",
+      "Gradient Status",
+      "Intersecting Bicycle Facility",
+      "Area type",
+      "Road AADT",
+      "Road operating speed (mean)",
+      "Road speed limit",
+      "Heavy vehicle flow",
+      "Curvature",
+      "Curvature Sub-category",
+      "Facility Width per Direction",
+      "Facility Width Sub-category",
+      "Number of lanes – adjacent road",
+      "Major Surface Deformation or Drain Opening",
+      "Loose or slippery surface",
+      "Issue Type (Slippery)"
+    ],
+    "1": [
+      "Curvature Sub-category"
+    ],
+    "2": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "3": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "4": [],
+    "5": [],
+    "6": [],
+    "7": [],
+    "8": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "9": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "10": [],
+    "11": [],
+    "12": [],
+    "13": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "14": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "15": [],
+    "16": [],
+    "17": [],
+    "18": [],
+    "19": [],
+    "20": [],
+    "21": [],
+    "22": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "23": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "24": [],
+    "25": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "26": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "27": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "28": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "29": [],
+    "30": [],
+    "31": [
+      "Curvature Sub-category"
+    ],
+    "32": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "33": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "34": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "35": [],
+    "36": [],
+    "37": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "38": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "39": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "40": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "41": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "42": [
+      "Curvature Sub-category"
+    ],
+    "43": [
+      "Curvature Sub-category"
+    ],
+    "44": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "45": [],
+    "46": [],
+    "47": [],
+    "48": [],
+    "49": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "50": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "51": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "52": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "53": [],
+    "54": [],
+    "55": [],
+    "56": [],
+    "57": [],
+    "58": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "59": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "60": [],
+    "61": [],
+    "62": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "63": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "64": [],
+    "65": [
+      "Curvature",
+      "Curvature Sub-category"
+    ],
+    "66": [],
+    "67": [],
+    "68": [],
+    "69": []
+  },
+  "fieldSourcesByRow": {
+    "0": {
+      "Facility Type": "CV",
+      "Fixed Obstacle on Facility": "CV",
+      "Non-Fixed Obstacle on Facility": "CV",
+      "Delineation": "CV",
+      "Delineation Type": "CV",
+      "Light Segregation": "CV",
+      "Width Restriction": "CV",
+      "Adjacent Road Lane 0-1m": "CV",
+      "Adjacent object or level change 0-1m": "CV",
+      "Adjacent Sidewalk 0-1m": "CV",
+      "Adjacent Road Lane 1-3m": "CV",
+      "Adjacent object or level change 1-3m": "CV",
+      "Intersection or Road Crossing": "CV",
+      "Crossing Facility": "CV",
+      "Number of lanes – intersecting road": "CV",
+      "Peak pedestrian flow along or across facility": "CV",
+      "Grade": "CV",
+      "Gradient %": "CV",
+      "Gradient Status": "CV",
+      "Intersecting Bicycle Facility": "GIS",
+      "Area type": "GIS",
+      "Road AADT": "GIS",
+      "Road operating speed (mean)": "GIS",
+      "Road speed limit": "GIS",
+      "Heavy vehicle flow": "GIS",
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS",
+      "Facility Width per Direction": "GIS",
+      "Facility Width Sub-category": "GIS",
+      "Number of lanes – adjacent road": "GIS",
+      "Major Surface Deformation or Drain Opening": "GIS",
+      "Loose or slippery surface": "GIS",
+      "Issue Type (Slippery)": "GIS"
+    },
+    "1": {
+      "Curvature Sub-category": "GIS"
+    },
+    "2": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "3": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "4": {},
+    "5": {},
+    "6": {},
+    "7": {},
+    "8": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "9": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "10": {},
+    "11": {},
+    "12": {},
+    "13": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "14": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "15": {},
+    "16": {},
+    "17": {},
+    "18": {},
+    "19": {},
+    "20": {},
+    "21": {},
+    "22": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "23": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "24": {},
+    "25": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "26": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "27": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "28": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "29": {},
+    "30": {},
+    "31": {
+      "Curvature Sub-category": "GIS"
+    },
+    "32": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "33": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "34": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "35": {},
+    "36": {},
+    "37": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "38": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "39": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "40": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "41": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "42": {
+      "Curvature Sub-category": "GIS"
+    },
+    "43": {
+      "Curvature Sub-category": "GIS"
+    },
+    "44": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "45": {},
+    "46": {},
+    "47": {},
+    "48": {},
+    "49": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "50": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "51": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "52": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "53": {},
+    "54": {},
+    "55": {},
+    "56": {},
+    "57": {},
+    "58": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "59": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "60": {},
+    "61": {},
+    "62": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "63": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "64": {},
+    "65": {
+      "Curvature": "GIS",
+      "Curvature Sub-category": "GIS"
+    },
+    "66": {},
+    "67": {},
+    "68": {},
+    "69": {}
+  }
+}
