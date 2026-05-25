@@ -39,6 +39,7 @@ obstacles/
 scripts/
 tmp/
 Gradient Calculation/
+profiles/
 .Rhistory
 visualize_obstacles.py
 visualize_width_restriction.py
