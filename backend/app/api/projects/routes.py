@@ -5349,6 +5349,7 @@ def autocode_all(project_name: str):
                             actual_filter = list(fields_filter)
                             if "Grade" in actual_filter:
                                 actual_filter.append("Gradient %")
+                                actual_filter.append(GRADIENT_STATUS_FIELD)
                             if "Delineation" in actual_filter:
                                 actual_filter.append("Delineation Type")
                             if "Fixed Obstacle on Facility" in actual_filter:

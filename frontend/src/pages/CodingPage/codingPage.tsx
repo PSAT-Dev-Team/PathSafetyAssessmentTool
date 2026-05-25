@@ -35,7 +35,7 @@ import {
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
-import { autocodeImage, autocodeGIS, autocodeAll, autocodeAllStream } from "../../api";
+import { autocodeImage, autocodeGIS, autocodeAllStream } from "../../api";
 
 
 import ImagePanel from "./components/ImagePanel";
@@ -858,46 +858,29 @@ export default function CodingPage() {
         const attrLength = attrs.length;
         setProjectProgress({ [currentProjectName]: { processed: 0, total: attrLength } });
 
-        // Process each segment one-by-one for real-time progress
-        const allChangedFieldsByRow: Record<number, string[]> = {};
-        const allSourcesByRow: Record<number, Record<string, string>> = {};
-        let totalOk = 0;
-        let totalFail = 0;
-        const errors: any[] = [];
+        const r = await autocodeAllStream(
+          currentProjectName,
+          { all: true, save: false },
+          (processed, total, _errors) => {
+            setProjectProgress({ [currentProjectName]: { processed, total } });
+            setProgress(10 + Math.round((processed / total) * 75));
+          },
+        );
 
-        for (let i = 0; i < attrs.length; i++) {
-          try {
-            const r = await autocodeAll(currentProjectName, { indices: [i], save: false });
-
-            // Update progress after each segment
-            setProjectProgress({ [currentProjectName]: { processed: i + 1, total: attrLength } });
-
-            if ("changed_by_row" in r && r.changed_by_row) {
-              Object.assign(allChangedFieldsByRow, r.changed_by_row);
-            }
-
-            if ("sources_by_row" in r && r.sources_by_row) {
-              Object.assign(allSourcesByRow, r.sources_by_row);
-            }
-
-            if ("ok" in r) totalOk += r.ok || 0;
-            if ("fail" in r) totalFail += r.fail || 0;
-            if ("errors" in r && r.errors && r.errors.length > 0) {
-              errors.push(...r.errors);
-            }
-          } catch (e: any) {
-            totalFail++;
-            errors.push({ segment: i, reason: e?.message });
-          }
-        }
+        const allChangedFieldsByRow: Record<number, string[]> =
+          ("changed_by_row" in r && r.changed_by_row) ? r.changed_by_row : {};
+        const allSourcesByRow: Record<number, Record<string, string>> =
+          ("sources_by_row" in r && r.sources_by_row) ? r.sources_by_row : {};
+        const totalOk = ("ok" in r ? r.ok : 0) || 0;
+        const totalFail = ("fail" in r ? r.fail : 0) || 0;
 
         // After all segments processed, fetch updated attributes and recalculate scores
         setProgress(85);
         try {
-          const a = await fetchProjectAttributes(currentProjectName) as AttributesResponse;
-          if (a?.rows) {
+          const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
+          if (rows) {
             updateProjectData(currentProjectName, {
-              attrs: a.rows,
+              attrs: rows,
               changedFieldsByRow: allChangedFieldsByRow,
               fieldSourcesByRow: allSourcesByRow,
               isDirty: true,
@@ -907,13 +890,13 @@ export default function CodingPage() {
             saveAutocodeMetadata(currentProjectName, allChangedFieldsByRow, allSourcesByRow);
 
             // Update autocode baseline with new values from all segments
-            updateAutocodeBaseline(a.rows);
+            updateAutocodeBaseline(rows);
 
             // Recalculate scores
             const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/score`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ attributes: a.rows }),
+              body: JSON.stringify({ attributes: rows }),
             });
 
             if (res.ok) {
@@ -1108,47 +1091,33 @@ export default function CodingPage() {
           }));
 
           try {
-            const projectChangedFieldsByRow: Record<number, string[]> = {};
-            const projectSourcesByRow: Record<number, Record<string, string>> = {};
-            let projectOk = 0;
-            let projectFail = 0;
-
-            // Process each segment one-by-one for real-time progress
-            for (let segmentIdx = 0; segmentIdx < projectAttrsLength; segmentIdx++) {
-              try {
-                const r = await autocodeAll(projectName, { indices: [segmentIdx], save: false });
-
-                // Update progress after each segment
+            const r = await autocodeAllStream(
+              projectName,
+              { all: true, save: false },
+              (processed, total, _errors) => {
                 setProjectProgress(prev => ({
                   ...prev,
-                  [projectName]: { processed: segmentIdx + 1, total: projectAttrsLength }
+                  [projectName]: { processed, total }
                 }));
+              },
+            );
 
-                if ("changed_by_row" in r && r.changed_by_row) {
-                  Object.assign(projectChangedFieldsByRow, r.changed_by_row);
-                }
-
-                if ("sources_by_row" in r && r.sources_by_row) {
-                  Object.assign(projectSourcesByRow, r.sources_by_row);
-                }
-
-                if ("ok" in r) projectOk += r.ok || 0;
-                if ("fail" in r) projectFail += r.fail || 0;
-                if ("errors" in r && r.errors && r.errors.length > 0) {
-                  errors.push(...r.errors);
-                }
-              } catch (e: any) {
-                projectFail++;
-                errors.push({ projectName, segment: segmentIdx, reason: e?.message });
-              }
+            const projectChangedFieldsByRow: Record<number, string[]> =
+              ("changed_by_row" in r && r.changed_by_row) ? r.changed_by_row : {};
+            const projectSourcesByRow: Record<number, Record<string, string>> =
+              ("sources_by_row" in r && r.sources_by_row) ? r.sources_by_row : {};
+            const projectOk = ("ok" in r ? r.ok : 0) || 0;
+            const projectFail = ("fail" in r ? r.fail : 0) || 0;
+            if ("errors" in r && r.errors && r.errors.length > 0) {
+              errors.push(...r.errors);
             }
 
-            // After all segments of this project are processed, fetch updated attributes
+            // After all segments of this project are processed, use the returned in-memory rows
             try {
-              const a = await fetchProjectAttributes(projectName) as AttributesResponse;
-              if (a?.rows) {
+              const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
+              if (rows) {
                 updateProjectData(projectName, {
-                  attrs: a.rows,
+                  attrs: rows,
                   changedFieldsByRow: projectChangedFieldsByRow,
                   fieldSourcesByRow: projectSourcesByRow,
                   isDirty: true,
@@ -1163,7 +1132,7 @@ export default function CodingPage() {
                   fetch(`/api/projects/${encodeURIComponent(projectName)}/baseline`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ rows: a.rows })
+                    body: JSON.stringify({ rows })
                   });
                 } catch (e) {
                 }
@@ -1172,7 +1141,7 @@ export default function CodingPage() {
                 const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/score`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ attributes: a.rows }),
+                  body: JSON.stringify({ attributes: rows }),
                 });
 
                 if (res.ok) {
