@@ -9,7 +9,9 @@ from app.services import telemetry_store  # noqa: E402
 
 def _patch_db(monkeypatch, tmp_path):
     db_path = tmp_path / "profiles" / "telemetry.sqlite3"
+    config_path = tmp_path / "profiles" / "report-upload.json"
     monkeypatch.setattr(telemetry_store, "_telemetry_db_path", lambda: db_path)
+    monkeypatch.setattr(telemetry_store, "_remote_export_config_path", lambda: config_path)
     return db_path
 
 
@@ -150,6 +152,188 @@ def test_generate_weekly_report_derives_daily_and_usage_metrics(monkeypatch, tmp
         {"treatment_id": 1, "application_count": 1},
         {"treatment_id": 9, "application_count": 1},
     ]
+
+
+def test_generate_weekly_report_reflects_remote_export_configuration(monkeypatch, tmp_path):
+    _patch_db(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "PSAT_REPORT_WEB_APP_URL",
+        "https://script.google.com/macros/s/example/exec",
+    )
+    monkeypatch.setenv("PSAT_UPLOAD_SECRET", "secret-123")
+
+    report = telemetry_store.generate_weekly_report(
+        "2026-05-18T00:00:00+00:00",
+        "2026-05-25T00:00:00+00:00",
+    )
+
+    assert report["remote_export"]["status"] == "configured"
+    assert report["remote_export"]["destination"] == "https://script.google.com/macros/s/example/exec"
+
+
+def test_upload_weekly_report_persists_uploaded_batch(monkeypatch, tmp_path):
+    _patch_db(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "PSAT_REPORT_WEB_APP_URL",
+        "https://script.google.com/macros/s/example/exec",
+    )
+    monkeypatch.setenv("PSAT_UPLOAD_SECRET", "secret-123")
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"status":"ok"}'
+
+        def json(self):
+            return {
+                "status": "ok",
+                "spreadsheet_id": "sheet-123",
+                "spreadsheet_url": "https://docs.google.com/spreadsheets/d/sheet-123/edit",
+            }
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(telemetry_store.requests, "post", lambda *args, **kwargs: FakeResponse())
+
+    report = telemetry_store.generate_weekly_report(
+        "2026-05-18T00:00:00+00:00",
+        "2026-05-25T00:00:00+00:00",
+    )
+    telemetry_store.upload_weekly_report(report)
+
+    assert report["remote_export"]["status"] == "uploaded"
+    assert report["remote_export"]["pending_batches"] == 0
+    assert report["remote_export"]["response"]["spreadsheet_id"] == "sheet-123"
+
+    conn = telemetry_store._connect()
+    try:
+        rows = conn.execute("SELECT status, destination, payload_json FROM report_batches").fetchall()
+    finally:
+        conn.close()
+
+    assert len(rows) == 1
+    assert rows[0]["status"] == "uploaded"
+    assert rows[0]["destination"] == "https://script.google.com/macros/s/example/exec"
+
+
+def test_upload_weekly_report_marks_failed_batch(monkeypatch, tmp_path):
+    _patch_db(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "PSAT_REPORT_WEB_APP_URL",
+        "https://script.google.com/macros/s/example/exec",
+    )
+    monkeypatch.setenv("PSAT_UPLOAD_SECRET", "secret-123")
+
+    class FakeResponse:
+        status_code = 500
+        text = "server exploded"
+
+        def json(self):
+            return {"error": "server exploded"}
+
+        def raise_for_status(self):
+            raise telemetry_store.requests.HTTPError("500 Server Error", response=self)
+
+    monkeypatch.setattr(telemetry_store.requests, "post", lambda *args, **kwargs: FakeResponse())
+
+    report = telemetry_store.generate_weekly_report(
+        "2026-05-18T00:00:00+00:00",
+        "2026-05-25T00:00:00+00:00",
+    )
+
+    try:
+        telemetry_store.upload_weekly_report(report)
+    except RuntimeError as exc:
+        assert "HTTP 500" in str(exc)
+    else:
+        raise AssertionError("Expected upload_weekly_report to fail on HTTP errors")
+
+    assert report["remote_export"]["status"] == "failed"
+    assert report["remote_export"]["pending_batches"] == 1
+    assert "HTTP 500" in report["remote_export"]["error"]
+
+    conn = telemetry_store._connect()
+    try:
+        rows = conn.execute("SELECT status, payload_json FROM report_batches").fetchall()
+    finally:
+        conn.close()
+
+    assert len(rows) == 1
+    assert rows[0]["status"] == "failed"
+
+
+def test_upload_weekly_report_marks_failed_batch_on_error_payload(monkeypatch, tmp_path):
+    _patch_db(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "PSAT_REPORT_WEB_APP_URL",
+        "https://script.google.com/macros/s/example/exec",
+    )
+    monkeypatch.setenv("PSAT_UPLOAD_SECRET", "secret-123")
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"status":"error","error":"Bad secret"}'
+
+        def json(self):
+            return {"status": "error", "error": "Bad secret"}
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(telemetry_store.requests, "post", lambda *args, **kwargs: FakeResponse())
+
+    report = telemetry_store.generate_weekly_report(
+        "2026-05-18T00:00:00+00:00",
+        "2026-05-25T00:00:00+00:00",
+    )
+
+    try:
+        telemetry_store.upload_weekly_report(report)
+    except RuntimeError as exc:
+        assert "Bad secret" in str(exc)
+    else:
+        raise AssertionError("Expected upload_weekly_report to fail on error payloads")
+
+    assert report["remote_export"]["status"] == "failed"
+    assert report["remote_export"]["response"]["status"] == "error"
+    assert report["remote_export"]["error"] == "Bad secret"
+
+
+def test_upload_weekly_report_marks_failed_batch_on_non_json_response(monkeypatch, tmp_path):
+    _patch_db(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "PSAT_REPORT_WEB_APP_URL",
+        "https://script.google.com/macros/s/example/exec",
+    )
+    monkeypatch.setenv("PSAT_UPLOAD_SECRET", "secret-123")
+
+    class FakeResponse:
+        status_code = 200
+        text = "<html><body>Script function not found: doPost</body></html>"
+
+        def json(self):
+            raise ValueError("not json")
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(telemetry_store.requests, "post", lambda *args, **kwargs: FakeResponse())
+
+    report = telemetry_store.generate_weekly_report(
+        "2026-05-18T00:00:00+00:00",
+        "2026-05-25T00:00:00+00:00",
+    )
+
+    try:
+        telemetry_store.upload_weekly_report(report)
+    except RuntimeError as exc:
+        assert "Script function not found: doPost" in str(exc)
+    else:
+        raise AssertionError("Expected upload_weekly_report to fail on non-JSON HTML responses")
+
+    assert report["remote_export"]["status"] == "failed"
+    assert report["remote_export"]["response"]["non_json"] is True
+    assert "Script function not found: doPost" in report["remote_export"]["error"]
 
 
 def test_generate_weekly_report_rejects_invalid_window(monkeypatch, tmp_path):
