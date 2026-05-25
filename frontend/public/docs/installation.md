@@ -85,6 +85,7 @@ PathSafetyAssessmentTool/
 ├── backend.Dockerfile
 └── docker-compose.yml
 ```
+*Layman's explanation: This shows how the main folders of the application are organized on your computer.*
 
 ### 3.1 Create the `in/` Folder
 
@@ -106,6 +107,7 @@ in/
 └── BISHAN STREET 11/
     └── ...
 ```
+*Layman's explanation: This example shows how your input photos should be organized in the 'in' folder for the system to find them.*
 
 ### 3.2 Copy Models and Shapefiles
 
@@ -124,6 +126,7 @@ backend/
 └── shapefiles/
     └── <GIS layer files>
 ```
+*Layman's explanation: This shows where to put the specialized files for computer vision and mapping logic.*
 
 ### 3.3 Build the Road Reference CSV (Recommended)
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchProjectList, deleteProject as apiDeleteProject, type FileResponse, type ProjectListItem } from "../../api";
 import { matchesProjectSearch } from "../../utils/projectSearch";
 import {
@@ -6,11 +7,14 @@ import {
   Dialog,
   Portal,
   CloseButton,
+  Spinner,
 } from "@chakra-ui/react";
-import { useNavigate } from "react-router-dom";
 
 import "./home.css";
 export default function Home() {
+  const [error, setError] = useState<string | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+
   // Project List
   const [Projectlist, setProjectList] = useState<FileResponse | null>(null);
 
@@ -24,17 +28,17 @@ export default function Home() {
   const [openDelete, setOpenDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteErr, setDeleteErr] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
 
   // Use effect
   useEffect(() => {
+    setLoadingProjects(true);
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch(() => {});
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoadingProjects(false));
   }, []);
 
   // UseMemo projects
@@ -119,7 +123,16 @@ export default function Home() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loadingProjects ? (
+              <tr>
+                <td colSpan={2} className="empty">
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: "10px" }}>
+                    <Spinner size="sm" />
+                    <span>Loading projects...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={2} className="empty">
                   No projects found

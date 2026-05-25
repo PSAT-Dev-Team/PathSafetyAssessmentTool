@@ -154,6 +154,7 @@ class Attributes(BaseTable):
         FIXED_OBSTACLE_TYPE_STR         = "FO Type"
         NON_FIXED_OBSTACLE_STR          = "Non-Fixed Obstacle on Facility"
         NON_FIXED_OBSTACLE_TYPE_STR     = "NFO Type"
+        LOOSE_SLIPPERY_ISSUE_TYPE_STR   = "Issue Type (Slippery)"
         DELINEATION_STR                 = "Delineation"
         DELINEATION_TYPE_STR            = "Delineation Type"
         LIGHT_SEGREGATION_STR           = "Light Segregation"
@@ -211,6 +212,7 @@ class Attributes(BaseTable):
         Fields.FIXED_OBSTACLE_TYPE_STR:         None,
         Fields.NON_FIXED_OBSTACLE_STR:          presence_mapping,
         Fields.NON_FIXED_OBSTACLE_TYPE_STR:     None,
+        Fields.LOOSE_SLIPPERY_ISSUE_TYPE_STR:   None,
         Fields.DELINEATION_STR:                 presence_mapping,
         Fields.DELINEATION_TYPE_STR:            None,
         Fields.LIGHT_SEGREGATION_STR:           presence_mapping,
@@ -266,6 +268,16 @@ class Results(BaseTable):
         SB_BAND_STR                     = "SB Band"
         VB_BAND_STR                     = "VB Band"
         CYCLERAP_SCORE_BAND_STR         = "Overall Risk Level Band"
+        TOP_1_CONTRIBUTOR_STR           = "Top 1 Contributor"
+        TOP_1_CONTRIBUTION_STR          = "Top 1 Contribution"
+        TOP_2_CONTRIBUTOR_STR           = "Top 2 Contributor"
+        TOP_2_CONTRIBUTION_STR          = "Top 2 Contribution"
+        TOP_3_CONTRIBUTOR_STR           = "Top 3 Contributor"
+        TOP_3_CONTRIBUTION_STR          = "Top 3 Contribution"
+        TOP_4_CONTRIBUTOR_STR           = "Top 4 Contributor"
+        TOP_4_CONTRIBUTION_STR          = "Top 4 Contribution"
+        TOP_5_CONTRIBUTOR_STR           = "Top 5 Contributor"
+        TOP_5_CONTRIBUTION_STR          = "Top 5 Contribution"
     
     FIELDS_META = {
         Fields.BB_BAND_STR:             risk_category,

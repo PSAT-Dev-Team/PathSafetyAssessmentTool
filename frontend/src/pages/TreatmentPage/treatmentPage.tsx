@@ -53,6 +53,7 @@ function getTagColor(tag: string): string {
 export default function TreatmentPage() {
   // Project list state
   const [projectList, setProjectList] = useState<FileResponse | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(true);
 
   // Filter states
   const [nameQuery, setNameQuery] = useState("");
@@ -72,9 +73,11 @@ export default function TreatmentPage() {
 
   // Fetch projects on mount
   useEffect(() => {
+    setLoadingProjects(true);
     fetchProjectList()
       .then((data) => setProjectList(data))
-      .catch(() => { });
+      .catch(() => { })
+      .finally(() => setLoadingProjects(false));
   }, []);
 
   // Listen for project verified status changes from coding page
@@ -299,7 +302,13 @@ export default function TreatmentPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {loadingProjects ? (
+                <tr>
+                  <td colSpan={5} className="empty">
+                    Loading projects...
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="empty">
                     No projects found

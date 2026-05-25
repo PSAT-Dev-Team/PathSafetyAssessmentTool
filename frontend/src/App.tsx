@@ -12,6 +12,7 @@ import GisLayersPage from "./pages/GisLayersPage/GisLayersPage"
 import AppLayout from "./layouts/AppLayout";
 import HelpButton from "./components/common/HelpButton";
 import HelpPage from "./pages/HelpPage/helpPage";
+import RequireProfile from "./features/profile/RequireProfile";
 
 export default function App() {
   return (
@@ -22,7 +23,7 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/help" element={<HelpPage />} />
 
-        <Route element={<AppLayout />}>
+        <Route element={<RequireProfile><AppLayout /></RequireProfile>}>
           <Route path="/home" element={<Home />} />
           <Route path="/coding/:projectNames" element={<CodingPage />} />
           <Route path="/treatment" element={<TreatmentPage />} />

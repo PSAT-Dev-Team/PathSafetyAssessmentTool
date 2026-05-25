@@ -20,6 +20,7 @@ import "leaflet/dist/leaflet.css";
 
 import proj4 from "proj4";
 import type { CurvatureVisualizationResponse } from '../../../api/curvatureVisualization';
+import { GRADIENT_STATUS_NO_LIDAR_RESULT, getGradientDisplayState } from "../../../utils/gradientDisplay";
 
 type Props = {
   projectName: string;                       // Current project name from parent
@@ -41,6 +42,7 @@ type Props = {
   widthM?: number | null;
   grade?: number | null;
   gradientPct?: number | null;
+  gradientStatus?: string | null;
 };
 
 type GJ = FeatureCollection<LineString, any>;
@@ -309,7 +311,7 @@ function StatPill({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct, gradientStatus }: Props) {
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
@@ -595,6 +597,11 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
       ([lon, lat]: [number, number]) => [lat, lon] as [number, number]
     );
   }, [curvData]);
+
+  const gradientState = getGradientDisplayState(
+    { grade, gradientPct, gradientStatus },
+    { percentDigits: 1 },
+  );
 
   // 初始中心（无数据时默认新加坡中心点）
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
@@ -942,11 +949,11 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
               <StatPill
                 label="Grade"
                 value={
-                  gradientPct != null
-                    ? `${(gradientPct as number) >= 0 ? "+" : ""}${(gradientPct as number).toFixed(1)}%`
-                    : grade === 1 ? "<5°"
-                    : grade === 2 ? "≥5°"
-                    : "—"
+                  gradientState.mode === "grade"
+                    ? gradientState.text.replace("Grade 1 (<5°)", "<5°").replace("Grade 2 (≥5°)", "≥5°")
+                    : gradientState.text === GRADIENT_STATUS_NO_LIDAR_RESULT
+                      ? "N/A"
+                      : gradientState.text
                 }
               />
             </Flex>

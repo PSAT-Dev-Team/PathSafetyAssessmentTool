@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-25T09:00:00+00:00",
+  "report_type": "weekly_activity_summary",
+  "installation": {
+    "installation_id": "2c7b4e9d8f1841f7b0a54d1e93a87112",
+    "scope": "single_device"
+  },
+  "window": {
+    "start": "2026-05-18T00:00:00+00:00",
+    "end": "2026-05-25T00:00:00+00:00"
+  },
+  "remote_export": {
+    "status": "not_configured",
+    "destination": null,
+    "pending_batches": 0
+  },
+  "summary": {
+    "total_events": 31,
+    "active_profiles": 4,
+    "division_count": 2
+  },
+  "event_totals": {
+    "autocode_bulk_requested": 3,
+    "profile_login": 5,
+    "project_created": 2,
+    "project_list_viewed": 6,
+    "project_opened": 7,
+    "project_scored": 4,
+    "treatments_evaluated": 4
+  },
+  "divisions": [
+    {
+      "division": "Active Mobility",
+      "profile_count": 3,
+      "last_active_at": "2026-05-24T16:42:11+00:00",
+      "total_events": 24,
+      "event_totals": {
+        "autocode_bulk_requested": 3,
+        "profile_login": 4,
+        "project_created": 2,
+        "project_list_viewed": 5,
+        "project_opened": 5,
+        "project_scored": 3,
+        "treatments_evaluated": 2
+      }
+    },
+    {
+      "division": "Transport Planning",
+      "profile_count": 1,
+      "last_active_at": "2026-05-23T11:15:49+00:00",
+      "total_events": 7,
+      "event_totals": {
+        "profile_login": 1,
+        "project_list_viewed": 1,
+        "project_opened": 2,
+        "project_scored": 1,
+        "treatments_evaluated": 2
+      }
+    }
+  ],
+  "profiles": [
+    {
+      "profile_id": "8fa3d1c2e4b56790",
+      "division": "Active Mobility",
+      "last_active_at": "2026-05-24T16:42:11+00:00",
+      "total_events": 10,
+      "event_totals": {
+        "autocode_bulk_requested": 1,
+        "profile_login": 2,
+        "project_created": 1,
+        "project_list_viewed": 2,
+        "project_opened": 2,
+        "project_scored": 1,
+        "treatments_evaluated": 1
+      },
+      "projects_touched": [
+        "Serangoon Avenue 1",
+        "TPYLor41Q2025"
+      ]
+    },
+    {
+      "profile_id": "b17e42a91cd84f5e",
+      "division": "Transport Planning",
+      "last_active_at": "2026-05-23T11:15:49+00:00",
+      "total_events": 7,
+      "event_totals": {
+        "profile_login": 1,
+        "project_list_viewed": 1,
+        "project_opened": 2,
+        "project_scored": 1,
+        "treatments_evaluated": 2
+      },
+      "projects_touched": [
+        "AMK Industrial Park 2",
+        "Bartley Road"
+      ]
+    },
+    {
+      "profile_id": "f44c98a0b2d3418a",
+      "division": "Active Mobility",
+      "last_active_at": "2026-05-22T14:08:33+00:00",
+      "total_events": 8,
+      "event_totals": {
+        "autocode_bulk_requested": 2,
+        "profile_login": 1,
+        "project_created": 1,
+        "project_list_viewed": 2,
+        "project_opened": 1,
+        "project_scored": 1
+      },
+      "projects_touched": [
+        "Hougang Street 52",
+        "Upper Paya Lebar Road"
+      ]
+    },
+    {
+      "profile_id": "0d6a4fb95ce74231",
+      "division": "Active Mobility",
+      "last_active_at": "2026-05-20T09:37:05+00:00",
+      "total_events": 6,
+      "event_totals": {
+        "profile_login": 1,
+        "project_list_viewed": 1,
+        "project_opened": 2,
+        "project_scored": 1,
+        "treatments_evaluated": 1
+      },
+      "projects_touched": [
+        "Serangoon North Avenue 1"
+      ]
+    }
+  ]
+}

@@ -63,7 +63,7 @@ export function AddSegmentsDialog({
     const [tags, setTags] = useState<string[]>([]);
     const [tagInput, setTagInput] = useState("");
     const [existingTags, setExistingTags] = useState<string[]>([]);
-    const [tagComboboxOpen, setTagComboboxOpen] = useState(false);
+    const [tagSuggestionsOpen, setTagSuggestionsOpen] = useState(false);
 
     // Project Combobox State
     const [existingProjectInput, setExistingProjectInput] = useState("");
@@ -111,15 +111,25 @@ export function AddSegmentsDialog({
         }
     }, [isOpen]);
 
+    const commitTag = (rawTag: string) => {
+        const trimmedTag = rawTag.trim();
+        if (trimmedTag) {
+            setTags((current) => current.includes(trimmedTag) ? current : [...current, trimmedTag]);
+        }
+        setTagInput("");
+        setTagSuggestionsOpen(true);
+    };
+
+    const filteredTagSuggestions = existingTags.filter((tag) => {
+        const query = tagInput.trim().toLowerCase();
+        return !tags.includes(tag) && (!query || tag.toLowerCase().includes(query));
+    });
+
     // Tag Handlers
     const handleTagInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
         if (e.key === "," || e.key === "Enter") {
             e.preventDefault();
-            const trimmedTag = tagInput.trim();
-            if (trimmedTag && !tags.includes(trimmedTag)) {
-                setTags([...tags, trimmedTag]);
-            }
-            setTagInput("");
+            commitTag(tagInput);
         } else if (e.key === "Backspace" && tagInput === "" && tags.length > 0) {
             setTags(tags.slice(0, -1));
         }
@@ -224,8 +234,6 @@ export function AddSegmentsDialog({
         p.toLowerCase().includes(existingProjectInput.toLowerCase())
     );
     const projectCollection = createListCollection({ items: filteredProjects.map(p => ({ label: p, value: p })) });
-    const tagCollection = createListCollection({ items: existingTags.map(t => ({ label: t, value: t })) });
-
     return (
         <>
             <Dialog.Root open={isOpen} onOpenChange={(e) => !e.open && onClose()}>
@@ -331,52 +339,64 @@ export function AddSegmentsDialog({
                                                                     </button>
                                                                 </Box>
                                                             ))}
-                                                            <Combobox.Root
-                                                                collection={tagCollection}
-                                                                inputValue={tagInput}
-                                                                onInputValueChange={({ inputValue }) => setTagInput(inputValue)}
-                                                                onValueChange={({ value }) => {
-                                                                    if (value.length > 0) {
-                                                                        const selectedTag = value[0];
-                                                                        if (selectedTag && !tags.includes(selectedTag)) {
-                                                                            setTags([...tags, selectedTag]);
-                                                                            setTagInput("");
-                                                                        }
-                                                                    }
-                                                                }}
-                                                                open={tagComboboxOpen}
-                                                                onOpenChange={(details) => {
-                                                                    if (tagInput.length > 0) {
-                                                                        setTagComboboxOpen(true);
-                                                                    } else {
-                                                                        setTagComboboxOpen(details.open);
-                                                                    }
-                                                                }}
-                                                            >
-                                                                <Combobox.Control onClick={() => setTagComboboxOpen(true)}>
-                                                                    <Combobox.Input
-                                                                        placeholder="Type tag and press comma or enter"
-                                                                        className="tag-input-field"
-                                                                        onKeyDown={handleTagInputKeyDown}
-                                                                    />
-                                                                </Combobox.Control>
-                                                                <Portal>
-                                                                    <Combobox.Positioner>
-                                                                        <Combobox.Content zIndex={2000}>
-                                                                            {existingTags
-                                                                                .filter(t =>
-                                                                                    t.toLowerCase().includes(tagInput.toLowerCase()) &&
-                                                                                    !tags.includes(t)
-                                                                                )
-                                                                                .map(t => (
-                                                                                    <Combobox.Item key={t} item={{ label: t, value: t }}>
-                                                                                        {t}
-                                                                                    </Combobox.Item>
-                                                                                ))}
-                                                                        </Combobox.Content>
-                                                                    </Combobox.Positioner>
-                                                                </Portal>
-                                                            </Combobox.Root>
+                                                            <Box position="relative" flex="1" minW="160px">
+                                                                <Input
+                                                                    value={tagInput}
+                                                                    onChange={(e) => {
+                                                                        setTagInput(e.target.value);
+                                                                        setTagSuggestionsOpen(true);
+                                                                    }}
+                                                                    onFocus={() => setTagSuggestionsOpen(true)}
+                                                                    onBlur={() => {
+                                                                        window.setTimeout(() => setTagSuggestionsOpen(false), 100);
+                                                                    }}
+                                                                    placeholder="Type tag and press comma or enter"
+                                                                    className="tag-input-field"
+                                                                    onKeyDown={handleTagInputKeyDown}
+                                                                />
+                                                                {tagSuggestionsOpen && filteredTagSuggestions.length > 0 && (
+                                                                    <Box
+                                                                        position="absolute"
+                                                                        top="calc(100% + 8px)"
+                                                                        left="0"
+                                                                        right="0"
+                                                                        bg="white"
+                                                                        borderWidth="1px"
+                                                                        borderColor="gray.200"
+                                                                        _dark={{ borderColor: "gray.700", bg: "gray.800" }}
+                                                                        borderRadius="md"
+                                                                        boxShadow="md"
+                                                                        maxH="180px"
+                                                                        overflowY="auto"
+                                                                        zIndex={2000}
+                                                                    >
+                                                                        {filteredTagSuggestions.map((tag) => (
+                                                                            <Button
+                                                                                key={tag}
+                                                                                type="button"
+                                                                                display="block"
+                                                                                width="100%"
+                                                                                px="3"
+                                                                                py="2"
+                                                                                textAlign="left"
+                                                                                fontSize="sm"
+                                                                                variant="ghost"
+                                                                                justifyContent="flex-start"
+                                                                                borderRadius="0"
+                                                                                minH="auto"
+                                                                                h="auto"
+                                                                                _hover={{ bg: "gray.50", _dark: { bg: "gray.700" } }}
+                                                                                onMouseDown={(e) => {
+                                                                                    e.preventDefault();
+                                                                                    commitTag(tag);
+                                                                                }}
+                                                                            >
+                                                                                {tag}
+                                                                            </Button>
+                                                                        ))}
+                                                                    </Box>
+                                                                )}
+                                                            </Box>
                                                         </Box>
                                                     </Box>
                                                     <Text color="gray.500" fontSize="xs" mt={1}>

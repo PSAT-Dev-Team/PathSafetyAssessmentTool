@@ -17,6 +17,17 @@ interface SegmentScoresCardProps {
     BP: number;
     "Overall Risk Level"?: number;
     "CycleRAP score"?: number; // Backward compatibility for existing projects
+    "Top 1 Contributor"?: string;
+    "Top 1 Contribution"?: number;
+    "Top 2 Contributor"?: string;
+    "Top 2 Contribution"?: number;
+    "Top 3 Contributor"?: string;
+    "Top 3 Contribution"?: number;
+    "Top 4 Contributor"?: string;
+    "Top 4 Contribution"?: number;
+    "Top 5 Contributor"?: string;
+    "Top 5 Contribution"?: number;
+    "Top Contributing Attributes"?: Array<{name: string, contribution: number}> | string;
   } | null;
   beforeScores?: {
     VB: number;
@@ -27,6 +38,10 @@ interface SegmentScoresCardProps {
     "CycleRAP score"?: number;
   } | null; // Optional scores for before/after comparison
   showPreviewBackground?: boolean; // If true, show light gray background for preview scores
+  projectContributors?: {
+    projectName: string;
+    contributors: Array<{ name: string; contribution: number }>;
+  } | null;
 }
 
 const CRASH_TYPES = [
@@ -114,11 +129,11 @@ const getBandLabel = (score: number, type: string): string => {
   return "Extreme";
 };
 
-export default function SegmentScoresCard({ scores, beforeScores, showPreviewBackground }: SegmentScoresCardProps) {
+export default function SegmentScoresCard({ scores, beforeScores, showPreviewBackground, projectContributors }: SegmentScoresCardProps) {
   const crashTypeScores = useMemo(() => {
     if (!scores) return [];
     return CRASH_TYPES.map((type) => {
-      const score = scores[type.key as keyof typeof scores] || 0;
+      const score = (scores[type.key as keyof typeof scores] as number) || 0;
       return {
         ...type,
         score,
@@ -138,7 +153,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
     let maxRiskLevel = 0; // 0: Low, 1: Med, 2: High, 3: Extreme
 
     CRASH_TYPES.forEach((type) => {
-      const score = scores[type.key as keyof typeof scores] || 0;
+      const score = (scores[type.key as keyof typeof scores] as number) || 0;
       let riskLevel = 0;
 
       // Determine risk level based on crash type thresholds
@@ -222,7 +237,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
               gap="1"
             >
               {crashTypeScores.map((type) => {
-                const beforeScore = beforeScores ? (beforeScores[type.key as keyof typeof beforeScores] || 0) : null;
+                const beforeScore = beforeScores ? ((beforeScores[type.key as keyof typeof beforeScores] as number) || 0) : null;
                 const reduction = beforeScore !== null ? beforeScore - type.score : null;
                 const improved = reduction !== null && reduction > 0;
 
@@ -299,7 +314,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                     >
                       {/* Total label */}
                       <Text fontSize="md" fontWeight="bold" lineHeight="1">
-                        CycleRAP Score
+                        Risk Score
                       </Text>
 
                       {/* Total score value */}
@@ -324,7 +339,103 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
             </Grid>
           </Box>
         </Flex>
+
+        {/* Top Contributing Attributes Section */}
+        {(() => {
+          if (!scores) return null;
+          
+          const topContributors: Array<{name: string, contribution: number}> = [];
+          
+          // Try new individual columns first
+          for (let i = 1; i <= 5; i++) {
+            const name = scores[`Top ${i} Contributor` as keyof typeof scores] as string | undefined;
+            const contrib = scores[`Top ${i} Contribution` as keyof typeof scores] as number | undefined;
+            if (name && contrib !== undefined && contrib !== null) {
+              topContributors.push({ name, contribution: contrib });
+            }
+          }
+
+          // Fallback to old property for backward compatibility
+          if (topContributors.length === 0 && scores["Top Contributing Attributes"]) {
+            let oldAttr = scores["Top Contributing Attributes"];
+            if (typeof oldAttr === 'string') {
+              try {
+                // python ast literal_eval format is slightly different but usually JSON-like if double quoted
+                // Alternatively, it's safer to just rely on the backend recalculation which we fixed.
+                // But we'll try parsing just in case it's valid JSON
+                oldAttr = JSON.parse(oldAttr.replace(/'/g, '"'));
+              } catch (e) {}
+            }
+            if (Array.isArray(oldAttr)) {
+              topContributors.push(...oldAttr);
+            }
+          }
+
+          if (topContributors.length === 0) return null;
+
+          return (
+            <Box mt={4} pt={3} borderTopWidth={1} borderColor="gray.200" _dark={{ borderColor: "gray.700" }}>
+              <Text fontSize="sm" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.300" }} mb={2}>
+                Top Risk Contributors
+              </Text>
+              <Flex wrap="wrap" gap={2}>
+                {topContributors.map((attr, idx) => (
+                  <Flex 
+                    key={idx} 
+                    align="center" 
+                    bg="gray.50" 
+                    px={2.5} 
+                    py={1} 
+                    borderRadius="md"
+                    borderWidth={1}
+                    borderColor="gray.200"
+                    _dark={{ bg: "gray.700", borderColor: "gray.600" }}
+                  >
+                    <Text fontSize="xs" fontWeight="medium" color="gray.800" _dark={{ color: "gray.50" }}>
+                      {attr.name}
+                    </Text>
+                    <Text fontSize="xs" fontWeight="bold" ml={1.5} color="red.600" _dark={{ color: "red.300" }}>
+                      +{attr.contribution.toFixed(1)}
+                    </Text>
+                  </Flex>
+                ))}
+              </Flex>
+            </Box>
+          );
+        })()}
+
+        {/* Project-level Top Contributing Attributes Section */}
+        {projectContributors && projectContributors.contributors.length > 0 && (
+          <Box mt={4} pt={3} borderTopWidth={1} borderColor="gray.200" _dark={{ borderColor: "gray.700" }}>
+            <Text fontSize="sm" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.300" }} mb={2}>
+              Top Risk Contributors ({projectContributors.projectName})
+            </Text>
+            <Flex wrap="wrap" gap={2}>
+              {projectContributors.contributors.map((attr, idx) => (
+                <Flex
+                  key={idx}
+                  align="center"
+                  bg="gray.50"
+                  px={2.5}
+                  py={1}
+                  borderRadius="md"
+                  borderWidth={1}
+                  borderColor="gray.200"
+                  _dark={{ bg: "gray.700", borderColor: "gray.600" }}
+                >
+                  <Text fontSize="xs" fontWeight="medium" color="gray.800" _dark={{ color: "gray.50" }}>
+                    {attr.name}
+                  </Text>
+                  <Text fontSize="xs" fontWeight="bold" ml={1.5} color="red.600" _dark={{ color: "red.300" }}>
+                    +{attr.contribution.toFixed(1)}
+                  </Text>
+                </Flex>
+              ))}
+            </Flex>
+          </Box>
+        )}
       </Box>
     </Box>
   );
 }
+

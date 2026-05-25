@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Box, Button, Text, Dialog, Portal, Input, SelectRoot, SelectTrigger, SelectValueText, SelectContent, SelectItem, createListCollection } from "@chakra-ui/react";
+import { Box, Button, Text, Dialog, Portal, Input } from "@chakra-ui/react";
 import { LuPlus, LuRefreshCw, LuUpload, LuFile, LuX, LuFolderInput, LuCheck } from "react-icons/lu";
 import { toaster } from "../../../components/ui/toaster";
 import * as api from "../../../api";
@@ -57,11 +57,19 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
   const [isTargetDropdownOpen, setIsTargetDropdownOpen] = useState(false);
   const categorySearchRef = useRef<HTMLDivElement>(null);
   const targetSearchRef = useRef<HTMLDivElement>(null);
+  const previewRequestIdRef = useRef(0);
 
   // Preview state (Add screen)
   const [previewGeoJSON, setPreviewGeoJSON] = useState<any>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  function resetPreviewState() {
+    previewRequestIdRef.current += 1;
+    setPreviewGeoJSON(null);
+    setPreviewError(null);
+    setPreviewLoading(false);
+  }
 
   useEffect(() => {
     if (open) {
@@ -94,26 +102,40 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     setSelectedReplaceCategory("");
     setSelectedTargetShapefile("");
     setDragActive(false);
-    setPreviewGeoJSON(null);
-    setPreviewError(null);
+    resetPreviewState();
     setReplaceCategorySearch("");
     setTargetShapefileSearch("");
   }
 
   async function fetchPreview(files: File[]) {
     const hasShp = files.some(f => f.name.toLowerCase().endsWith(".shp"));
-    if (!hasShp) { setPreviewGeoJSON(null); return; }
+    if (!hasShp) {
+      resetPreviewState();
+      return;
+    }
+
+    const requestId = ++previewRequestIdRef.current;
     setPreviewLoading(true);
     setPreviewError(null);
     setPreviewGeoJSON(null);
     try {
       const geojson = await api.previewUploadedShapefiles(files);
-      if (geojson?.error) throw new Error(geojson.error);
+      if (previewRequestIdRef.current !== requestId) {
+        return;
+      }
+      if (!geojson || geojson.type !== "FeatureCollection" || !Array.isArray(geojson.features)) {
+        throw new Error("Invalid preview response");
+      }
       setPreviewGeoJSON(geojson);
     } catch (e: any) {
+      if (previewRequestIdRef.current !== requestId) {
+        return;
+      }
       setPreviewError(e.message || "Preview failed");
     } finally {
-      setPreviewLoading(false);
+      if (previewRequestIdRef.current === requestId) {
+        setPreviewLoading(false);
+      }
     }
   }
 
@@ -138,6 +160,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     setSelectedTargetShapefile("");
     setReplaceCategorySearch("");
     setTargetShapefileSearch("");
+    resetPreviewState();
   }
 
   // === Search & Filter Logic ===
@@ -239,7 +262,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     const updated = uploadFiles.filter((_, i) => i !== index);
     setUploadFiles(updated);
     if (updated.length > 0) fetchPreview(updated);
-    else { setPreviewGeoJSON(null); setPreviewError(null); }
+    else resetPreviewState();
   }
 
   async function handleAddUpload() {
@@ -279,6 +302,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
 
       // Clear files and reload data
       setUploadFiles([]);
+  resetPreviewState();
       await loadCategories();
       await loadAllShapefiles();
       setStep("success");
@@ -364,6 +388,14 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     if (replaceFiles.length === 0) {
       toaster.create({
         description: "Please select file(s) to upload",
+        type: "warning",
+      });
+      return;
+    }
+
+    if (!selectedReplaceCategory) {
+      toaster.create({
+        description: "Please select a category",
         type: "warning",
       });
       return;
@@ -473,6 +505,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
       // Clear and reload
       setReplaceFiles([]);
       setSelectedTargetShapefile("");
+      resetPreviewState();
       await loadAllShapefiles();
       setStep("success");
     } catch (error) {
@@ -492,32 +525,6 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
   }
-
-  // Create collection for category select
-  const categoryItems = [
-    ...categories.map((cat) => ({
-      label: cat.name,
-      value: cat.name,
-    })),
-    { label: "➕ New Category", value: "__new__" },
-  ];
-  const categoryCollection = createListCollection({ items: categoryItems });
-
-  // Create collection for shapefile select (grouped by category)
-  // const shapefilesByCategory = allShapefiles.reduce((acc, shp) => {
-  //   if (!acc[shp.category]) {
-  //     acc[shp.category] = [];
-  //   }
-  //   acc[shp.category].push(shp);
-  //   return acc;
-  // }, {} as Record<string, api.ShapefileInfo[]>);
-
-  // const shapefileItems = allShapefiles.map((shp) => ({
-  //   label: `${shp.category} / ${shp.name}`,
-  //   value: shp.path,
-  // }));
-  // const shapefileCollection = createListCollection({ items: shapefileItems });
-
   return (
     <Dialog.Root open={open} onOpenChange={(e) => !e.open && handleClose()} size="xl">
       <Portal>

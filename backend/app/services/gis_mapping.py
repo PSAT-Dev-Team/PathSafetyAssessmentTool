@@ -1,7 +1,8 @@
 # gis_mapping.py
 from __future__ import annotations
+import math
 import geopandas as gpd
-from shapely.geometry import Point
+from shapely.geometry import Point, LineString
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -49,7 +50,13 @@ CURVATURE_MIN_TRIPLET_LEG_M = 0.35
 CURVATURE_MIN_PLAUSIBLE_RADIUS_M = 1.0
 CURVATURE_MIN_KINK_LEG_M = 1.0
 CURVATURE_JUNCTION_SNAP_TOL_M = 0.75
-CURVATURE_MIN_JUNCTION_LEG_M = 1.5
+CURVATURE_MIN_JUNCTION_LEG_M = 1.2
+CURVATURE_MAX_SNAP_DISTANCE_M = 30.0
+CURVATURE_TIGHT_RADIUS_BUCKET_M = 6.5
+CURVATURE_KINK_ANGLE_THRESHOLD_DEG = 45.0
+CURVATURE_JUNCTION_ANGLE_THRESHOLD_DEG = 25.0
+CURVATURE_INTERSECTION_JUNCTION_ANGLE_THRESHOLD_DEG = 60.0
+CURVATURE_MIN_SHARP_HEADING_CHANGE_DEG = 15.0
 
 class LayerStore:
     """Lazy-loading shapefile store with parquet caching."""
@@ -630,12 +637,14 @@ class GIS:
         step=1.0,
         collect_radius=5.0,
         sample_half_window=1.0,
-        epsilon=1e-6
+        epsilon=1e-6,
+        return_details=False,
     ):
         """
         Calculate the minimum curvature radius and facility width at a given point using a
         TWO-STAGE process that matches the original PathAssignmentTool implementation.
 
+            return geom_a.intersects(geom_b)
         This method implements the exact algorithm from the original Streamlit app:
         - STAGE 1: Expanding ring search (1m→5m) to find WIDTH from the nearest path
         - STAGE 2: Fixed window search (5m) to calculate CURVATURE from the same layer
@@ -696,7 +705,7 @@ class GIS:
         # ========================================================================
         # STAGE 1: EXPANDING RING SEARCH FOR WIDTH
         # ========================================================================
-        found_layer = None       # layer that gave us a valid width
+        width_layer = None       # layer that gave us a valid width
         found_width = None
         curvature_layer = None   # layer to use for curvature (first geometric hit,
                                  # even if it has no WIDTH attribute)
@@ -754,7 +763,7 @@ class GIS:
                             width_value = intersecting_std.loc[nearest_idx, 'WIDTH']
                             if pd.notna(width_value):
                                 found_width = float(width_value)
-                                found_layer = layer_key  # Remember which layer provided it
+                                width_layer = layer_key  # Remember which layer provided it
 
                 except KeyError:
                     continue
@@ -765,176 +774,671 @@ class GIS:
             # Increment radius for next ring
             current_radius += step
 
-        # Curvature uses the width layer when available, otherwise the first geometric hit
-        effective_curvature_layer = found_layer if found_layer is not None else curvature_layer
+        # Curvature seeds from the width layer when available, otherwise the first
+        # geometric hit, then continues across the connected local path network.
+        effective_curvature_layer = width_layer if width_layer is not None else curvature_layer
 
         # ========================================================================
         # STAGE 2: CURVATURE CALCULATION (Fixed Window)
         # ========================================================================
-        # Calculate curvature from the best available layer
         min_radius = None
+        analysis_layers = []
+        analysis_lines = []
 
-        if effective_curvature_layer is not None:
-            # Temporarily swap found_layer so the existing Stage 2 block works unchanged
-            found_layer = effective_curvature_layer
-        if found_layer is not None:
-            try:
-                gdf = self.store.get(layer_names[found_layer])
-                if gdf is not None and not gdf.empty:
-                    # Ensure metric CRS
-                    if gdf.crs.to_epsg() != 3414:
-                        gdf = gdf.to_crs("EPSG:3414")
+        try:
+            buffer_curv = pt.buffer(collect_radius + 0.5)
+            all_segments = self._collect_path_segments(pt, buffer_curv)
+            primary_segments = self._select_primary_path_segments(
+                all_segments,
+                preferred_layer=effective_curvature_layer,
+            )
 
-                    # Remove Z-coordinates if present
-                    if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
-                        gdf.geometry = gdf.geometry.apply(
-                            lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
-                        )
+            if primary_segments:
+                analysis_layers = sorted({segment["layer_key"] for segment in primary_segments})
+                analysis_lines = self._merge_analysis_segments(primary_segments)
+                min_radius = self._calculate_min_radius_from_lines(
+                    analysis_lines,
+                    pt,
+                    collect_radius=collect_radius,
+                    epsilon=epsilon,
+                )
+        except Exception as e:
+            print(f"Warning: Error calculating curvature from connected paths: {e}")
 
-                    # Filter to valid geometries
-                    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
-
-                    if not gdf.empty:
-                        # Create FIXED window buffer for curvature (extended slightly for better edge detection)
-                        # Use 5.5m instead of 5.0m to ensure sharp bends at the edge are fully captured
-                        buffer_curv = pt.buffer(collect_radius + 0.5)
-
-                        # Spatial query using index
-                        candidate_indices = list(gdf.sindex.intersection(buffer_curv.bounds))
-                        if candidate_indices:
-                            candidates = gdf.iloc[candidate_indices]
-
-                            # Find features that actually intersect the buffer
-                            intersecting_curv = candidates[candidates.intersects(buffer_curv)]
-                            if not intersecting_curv.empty:
-                                # Merge all intersecting geometries
-                                from shapely.ops import linemerge, unary_union
-                                merged_geom = unary_union(intersecting_curv.geometry.tolist())
-
-                                # Apply linemerge to connect segments if possible
-                                if merged_geom.geom_type == 'MultiLineString':
-                                    merged_geom = linemerge(merged_geom)
-
-                                # IMPORTANT: Process UNCLIPPED geometry to preserve sharp vertices
-                                # Clipping can alter vertex angles at the boundary
-                                # We'll filter individual vertices by distance instead
-                                from shapely.geometry import LineString, MultiLineString
-                                lines_to_process = []
-
-                                if merged_geom.geom_type == 'LineString':
-                                    lines_to_process = [merged_geom]
-                                elif merged_geom.geom_type == 'MultiLineString':
-                                    lines_to_process = list(merged_geom.geoms)
-                                elif merged_geom.geom_type == 'GeometryCollection':
-                                    lines_to_process = [g for g in merged_geom.geoms if g.geom_type == 'LineString']
-
-                                # Calculate radius for each line segment
-                                for line in lines_to_process:
-                                    if line.is_empty:
-                                        continue
-
-                                    # IMPROVED DENSIFICATION: Preserve original vertices + add interpolated points
-                                    # This ensures we capture sharp bends encoded as vertices in the shapefile
-                                    original_coords = list(line.coords)
-
-                                    if len(original_coords) < 2:
-                                        continue
-
-                                    # Use moderate densification to preserve bends without
-                                    # overreacting to tiny geometry artifacts.
-                                    fine_step = CURVATURE_FINE_STEP_M
-
-                                    # Build combined coordinate list: original vertices + interpolated points
-                                    combined_coords = []
-
-                                    for i in range(len(original_coords) - 1):
-                                        # Always add the original vertex (this preserves sharp angles)
-                                        combined_coords.append(original_coords[i])
-
-                                        # Calculate segment between this vertex and next
-                                        segment = LineString([original_coords[i], original_coords[i+1]])
-                                        segment_length = segment.length
-
-                                        # Add densified points between vertices
-                                        if segment_length > fine_step:
-                                            num_intermediate = int(segment_length / fine_step)
-                                            for j in range(1, num_intermediate + 1):
-                                                dist = j * fine_step
-                                                if dist < segment_length:
-                                                    pt_interp = segment.interpolate(dist)
-                                                    combined_coords.append((pt_interp.x, pt_interp.y))
-
-                                    # Add the final original vertex
-                                    combined_coords.append(original_coords[-1])
-
-                                    # Remove duplicate/near-duplicate consecutive points.
-                                    deduped_coords = [combined_coords[0]]
-                                    for coord in combined_coords[1:]:
-                                        prev = deduped_coords[-1]
-                                        dist_sq = (coord[0] - prev[0])**2 + (coord[1] - prev[1])**2
-                                        if dist_sq > CURVATURE_DEDUP_TOLERANCE_M * CURVATURE_DEDUP_TOLERANCE_M:
-                                            deduped_coords.append(coord)
-
-                                    # Mark which coordinates are within the analysis window
-                                    # We need to keep triplets where AT LEAST ONE point is within range
-                                    max_dist = collect_radius + 0.5  # 5.5m
-
-                                    # Tag each coordinate with its distance to analysis point
-                                    coords_with_dist = []
-                                    for coord in deduped_coords:
-                                        dist_to_pt = ((coord[0] - pt.x)**2 + (coord[1] - pt.y)**2)**0.5
-                                        coords_with_dist.append((coord, dist_to_pt))
-
-                                    # Analyze triplets - include if ANY of the 3 points is within range
-                                    # This ensures we capture sharp bends near the boundary
-                                    min_triplet_radius = float('inf')
-                                    for i in range(len(coords_with_dist) - 2):
-                                        coord_a, dist_a = coords_with_dist[i]
-                                        coord_b, dist_b = coords_with_dist[i + 1]
-                                        coord_c, dist_c = coords_with_dist[i + 2]
-
-                                        # Include triplet if at least one point is within range
-                                        if min(dist_a, dist_b, dist_c) <= max_dist:
-                                            # Calculate circumradius for this triplet
-                                            A = Point(coord_a)
-                                            B = Point(coord_b)
-                                            C = Point(coord_c)
-
-                                            a = A.distance(B)
-                                            b = B.distance(C)
-                                            c = A.distance(C)
-
-                                            # Skip degenerate and micro-scale triangles.
-                                            if (
-                                                a < CURVATURE_MIN_TRIPLET_LEG_M
-                                                or b < CURVATURE_MIN_TRIPLET_LEG_M
-                                                or c < CURVATURE_MIN_TRIPLET_LEG_M
-                                            ):
-                                                continue
-
-                                            # Calculate using Heron's formula
-                                            p = 0.5 * (a + b + c)
-                                            area_sq = p * (p - a) * (p - b) * (p - c)
-
-                                            if area_sq <= epsilon:
-                                                continue  # Nearly collinear
-
-                                            R = (a * b * c) / (4.0 * area_sq**0.5)
-                                            if R < CURVATURE_MIN_PLAUSIBLE_RADIUS_M:
-                                                continue
-                                            if R < min_triplet_radius:
-                                                min_triplet_radius = R
-
-                                    # Update overall minimum
-                                    if min_triplet_radius != float('inf'):
-                                        segment_min_radius = min_triplet_radius
-                                        if min_radius is None or segment_min_radius < min_radius:
-                                            min_radius = segment_min_radius
-
-            except Exception as e:
-                print(f"Warning: Error calculating curvature from {found_layer}: {e}")
+        if return_details:
+            return (
+                min_radius,
+                found_width,
+                {
+                    "width_layer": width_layer,
+                    "first_geometry_layer": curvature_layer,
+                    "layer_used": effective_curvature_layer,
+                    "analysis_layers": analysis_layers,
+                    "analysis_lines": analysis_lines,
+                },
+            )
 
         return (min_radius, found_width)
+
+    @staticmethod
+    def _path_layer_names():
+        return {
+            "cycling": "cycling_path",
+            "shared": "shared_path",
+            "footpath": "footpath",
+        }
+
+    def _load_path_layer(self, store_key):
+        gdf = self.store.get(store_key)
+        if gdf is None or gdf.empty:
+            return gdf
+
+        if gdf.crs is not None and gdf.crs.to_epsg() != 3414:
+            gdf = gdf.to_crs("EPSG:3414")
+
+        if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+            gdf.geometry = gdf.geometry.apply(
+                lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
+            )
+
+        return gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+
+    @staticmethod
+    def _flatten_line_geometries(geom):
+        if geom is None or geom.is_empty:
+            return []
+        if geom.geom_type == "LineString":
+            return [geom]
+        if geom.geom_type == "MultiLineString":
+            return [part for part in geom.geoms if part is not None and not part.is_empty]
+        if geom.geom_type == "GeometryCollection":
+            lines = []
+            for part in geom.geoms:
+                lines.extend(GIS._flatten_line_geometries(part))
+            return lines
+        return []
+
+    @staticmethod
+    def _line_endpoints(line):
+        coords = list(line.coords)
+        if not coords:
+            return []
+        return [coords[0][:2], coords[-1][:2]]
+
+    def _collect_path_segments(self, pt, search_geom):
+        segments = []
+        for layer_key, store_key in self._path_layer_names().items():
+            try:
+                gdf = self._load_path_layer(store_key)
+                if gdf is None or gdf.empty:
+                    continue
+
+                candidate_indices = list(gdf.sindex.intersection(search_geom.bounds))
+                if not candidate_indices:
+                    continue
+
+                candidates = gdf.iloc[candidate_indices]
+                intersecting = candidates[candidates.intersects(search_geom)]
+                if intersecting.empty:
+                    continue
+
+                for feature_idx, geom in zip(intersecting.index, intersecting.geometry):
+                    for part_idx, line in enumerate(self._flatten_line_geometries(geom)):
+                        if line.is_empty:
+                            continue
+                        segments.append({
+                            "segment_id": f"{layer_key}:{feature_idx}:{part_idx}",
+                            "layer_key": layer_key,
+                            "geometry": line,
+                            "distance": float(line.distance(pt)),
+                            "endpoints": self._line_endpoints(line),
+                        })
+            except Exception as e:
+                print(f"Warning: Error collecting path segments from {layer_key}: {e}")
+        return segments
+
+    def _snap_point_to_path_network(self, point, max_snap_distance=CURVATURE_MAX_SNAP_DISTANCE_M):
+        pt = self.store.to_metric_point(point)
+        search_geom = pt.buffer(max_snap_distance)
+        segments = self._collect_path_segments(pt, search_geom)
+
+        if not segments:
+            return pt, {
+                "point_was_snapped": False,
+                "snap_distance_m": None,
+                "snap_layer": None,
+            }
+
+        nearest_segment = min(segments, key=lambda segment: segment["distance"])
+        nearest_line = nearest_segment["geometry"]
+        snapped_point = nearest_line.interpolate(nearest_line.project(pt))
+        snap_distance = float(pt.distance(snapped_point))
+
+        return snapped_point, {
+            "point_was_snapped": snap_distance > 1e-6,
+            "snap_distance_m": snap_distance,
+            "snap_layer": nearest_segment["layer_key"],
+        }
+
+    @staticmethod
+    def _segments_are_connected(segment_a, segment_b, snap_tol=CURVATURE_JUNCTION_SNAP_TOL_M):
+        geom_a = segment_a["geometry"]
+        geom_b = segment_b["geometry"]
+
+        try:
+            if geom_a.intersects(geom_b):
+                return True
+        except Exception:
+            pass
+
+        tol_sq = snap_tol * snap_tol
+        for ax, ay in segment_a["endpoints"]:
+            for bx, by in segment_b["endpoints"]:
+                if (ax - bx) ** 2 + (ay - by) ** 2 <= tol_sq:
+                    return True
+        return False
+
+    @staticmethod
+    def _matching_endpoint_index(segment, point, snap_tol=CURVATURE_JUNCTION_SNAP_TOL_M):
+        tol_sq = snap_tol * snap_tol
+        for endpoint_idx, endpoint in enumerate(segment["endpoints"]):
+            dx = endpoint[0] - point[0]
+            dy = endpoint[1] - point[1]
+            if dx * dx + dy * dy <= tol_sq:
+                return endpoint_idx
+        return None
+
+    @staticmethod
+    def _endpoint_vector(segment, endpoint_idx):
+        line = segment["geometry"]
+        if line is None or line.is_empty or line.length <= 1e-9:
+            return None
+
+        lookahead = min(CURVATURE_MIN_JUNCTION_LEG_M, float(line.length))
+
+        if endpoint_idx == 0:
+            start = line.interpolate(0.0)
+            probe = line.interpolate(lookahead)
+            return (probe.x - start.x, probe.y - start.y)
+
+        end = line.interpolate(line.length)
+        probe = line.interpolate(line.length - lookahead)
+        return (probe.x - end.x, probe.y - end.y)
+
+    @staticmethod
+    def _normalized_vector_angle(vector_a, vector_b, epsilon=1e-9):
+        if vector_a is None or vector_b is None:
+            return 180.0
+
+        ax, ay = vector_a
+        bx, by = vector_b
+        mag_a = math.sqrt(ax * ax + ay * ay)
+        mag_b = math.sqrt(bx * bx + by * by)
+        if mag_a < epsilon or mag_b < epsilon:
+            return 180.0
+
+        cos_a = max(-1.0, min(1.0, (ax * bx + ay * by) / (mag_a * mag_b)))
+        return math.degrees(math.acos(abs(cos_a)))
+
+    @staticmethod
+    def _deflection_angle_points(point_a, point_b, point_c, epsilon=1e-9):
+        ax, ay = point_a[:2]
+        bx, by = point_b[:2]
+        cx, cy = point_c[:2]
+
+        v1x, v1y = bx - ax, by - ay
+        v2x, v2y = cx - bx, cy - by
+        mag_a = math.sqrt(v1x * v1x + v1y * v1y)
+        mag_b = math.sqrt(v2x * v2x + v2y * v2y)
+        if mag_a < epsilon or mag_b < epsilon:
+            return 0.0
+
+        cos_a = max(-1.0, min(1.0, (v1x * v2x + v1y * v2y) / (mag_a * mag_b)))
+        return math.degrees(math.acos(cos_a))
+
+    @staticmethod
+    def _vertex_outgoing_vectors(coords, vertex_idx, epsilon=1e-9):
+        if not coords or vertex_idx < 0 or vertex_idx >= len(coords):
+            return []
+
+        vertex = coords[vertex_idx][:2]
+        vectors = []
+        lookahead = CURVATURE_MIN_JUNCTION_LEG_M
+
+        if vertex_idx > 0:
+            reverse_line = LineString([coord[:2] for coord in reversed(coords[:vertex_idx + 1])])
+            if not reverse_line.is_empty and reverse_line.length >= epsilon:
+                reverse_probe = reverse_line.interpolate(min(lookahead, float(reverse_line.length)))
+                dx = reverse_probe.x - vertex[0]
+                dy = reverse_probe.y - vertex[1]
+                if math.sqrt(dx * dx + dy * dy) >= epsilon:
+                    vectors.append((dx, dy))
+
+        if vertex_idx < len(coords) - 1:
+            forward_line = LineString([coord[:2] for coord in coords[vertex_idx:]])
+            if not forward_line.is_empty and forward_line.length >= epsilon:
+                forward_probe = forward_line.interpolate(min(lookahead, float(forward_line.length)))
+                dx = forward_probe.x - vertex[0]
+                dy = forward_probe.y - vertex[1]
+                if math.sqrt(dx * dx + dy * dy) >= epsilon:
+                    vectors.append((dx, dy))
+
+        return vectors
+
+    @staticmethod
+    def _line_directions_at_point(line, point, epsilon=1e-9):
+        if line is None or line.is_empty or point is None:
+            return []
+
+        point_on_line = line.interpolate(line.project(point))
+        distance_on_line = line.project(point_on_line)
+        directions = []
+
+        backward = min(CURVATURE_MIN_JUNCTION_LEG_M, float(distance_on_line))
+        if backward >= epsilon:
+            backward_point = line.interpolate(distance_on_line - backward)
+            dx = backward_point.x - point_on_line.x
+            dy = backward_point.y - point_on_line.y
+            if math.sqrt(dx * dx + dy * dy) >= epsilon:
+                directions.append((dx, dy))
+
+        forward = min(CURVATURE_MIN_JUNCTION_LEG_M, float(line.length - distance_on_line))
+        if forward >= epsilon:
+            forward_point = line.interpolate(distance_on_line + forward)
+            dx = forward_point.x - point_on_line.x
+            dy = forward_point.y - point_on_line.y
+            if math.sqrt(dx * dx + dy * dy) >= epsilon:
+                directions.append((dx, dy))
+
+        return directions
+
+    def _supports_sharp_curve_details(
+        self,
+        details,
+        sharp_turn_threshold=10.0,
+        min_heading_change_deg=CURVATURE_MIN_SHARP_HEADING_CHANGE_DEG,
+    ):
+        if not details:
+            return True
+
+        min_triplet = details.get("min_triplet")
+        if not min_triplet or min_triplet.get("radius") is None:
+            return True
+        if min_triplet["radius"] >= sharp_turn_threshold:
+            return False
+
+        radius_triplets = {
+            triplet["index"]: triplet
+            for triplet in details.get("all_triplets", [])
+            if "radius" in triplet
+        }
+        if not radius_triplets:
+            return True
+
+        start_idx = min_triplet["index"]
+        end_idx = min_triplet["index"]
+
+        while (start_idx - 1) in radius_triplets and radius_triplets[start_idx - 1]["radius"] < sharp_turn_threshold:
+            start_idx -= 1
+        while (end_idx + 1) in radius_triplets and radius_triplets[end_idx + 1]["radius"] < sharp_turn_threshold:
+            end_idx += 1
+
+        run_triplets = [
+            radius_triplets[idx]
+            for idx in range(start_idx, end_idx + 1)
+            if idx in radius_triplets
+        ]
+        if not run_triplets:
+            return True
+
+        run_coords = [
+            tuple(run_triplets[0]["points"][0]),
+            tuple(run_triplets[0]["points"][1]),
+            tuple(run_triplets[0]["points"][2]),
+        ]
+        for triplet in run_triplets[1:]:
+            point_c = tuple(triplet["points"][2])
+            if point_c != run_coords[-1]:
+                run_coords.append(point_c)
+
+        cumulative_heading_change = 0.0
+        for idx in range(len(run_coords) - 2):
+            cumulative_heading_change += self._deflection_angle_points(
+                run_coords[idx],
+                run_coords[idx + 1],
+                run_coords[idx + 2],
+            )
+
+        details["support_heading_change_deg"] = float(cumulative_heading_change)
+        return cumulative_heading_change >= min_heading_change_deg
+
+    def _select_primary_path_segments(self, segments, preferred_layer=None, snap_tol=CURVATURE_JUNCTION_SNAP_TOL_M):
+        if not segments:
+            return []
+
+        min_dist = min(segment["distance"] for segment in segments)
+        candidate_indices = [
+            idx for idx, segment in enumerate(segments)
+            if segment["distance"] <= min_dist + 1e-9
+        ]
+
+        if preferred_layer is not None:
+            preferred_dists = [
+                segment["distance"] for segment in segments if segment["layer_key"] == preferred_layer
+            ]
+            if preferred_dists:
+                preferred_min = min(preferred_dists)
+                if preferred_min <= min_dist + snap_tol:
+                    candidate_indices = [
+                        idx for idx, segment in enumerate(segments)
+                        if (
+                            segment["layer_key"] == preferred_layer
+                            and segment["distance"] <= preferred_min + 1e-9
+                        )
+                    ]
+
+        seed_idx = min(
+            candidate_indices,
+            key=lambda idx: (
+                segments[idx]["distance"],
+                0 if preferred_layer is not None and segments[idx]["layer_key"] == preferred_layer else 1,
+                -segments[idx]["geometry"].length,
+                idx,
+            ),
+        )
+
+        selected_indices = {seed_idx}
+
+        def walk(current_idx, endpoint_idx):
+            while True:
+                current_segment = segments[current_idx]
+                junction_point = current_segment["endpoints"][endpoint_idx]
+                current_vector = self._endpoint_vector(current_segment, endpoint_idx)
+                candidates = []
+
+                for other_idx, other_segment in enumerate(segments):
+                    if other_idx in selected_indices or other_idx == current_idx:
+                        continue
+
+                    other_endpoint_idx = self._matching_endpoint_index(
+                        other_segment,
+                        junction_point,
+                        snap_tol=snap_tol,
+                    )
+                    if other_endpoint_idx is None:
+                        continue
+
+                    other_vector = self._endpoint_vector(other_segment, other_endpoint_idx)
+                    angle = self._normalized_vector_angle(current_vector, other_vector)
+                    candidates.append((
+                        angle,
+                        other_segment["distance"],
+                        0 if preferred_layer is not None and other_segment["layer_key"] == preferred_layer else 1,
+                        -other_segment["geometry"].length,
+                        other_idx,
+                        other_endpoint_idx,
+                    ))
+
+                if not candidates:
+                    break
+
+                _, _, _, _, next_idx, matched_endpoint_idx = min(candidates)
+                selected_indices.add(next_idx)
+                current_idx = next_idx
+                endpoint_idx = 1 - matched_endpoint_idx
+
+        walk(seed_idx, 0)
+        walk(seed_idx, 1)
+
+        return [segments[idx] for idx in sorted(selected_indices)]
+
+    def _select_connected_segments(self, segments, preferred_layer=None, snap_tol=CURVATURE_JUNCTION_SNAP_TOL_M):
+        if not segments:
+            return []
+
+        min_dist = min(segment["distance"] for segment in segments)
+        seed_indices = {
+            idx for idx, segment in enumerate(segments)
+            if segment["distance"] <= min_dist + 1e-9
+        }
+
+        if preferred_layer is not None:
+            preferred_dists = [
+                segment["distance"] for segment in segments if segment["layer_key"] == preferred_layer
+            ]
+            if preferred_dists:
+                preferred_min = min(preferred_dists)
+                if preferred_min <= min_dist + snap_tol:
+                    for idx, segment in enumerate(segments):
+                        if (
+                            segment["layer_key"] == preferred_layer
+                            and segment["distance"] <= preferred_min + 1e-9
+                        ):
+                            seed_indices.add(idx)
+
+        selected = set(seed_indices)
+        queue = list(seed_indices)
+        while queue:
+            current_idx = queue.pop(0)
+            current = segments[current_idx]
+            for other_idx, other in enumerate(segments):
+                if other_idx in selected:
+                    continue
+                if self._segments_are_connected(current, other, snap_tol=snap_tol):
+                    selected.add(other_idx)
+                    queue.append(other_idx)
+
+        return [segments[idx] for idx in sorted(selected)]
+
+    def _merge_analysis_segments(self, segments):
+        if not segments:
+            return []
+
+        from shapely.ops import linemerge, unary_union
+
+        merged_geom = unary_union([segment["geometry"] for segment in segments])
+        if merged_geom.geom_type == "MultiLineString":
+            merged_geom = linemerge(merged_geom)
+        return self._flatten_line_geometries(merged_geom)
+
+    def _build_curvature_coords_with_distance(self, line, pt):
+        if line.is_empty:
+            return []
+
+        original_coords = list(line.coords)
+        if len(original_coords) < 2:
+            return []
+
+        combined_coords = []
+        for i in range(len(original_coords) - 1):
+            combined_coords.append(original_coords[i])
+
+            segment = line.__class__([original_coords[i], original_coords[i + 1]])
+            segment_length = segment.length
+            if segment_length > CURVATURE_FINE_STEP_M:
+                num_intermediate = int(segment_length / CURVATURE_FINE_STEP_M)
+                for j in range(1, num_intermediate + 1):
+                    dist = j * CURVATURE_FINE_STEP_M
+                    if dist < segment_length:
+                        pt_interp = segment.interpolate(dist)
+                        combined_coords.append((pt_interp.x, pt_interp.y))
+
+        combined_coords.append(original_coords[-1])
+
+        deduped_coords = [combined_coords[0]]
+        for coord in combined_coords[1:]:
+            prev = deduped_coords[-1]
+            dist_sq = (coord[0] - prev[0]) ** 2 + (coord[1] - prev[1]) ** 2
+            if dist_sq > CURVATURE_DEDUP_TOLERANCE_M * CURVATURE_DEDUP_TOLERANCE_M:
+                deduped_coords.append(coord)
+
+        coords_with_dist = []
+        for coord in deduped_coords:
+            dist_to_pt = ((coord[0] - pt.x) ** 2 + (coord[1] - pt.y) ** 2) ** 0.5
+            coords_with_dist.append((coord, dist_to_pt))
+
+        return coords_with_dist
+
+    def _calculate_windowed_min_radius_triplets(self, coords_with_dist, max_dist, epsilon=1e-6, return_details=False):
+        if len(coords_with_dist) < 3:
+            if return_details:
+                return None, {
+                    "error": "Insufficient points",
+                    "num_points": len(coords_with_dist),
+                    "required": 3,
+                }
+            return None
+
+        min_radius = float('inf')
+        min_triplet_idx = None
+        all_triplets = []
+
+        for i in range(len(coords_with_dist) - 2):
+            (coord_a, dist_a), (coord_b, dist_b), (coord_c, dist_c) = coords_with_dist[i:i + 3]
+
+            if min(dist_a, dist_b, dist_c) > max_dist:
+                if return_details:
+                    all_triplets.append({
+                        "index": i,
+                        "points": [coord_a, coord_b, coord_c],
+                        "skipped": "outside_window",
+                        "reason": "Triplet is outside the analysis window",
+                    })
+                continue
+
+            a = np.sqrt((coord_b[0] - coord_a[0]) ** 2 + (coord_b[1] - coord_a[1]) ** 2)
+            b = np.sqrt((coord_c[0] - coord_b[0]) ** 2 + (coord_c[1] - coord_b[1]) ** 2)
+            c = np.sqrt((coord_c[0] - coord_a[0]) ** 2 + (coord_c[1] - coord_a[1]) ** 2)
+
+            if (
+                a < CURVATURE_MIN_TRIPLET_LEG_M
+                or b < CURVATURE_MIN_TRIPLET_LEG_M
+                or c < CURVATURE_MIN_TRIPLET_LEG_M
+            ):
+                if return_details:
+                    all_triplets.append({
+                        "index": i,
+                        "points": [coord_a, coord_b, coord_c],
+                        "skipped": "degenerate",
+                        "reason": "Side length too small",
+                    })
+                continue
+
+            p = 0.5 * (a + b + c)
+            area_squared = p * (p - a) * (p - b) * (p - c)
+            if area_squared <= epsilon:
+                if return_details:
+                    all_triplets.append({
+                        "index": i,
+                        "points": [coord_a, coord_b, coord_c],
+                        "skipped": "collinear",
+                        "reason": "Points are nearly collinear",
+                    })
+                continue
+
+            area = np.sqrt(area_squared)
+            radius = (a * b * c) / (4.0 * area)
+            if radius < CURVATURE_MIN_PLAUSIBLE_RADIUS_M:
+                if return_details:
+                    all_triplets.append({
+                        "index": i,
+                        "points": [coord_a, coord_b, coord_c],
+                        "skipped": "implausible_radius",
+                        "reason": f"Radius below plausible minimum ({CURVATURE_MIN_PLAUSIBLE_RADIUS_M}m)",
+                    })
+                continue
+
+            if return_details:
+                all_triplets.append({
+                    "index": i,
+                    "points": [coord_a, coord_b, coord_c],
+                    "sides": {"a": float(a), "b": float(b), "c": float(c)},
+                    "semi_perimeter": float(p),
+                    "area": float(area),
+                    "radius": float(radius),
+                    "is_minimum": False,
+                })
+
+            if radius < min_radius:
+                min_radius = radius
+                min_triplet_idx = len(all_triplets) - 1 if return_details else i
+
+        if min_radius == float('inf'):
+            if return_details:
+                return None, {
+                    "error": "No valid triplets",
+                    "total_points": len(coords_with_dist),
+                    "all_triplets": all_triplets,
+                }
+            return None
+
+        if return_details:
+            if min_triplet_idx is not None and all_triplets:
+                all_triplets[min_triplet_idx]["is_minimum"] = True
+            min_triplet = all_triplets[min_triplet_idx] if min_triplet_idx is not None else None
+            details = {
+                "min_radius": float(min_radius),
+                "total_triplets_checked": len(coords_with_dist) - 2,
+                "valid_triplets": len([t for t in all_triplets if "radius" in t]),
+                "skipped_triplets": len([t for t in all_triplets if "skipped" in t]),
+                "all_triplets": all_triplets,
+                "min_triplet": min_triplet,
+                "calculation_steps": self._format_calculation_steps(min_triplet) if min_triplet else None,
+            }
+            return float(min_radius), details
+
+        return min_radius
+
+    def _calculate_min_radius_from_lines(self, lines_to_process, pt, collect_radius=5.0, epsilon=1e-6, return_details=False):
+        if not lines_to_process:
+            if return_details:
+                return None, None
+            return None
+
+        max_dist = collect_radius + 0.5
+        best_radius = None
+        best_details = None
+
+        for line in lines_to_process:
+            coord_variants = []
+
+            original_coords = [coord[:2] for coord in list(line.coords)]
+            if len(original_coords) >= 3:
+                original_coords_with_dist = []
+                for coord in original_coords:
+                    dist_to_pt = ((coord[0] - pt.x) ** 2 + (coord[1] - pt.y) ** 2) ** 0.5
+                    original_coords_with_dist.append((coord, dist_to_pt))
+                coord_variants.append(original_coords_with_dist)
+
+            densified_coords_with_dist = self._build_curvature_coords_with_distance(line, pt)
+            if len(densified_coords_with_dist) >= 3:
+                coord_variants.append(densified_coords_with_dist)
+
+            for coords_with_dist in coord_variants:
+                if return_details:
+                    radius, details = self._calculate_windowed_min_radius_triplets(
+                        coords_with_dist,
+                        max_dist,
+                        epsilon=epsilon,
+                        return_details=True,
+                    )
+                    if radius is not None and (best_radius is None or radius < best_radius):
+                        best_radius = radius
+                        best_details = details
+                else:
+                    radius = self._calculate_windowed_min_radius_triplets(
+                        coords_with_dist,
+                        max_dist,
+                        epsilon=epsilon,
+                        return_details=False,
+                    )
+                    if radius is not None and (best_radius is None or radius < best_radius):
+                        best_radius = radius
+
+        if return_details:
+            return best_radius, best_details
+
+        return best_radius
 
     def _calculate_min_radius_triplet(self, coordinates, epsilon=1e-6, return_details=False):
         """
@@ -1117,6 +1621,100 @@ class GIS:
             }
         }
 
+    def _build_curvature_diagnostics(self, analysis_lines, point, collect_radius=5.0):
+        if not analysis_lines:
+            return None
+
+        try:
+            pt = self.store.to_metric_point(point)
+            _, details = self._calculate_min_radius_from_lines(
+                analysis_lines,
+                pt,
+                collect_radius=collect_radius,
+                epsilon=1e-6,
+                return_details=True,
+            )
+            return details
+        except Exception as e:
+            print(f"Warning: Error generating diagnostics: {e}")
+            return None
+
+    def analyze_curvature(self, point, sharp_turn_threshold=10.0, default_value=2, collect_radius=5.0, include_diagnostics=False):
+        input_point = self.store.to_metric_point(point)
+        analysis_point, snap_info = self._snap_point_to_path_network(point)
+
+        min_radius, width, analysis_details = self.get_radius_and_width_at_point(
+            point=analysis_point,
+            collect_radius=collect_radius,
+            return_details=True,
+        )
+
+        is_sharp_curve = (min_radius is not None) and (min_radius < sharp_turn_threshold)
+        radius_diagnostics = None
+        analysis_lines = analysis_details.get("analysis_lines")
+        if is_sharp_curve and analysis_lines:
+            _, radius_diagnostics = self._calculate_min_radius_from_lines(
+                analysis_lines,
+                analysis_point,
+                collect_radius=collect_radius,
+                epsilon=1e-6,
+                return_details=True,
+            )
+            if radius_diagnostics is not None:
+                is_sharp_curve = self._supports_sharp_curve_details(
+                    radius_diagnostics,
+                    sharp_turn_threshold=sharp_turn_threshold,
+                )
+
+        has_kink, has_path_junction = self._check_angle_curvature(analysis_point, collect_radius=collect_radius)
+        is_sharp_bend = is_sharp_curve or has_kink
+
+        if is_sharp_bend or has_path_junction:
+            curvature = 1
+            if is_sharp_bend:
+                if min_radius is not None and min_radius < CURVATURE_TIGHT_RADIUS_BUCKET_M:
+                    subcategory = "<6.5m"
+                else:
+                    subcategory = "<10m"
+            else:
+                subcategory = "Path Junction"
+        else:
+            curvature = default_value
+            if min_radius is not None:
+                subcategory = ">18m" if min_radius > 18 else "10–18m"
+            else:
+                subcategory = None
+
+        diagnostics = None
+        if include_diagnostics and is_sharp_curve:
+            diagnostics = radius_diagnostics
+            if diagnostics is None:
+                diagnostics = self._build_curvature_diagnostics(
+                    analysis_lines,
+                    analysis_point,
+                    collect_radius=collect_radius,
+                )
+
+        return {
+            "radius": min_radius,
+            "width": width,
+            "input_point": input_point,
+            "analysis_point": analysis_point,
+            "point_was_snapped": snap_info["point_was_snapped"],
+            "snap_distance_m": snap_info["snap_distance_m"],
+            "snap_layer": snap_info["snap_layer"],
+            "layer_used": analysis_details.get("layer_used"),
+            "width_layer": analysis_details.get("width_layer"),
+            "first_geometry_layer": analysis_details.get("first_geometry_layer"),
+            "analysis_layers": analysis_details.get("analysis_layers", []),
+            "curvature": curvature,
+            "subcategory": subcategory,
+            "has_sharp_curve": is_sharp_curve,
+            "has_kink": has_kink,
+            "has_path_junction": has_path_junction,
+            "diagnostics": diagnostics,
+        }
+
     def get_curvature(self, point, sharp_turn_threshold=10.0, default_value=2):
         """
         Calculate curvature for a segment using actual path centerline shapefiles.
@@ -1149,40 +1747,23 @@ class GIS:
         4. Calculate minimum circumradius using triplet method
         5. Classify: radius < 10m → Sharp Turn (1), otherwise No Sharp Turn (2)
         """
-        # Use the two-stage shapefile-based radius calculation
-        # Defaults match original PathAssignmentTool:
-        #   start_radius=1.0, max_radius=5.0, step=1.0,
-        #   collect_radius=5.0, sample_half_window=1.0
-        min_radius, _ = self.get_radius_and_width_at_point(
-            point=point,
-            # Uses default parameters from original implementation
+        analysis = self.analyze_curvature(
+            point,
+            sharp_turn_threshold=sharp_turn_threshold,
+            default_value=default_value,
+            collect_radius=5.0,
+            include_diagnostics=False,
         )
+        return analysis["curvature"], analysis["subcategory"]
 
-        # Check 1 (along-path curve): circumradius < 10 m → sharp turn
-        is_sharp_curve = (min_radius is not None) and (min_radius < sharp_turn_threshold)
-
-        # Angle-based detections are split between sharp kinks on one path and
-        # true branch junctions between separate path segments.
-        has_kink, has_path_junction = self._check_angle_curvature(point)
-        is_sharp_bend = is_sharp_curve or has_kink
-
-        if is_sharp_bend or has_path_junction:
-            # Determine detection type sub-category
-            if is_sharp_bend and has_path_junction:
-                subcat = "Both"
-            elif is_sharp_bend:
-                subcat = "Sharp Bend"
-            else:
-                subcat = "Path Junction"
-            return 1, subcat  # Sharp Turn Present
-        else:
-            if min_radius is not None:
-                subcat = ">18m" if min_radius > 18 else "10\u201318m"
-            else:
-                subcat = None
-            return 2, subcat  # No Sharp Turn Present
-
-    def _check_angle_curvature(self, point, collect_radius=5.0, angle_threshold=45.0, epsilon=1e-9):
+    def _check_angle_curvature(
+        self,
+        point,
+        collect_radius=5.0,
+        kink_angle_threshold=CURVATURE_KINK_ANGLE_THRESHOLD_DEG,
+        junction_angle_threshold=CURVATURE_JUNCTION_ANGLE_THRESHOLD_DEG,
+        epsilon=1e-9,
+    ):
         """
         Check for two angle-based curvature conditions over all path layers within the window:
 
@@ -1201,7 +1782,8 @@ class GIS:
         Args:
             point:            Shapely Point or (lon, lat) tuple (WGS84 or metric EPSG:3414).
             collect_radius:   Search window radius in metres (default 5.0).
-            angle_threshold:  Degrees above which a kink/junction is flagged (default 45.0).
+            kink_angle_threshold:      Degrees above which an along-path kink is flagged.
+            junction_angle_threshold:  Degrees above which a branch junction is flagged.
             epsilon:          Minimum length threshold to skip degenerate segments.
 
         Returns:
@@ -1210,7 +1792,8 @@ class GIS:
         import math
 
         pt = self.store.to_metric_point(point)
-        buf = pt.buffer(collect_radius)
+        endpoint_search_radius = collect_radius + CURVATURE_JUNCTION_SNAP_TOL_M
+        buf = pt.buffer(endpoint_search_radius)
 
         all_layer_names = {
             "cycling": "cycling_path",
@@ -1258,19 +1841,6 @@ class GIS:
             return False, False
 
         # ------------------------------------------------------------------
-        # Helper: deflection angle at vertex B along A→B→C (0° = straight)
-        # ------------------------------------------------------------------
-        def deflection_angle(ax, ay, bx, by, cx, cy):
-            v1x, v1y = bx - ax, by - ay
-            v2x, v2y = cx - bx, cy - by
-            m1 = math.sqrt(v1x * v1x + v1y * v1y)
-            m2 = math.sqrt(v2x * v2x + v2y * v2y)
-            if m1 < epsilon or m2 < epsilon:
-                return 0.0
-            cos_a = max(-1.0, min(1.0, (v1x * v2x + v1y * v2y) / (m1 * m2)))
-            return math.degrees(math.acos(cos_a))
-
-        # ------------------------------------------------------------------
         # CHECK 1 — Sudden kink on original vertices
         # A vertex is only tested when it lies inside the analysis window.
         # ------------------------------------------------------------------
@@ -1289,72 +1859,130 @@ class GIS:
                 leg_bc = math.sqrt((cx - bx) ** 2 + (cy - by) ** 2)
                 if leg_ab < CURVATURE_MIN_KINK_LEG_M or leg_bc < CURVATURE_MIN_KINK_LEG_M:
                     continue
-                if deflection_angle(ax, ay, bx, by, cx, cy) > angle_threshold:
+                if self._deflection_angle_points((ax, ay), (bx, by), (cx, cy), epsilon=epsilon) > kink_angle_threshold:
                     has_kink = True
                     break
             if has_kink:
                 break
 
         # ------------------------------------------------------------------
-        # CHECK 2 — True branch junctions between separate path endpoints.
+        # CHECK 2 — True branch junctions between clustered original vertices.
+        # This catches both endpoint-to-endpoint joins and branches that connect
+        # into an internal vertex on the main corridor.
         # ------------------------------------------------------------------
-        endpoint_vectors = []
-        endpoint_search_radius = collect_radius + CURVATURE_JUNCTION_SNAP_TOL_M
-
+        junction_vectors = []
+        min_junction_leg = CURVATURE_MIN_JUNCTION_LEG_M - 1e-6
         for segment in all_segments:
             coords = segment["coords"]
             if len(coords) < 2:
                 continue
+            for vertex_idx in range(len(coords)):
+                vertex = coords[vertex_idx][:2]
+                if ((vertex[0] - pt.x) ** 2 + (vertex[1] - pt.y) ** 2) > endpoint_search_radius ** 2:
+                    continue
 
-            start = coords[0][:2]
-            next_coord = coords[1][:2]
-            end = coords[-1][:2]
-            prev_coord = coords[-2][:2]
+                for vector in self._vertex_outgoing_vectors(coords, vertex_idx, epsilon=epsilon):
+                    leg = math.sqrt(vector[0] * vector[0] + vector[1] * vector[1])
+                    if leg < min_junction_leg:
+                        continue
+                    junction_vectors.append({
+                        "segment_id": segment["segment_id"],
+                        "point": vertex,
+                        "vector": vector,
+                    })
 
-            start_leg = math.sqrt((next_coord[0] - start[0]) ** 2 + (next_coord[1] - start[1]) ** 2)
-            end_leg = math.sqrt((end[0] - prev_coord[0]) ** 2 + (end[1] - prev_coord[1]) ** 2)
-
-            if ((start[0] - pt.x) ** 2 + (start[1] - pt.y) ** 2) <= endpoint_search_radius ** 2 and start_leg >= CURVATURE_MIN_JUNCTION_LEG_M:
-                endpoint_vectors.append({
-                    "segment_id": segment["segment_id"],
-                    "point": start,
-                    "vector": (next_coord[0] - start[0], next_coord[1] - start[1]),
-                })
-
-            if ((end[0] - pt.x) ** 2 + (end[1] - pt.y) ** 2) <= endpoint_search_radius ** 2 and end_leg >= CURVATURE_MIN_JUNCTION_LEG_M:
-                endpoint_vectors.append({
-                    "segment_id": segment["segment_id"],
-                    "point": end,
-                    "vector": (prev_coord[0] - end[0], prev_coord[1] - end[1]),
-                })
+        clusters = []
+        tol_sq = CURVATURE_JUNCTION_SNAP_TOL_M * CURVATURE_JUNCTION_SNAP_TOL_M
+        for entry in junction_vectors:
+            matched_cluster = None
+            for cluster in clusters:
+                if any(
+                    (existing["point"][0] - entry["point"][0]) ** 2 + (existing["point"][1] - entry["point"][1]) ** 2 <= tol_sq
+                    for existing in cluster
+                ):
+                    matched_cluster = cluster
+                    break
+            if matched_cluster is None:
+                clusters.append([entry])
+            else:
+                matched_cluster.append(entry)
 
         has_junction = False
-        for i in range(len(endpoint_vectors)):
-            endpoint_a = endpoint_vectors[i]
-            for j in range(i + 1, len(endpoint_vectors)):
-                endpoint_b = endpoint_vectors[j]
-                if endpoint_a["segment_id"] == endpoint_b["segment_id"]:
-                    continue
+        for cluster in clusters:
+            if len({entry["segment_id"] for entry in cluster}) < 2:
+                continue
+            for i in range(len(cluster)):
+                entry_a = cluster[i]
+                for j in range(i + 1, len(cluster)):
+                    entry_b = cluster[j]
+                    if entry_a["segment_id"] == entry_b["segment_id"]:
+                        continue
 
-                dx = endpoint_a["point"][0] - endpoint_b["point"][0]
-                dy = endpoint_a["point"][1] - endpoint_b["point"][1]
-                if dx * dx + dy * dy > CURVATURE_JUNCTION_SNAP_TOL_M ** 2:
-                    continue
+                    angle = self._normalized_vector_angle(
+                        entry_a["vector"],
+                        entry_b["vector"],
+                        epsilon=epsilon,
+                    )
+                    if angle <= junction_angle_threshold:
+                        continue
 
-                v1x, v1y = endpoint_a["vector"]
-                v2x, v2y = endpoint_b["vector"]
-                m1 = math.sqrt(v1x * v1x + v1y * v1y)
-                m2 = math.sqrt(v2x * v2x + v2y * v2y)
-                if m1 < epsilon or m2 < epsilon:
-                    continue
-
-                cos_a = max(-1.0, min(1.0, (v1x * v2x + v1y * v2y) / (m1 * m2)))
-                normalized_angle = math.degrees(math.acos(abs(cos_a)))
-                if normalized_angle > angle_threshold:
                     has_junction = True
+                    continue
+                if has_junction:
                     break
             if has_junction:
                 break
+
+        if not has_junction:
+            for idx_a, segment_a in enumerate(all_segments):
+                line_a = LineString([coord[:2] for coord in segment_a["coords"]])
+                if line_a.is_empty:
+                    continue
+
+                for segment_b in all_segments[idx_a + 1:]:
+                    if segment_a["segment_id"] == segment_b["segment_id"]:
+                        continue
+
+                    line_b = LineString([coord[:2] for coord in segment_b["coords"]])
+                    if line_b.is_empty:
+                        continue
+
+                    intersection = line_a.intersection(line_b)
+                    if intersection.is_empty:
+                        continue
+
+                    if intersection.geom_type == "Point":
+                        intersection_points = [intersection]
+                    elif intersection.geom_type == "MultiPoint":
+                        intersection_points = list(intersection.geoms)
+                    else:
+                        intersection_points = []
+
+                    for intersection_point in intersection_points:
+                        if intersection_point.distance(pt) > endpoint_search_radius:
+                            continue
+
+                        directions_a = self._line_directions_at_point(line_a, intersection_point, epsilon=epsilon)
+                        directions_b = self._line_directions_at_point(line_b, intersection_point, epsilon=epsilon)
+                        if not directions_a or not directions_b:
+                            continue
+
+                        for direction_a in directions_a:
+                            for direction_b in directions_b:
+                                angle = self._normalized_vector_angle(direction_a, direction_b, epsilon=epsilon)
+                                if angle <= CURVATURE_INTERSECTION_JUNCTION_ANGLE_THRESHOLD_DEG:
+                                    continue
+
+                                has_junction = True
+                                break
+                            if has_junction:
+                                break
+                        if has_junction:
+                            break
+                    if has_junction:
+                        break
+                if has_junction:
+                    break
 
         return has_kink, has_junction
 
@@ -1381,14 +2009,21 @@ class GIS:
                 - paths: list[dict] - Path segments with type and coordinates
                 - layer_used: str or None - Which layer provided the data ("cycling", "shared", "footpath")
         """
-        # Convert point to metric CRS (EPSG:3414)
-        pt = self.store.to_metric_point(point)
-
-        # Calculate radius and width using the two-stage process
-        min_radius, width = self.get_radius_and_width_at_point(
-            point=point,
-            collect_radius=collect_radius
+        analysis = self.analyze_curvature(
+            point,
+            sharp_turn_threshold=10.0,
+            default_value=2,
+            collect_radius=collect_radius,
+            include_diagnostics=True,
         )
+
+        pt = analysis["analysis_point"]
+        min_radius = analysis["radius"]
+        width = analysis["width"]
+        found_layer = analysis["layer_used"]
+        diagnostics = analysis["diagnostics"]
+        curvature = analysis["curvature"]
+        subcategory = analysis["subcategory"]
 
         # Create the analysis circle (5m buffer in EPSG:3414)
         circle_geom_3414 = pt.buffer(collect_radius)
@@ -1433,35 +2068,6 @@ class GIS:
         }
 
         paths = []
-
-        # Determine which layer was used for calculation (if any)
-        # We need to run the width search again to find out which layer provided data
-        found_layer = None
-        current_radius = 1.0
-        while current_radius <= 5.0 and found_layer is None:
-            buffer_ring = pt.buffer(current_radius)
-            for layer_key in priority:
-                try:
-                    gdf = self.store.get(layer_names[layer_key])
-                    if gdf is None or gdf.empty:
-                        continue
-
-                    if gdf.crs.to_epsg() != 3414:
-                        gdf = gdf.to_crs("EPSG:3414")
-
-                    candidate_indices = list(gdf.sindex.intersection(buffer_ring.bounds))
-                    if not candidate_indices:
-                        continue
-
-                    candidates = gdf.iloc[candidate_indices]
-                    intersecting = candidates[candidates.intersects(buffer_ring)]
-
-                    if not intersecting.empty:
-                        found_layer = layer_key
-                        break
-                except Exception:
-                    continue
-            current_radius += 1.0
 
         # Collect paths from all layers within the circle for visualization
         for layer_key in priority:
@@ -1545,84 +2151,27 @@ class GIS:
             # Transform from metric to WGS84
             point_lon, point_lat = transformer.transform(pt.x, pt.y)
 
-        # Generate detailed diagnostics if curvature was calculated
-        diagnostics = None
-        if found_layer is not None and min_radius is not None:
-            try:
-                # Re-run calculation with details for diagnostics
-                gdf = self.store.get(layer_names[found_layer])
-                if gdf is not None and not gdf.empty:
-                    if gdf.crs.to_epsg() != 3414:
-                        gdf = gdf.to_crs("EPSG:3414")
-
-                    if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
-                        gdf.geometry = gdf.geometry.apply(
-                            lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
-                        )
-
-                    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
-
-                    if not gdf.empty:
-                        buffer_curv = pt.buffer(collect_radius)
-                        candidate_indices = list(gdf.sindex.intersection(buffer_curv.bounds))
-
-                        if candidate_indices:
-                            candidates = gdf.iloc[candidate_indices]
-                            intersecting_curv = candidates[candidates.intersects(buffer_curv)]
-
-                            if not intersecting_curv.empty:
-                                from shapely.ops import linemerge, unary_union
-                                merged_geom = unary_union(intersecting_curv.geometry.tolist())
-
-                                if merged_geom.geom_type == 'MultiLineString':
-                                    merged_geom = linemerge(merged_geom)
-
-                                clipped_geom = merged_geom.intersection(buffer_curv)
-
-                                # Get densified coordinates
-                                lines_to_process = []
-                                if clipped_geom.geom_type == 'LineString':
-                                    lines_to_process = [clipped_geom]
-                                elif clipped_geom.geom_type == 'MultiLineString':
-                                    lines_to_process = list(clipped_geom.geoms)
-                                elif clipped_geom.geom_type == 'GeometryCollection':
-                                    lines_to_process = [g for g in clipped_geom.geoms if g.geom_type == 'LineString']
-
-                                # Calculate with details for the first line
-                                if lines_to_process:
-                                    line = lines_to_process[0]
-                                    if not line.is_empty and line.length >= 1.0:
-                                        # Densify
-                                        densified_coords = []
-                                        num_points = int(line.length / 1.0)
-                                        for i in range(num_points + 1):
-                                            distance = min(i * 1.0, line.length)
-                                            point_on_line = line.interpolate(distance)
-                                            densified_coords.append((point_on_line.x, point_on_line.y))
-
-                                        if len(densified_coords) > 0:
-                                            last_coord = list(line.coords)[-1]
-                                            if densified_coords[-1] != last_coord:
-                                                densified_coords.append(last_coord)
-
-                                        if len(densified_coords) >= 3:
-                                            _, details = self._calculate_min_radius_triplet(densified_coords, epsilon=1e-6, return_details=True)
-                                            diagnostics = details
-
-            except Exception as e:
-                print(f"Warning: Error generating diagnostics: {e}")
-
         return {
             "point": {
                 "lon": point_lon,
                 "lat": point_lat
             },
+            "original_point": {
+                "lon": transformer.transform(analysis["input_point"].x, analysis["input_point"].y)[0],
+                "lat": transformer.transform(analysis["input_point"].x, analysis["input_point"].y)[1],
+            },
             "radius": min_radius,
             "width": width,
+            "curvature": curvature,
+            "curvature_subcategory": subcategory,
             "circle_geojson": circle_geojson,
             "paths": paths,
             "layer_used": found_layer,
+            "analysis_layers": analysis.get("analysis_layers", []),
             "analysis_window_m": collect_radius,
+            "point_was_snapped": analysis.get("point_was_snapped", False),
+            "snap_distance_m": analysis.get("snap_distance_m"),
+            "snap_layer": analysis.get("snap_layer"),
             "diagnostics": diagnostics
         }
 

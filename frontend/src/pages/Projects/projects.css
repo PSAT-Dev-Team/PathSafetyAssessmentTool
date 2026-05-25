@@ -8,6 +8,31 @@
   height: 100vh;
 }
 
+.profile-migration-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 14px;
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.profile-migration-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--chakra-colors-fg-emphasized);
+}
+
+.profile-migration-copy {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--chakra-colors-fg-muted);
+}
+
 .projects-header h1 {
   margin: 0 0 4px;
   font-size: 28px;
@@ -135,6 +160,65 @@
   min-width: 80px;
 }
 
+.search-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.search-summary-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--chakra-colors-fg-muted);
+}
+
+.search-summary-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-summary-error {
+  color: var(--chakra-colors-red-500);
+}
+
+.search-summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.active-filter-pill {
+  border: 1px solid var(--chakra-colors-border);
+  background: var(--chakra-colors-bg);
+  color: var(--chakra-colors-fg);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.active-filter-pill:hover {
+  background: var(--chakra-colors-bg-muted);
+}
+
+.clear-filters-btn {
+  border: none;
+  background: transparent;
+  color: var(--chakra-colors-blue-600);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.clear-filters-btn:hover {
+  text-decoration: underline;
+}
+
 .date-range {
   display: flex;
   align-items: center;
@@ -242,6 +326,28 @@
   color: var(--chakra-colors-fg-muted);
   text-align: center;
   padding: 20px 0;
+}
+
+.empty-project-search-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.empty-project-search-title {
+  color: var(--chakra-colors-fg-emphasized);
+  font-weight: 600;
+}
+
+.empty-project-search-copy {
+  max-width: 460px;
+}
+
+.table-loading-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .actions-panel {

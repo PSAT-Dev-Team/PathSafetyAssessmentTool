@@ -13,8 +13,31 @@ import {
   Button,
 } from "@chakra-ui/react";
 import { FaSyncAlt } from "react-icons/fa";
+import { LuPencil } from "react-icons/lu";
 import { useState } from "react";
 import { toaster } from "../../../components/ui/toaster";
+import "./AttributesPanel.css";
+
+/** Maps real parent key → child field name whose options are editable */
+const PARENT_TO_CHILD_FIELD: Record<string, string> = {
+  "Fixed Obstacle on Facility": "FO Type",
+  "Non-Fixed Obstacle on Facility": "NFO Type",
+  "Loose or slippery surface": "Issue Type (Slippery)",
+  "Facility Width per Direction": "Facility Width Sub-category",
+  "Crossing Facility": "Crossing Type",
+  "Delineation": "Delineation Type",
+  "Curvature": "Curvature Sub-category",
+};
+
+/**
+ * For these child fields, the pencil only appears when the parent is Present (value 1).
+ */
+const CHILD_REQUIRES_PARENT_PRESENT: Record<string, string> = {
+  "FO Type": "Fixed Obstacle on Facility",
+  "NFO Type": "Non-Fixed Obstacle on Facility",
+  "Issue Type (Slippery)": "Loose or slippery surface",
+  "Crossing Type": "Crossing Facility",
+};
 
 /** ====== Props ====== */
 type Props = {
@@ -31,6 +54,7 @@ type Props = {
   highlightMessage?: string; // Custom message for changed attributes
   highlightColor?: "green" | "yellow";
   flex?: number | string;
+  onEditOptions?: (fieldName: string) => void;
 };
 
 /** ====== Group ordering (tab order) ====== */
@@ -41,6 +65,8 @@ const GROUP_ORDER = [
   "Intersection",
   "Flow & Speed",
 ] as const;
+
+const OPTIONAL_FIELDS_HIDE_WHEN_EMPTY = new Set(["Gradient Status"]);
 
 /** ====== Display fields under each group (keep your original order) ====== */
 const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
@@ -82,10 +108,10 @@ const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
   ],
   "Facility surface conditions": [
     "Delineation",
-    "Delineation type",
     "Major surface road deformation",
     "Loose or slippery surface",
     "Grade",
+    "Gradient status",
     "Curvature",
     "Tram or train rails",
     "Street lighting",
@@ -142,10 +168,10 @@ const KEY_ALIASES: Record<string, string> = {
 
   // Facility surface conditions
   "Delineation": "Delineation",
-  "Delineation type": "Delineation Type",
   "Major surface road deformation": "Major Surface Deformation or Drain Opening",
   "Loose or slippery surface": "Loose or slippery surface",
   "Grade": "Grade",
+  "Gradient status": "Gradient Status",
   "Curvature": "Curvature",
   "Tram or train rails": "Tram or Train Rails",
   "Street lighting": "Street Lighting",
@@ -169,7 +195,7 @@ function groupEntries(row: AttributeRow) {
   for (const group of GROUP_ORDER) {
     for (const displayName of GROUP_RULES[group]) {
       const realKey = KEY_ALIASES[displayName] ?? displayName;
-      if (!(realKey in rowWithDefaults)) {
+      if (!(realKey in rowWithDefaults) && !OPTIONAL_FIELDS_HIDE_WHEN_EMPTY.has(realKey)) {
         rowWithDefaults[realKey] = null;
       }
     }
@@ -194,6 +220,9 @@ function groupEntries(row: AttributeRow) {
   for (const [k, v] of allEntries) {
     const hit = keyToGroup[k];
     if (hit) {
+      if (OPTIONAL_FIELDS_HIDE_WHEN_EMPTY.has(k) && (v === null || v === undefined || v === "")) {
+        continue;
+      }
       grouped[hit.group].push([k, v]);
     }
   }
@@ -232,13 +261,14 @@ export default function AttributesPanel({
   highlightColor = "green",
   flex,
   projectName, // Passed from parent
+  onEditOptions,
 }: Props & { projectName?: string }) {
   const [detecting, setDetecting] = useState(false);
 
   const isYellow = highlightColor === "yellow";
   const changedBg = isYellow ? "yellow.50" : "green.100";
   const changedBorder = isYellow ? "yellow.500" : "green.500";
-  const changedText = isYellow ? { base: "yellow.900", _dark: "yellow.200" } : { base: "green.900", _dark: "green.900" };
+  const changedText = isYellow ? { base: "yellow.900", _dark: "black" } : { base: "green.900", _dark: "green.900" };
   const changedInputBg = isYellow ? "#FFFFF0" : "#F0FFF4"; // yellow.50 vs green.50 (approx)
   const changedInputBorder = isYellow ? "#D69E2E" : "#38A169"; // yellow.500 vs green.500
 
@@ -422,19 +452,36 @@ export default function AttributesPanel({
                           borderColor={isEdited ? "red.200" : isChanged ? changedBorder : "transparent"}
                           transition="all 0.2s"
                         >
-                          <Text
-                            fontSize="xs"
-                            color={isEdited ? "red.800" : isChanged ? changedText : "gray.600"}
-                            fontWeight={isEdited || isChanged ? "bold" : "semibold"}
-                          >
-                            {k}
-                            {isChanged && source && ` ✨ (${source})`}
-                            {isEdited && (
-                              <Text as="span" color="red.600" fontWeight="bold" ml="1">
-                                (Manual Edit Done)
-                              </Text>
-                            )}
-                          </Text>
+                          <Box display="flex" alignItems="center" justifyContent="space-between" gap="1">
+                            <Text
+                              fontSize="xs"
+                              color={isEdited ? "red.800" : isChanged ? changedText : "gray.600"}
+                              fontWeight={isEdited || isChanged ? "bold" : "semibold"}
+                            >
+                              {k}
+                              {isChanged && source && ` ✨ (${source})`}
+                              {isEdited && (
+                                <Text as="span" color="red.600" fontWeight="bold" ml="1">
+                                  (Manual Edit Done)
+                                </Text>
+                              )}
+                            </Text>
+                            {PARENT_TO_CHILD_FIELD[k] && onEditOptions && (() => {
+                              const childField = PARENT_TO_CHILD_FIELD[k];
+                              const parentKey = CHILD_REQUIRES_PARENT_PRESENT[childField];
+                              // Hide pencil for FO/NFO Type when parent is Not Present (value 2)
+                              if (parentKey && Number(row[parentKey]) !== 1) return null;
+                              return (
+                                <button
+                                  className="attr-edit-btn"
+                                  onClick={(e) => { e.stopPropagation(); onEditOptions(childField); }}
+                                  aria-label={`Edit options for ${childField}`}
+                                >
+                                  <LuPencil className="attr-edit-icon" />
+                                </button>
+                              );
+                            })()}
+                          </Box>
 
                           {dict ? (
                             <NativeSelect.Root size="sm" width="100%" mt="auto" disabled={readOnly}>
