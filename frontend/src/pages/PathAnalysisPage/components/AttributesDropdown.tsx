@@ -284,7 +284,7 @@ const cyclerapAttributes: AttributeConfig[] = [
   {
     name: "Road speed limit",
     group: "Flow & Speed",
-    options: ["Not Selected", "NA", "0 km/h", "10 km/h", "20 km/h", "30 km/h", "40 km/h", "50 km/h", "60 km/h", "70 km/h", "80 km/h", "90 km/h", "100 km/h", "110 km/h", "120 km/h"],
+    options: ["Not Selected", "NA", "30 km/h", "40 km/h", "50 km/h", "60 km/h", "70 km/h", "80 km/h", "90 km/h"],
   },
   {
     name: "Road AADT",
@@ -359,7 +359,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "Delineation Type",
     label: "Delineation Type",
     group: "Facility surface conditions",
-    options: ["Not Selected", "Cycling Path", "Red Stripe", "Traffic Crossing", "Zebra Crossing"],
+    options: ["Not Selected", "Cycling Path", "Red Stripe", "Signalised Crossing", "Traffic Crossing", "Zebra Crossing"],
   },
   {
     name: "Loose or slippery surface",
@@ -380,7 +380,7 @@ const cyclerapAttributes: AttributeConfig[] = [
   {
     name: "Grade",
     group: "Facility surface conditions",
-    options: ["Not Selected", "< 5 Degrees", "=/> 5 Degrees"]
+    options: ["Not Selected", "<=2% (1:25)", "2.9% (1:20)", "3.8% (1:15)", "4.7% (1:12)", ">=5%"]
   },
   {
     name: "Curvature",
@@ -419,7 +419,7 @@ const cyclerapAttributes: AttributeConfig[] = [
     name: "Crossing Type",
     label: "Crossing Type",
     group: "Intersection",
-    options: ["Not Selected", "Traffic Crossing"],
+    options: ["Not Selected", "Zebra Crossing", "Signalised PC", "Bicycle Crossing", "Unsignalised Junction", "Development Access"],
   },
   {
     name: "Pedestrian Crossing",
@@ -495,20 +495,20 @@ export const SUBCATEGORY_MAP: Record<
   "Curvature": {
     childAttr: "Curvature Sub-category",
     parentCategories: {
-      "Sharp Turn Present": ["Sharp Bend", "Path Junction", "Both"],
+      "Sharp Turn Present": ["<6.5m", "<10m", "Path Junction"],
       "No Sharp Turn Present": ["10–18m", ">18m"],
     },
   },
   "Crossing Facility": {
     childAttr: "Crossing Type",
     parentCategories: {
-      "Present": ["Traffic Crossing"],
+      "Present": ["Zebra Crossing", "Signalised PC", "Bicycle Crossing", "Unsignalised Junction", "Development Access"],
     },
   },
   "Delineation": {
     childAttr: "Delineation Type",
     parentCategories: {
-      "Present": ["Cycling Path", "Red Stripe", "Traffic Crossing", "Zebra Crossing"],
+      "Present": ["Cycling Path", "Red Stripe", "Signalised Crossing", "Traffic Crossing", "Zebra Crossing"],
     },
   },
 };
@@ -519,7 +519,7 @@ export const SUBCATEGORY_CHILD_ATTRS = new Set(
 );
 
 /** Multi-value attributes whose CSV cells can contain comma-separated values. */
-export const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type", "Delineation Type"]);
+export const MULTI_VALUE_ATTRS = new Set(["FO Type", "NFO Type", "Delineation Type", "Crossing Type"]);
 
 /**
  * Subcategory descriptions per attribute option.
@@ -558,11 +558,14 @@ export const ATTRIBUTE_SUBCATEGORIES: Record<string, Record<string, string>> = {
     "Present": "Type: bus stop, obstacle on path, construction, vegetation, others",
   },
   "Grade": {
-    "< 5 Degrees": "≤4° (1:25) · >4°–<5°",
-    "=/> 5 Degrees": "5° · 6° · 7° · 8° · >8°",
+    "<=2% (1:25)": "Up to 2% gradient (1:25)",
+    "2.9% (1:20)": "Up to 2.9% gradient (1:20)",
+    "3.8% (1:15)": "Up to 3.8% gradient (1:15)",
+    "4.7% (1:12)": "Up to 4.7% gradient (1:12)",
+    ">=5%": "5% gradient or steeper",
   },
   "Curvature": {
-    "Sharp Turn Present": "<6.5 m · 6.5–<10 m",
+    "Sharp Turn Present": "<6.5 m · <10 m · Path Junction",
     "No Sharp Turn Present": "10–18 m · >18 m",
   },
   "Pedestrian Crossing": {
@@ -572,7 +575,7 @@ export const ATTRIBUTE_SUBCATEGORIES: Record<string, Record<string, string>> = {
     "Present": "Type: side road, development access, signalised pedestrian crossing, pedestrian cum bicycle crossing, zebra crossing, kerb cut ramp",
   },
   "Crossing Facility": {
-    "Present": "Type: signalised pedestrian crossing (GIS), pedestrian cum bicycle crossing (GIS), zebra crossing (GIS), refuge island",
+    "Present": "Type: zebra crossing, signalised PC, bicycle crossing, unsignalised junction, development access",
   },
   "Bicycle/LV speed – average": {
     "=/> 20km/h": "20 · >20–25 · >25 km/h",
@@ -631,11 +634,18 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Delineation Type": {
       "Cycling Path":     "#2563EB",
       "Red Stripe":       "#DC2626",
-      "Traffic Crossing": "#EA580C",
+      "Signalised Crossing": "#EA580C",
+      "Traffic Crossing": "#0891B2",
       "Zebra Crossing":   "#CA8A04",
     },
     "Street Lighting": { "Present": "#16A34A", "Not Present": "#DC2626" },
-    "Grade": { "< 5 Degrees": "#16A34A", "=/> 5 Degrees": "#DC2626" },
+    "Grade": {
+      "<=2% (1:25)": "#16A34A",
+      "2.9% (1:20)": "#65A30D",
+      "3.8% (1:15)": "#CA8A04",
+      "4.7% (1:12)": "#EA580C",
+      ">=5%": "#DC2626",
+    },
     "Curvature": { "No Sharp Turn Present": "#16A34A", "Sharp Turn Present": "#DC2626" },
     "Facility Width per Direction": { "Wide": "#16A34A", "Narrow": "#FFCC1A", "Very Narrow": "#DC2626" },
     "Peak pedestrian flow along or across facility": { "None": "#6B7280", "Low": "#16A34A", "Moderate to high": "#DC2626" },
@@ -647,7 +657,11 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Intersection or Road Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Crossing Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Crossing Type": {
-      "Traffic Crossing": "#2563EB",
+      "Zebra Crossing": "#CA8A04",
+      "Signalised PC": "#2563EB",
+      "Bicycle Crossing": "#16A34A",
+      "Unsignalised Junction": "#EA580C",
+      "Development Access": "#9333EA",
     },
     "Pedestrian Crossing": { "Present": "#16A34A", "Not Present": "#DC2626" },
     "Intersecting Bicycle Facility": { "Present": "#16A34A", "Not Present": "#DC2626" },
@@ -655,6 +669,16 @@ export function getCategoryColor(attribute: string, category: string): string {
     "Intersection Approach": { "Separate/NA": "#16A34A", "Shared": "#DC2626" },
     "Number of lanes – adjacent road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
     "Number of lanes – intersecting road": { "1 per Direction/NA": "#16A34A", "> 1 per Direction": "#DC2626" },
+    "Road speed limit": {
+      "NA": "#6B7280",
+      "30 km/h": "#16A34A",
+      "40 km/h": "#65A30D",
+      "50 km/h": "#FFCC1A",
+      "60 km/h": "#F59E0B",
+      "70 km/h": "#EA580C",
+      "80 km/h": "#DC2626",
+      "90 km/h": "#991B1B",
+    },
     "Flow Direction": { "One Way": "#2563EB", "Two Way": "#9333EA" },
     "Facility Type": {
       "Sidewalk": "#2563EB",
@@ -673,9 +697,11 @@ export function getCategoryColor(attribute: string, category: string): string {
       ">4m":            "#2563EB",
     },
     "Curvature Sub-category": {
-      "Sharp Bend":     "#DC2626",
-      "Path Junction":  "#EA580C",
-      "Both":           "#9333EA",
+      "<6.5m":         "#DC2626",
+      "<10m":          "#EA580C",
+      "Path Junction": "#9333EA",
+      "Sharp Bend":    "#EA580C",
+      "Both":          "#9333EA",
       "10\u201318m":    "#16A34A",
       ">18m":           "#2563EB",
     },

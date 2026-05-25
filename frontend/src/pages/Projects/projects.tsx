@@ -6,12 +6,13 @@ import {
   Dialog,
   Portal,
   CloseButton,
-  Combobox,
-  createListCollection,
+  Spinner,
 } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
 import { LuPencil, LuArrowUpDown, LuArrowUp, LuArrowDown } from "react-icons/lu";
 import EditProjectModal from "./components/EditProjectModal";
+import { toaster } from "../../components/ui/toaster";
+import { useProfile } from "../../features/profile/ProfileProvider";
 
 import "./projects.css";
 import "./components/EditProjectModal.css";
@@ -52,13 +53,15 @@ function getTagColor(tag: string): string {
 }
 
 export default function Home() {
+  const { activeProfile, legacyProjects, migrateLegacyProjects } = useProfile();
 
   // Status
-  const [, setStatus] = useState("checking...");
-  const [, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState("checking...");
+  const [error, setError] = useState<string | null>(null);
 
   // Project List
   const [Projectlist, setProjectList] = useState<FileListResponse | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(true);
 
   // Sorting
   type SortCriterion = { key: string; direction: 'asc' | 'desc' };
@@ -70,7 +73,7 @@ export default function Home() {
   const [nameQuery, setNameQuery] = useState("");
   const [tagFilters, setTagFilters] = useState<string[]>([]);
   const [tagInputValue, setTagInputValue] = useState("");
-  const [tagComboboxOpen, setTagComboboxOpen] = useState(false);
+  const [tagSuggestionsOpen, setTagSuggestionsOpen] = useState(false);
 
   // Selected Projects (multiple selection)
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -82,8 +85,20 @@ export default function Home() {
   // Edit dialog state
   const [openEdit, setOpenEdit] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectListItem | null>(null);
+  const [migratingLegacyProjects, setMigratingLegacyProjects] = useState(false);
 
   const navigate = useNavigate();
+
+  const loadProjects = useMemo(() => {
+    return () => {
+      setLoadingProjects(true);
+      setError(null);
+      return fetchProjectList()
+        .then((data) => setProjectList(data))
+        .catch((nextError) => setError(String(nextError)))
+        .finally(() => setLoadingProjects(false));
+    };
+  }, []);
 
 
   // Use effect
@@ -92,10 +107,8 @@ export default function Home() {
       .then((r) => setStatus(r.status))
       .catch(() => setStatus("offline"));
 
-    fetchProjectList()
-      .then((data) => setProjectList(data))
-      .catch((e) => setError(String(e)));
-  }, []);
+    void loadProjects();
+  }, [loadProjects]);
 
   // Listen for project verified status changes from coding page
   useEffect(() => {
@@ -208,6 +221,57 @@ export default function Home() {
 
     return list;
   }, [projects, nameQuery, tagFilters]);
+  const filteredTagOptions = useMemo(
+    () => allTags.filter(tag =>
+      tag.toLowerCase().includes(tagInputValue.toLowerCase()) &&
+      !tagFilters.includes(tag)
+    ),
+    [allTags, tagFilters, tagInputValue]
+  );
+  const showCreateProjectPrompt = !loadingProjects && filtered.length === 0 && nameQuery.trim().length > 0;
+  const hasActiveFilters = nameQuery.trim().length > 0 || tagFilters.length > 0;
+
+  const moveLegacyProjects = async () => {
+    try {
+      setMigratingLegacyProjects(true);
+      const result = await migrateLegacyProjects();
+      await loadProjects();
+      toaster.create({
+        title: "Shared projects moved",
+        description: result.moved.length > 0
+          ? `${result.moved.length} project${result.moved.length === 1 ? "" : "s"} moved into ${activeProfile?.name ?? "the active profile"}.`
+          : "No shared projects were moved.",
+        type: "success",
+      });
+    } catch (nextError) {
+      toaster.create({
+        title: "Move failed",
+        description: nextError instanceof Error ? nextError.message : "Failed to move shared projects.",
+        type: "error",
+      });
+    } finally {
+      setMigratingLegacyProjects(false);
+    }
+  };
+
+  const addTagFilter = (tag: string) => {
+    if (!tag || tagFilters.includes(tag)) {
+      setTagInputValue("");
+      setTagSuggestionsOpen(true);
+      return;
+    }
+
+    setTagFilters((current) => [...current, tag]);
+    setTagInputValue("");
+    setTagSuggestionsOpen(true);
+  };
+
+  const clearAllFilters = () => {
+    setNameQuery("");
+    setTagFilters([]);
+    setTagInputValue("");
+    setTagSuggestionsOpen(false);
+  };
 
   // Toggle project selection
   const onRowClick = (name: string) => {
@@ -391,6 +455,26 @@ export default function Home() {
 
   return (
     <div className="projects-root">
+      {activeProfile && legacyProjects.length > 0 && (
+        <div className="profile-migration-banner">
+          <div>
+            <div className="profile-migration-title">Shared projects are still outside this profile</div>
+            <div className="profile-migration-copy">
+              {legacyProjects.length} existing project{legacyProjects.length === 1 ? " is" : "s are"} still in the shared project area.
+              Move them into {activeProfile.name} so they appear in this profile's project list.
+            </div>
+          </div>
+          <Button
+            colorPalette="teal"
+            variant="solid"
+            loading={migratingLegacyProjects}
+            onClick={() => void moveLegacyProjects()}
+          >
+            Move Shared Projects
+          </Button>
+        </div>
+      )}
+
       <div className="search-panel">
         <div className="search-row">
           <div className="search-item">
@@ -405,67 +489,142 @@ export default function Home() {
             />
           </div>
           <div className="search-item">
-            <label htmlFor="tagFilterCombobox">Filter by tags</label>
-            <Combobox.Root
-              collection={createListCollection({
-                items: allTags.map(tag => ({ label: tag, value: tag }))
-              })}
-              inputValue={tagInputValue}
-              onInputValueChange={({ inputValue }) => setTagInputValue(inputValue)}
-              onValueChange={({ value }) => {
-                if (value.length > 0 && !tagFilters.includes(value[0])) {
-                  setTagFilters([...tagFilters, value[0]]);
-                  setTagInputValue("");
-                }
-              }}
-              open={tagComboboxOpen}
-              onOpenChange={(details) => setTagComboboxOpen(details.open)}
-            >
-              <Combobox.Control onClick={() => setTagComboboxOpen(true)}>
-                <div className="tag-input-container">
-                  <div className="tag-input-wrapper">
-                    {tagFilters.map((tag) => (
-                      <div
-                        key={tag}
-                        className="tag-chip"
-                        style={{ backgroundColor: getTagColor(tag) }}
+            <label htmlFor="tagFilterInput">Filter by tags</label>
+            <div style={{ position: "relative" }}>
+              <div className="tag-input-container">
+                <div className="tag-input-wrapper">
+                  {tagFilters.map((tag) => (
+                    <div
+                      key={tag}
+                      className="tag-chip"
+                      style={{ backgroundColor: getTagColor(tag) }}
+                    >
+                      <span className="tag-chip-text">{tag}</span>
+                      <button
+                        className="tag-chip-remove"
+                        onClick={() => removeTagFilter(tag)}
+                        type="button"
+                        aria-label={`Remove ${tag} filter`}
                       >
-                        <span className="tag-chip-text">{tag}</span>
-                        <button
-                          className="tag-chip-remove"
-                          onClick={() => removeTagFilter(tag)}
-                          type="button"
-                          aria-label={`Remove ${tag} filter`}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    <Combobox.Input
-                      id="tagFilterCombobox"
-                      placeholder={tagFilters.length === 0 ? "Type or click to select tags..." : "Add more tags..."}
-                      className="tag-input-field"
-                    />
-                  </div>
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <input
+                    id="tagFilterInput"
+                    type="text"
+                    value={tagInputValue}
+                    onChange={(event) => {
+                      setTagInputValue(event.target.value);
+                      setTagSuggestionsOpen(true);
+                    }}
+                    onFocus={() => setTagSuggestionsOpen(true)}
+                    onBlur={() => {
+                      window.setTimeout(() => setTagSuggestionsOpen(false), 100);
+                    }}
+                    placeholder={tagFilters.length === 0 ? "Type or click to select tags..." : "Add more tags..."}
+                    className="tag-input-field"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && filteredTagOptions.length > 0) {
+                        event.preventDefault();
+                        addTagFilter(filteredTagOptions[0]);
+                      }
+                    }}
+                  />
                 </div>
-              </Combobox.Control>
-              <Portal>
-                <Combobox.Positioner>
-                  <Combobox.Content>
-                    {allTags
-                      .filter(tag =>
-                        tag.toLowerCase().includes(tagInputValue.toLowerCase()) &&
-                        !tagFilters.includes(tag)
-                      )
-                      .map((tag) => (
-                        <Combobox.Item key={tag} item={{ label: tag, value: tag }}>
-                          {tag}
-                        </Combobox.Item>
-                      ))}
-                  </Combobox.Content>
-                </Combobox.Positioner>
-              </Portal>
-            </Combobox.Root>
+              </div>
+              {tagSuggestionsOpen && filteredTagOptions.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 8px)",
+                    left: 0,
+                    right: 0,
+                    background: "var(--chakra-colors-bg)",
+                    border: "1px solid var(--chakra-colors-border)",
+                    borderRadius: "8px",
+                    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.12)",
+                    maxHeight: "220px",
+                    overflowY: "auto",
+                    zIndex: 20,
+                  }}
+                >
+                  {filteredTagOptions.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "var(--chakra-colors-fg)",
+                        fontSize: "14px",
+                      }}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        addTagFilter(tag);
+                      }}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="search-summary-row">
+          <div className="search-summary-text">
+            {loadingProjects ? (
+              <span className="search-summary-loading">
+                <Spinner size="sm" />
+                <span>Loading project list from backend...</span>
+              </span>
+            ) : error ? (
+              <span className="search-summary-error">
+                {status === "offline" ? "Backend appears offline." : error}
+              </span>
+            ) : (
+              <>
+                {`Showing ${filtered.length} of ${projects.length} project${projects.length === 1 ? "" : "s"}`}
+                {selected.size > 0 ? ` • ${selected.size} selected` : ""}
+              </>
+            )}
+          </div>
+          <div className="search-summary-actions">
+            {nameQuery.trim() && (
+              <button
+                type="button"
+                className="active-filter-pill"
+                onClick={() => setNameQuery("")}
+              >
+                Search: {nameQuery.trim()} ×
+              </button>
+            )}
+            {tagFilters.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className="active-filter-pill"
+                onClick={() => removeTagFilter(tag)}
+              >
+                Tag: {tag} ×
+              </button>
+            ))}
+            {hasActiveFilters && (
+              <button
+                type="button"
+                className="clear-filters-btn"
+                onClick={clearAllFilters}
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         </div>
 
@@ -509,10 +668,38 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {loadingProjects ? (
                 <tr>
                   <td colSpan={8} className="empty">
-                    No projects found
+                    <div className="table-loading-state">
+                      <Spinner size="sm" />
+                      <span>Loading projects...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="empty">
+                    {showCreateProjectPrompt ? (
+                      <div className="empty-project-search-state">
+                        <div className="empty-project-search-title">
+                          No projects matched "{nameQuery.trim()}"
+                        </div>
+                        <div className="empty-project-search-copy">
+                          Create a new project if this road or project has not been set up yet.
+                        </div>
+                        <Button
+                          size="sm"
+                          colorPalette="black"
+                          variant="solid"
+                          onClick={() => createProject(navigate)}
+                        >
+                          Create Project
+                        </Button>
+                      </div>
+                    ) : (
+                      "No projects found"
+                    )}
                   </td>
                 </tr>
               ) : (

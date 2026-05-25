@@ -165,3 +165,5 @@ All under `/api/shapefiles/`:
 | `409` | Conflict — project already exists |
 | `500` | Unexpected backend error |
 | `503` | Service unavailable — CV models missing or failed to load |
+
+*Layman's explanation: These numbers are like secret codes the computer uses to tell the website if a request was successful or if something went wrong.*

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Box, Text, Flex, Button, Tabs, Badge } from "@chakra-ui/react";
 import { Switch } from "../../../components/ui/switch";
 import { FaFilter, FaChevronDown, FaChevronUp } from "react-icons/fa";
-import { ATTRIBUTE_LABELS, CYCLERAP_ATTRIBUTE_CONFIGS, SUBCATEGORY_CHILD_ATTRS, safetyScoreAttributes } from "./AttributesDropdown";
+import { ATTRIBUTE_LABELS, CYCLERAP_ATTRIBUTE_CONFIGS, SUBCATEGORY_CHILD_ATTRS, SUBCATEGORY_MAP, safetyScoreAttributes } from "./AttributesDropdown";
 
 const GROUP_ORDER = [
   "Risk Level",
@@ -14,6 +14,11 @@ const GROUP_ORDER = [
 ] as const;
 
 const MAX_ACTIVE = 5;
+
+const getMasterToggleLabel = (attrName: string, fallbackLabel?: string): string => {
+  const label = ATTRIBUTE_LABELS[attrName] ?? fallbackLabel ?? attrName;
+  return SUBCATEGORY_MAP[attrName] ? `${label}*` : label;
+};
 
 interface FilterPanelProps {
   activeFilters: string[];
@@ -116,7 +121,7 @@ export default function FilterPanel({ activeFilters, onActiveFiltersChange }: Fi
               <Tabs.Content key={group} value={group} p="4">
                 <Flex flexWrap="wrap" gap="3">
                   {(attrsByGroup[group] ?? []).map(attr => {
-                    const label = ATTRIBUTE_LABELS[attr.name] ?? attr.label ?? attr.name;
+                    const label = getMasterToggleLabel(attr.name, attr.label);
                     const isActive = activeFilters.includes(attr.name);
                     const isDisabled = activeFilters.length >= MAX_ACTIVE && !isActive;
 

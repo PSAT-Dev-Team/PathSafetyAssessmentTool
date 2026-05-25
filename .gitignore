@@ -23,8 +23,7 @@ obsidian-vault/
 .mcp.json
 .opencode.json
 .windsurfrules
-AGENTS.md
-GEMINI.md
+
 
 # POC scripts and outputs
 adjroad_poc.py
@@ -37,7 +36,14 @@ yck_facil/
 yck_obstacles/
 obstacles/
 scripts/
+tmp/
 Gradient Calculation/
+profiles/
+.Rhistory
+visualize_obstacles.py
+visualize_width_restriction.py
+run_attribute_inference.py
+visualise_width_restriction.py
 
 # Data and Models
 CycleRAP - model - generation v2.13 - to suppliers.xlsm
@@ -48,3 +54,7 @@ completed.csv
 # OS specific files
 .DS_Store
 **/.DS_Store
+
+# Documentation and explanations
+*.md
+

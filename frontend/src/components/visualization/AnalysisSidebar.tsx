@@ -5,6 +5,7 @@ import { CurvatureDiagnostics } from './curvature/CurvatureDiagnostics';
 import { WidthSearchDiagnostics } from './width/WidthSearchDiagnostics';
 import type { WidthVisualizationResponse } from '../../api/widthVisualization';
 import type { CurvatureVisualizationResponse } from '../../api/curvatureVisualization';
+import { getGradientDisplayColor, getGradientDisplayState } from '../../utils/gradientDisplay';
 import './AnalysisPanel.css'; // Reusing styles
 
 interface AnalysisSidebarProps {
@@ -18,6 +19,7 @@ interface AnalysisSidebarProps {
   curvError: string | null;
   grade?: number | string | null;
   gradientPct?: number | string | null;
+  gradientStatus?: string | null;
 }
 
 function getWidthCategoryColor(category: number): string {
@@ -63,6 +65,26 @@ function LayerDot({ layer }: { layer: string }) {
   );
 }
 
+function getCurvatureAccent(data: CurvatureVisualizationResponse | null): string | undefined {
+  if (!data) return undefined;
+  if (data.curvature !== 1) return '#27AE60';
+  if (data.curvature_subcategory === '<6.5m') return '#DC2626';
+  if (data.curvature_subcategory === '<10m') return '#EA580C';
+  if (data.curvature_subcategory === 'Path Junction') return '#9333EA';
+  if (data.curvature_subcategory === 'Both') return '#9333EA';
+  return '#E74C3C';
+}
+
+function getCurvatureLabel(data: CurvatureVisualizationResponse | null): string | null {
+  if (!data) return null;
+  if (data.curvature !== 1) return '✓ No Sharp Turn';
+  if (data.curvature_subcategory === '<6.5m') return '⚠️ <6.5m Radius';
+  if (data.curvature_subcategory === '<10m') return '⚠️ <10m Radius';
+  if (data.curvature_subcategory === 'Path Junction') return '⚠️ Path Junction';
+  if (data.curvature_subcategory === 'Both') return '⚠️ Sharp Bend + Junction';
+  return '⚠️ Sharp Bend';
+}
+
 function DataCard({ label, value, loading, error, accent }: { label: string; value: React.ReactNode; loading?: boolean; error?: boolean; accent?: string }) {
   return (
     <div className="analysis-card">
@@ -90,21 +112,20 @@ export function AnalysisSidebar({
   curvError,
   grade,
   gradientPct,
+  gradientStatus,
 }: AnalysisSidebarProps) {
   const [showDiag, setShowDiag] = useState(false);
 
-  const gradeNum = grade != null ? Number(grade) : null;
-  const pct = gradientPct != null ? Number(gradientPct) : null;
-  const gradientValue = pct != null ? (
-    <span style={{ color: gradeNum === 2 ? '#E74C3C' : '#27AE60', fontWeight: 600 }}>
-      {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-    </span>
-  ) : gradeNum === 1 ? (
-    <span style={{ color: '#27AE60' }}>✓ Grade 1 (&lt;5°)</span>
-  ) : gradeNum === 2 ? (
-    <span style={{ color: '#E74C3C' }}>⚠️ Grade 2 (≥5°)</span>
+  const gradientState = getGradientDisplayState({ grade, gradientPct, gradientStatus });
+  const gradientColor = getGradientDisplayColor(gradientState.kind);
+  const gradientValue = gradientState.mode === 'percent' ? (
+    <span style={{ color: gradientColor, fontWeight: 600 }}>{gradientState.text}</span>
+  ) : gradientState.mode === 'grade' && gradientState.kind === 'ok' ? (
+    <span style={{ color: gradientColor }}>✓ {gradientState.text}</span>
+  ) : gradientState.mode === 'grade' ? (
+    <span style={{ color: gradientColor }}>⚠️ {gradientState.text}</span>
   ) : (
-    <span className="analysis-card-na">—</span>
+    <span style={{ color: gradientColor }}>{gradientState.text}</span>
   );
 
   return (
@@ -164,8 +185,8 @@ export function AnalysisSidebar({
                 label="Curvature Class"
                 loading={curvLoading}
                 error={!!curvError}
-                accent={curvData ? (curvData.curvature === 1 ? '#E74C3C' : '#27AE60') : undefined}
-                value={curvData ? (curvData.curvature === 1 ? '⚠️ Sharp Turn' : '✓ No Sharp Turn') : undefined}
+                accent={getCurvatureAccent(curvData)}
+                value={getCurvatureLabel(curvData) ?? undefined}
               />
               <DataCard
                 label="Curvature Layer"

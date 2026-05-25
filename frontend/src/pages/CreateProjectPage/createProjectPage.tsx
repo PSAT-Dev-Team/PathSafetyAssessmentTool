@@ -20,6 +20,7 @@ import {
   fetchProjectList,
   fetchSourceFolderPreview,
   type SourceFolderPreview,
+  type ProjectSelectionGeometry,
 } from "../../api";
 import ImageUploadModal from "../sidebar/components/ImageUploadModal";
 import SelectRoadsMap, { type SelectedRoad } from "./SelectRoadsMap";
@@ -68,7 +69,7 @@ export default function CreateProjectPage() {
   const [folderComboboxOpen, setFolderComboboxOpen] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
-  const [tagComboboxOpen, setTagComboboxOpen] = useState(false);
+  const [tagSuggestionsOpen, setTagSuggestionsOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [imageUploadModalOpen, setImageUploadModalOpen] = useState(false);
@@ -77,7 +78,7 @@ export default function CreateProjectPage() {
   const [loadingFolderPreview, setLoadingFolderPreview] = useState(false);
   const [folderPreviewError, setFolderPreviewError] = useState<string | null>(null);
   const [selectedRoads, setSelectedRoads] = useState<SelectedRoad[]>([]);
-  const [selectedPolygon, setSelectedPolygon] = useState<[number, number][]>([]);
+  const [selectedSelectionGeometry, setSelectedSelectionGeometry] = useState<ProjectSelectionGeometry | null>(null);
 
   const selectedRoadFolders = useMemo(
     () => selectedRoads.filter((road) => road.selected),
@@ -135,7 +136,22 @@ export default function CreateProjectPage() {
     setFolderPreviewError(null);
 
     fetchSourceFolderPreview(folder.trim(), { signal: ctrl.signal })
-      .then((preview) => setFolderPreview(preview))
+      .then((preview) => {
+        setFolderPreview(preview);
+
+        if (preview.folder_name !== folder.trim()) {
+          setFolders((currentFolders) => {
+            const nextFolders = currentFolders.filter((item) => item !== folder.trim());
+            if (!nextFolders.includes(preview.folder_name)) {
+              nextFolders.push(preview.folder_name);
+            }
+            return nextFolders.sort((left, right) => left.localeCompare(right));
+          });
+          setFolder(preview.folder_name);
+          setFolderComboboxOpen(false);
+          void loadFolders();
+        }
+      })
       .catch((error: any) => {
         if (error?.name !== "AbortError") {
           setFolderPreview(null);
@@ -151,9 +167,25 @@ export default function CreateProjectPage() {
     setSelectedRoads(roads);
   }, []);
 
-  const handlePolygonChange = useCallback((polygon: [number, number][]) => {
-    setSelectedPolygon(polygon);
+  const handleSelectionGeometryChange = useCallback((selectionGeometry: ProjectSelectionGeometry | null) => {
+    setSelectedSelectionGeometry(selectionGeometry);
   }, []);
+
+  const commitTag = useCallback((rawTag: string) => {
+    const trimmedTag = rawTag.trim();
+    if (trimmedTag) {
+      setTags((current) => current.includes(trimmedTag) ? current : [...current, trimmedTag]);
+    }
+    setTagInput("");
+    setTagSuggestionsOpen(true);
+  }, []);
+
+  const filteredTagSuggestions = useMemo(() => {
+    const query = tagInput.trim().toLowerCase();
+    return existingTags.filter((tag) =>
+      !tags.includes(tag) && (!query || tag.toLowerCase().includes(query))
+    );
+  }, [existingTags, tagInput, tags]);
 
   const canCreate = useMemo(() => {
     if (!name.trim()) return false;
@@ -168,11 +200,7 @@ export default function CreateProjectPage() {
   const handleTagInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "," || e.key === "Enter") {
       e.preventDefault();
-      const trimmedTag = tagInput.trim();
-      if (trimmedTag && !tags.includes(trimmedTag)) {
-        setTags([...tags, trimmedTag]);
-      }
-      setTagInput("");
+      commitTag(tagInput);
     } else if (e.key === "Backspace" && tagInput === "" && tags.length > 0) {
       // Remove last tag on backspace if input is empty
       setTags(tags.slice(0, -1));
@@ -195,7 +223,7 @@ export default function CreateProjectPage() {
         name.trim(),
         sourceSelection,
         tags,
-        usingRoadSelection ? selectedPolygon : undefined
+        usingRoadSelection ? (selectedSelectionGeometry ?? undefined) : undefined
       );
       const proj = data?.name ?? name.trim();
       nav(`/coding/${encodeURIComponent(proj)}`);
@@ -213,7 +241,7 @@ export default function CreateProjectPage() {
         <CardHeader>
           <Heading size="md">Create Project from Folder</Heading>
           <Text mt="1" color="gray.500" fontSize="sm">
-            Use either a single source folder or a polygon-selected set of roads to create a project.
+            Use either a single source folder or a geometry-selected set of roads to create a project.
           </Text>
         </CardHeader>
         <CardBody display="grid" gap={4}>
@@ -227,7 +255,7 @@ export default function CreateProjectPage() {
               onChange={(e) => setName(e.target.value)}
             />
             {name.includes("_") && (
-              <Text color="red.600" fontSize="xs" mt={1}>
+              <Text color="red.600" _dark={{ color: "red.400" }} fontSize="xs" mt={1}>
                 Project name cannot contain underscores (_)
               </Text>
             )}
@@ -257,53 +285,64 @@ export default function CreateProjectPage() {
                     </button>
                   </Box>
                 ))}
-                <Combobox.Root
-                  collection={createListCollection({
-                    items: existingTags.map(t => ({ label: t, value: t }))
-                  })}
-                  inputValue={tagInput}
-                  onInputValueChange={({ inputValue }) => setTagInput(inputValue)}
-                  onValueChange={({ value }) => {
-                    if (value.length > 0) {
-                      const selectedTag = value[0];
-                      if (selectedTag && !tags.includes(selectedTag)) {
-                        setTags([...tags, selectedTag]);
-                        setTagInput("");
-                      }
-                    }
-                  }}
-                  open={tagComboboxOpen}
-                  onOpenChange={(details) => {
-                    // Keep dropdown open if there's text in the field
-                    if (tagInput.length > 0) {
-                      setTagComboboxOpen(true);
-                    } else {
-                      setTagComboboxOpen(details.open);
-                    }
-                  }}
-                >
-                  <Combobox.Control onClick={() => setTagComboboxOpen(true)}>
-                    <Combobox.Input
-                      placeholder="Type tag and press comma or enter"
-                      className="tag-input-field"
-                      onKeyDown={handleTagInputKeyDown}
-                    />
-                  </Combobox.Control>
-                  <Combobox.Positioner zIndex={1200}>
-                    <Combobox.Content>
-                      {existingTags
-                        .filter(t =>
-                          t.toLowerCase().includes(tagInput.toLowerCase()) &&
-                          !tags.includes(t)
-                        )
-                        .map(t => (
-                          <Combobox.Item key={t} item={{ label: t, value: t }}>
-                            {t}
-                          </Combobox.Item>
-                        ))}
-                    </Combobox.Content>
-                  </Combobox.Positioner>
-                </Combobox.Root>
+                <Box position="relative" flex="1" minW="160px">
+                  <Input
+                    value={tagInput}
+                    onChange={(e) => {
+                      setTagInput(e.target.value);
+                      setTagSuggestionsOpen(true);
+                    }}
+                    onFocus={() => setTagSuggestionsOpen(true)}
+                    onBlur={() => {
+                      window.setTimeout(() => setTagSuggestionsOpen(false), 100);
+                    }}
+                    placeholder="Type tag and press comma or enter"
+                    className="tag-input-field"
+                    onKeyDown={handleTagInputKeyDown}
+                  />
+                  {tagSuggestionsOpen && filteredTagSuggestions.length > 0 && (
+                    <Box
+                      position="absolute"
+                      top="calc(100% + 8px)"
+                      left="0"
+                      right="0"
+                      bg="white"
+                      borderWidth="1px"
+                      borderColor="gray.200"
+                      _dark={{ borderColor: "gray.700", bg: "gray.800" }}
+                      borderRadius="md"
+                      boxShadow="md"
+                      maxH="180px"
+                      overflowY="auto"
+                      zIndex={1200}
+                    >
+                      {filteredTagSuggestions.map((tag) => (
+                        <Button
+                          key={tag}
+                          type="button"
+                          display="block"
+                          width="100%"
+                          px="3"
+                          py="2"
+                          textAlign="left"
+                          fontSize="sm"
+                          variant="ghost"
+                          justifyContent="flex-start"
+                          borderRadius="0"
+                          minH="auto"
+                          h="auto"
+                          _hover={{ bg: "gray.50", _dark: { bg: "gray.700" } }}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            commitTag(tag);
+                          }}
+                        >
+                          {tag}
+                        </Button>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
               </Box>
             </Box>
             <Text color="gray.500" fontSize="xs" mt={1}>
@@ -363,7 +402,7 @@ export default function CreateProjectPage() {
             </Box>
 
             {err && (
-              <Text color="red.600" fontSize="xs" mt={1}>
+              <Text color="red.600" _dark={{ color: "red.400" }} fontSize="xs" mt={1}>
                 {err}
               </Text>
             )}
@@ -375,14 +414,14 @@ export default function CreateProjectPage() {
             )}
 
             {selectedFolderExists && (
-              <Box mt={3} border="1px solid" borderColor="gray.200" borderRadius="md" p={3} bg="gray.50">
+              <Box mt={3} border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.700", bg: "gray.800" }} borderRadius="md" p={3} bg="gray.50">
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={3} flexWrap="wrap" mb={2}>
                   <Box>
                     <Text fontSize="sm" fontWeight="semibold">
                       {folder} Summary
                     </Text>
                     {folderPreview && (
-                      <Text fontSize="xs" color="gray.500">
+                      <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }}>
                         {folderPreview.image_count} image{folderPreview.image_count === 1 ? "" : "s"} in this source folder
                       </Text>
                     )}
@@ -399,50 +438,68 @@ export default function CreateProjectPage() {
                 </Box>
 
                 {loadingFolderPreview && (
-                  <Text fontSize="xs" color="gray.500">
+                  <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }}>
                     Loading folder summary...
                   </Text>
                 )}
 
                 {folderPreviewError && !loadingFolderPreview && (
-                  <Text fontSize="xs" color="red.600">
+                  <Text fontSize="xs" color="red.600" _dark={{ color: "red.400" }}>
                     {folderPreviewError}
                   </Text>
                 )}
 
                 {folderPreview && !loadingFolderPreview && !folderPreviewError && (
                   <>
-                    <Text fontSize="xs" color="gray.600" mb={3}>
-                      Survey quarter is inferred from the last modified timestamp on the images in this folder, not from EXIF metadata.
+                    <Text fontSize="xs" color="gray.600" _dark={{ color: "gray.400" }} mb={3}>
+                      Survey quarter is inferred from the last modified timestamp on the images in this folder, not from EXIF metadata. This summary is cached inside the folder and refreshes automatically when the image set changes.
                     </Text>
 
+                    {folderPreview.renamed_from && (
+                      <Text fontSize="xs" color="blue.600" _dark={{ color: "blue.400" }} mb={3}>
+                        Renamed from {folderPreview.renamed_from} to {folderPreview.folder_name} to include the detected survey quarter.
+                      </Text>
+                    )}
+
+                    {folderPreview.mixed_quarters && (
+                      <Text fontSize="xs" color="orange.600" _dark={{ color: "orange.400" }} mb={3}>
+                        This folder spans multiple survey quarters ({folderPreview.survey_quarters.join(", ")}). Keep quarters separated where possible so project creation stays predictable.
+                      </Text>
+                    )}
+
+                    {folderPreview.cached && !folderPreview.renamed_from && (
+                      <Text fontSize="xs" color="green.600" _dark={{ color: "green.400" }} mb={3}>
+                        Loaded instantly from cached folder metadata.
+                      </Text>
+                    )}
+
                     <Box display="grid" gridTemplateColumns="repeat(auto-fit, minmax(160px, 1fr))" gap={3}>
-                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
-                        <Text fontSize="xs" color="gray.500" mb={1}>Segments</Text>
+                      <Box border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600", bg: "gray.700" }} borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mb={1}>Segments</Text>
                         <Text fontSize="lg" fontWeight="semibold">
                           {folderPreview.segment_count}
                         </Text>
                       </Box>
 
-                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
-                        <Text fontSize="xs" color="gray.500" mb={1}>Survey Quarter</Text>
+                      <Box border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600", bg: "gray.700" }} borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mb={1}>Survey Quarter</Text>
                         <Text fontSize="lg" fontWeight="semibold">
                           {folderPreview.survey_quarter ?? (folderPreview.survey_quarters.length > 0 ? folderPreview.survey_quarters.join(", ") : "Unknown")}
                         </Text>
                       </Box>
 
-                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
-                        <Text fontSize="xs" color="gray.500" mb={1}>Source Images</Text>
+                      <Box border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600", bg: "gray.700" }} borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mb={1}>Source Images</Text>
                         <Text fontSize="lg" fontWeight="semibold">
                           {folderPreview.image_count}
                         </Text>
-                        <Text fontSize="xs" color="gray.500" mt={1}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mt={1}>
                           {folderPreview.geotagged_image_count} geotagged
                         </Text>
                       </Box>
 
-                      <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
-                        <Text fontSize="xs" color="gray.500" mb={1}>Last Modified</Text>
+                      <Box border="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600", bg: "gray.700" }} borderRadius="md" bg="white" p={3}>
+                        <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }} mb={1}>Last Modified</Text>
                         <Text fontSize="sm" fontWeight="semibold">
                           {folderPreview.earliest_modified_at && folderPreview.latest_modified_at
                             ? folderPreview.earliest_modified_at === folderPreview.latest_modified_at
@@ -454,7 +511,7 @@ export default function CreateProjectPage() {
                     </Box>
 
                     {folderPreview.segment_error && (
-                      <Text fontSize="xs" color="orange.600" mt={3}>
+                      <Text fontSize="xs" color="orange.600" _dark={{ color: "orange.400" }} mt={3}>
                         Segment summary fallback: {folderPreview.segment_error}
                       </Text>
                     )}
@@ -471,22 +528,22 @@ export default function CreateProjectPage() {
               Select Roads
             </Text>
             <Text color="gray.500" fontSize="xs" mb={3}>
-              Draw a polygon or click a planning area to select multiple roads. Project creation uses only nodes inside the selected boundary.
+              Draw a polygon, click a planning area, or import polygon or line shapefiles to select multiple roads. Project creation keeps only nodes inside the selected area, or near imported path lines.
             </Text>
             <SelectRoadsMap
               onSelectionChange={handleRoadSelectionChange}
-              onPolygonChange={handlePolygonChange}
+              onSelectionGeometryChange={handleSelectionGeometryChange}
               refreshKey={roadAvailabilityVersion}
             />
 
             {usingRoadSelection && unavailableSelectedRoads.length > 0 && (
-              <Text color="orange.600" fontSize="xs" mt={3}>
-                Deselect unavailable roads to create the project. {unavailableSelectedRoads.length} selected road{unavailableSelectedRoads.length === 1 ? " is" : "s are"} missing local files.
+              <Text color="orange.600" _dark={{ color: "orange.400" }} fontSize="xs" mt={3}>
+                Deselect unavailable roads to create the project. {unavailableSelectedRoads.length} selected road{unavailableSelectedRoads.length === 1 ? " is" : "s are"} missing local files. Use the map list's Deselect Unavailable action to clear them in one click.
               </Text>
             )}
 
             {usingRoadSelection && unavailableSelectedRoads.length === 0 && (
-              <Text color="green.600" fontSize="xs" mt={3}>
+              <Text color="green.600" _dark={{ color: "green.400" }} fontSize="xs" mt={3}>
                 Project will be created from nodes inside the boundary across {selectedRoadFolders.length} selected road{selectedRoadFolders.length === 1 ? "" : "s"}.
               </Text>
             )}

@@ -57,6 +57,7 @@ Attribute dictionary {field: coded_value}
          ▼
 Stored in attributes.csv (merged with existing values)
 ```
+*Layman's explanation: This flowchart shows the step-by-step process the computer takes to analyze a street photo and identify features like paths or obstacles.*
 
 ---
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import {
   Box,
+  Dialog,
   Flex,
   Grid,
   GridItem,
@@ -9,6 +10,7 @@ import {
   Spinner,
   NumberInput,
   Button,
+  Input,
   Portal,
   Progress,
   Card,
@@ -25,6 +27,7 @@ import {
   fetchProjectAttributes,
   fetchProjectGeoJSON,
   fetchAttributeMappings,
+  fetchCustomAttrOptions,
   calculateScore,
   calculateScoreForRow,
   fetchProjectMetadata,
@@ -32,11 +35,12 @@ import {
 } from "../../api";
 
 import type { AttributeRow } from "../../api";
-import { autocodeImage, autocodeGIS, autocodeAll, autocodeAllStream } from "../../api";
+import { autocodeImage, autocodeGIS, autocodeAllStream } from "../../api";
 
 
 import ImagePanel from "./components/ImagePanel";
 import AttributesPanel from "./components/AttributesPanel";
+import AttributeOptionsDialog from "./components/AttributeOptionsDialog";
 import GeoDataPanel from "./components/GeoDataPanel";
 import { saveAttributes } from "../../api";
 import { AnalysisSidebar } from "../../components/visualization/AnalysisSidebar";
@@ -46,6 +50,7 @@ import type { WidthVisualizationResponse } from "../../api/widthVisualization";
 import { fetchCurvatureVisualization } from "../../api/curvatureVisualization";
 import type { CurvatureVisualizationResponse } from "../../api/curvatureVisualization";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
+import { aggregateTopContributors } from "../../utils/aggregateTopContributors";
 import AutocodeValidation from "../PathAnalysisPage/components/AutocodeValidation";
 
 
@@ -89,6 +94,192 @@ const defaultProjectData: ProjectDataState = {
 
 // Global cache for project data to prevent reloading when navigating away and back (e.g. to Help page)
 const projectDataCache: Record<string, ProjectDataState> = {};
+
+const DELINEATION_PRESENT_SUGGESTIONS = ["Cycling Path", "Red Stripe", "Signalised Crossing", "Traffic Crossing", "Zebra Crossing"];
+const FO_TYPE_SUGGESTIONS = ["Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation"];
+const NFO_TYPE_SUGGESTIONS = ["Barrier", "Bins", "Bicycle", "Cone"];
+const SLIPPERY_ISSUE_TYPE_SUGGESTIONS = ["Algae", "Leaves", "Soil", "Sand"];
+
+const FACILITY_WIDTH_SUBCATEGORY_MAP: Record<string, string[]> = {
+  "Very Narrow": ["≤1.5m", ">1.5–1.8m", ">1.8–<2m"],
+  "Narrow": ["2–<3.5m", "3.5–4m"],
+  "Wide": [">4m"],
+};
+
+function getParentCategoryForSubcat(subCat: string | null | undefined): string | null {
+  if (!subCat) return null;
+  for (const [parent, children] of Object.entries(FACILITY_WIDTH_SUBCATEGORY_MAP)) {
+    if (children.includes(subCat)) return parent;
+  }
+  return null;
+}
+
+function PresentMultiTagModal({
+  open,
+  options,
+  onConfirm,
+  onCancel,
+  title,
+  description,
+  singleSelect = false,
+}: {
+  open: boolean;
+  options: string[];
+  onConfirm: (val: string) => void;
+  onCancel?: () => void;
+  title: string;
+  description: string;
+  singleSelect?: boolean;
+}) {
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [showOthersInput, setShowOthersInput] = useState(false);
+  const [othersText, setOthersText] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setSelectedTags([]);
+      setShowOthersInput(false);
+      setOthersText("");
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      const t = setTimeout(() => {
+        document.body.style.pointerEvents = "auto";
+        document.documentElement.style.pointerEvents = "auto";
+        document.body.style.overflow = "";
+        document.documentElement.style.overflow = "";
+        document.body.removeAttribute("data-scroll-locked");
+        document.documentElement.removeAttribute("data-scroll-locked");
+      }, 400);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  function toggleTag(tag: string) {
+    if (singleSelect) {
+      setSelectedTags([tag]);
+    } else {
+      setSelectedTags((prev) =>
+        prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+      );
+    }
+  }
+
+  function handleAddOthers() {
+    const trimmed = othersText.trim();
+    if (trimmed && !selectedTags.includes(trimmed)) {
+      setSelectedTags((prev) => [...prev, trimmed]);
+    }
+    setOthersText("");
+    setShowOthersInput(false);
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={() => { }} unmountOnExit>
+      <Portal>
+        <Dialog.Backdrop />
+        <Dialog.Positioner>
+          <Dialog.Content maxW="420px" w="full">
+            <Dialog.Header>
+              <Dialog.Title>{title}</Dialog.Title>
+            </Dialog.Header>
+            <Dialog.Body>
+              <Text fontSize="sm" mb="3">
+                {description}
+              </Text>
+              <Box display="flex" flexWrap="wrap" gap="2">
+                {options.map((opt) => {
+                  const selected = selectedTags.includes(opt);
+                  return (
+                    <Box
+                      key={opt}
+                      as="button"
+                      px="3"
+                      py="1.5"
+                      borderRadius="full"
+                      borderWidth="2px"
+                      borderColor={selected ? "blue.500" : "gray.200"}
+                      bg={selected ? "blue.50" : "white"}
+                      color={selected ? "blue.800" : "gray.700"}
+                      fontWeight={selected ? "semibold" : "normal"}
+                      fontSize="sm"
+                      cursor="pointer"
+                      _hover={{ borderColor: "blue.400", bg: "blue.50" }}
+                      _dark={{
+                        bg: selected ? "blue.900" : "gray.800",
+                        borderColor: selected ? "blue.400" : "gray.600",
+                        color: selected ? "blue.200" : "gray.300",
+                      }}
+                      transition="all 0.15s"
+                      onClick={() => toggleTag(opt)}
+                    >
+                      {opt}
+                    </Box>
+                  );
+                })}
+                {!singleSelect && (
+                  <Box
+                    as="button"
+                    px="3"
+                    py="1.5"
+                    borderRadius="full"
+                    borderWidth="2px"
+                    borderColor="gray.300"
+                    bg="white"
+                    color="gray.600"
+                    fontSize="sm"
+                    cursor="pointer"
+                    _hover={{ borderColor: "blue.400", bg: "blue.50" }}
+                    _dark={{ bg: "gray.800", borderColor: "gray.500", color: "gray.300" }}
+                    transition="all 0.15s"
+                    onClick={() => setShowOthersInput(true)}
+                  >
+                    + Others
+                  </Box>
+                )}
+              </Box>
+              {showOthersInput && (
+                <Box display="flex" gap="2" mt="3">
+                  <Input
+                    size="sm"
+                    placeholder="Enter custom value..."
+                    value={othersText}
+                    onChange={(e) => setOthersText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); handleAddOthers(); }
+                    }}
+                    autoFocus
+                  />
+                  <Button size="sm" variant="outline" onClick={handleAddOthers} disabled={!othersText.trim()}>
+                    Add
+                  </Button>
+                </Box>
+              )}
+            </Dialog.Body>
+            <Dialog.Footer>
+              {onCancel && (
+                <Button variant="outline" onClick={onCancel}>
+                  Cancel
+                </Button>
+              )}
+              <Button
+                colorPalette="blue"
+                disabled={selectedTags.length === 0}
+                onClick={() => onConfirm(selectedTags.join(", "))}
+              >
+                Confirm
+              </Button>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
+    </Dialog.Root>
+  );
+}
+
+
 
 export default function CodingPage() {
   const { projectNames } = useParams<{ projectNames: string }>();
@@ -139,6 +330,19 @@ export default function CodingPage() {
   const [progress, setProgress] = useState<number>(0);
   const [projectProgress, setProjectProgress] = useState<Record<string, { processed: number; total: number }>>({});
   const [attrMappings, setAttrMappings] = useState<AttrMappings>({});
+  const [customAttrOptions, setCustomAttrOptions] = useState<Record<string, string[]>>({});
+  const [editingOptions, setEditingOptions] = useState<{ field: string; currentValue: string | null; delineationNotPresent?: boolean } | null>(null);
+  const [pendingPresentDelineationChange, setPendingPresentDelineationChange] = useState(false);
+  const [pendingNotPresentDelineationChange, setPendingNotPresentDelineationChange] = useState(false);
+  const [pendingPresentFOChange, setPendingPresentFOChange] = useState(false);
+  const [pendingPresentNFOChange, setPendingPresentNFOChange] = useState(false);
+  const [pendingPresentSlipperyChange, setPendingPresentSlipperyChange] = useState(false);
+  const [pendingFacilityWidthParentChange, setPendingFacilityWidthParentChange] = useState<{
+    categoryLabel: string;
+    subCategories: string[];
+    originalParentCode: string | number | null;
+    originalSubCategory: string | null;
+  } | null>(null);
 
   // Image preloading state
   const [imagesLoaded, setImagesLoaded] = useState(false);
@@ -347,6 +551,15 @@ export default function CodingPage() {
     [currentPage, len]
   );
 
+  const projectContributors = useMemo(() => {
+    if (!currentProjectName) return null;
+    const slice = scores as unknown as Array<Record<string, unknown>>;
+    return {
+      projectName: currentProjectName,
+      contributors: aggregateTopContributors(slice),
+    };
+  }, [scores, currentProjectName]);
+
   const currentAttr = useMemo<AttributeRow | null>(
     () => (len > 0 ? attrs[currentIndex] : null),
     [attrs, currentIndex]
@@ -429,6 +642,42 @@ export default function CodingPage() {
       });
     },
     [currentIndex, currentProjectName]
+  );
+
+  /** Atomically update multiple fields on the current row, then debounce score recalculation. */
+  const editCurrentAttrMany = useCallback(
+    (updates: Record<string, string | number | boolean | null>) => {
+      if (!currentProjectName || !attrs?.[currentIndex]) return;
+      const updatedRow = { ...attrs[currentIndex], ...updates };
+      updateProjectData(currentProjectName, {
+        attrs: attrs.map((row, i) => (i === currentIndex ? updatedRow : row)),
+        isDirty: true,
+      });
+      // Dispatch for the first changed field (sufficient for validation listener)
+      const firstField = Object.keys(updates)[0];
+      if (firstField !== undefined) {
+        window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+          detail: { projectName: currentProjectName, rowIndex: currentIndex, field: firstField, value: updates[firstField] }
+        }));
+      }
+      const currentIdx = currentIndex;
+      if (scoreDebounceRef.current[currentIdx] !== undefined) {
+        clearTimeout(scoreDebounceRef.current[currentIdx]);
+      }
+      scoreDebounceRef.current[currentIdx] = window.setTimeout(async () => {
+        if (!currentProjectName) return;
+        try {
+          const newScore = await calculateScoreForRow(currentProjectName, updatedRow);
+          updateProjectData(currentProjectName, {
+            scores: scores.map((score, i) =>
+              i === currentIdx ? { ...score, ...newScore } : score
+            ),
+          });
+          window.dispatchEvent(new CustomEvent("psat:scores:updated"));
+        } catch {}
+      }, 500);
+    },
+    [currentIndex, currentProjectName, attrs, scores]
   );
 
   // Normalize attribute values to consistent types (convert numeric strings to numbers)
@@ -518,9 +767,12 @@ export default function CodingPage() {
         const gisChanged = g?.changed_fields ?? [];
         const allChanged = [...new Set([...cvChanged, ...gisChanged])];
 
-        const fieldSources: Record<string, string> = {};
-        cvChanged.forEach(field => { fieldSources[field] = "CV"; });
-        gisChanged.forEach(field => { fieldSources[field] = "GIS"; });
+        const fieldSources: Record<string, string> = {
+          ...(cv?.field_sources ?? {}),
+          ...(g?.field_sources ?? {}),
+        };
+        cvChanged.forEach(field => { if (!fieldSources[field]) fieldSources[field] = "CV"; });
+        gisChanged.forEach(field => { if (!fieldSources[field]) fieldSources[field] = "GIS"; });
 
         updateProjectData(currentProjectName, {
           changedFieldsByRow: {
@@ -606,46 +858,29 @@ export default function CodingPage() {
         const attrLength = attrs.length;
         setProjectProgress({ [currentProjectName]: { processed: 0, total: attrLength } });
 
-        // Process each segment one-by-one for real-time progress
-        const allChangedFieldsByRow: Record<number, string[]> = {};
-        const allSourcesByRow: Record<number, Record<string, string>> = {};
-        let totalOk = 0;
-        let totalFail = 0;
-        const errors: any[] = [];
+        const r = await autocodeAllStream(
+          currentProjectName,
+          { all: true, save: false },
+          (processed, total, _errors) => {
+            setProjectProgress({ [currentProjectName]: { processed, total } });
+            setProgress(10 + Math.round((processed / total) * 75));
+          },
+        );
 
-        for (let i = 0; i < attrs.length; i++) {
-          try {
-            const r = await autocodeAll(currentProjectName, { indices: [i], save: false });
-
-            // Update progress after each segment
-            setProjectProgress({ [currentProjectName]: { processed: i + 1, total: attrLength } });
-
-            if ("changed_by_row" in r && r.changed_by_row) {
-              Object.assign(allChangedFieldsByRow, r.changed_by_row);
-            }
-
-            if ("sources_by_row" in r && r.sources_by_row) {
-              Object.assign(allSourcesByRow, r.sources_by_row);
-            }
-
-            if ("ok" in r) totalOk += r.ok || 0;
-            if ("fail" in r) totalFail += r.fail || 0;
-            if ("errors" in r && r.errors && r.errors.length > 0) {
-              errors.push(...r.errors);
-            }
-          } catch (e: any) {
-            totalFail++;
-            errors.push({ segment: i, reason: e?.message });
-          }
-        }
+        const allChangedFieldsByRow: Record<number, string[]> =
+          ("changed_by_row" in r && r.changed_by_row) ? r.changed_by_row : {};
+        const allSourcesByRow: Record<number, Record<string, string>> =
+          ("sources_by_row" in r && r.sources_by_row) ? r.sources_by_row : {};
+        const totalOk = ("ok" in r ? r.ok : 0) || 0;
+        const totalFail = ("fail" in r ? r.fail : 0) || 0;
 
         // After all segments processed, fetch updated attributes and recalculate scores
         setProgress(85);
         try {
-          const a = await fetchProjectAttributes(currentProjectName) as AttributesResponse;
-          if (a?.rows) {
+          const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
+          if (rows) {
             updateProjectData(currentProjectName, {
-              attrs: a.rows,
+              attrs: rows,
               changedFieldsByRow: allChangedFieldsByRow,
               fieldSourcesByRow: allSourcesByRow,
               isDirty: true,
@@ -655,13 +890,13 @@ export default function CodingPage() {
             saveAutocodeMetadata(currentProjectName, allChangedFieldsByRow, allSourcesByRow);
 
             // Update autocode baseline with new values from all segments
-            updateAutocodeBaseline(a.rows);
+            updateAutocodeBaseline(rows);
 
             // Recalculate scores
             const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/score`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ attributes: a.rows }),
+              body: JSON.stringify({ attributes: rows }),
             });
 
             if (res.ok) {
@@ -856,47 +1091,33 @@ export default function CodingPage() {
           }));
 
           try {
-            const projectChangedFieldsByRow: Record<number, string[]> = {};
-            const projectSourcesByRow: Record<number, Record<string, string>> = {};
-            let projectOk = 0;
-            let projectFail = 0;
-
-            // Process each segment one-by-one for real-time progress
-            for (let segmentIdx = 0; segmentIdx < projectAttrsLength; segmentIdx++) {
-              try {
-                const r = await autocodeAll(projectName, { indices: [segmentIdx], save: false });
-
-                // Update progress after each segment
+            const r = await autocodeAllStream(
+              projectName,
+              { all: true, save: false },
+              (processed, total, _errors) => {
                 setProjectProgress(prev => ({
                   ...prev,
-                  [projectName]: { processed: segmentIdx + 1, total: projectAttrsLength }
+                  [projectName]: { processed, total }
                 }));
+              },
+            );
 
-                if ("changed_by_row" in r && r.changed_by_row) {
-                  Object.assign(projectChangedFieldsByRow, r.changed_by_row);
-                }
-
-                if ("sources_by_row" in r && r.sources_by_row) {
-                  Object.assign(projectSourcesByRow, r.sources_by_row);
-                }
-
-                if ("ok" in r) projectOk += r.ok || 0;
-                if ("fail" in r) projectFail += r.fail || 0;
-                if ("errors" in r && r.errors && r.errors.length > 0) {
-                  errors.push(...r.errors);
-                }
-              } catch (e: any) {
-                projectFail++;
-                errors.push({ projectName, segment: segmentIdx, reason: e?.message });
-              }
+            const projectChangedFieldsByRow: Record<number, string[]> =
+              ("changed_by_row" in r && r.changed_by_row) ? r.changed_by_row : {};
+            const projectSourcesByRow: Record<number, Record<string, string>> =
+              ("sources_by_row" in r && r.sources_by_row) ? r.sources_by_row : {};
+            const projectOk = ("ok" in r ? r.ok : 0) || 0;
+            const projectFail = ("fail" in r ? r.fail : 0) || 0;
+            if ("errors" in r && r.errors && r.errors.length > 0) {
+              errors.push(...r.errors);
             }
 
-            // After all segments of this project are processed, fetch updated attributes
+            // After all segments of this project are processed, use the returned in-memory rows
             try {
-              const a = await fetchProjectAttributes(projectName) as AttributesResponse;
-              if (a?.rows) {
+              const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
+              if (rows) {
                 updateProjectData(projectName, {
-                  attrs: a.rows,
+                  attrs: rows,
                   changedFieldsByRow: projectChangedFieldsByRow,
                   fieldSourcesByRow: projectSourcesByRow,
                   isDirty: true,
@@ -911,7 +1132,7 @@ export default function CodingPage() {
                   fetch(`/api/projects/${encodeURIComponent(projectName)}/baseline`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ rows: a.rows })
+                    body: JSON.stringify({ rows })
                   });
                 } catch (e) {
                 }
@@ -920,7 +1141,7 @@ export default function CodingPage() {
                 const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/score`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ attributes: a.rows }),
+                  body: JSON.stringify({ attributes: rows }),
                 });
 
                 if (res.ok) {
@@ -1173,6 +1394,55 @@ export default function CodingPage() {
     return baselineRows[currentIndex] || null;
   }, [currentIndex, baselineRows]);
 
+  const presentDelineationTypeOptions = useMemo(() => {
+    const projectValues = Array.from(new Set(
+      Object.values(projectData)
+        .flatMap((pd) => pd?.attrs ?? [])
+        .flatMap((row) => {
+          const v = row["Delineation Type"];
+          if (!v) return [];
+          return String(v).split(",").map((s) => s.trim()).filter(Boolean);
+        })
+    )).filter((v) => v !== "Absent" && v !== "In Poor Condition");
+    return Array.from(new Set([...DELINEATION_PRESENT_SUGGESTIONS, ...projectValues])).sort();
+  }, [projectData]);
+
+  const foTypeOptions = useMemo(() => {
+    const projectValues = Array.from(new Set(
+      Object.values(projectData).flatMap((pd) => pd?.attrs ?? [])
+        .flatMap((row) => {
+          const v = row["FO Type"];
+          if (!v) return [];
+          return String(v).split(",").map((s) => s.trim()).filter(Boolean);
+        })
+    ));
+    return Array.from(new Set([...FO_TYPE_SUGGESTIONS, ...projectValues])).sort();
+  }, [projectData]);
+
+  const nfoTypeOptions = useMemo(() => {
+    const projectValues = Array.from(new Set(
+      Object.values(projectData).flatMap((pd) => pd?.attrs ?? [])
+        .flatMap((row) => {
+          const v = row["NFO Type"];
+          if (!v) return [];
+          return String(v).split(",").map((s) => s.trim()).filter(Boolean);
+        })
+    ));
+    return Array.from(new Set([...NFO_TYPE_SUGGESTIONS, ...projectValues])).sort();
+  }, [projectData]);
+
+  const slipperyIssueTypeOptions = useMemo(() => {
+    const projectValues = Array.from(new Set(
+      Object.values(projectData).flatMap((pd) => pd?.attrs ?? [])
+        .flatMap((row) => {
+          const v = row["Issue Type (Slippery)"];
+          if (!v) return [];
+          return String(v).split(",").map((s) => s.trim()).filter(Boolean);
+        })
+    ));
+    return Array.from(new Set([...SLIPPERY_ISSUE_TYPE_SUGGESTIONS, ...projectValues])).sort();
+  }, [projectData]);
+
   // Fetch width and curvature data when project or segment changes
   useEffect(() => {
     if (!currentProjectName || !currentFeature || currentFeature.geometry?.type !== "LineString") {
@@ -1182,19 +1452,56 @@ export default function CodingPage() {
     }
     const coords = (currentFeature.geometry as LineString).coordinates as [number, number][];
 
+    const widthController = new AbortController();
+    const curvController = new AbortController();
+
+    setWidthData(null);
+    setCurvData(null);
+
     setWidthLoading(true);
     setWidthError(null);
-    fetchWidthVisualization(currentProjectName, coords, currentIndex)
-      .then(setWidthData)
-      .catch(e => setWidthError(e instanceof Error ? e.message : 'Failed'))
-      .finally(() => setWidthLoading(false));
+    fetchWidthVisualization(currentProjectName, coords, currentIndex, widthController.signal)
+      .then((data) => {
+        if (!widthController.signal.aborted) {
+          setWidthData(data);
+        }
+      })
+      .catch((e) => {
+        if (widthController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
+          return;
+        }
+        setWidthError(e instanceof Error ? e.message : 'Failed');
+      })
+      .finally(() => {
+        if (!widthController.signal.aborted) {
+          setWidthLoading(false);
+        }
+      });
 
     setCurvLoading(true);
     setCurvError(null);
-    fetchCurvatureVisualization(currentProjectName, coords, currentIndex)
-      .then(setCurvData)
-      .catch(e => setCurvError(e instanceof Error ? e.message : 'Failed'))
-      .finally(() => setCurvLoading(false));
+    fetchCurvatureVisualization(currentProjectName, coords, currentIndex, curvController.signal)
+      .then((data) => {
+        if (!curvController.signal.aborted) {
+          setCurvData(data);
+        }
+      })
+      .catch((e) => {
+        if (curvController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
+          return;
+        }
+        setCurvError(e instanceof Error ? e.message : 'Failed');
+      })
+      .finally(() => {
+        if (!curvController.signal.aborted) {
+          setCurvLoading(false);
+        }
+      });
+
+    return () => {
+      widthController.abort();
+      curvController.abort();
+    };
   }, [currentProjectName, currentIndex, currentFeature]);
 
   // Auto-calculate scores on project load
@@ -1259,18 +1566,37 @@ export default function CodingPage() {
     let cancelled = false;
     (async () => {
       try {
-        const map = await fetchAttributeMappings();
+        const [map, customOpts] = await Promise.all([
+          fetchAttributeMappings(),
+          fetchCustomAttrOptions().catch(() => ({} as Record<string, string[]>)),
+        ]);
         // Ensure "Line of Sight" always has a dropdown even if the backend hasn't been restarted
         if (!map["Line of Sight"]) {
           map["Line of Sight"] = { "1": "Adequate", "2": "Inadequate" };
         }
-        if (!cancelled) setAttrMappings(map);
+        // Merge custom sub-category options into mappings (identity key→label)
+        for (const [field, opts] of Object.entries(customOpts)) {
+          map[field] = Object.fromEntries(opts.map((o) => [o, o]));
+        }
+        if (!cancelled) {
+          setCustomAttrOptions(customOpts);
+          setAttrMappings(map);
+        }
       } catch {
         if (!cancelled) setAttrMappings({ "Line of Sight": { "1": "Adequate", "2": "Inadequate" } });
       }
     })();
     return () => { cancelled = true; };
   }, []);
+
+  function handleSaveOptions(field: string, options: string[]) {
+    const updatedCustom = { ...customAttrOptions, [field]: options };
+    setCustomAttrOptions(updatedCustom);
+    setAttrMappings((prev) => ({
+      ...prev,
+      [field]: Object.fromEntries(options.map((o) => [o, o])),
+    }));
+  }
 
   // Reusable save function
   const saveAllProjects = useCallback(async (): Promise<boolean> => {
@@ -1420,6 +1746,207 @@ export default function CodingPage() {
       }
     }, 500);
   };
+
+  // Intercept "Delineation" transitions to force Delineation Type selection
+  const onEdit = useCallback((field: string, value: string | number | boolean | null) => {
+    if (field === "Delineation") {
+      const prevVal = attrs[currentIndex]?.["Delineation"];
+      if (value === 2 && Number(prevVal) === 1) {
+        // Present → Not Present: clear Delineation Type, then prompt for Absent/In Poor Condition
+        if (!currentProjectName || !attrs || !attrs[currentIndex]) return;
+        const updatedRow = { ...attrs[currentIndex], "Delineation": value, "Delineation Type": null };
+        updateProjectData(currentProjectName, {
+          attrs: attrs.map((row, i) => i === currentIndex ? updatedRow : row),
+          isDirty: true,
+        });
+        window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+          detail: { projectName: currentProjectName, rowIndex: currentIndex, field: "Delineation", value }
+        }));
+        setPendingNotPresentDelineationChange(true);
+        return;
+      }
+      if (value === 1 && Number(prevVal) === 2) {
+        // Not Present → Present: atomically set Delineation=Present and clear Delineation Type,
+        // then force category selection. Two separate editCurrentAttr calls would race on the
+        // same stale attrs snapshot, causing the second write to overwrite the first.
+        if (!currentProjectName || !attrs || !attrs[currentIndex]) return;
+        const updatedRow = { ...attrs[currentIndex], "Delineation": value, "Delineation Type": null };
+        updateProjectData(currentProjectName, {
+          attrs: attrs.map((row, i) => i === currentIndex ? updatedRow : row),
+          isDirty: true,
+        });
+        window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+          detail: { projectName: currentProjectName, rowIndex: currentIndex, field: "Delineation", value }
+        }));
+        setPendingPresentDelineationChange(true);
+        return;
+      }
+    }
+    // --- Fixed Obstacle on Facility ---
+    if (field === "Fixed Obstacle on Facility") {
+      const prevVal = attrs[currentIndex]?.["Fixed Obstacle on Facility"];
+      if (value === 2 && Number(prevVal) === 1) {
+        // Present → Not Present: null out FO Type atomically
+        if (!currentProjectName || !attrs?.[currentIndex]) return;
+        const updatedRow = { ...attrs[currentIndex], "Fixed Obstacle on Facility": value, "FO Type": null };
+        updateProjectData(currentProjectName, {
+          attrs: attrs.map((row, i) => i === currentIndex ? updatedRow : row),
+          isDirty: true,
+        });
+        window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+          detail: { projectName: currentProjectName, rowIndex: currentIndex, field, value }
+        }));
+        const currentIdx = currentIndex;
+        if (scoreDebounceRef.current[currentIdx] !== undefined) clearTimeout(scoreDebounceRef.current[currentIdx]);
+        scoreDebounceRef.current[currentIdx] = window.setTimeout(async () => {
+          if (!currentProjectName) return;
+          try {
+            const newScore = await calculateScoreForRow(currentProjectName, updatedRow);
+            updateProjectData(currentProjectName, {
+              scores: scores.map((score, i) => i === currentIdx ? { ...score, ...newScore } : score),
+            });
+            window.dispatchEvent(new CustomEvent("psat:scores:updated"));
+          } catch {}
+        }, 500);
+        return;
+      }
+      if (value === 1 && Number(prevVal) === 2) {
+        // Not Present → Present: clear FO Type, force selection
+        if (!currentProjectName || !attrs?.[currentIndex]) return;
+        const updatedRow = { ...attrs[currentIndex], "Fixed Obstacle on Facility": value, "FO Type": null };
+        updateProjectData(currentProjectName, {
+          attrs: attrs.map((row, i) => i === currentIndex ? updatedRow : row),
+          isDirty: true,
+        });
+        window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+          detail: { projectName: currentProjectName, rowIndex: currentIndex, field, value }
+        }));
+        setPendingPresentFOChange(true);
+        return;
+      }
+    }
+
+    // --- Non-Fixed Obstacle on Facility ---
+    if (field === "Non-Fixed Obstacle on Facility") {
+      const prevVal = attrs[currentIndex]?.["Non-Fixed Obstacle on Facility"];
+      if (value === 2 && Number(prevVal) === 1) {
+        // Present → Not Present: null out NFO Type atomically
+        if (!currentProjectName || !attrs?.[currentIndex]) return;
+        const updatedRow = { ...attrs[currentIndex], "Non-Fixed Obstacle on Facility": value, "NFO Type": null };
+        updateProjectData(currentProjectName, {
+          attrs: attrs.map((row, i) => i === currentIndex ? updatedRow : row),
+          isDirty: true,
+        });
+        window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+          detail: { projectName: currentProjectName, rowIndex: currentIndex, field, value }
+        }));
+        const currentIdx = currentIndex;
+        if (scoreDebounceRef.current[currentIdx] !== undefined) clearTimeout(scoreDebounceRef.current[currentIdx]);
+        scoreDebounceRef.current[currentIdx] = window.setTimeout(async () => {
+          if (!currentProjectName) return;
+          try {
+            const newScore = await calculateScoreForRow(currentProjectName, updatedRow);
+            updateProjectData(currentProjectName, {
+              scores: scores.map((score, i) => i === currentIdx ? { ...score, ...newScore } : score),
+            });
+            window.dispatchEvent(new CustomEvent("psat:scores:updated"));
+          } catch {}
+        }, 500);
+        return;
+      }
+      if (value === 1 && Number(prevVal) === 2) {
+        // Not Present → Present: clear NFO Type, force selection
+        if (!currentProjectName || !attrs?.[currentIndex]) return;
+        const updatedRow = { ...attrs[currentIndex], "Non-Fixed Obstacle on Facility": value, "NFO Type": null };
+        updateProjectData(currentProjectName, {
+          attrs: attrs.map((row, i) => i === currentIndex ? updatedRow : row),
+          isDirty: true,
+        });
+        window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+          detail: { projectName: currentProjectName, rowIndex: currentIndex, field, value }
+        }));
+        setPendingPresentNFOChange(true);
+        return;
+      }
+    }
+
+    // --- Loose or slippery surface ---
+    if (field === "Loose or slippery surface") {
+      const prevVal = attrs[currentIndex]?.["Loose or slippery surface"];
+      if (value === 2 && Number(prevVal) === 1) {
+        // Present → Not Present: null out Issue Type (Slippery) atomically
+        if (!currentProjectName || !attrs?.[currentIndex]) return;
+        const updatedRow = { ...attrs[currentIndex], "Loose or slippery surface": value, "Issue Type (Slippery)": null };
+        updateProjectData(currentProjectName, {
+          attrs: attrs.map((row, i) => i === currentIndex ? updatedRow : row),
+          isDirty: true,
+        });
+        window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+          detail: { projectName: currentProjectName, rowIndex: currentIndex, field, value }
+        }));
+        const currentIdx = currentIndex;
+        if (scoreDebounceRef.current[currentIdx] !== undefined) clearTimeout(scoreDebounceRef.current[currentIdx]);
+        scoreDebounceRef.current[currentIdx] = window.setTimeout(async () => {
+          if (!currentProjectName) return;
+          try {
+            const newScore = await calculateScoreForRow(currentProjectName, updatedRow);
+            updateProjectData(currentProjectName, {
+              scores: scores.map((score, i) => i === currentIdx ? { ...score, ...newScore } : score),
+            });
+            window.dispatchEvent(new CustomEvent("psat:scores:updated"));
+          } catch {}
+        }, 500);
+        return;
+      }
+      if (value === 1 && Number(prevVal) === 2) {
+        // Not Present → Present: clear Issue Type (Slippery), force selection
+        if (!currentProjectName || !attrs?.[currentIndex]) return;
+        const updatedRow = { ...attrs[currentIndex], "Loose or slippery surface": value, "Issue Type (Slippery)": null };
+        updateProjectData(currentProjectName, {
+          attrs: attrs.map((row, i) => i === currentIndex ? updatedRow : row),
+          isDirty: true,
+        });
+        window.dispatchEvent(new CustomEvent("psat:attribute:changed", {
+          detail: { projectName: currentProjectName, rowIndex: currentIndex, field, value }
+        }));
+        setPendingPresentSlipperyChange(true);
+        return;
+      }
+    }
+
+    // --- Facility Width per Direction ---
+    if (field === "Facility Width per Direction") {
+      const codeStr = String(value);
+      const dict = attrMappings["Facility Width per Direction"];
+      const newCategoryLabel = dict?.[codeStr] ?? null;
+      const subCategories = newCategoryLabel ? FACILITY_WIDTH_SUBCATEGORY_MAP[newCategoryLabel] : null;
+
+      if (newCategoryLabel && subCategories) {
+        const currentSubCat = (attrs[currentIndex]?.["Facility Width Sub-category"] as string | null) ?? null;
+        const isCompatible = !!currentSubCat && subCategories.includes(currentSubCat);
+
+        if (isCompatible) {
+          editCurrentAttr(field, value);
+          return;
+        }
+
+        const originalParentCode = (attrs[currentIndex]?.["Facility Width per Direction"] as string | number | null) ?? null;
+        editCurrentAttrMany({
+          "Facility Width per Direction": value,
+          "Facility Width Sub-category": null,
+        });
+        setPendingFacilityWidthParentChange({
+          categoryLabel: newCategoryLabel,
+          subCategories,
+          originalParentCode,
+          originalSubCategory: currentSubCat,
+        });
+        return;
+      }
+    }
+
+    editCurrentAttr(field, value);
+  }, [attrs, currentIndex, editCurrentAttr, editCurrentAttrMany, attrMappings, currentProjectName, updateProjectData]);
 
   // Pagination
   const gotoPage = useCallback((page: number) => {
@@ -1835,6 +2362,7 @@ export default function CodingPage() {
           >
             <SegmentScoresCard
               scores={scores[currentIndex] || null}
+              projectContributors={projectContributors}
             />
           </Box>
 
@@ -1895,10 +2423,21 @@ export default function CodingPage() {
               panelHeight={undefined} // Let it fill the parent
               flex={1}
               onChange={onAttrChange}
-              onEdit={editCurrentAttr}
+              onEdit={onEdit}
               changedFields={changedFieldsByRow[currentIndex] || []}
               fieldSources={fieldSourcesByRow[currentIndex] || {}}
               highlightColor="yellow"
+              onEditOptions={(field) => {
+                const raw = currentAttr?.[field];
+                let currentValue = raw != null ? String(raw) : null;
+                if (field === "Issue Type (Slippery)" && !currentValue) {
+                  currentValue = "Algae";
+                }
+                const delineationVal = currentAttr?.["Delineation"];
+                const delineationNotPresent = field === "Delineation Type"
+                  && (delineationVal === 2 || delineationVal === "2");
+                setEditingOptions({ field, currentValue, delineationNotPresent });
+              }}
             />
           </Box>
         </GridItem>
@@ -1919,6 +2458,7 @@ export default function CodingPage() {
             widthM={widthData?.width ?? null}
             grade={(currentAttr?.["Grade"] as number | null) ?? null}
             gradientPct={(currentAttr?.["Gradient %"] as number | null) ?? null}
+            gradientStatus={(currentAttr?.["Gradient Status"] as string | null) ?? null}
             showCurvatureOverlay={showCurvatureOverlay}
             onToggleCurvatureOverlay={() => setShowCurvatureOverlay(v => !v)}
             overlayContent={
@@ -1933,6 +2473,7 @@ export default function CodingPage() {
                 curvError={curvError}
                 grade={currentAttr?.["Grade"] as number | null}
                 gradientPct={currentAttr?.["Gradient %"] as number | null}
+                gradientStatus={(currentAttr?.["Gradient Status"] as string | null) ?? null}
               />
             }
           />
@@ -1946,6 +2487,150 @@ export default function CodingPage() {
           />
         </GridItem>
       </Grid>
+
+      <AttributeOptionsDialog
+        open={editingOptions !== null}
+        onClose={() => setEditingOptions(null)}
+        fieldName={editingOptions?.field ?? ""}
+        currentValue={editingOptions?.currentValue ?? null}
+        delineationNotPresent={editingOptions?.delineationNotPresent}
+        singleSelect={
+          editingOptions?.field === "Facility Width Sub-category" ||
+          editingOptions?.field === "Crossing Type" ||
+          editingOptions?.field === "Curvature Sub-category"
+        }
+        facilityWidthConfirm={
+          editingOptions?.field === "Facility Width Sub-category"
+            ? {
+                oldSubCategory: editingOptions.currentValue ?? null,
+                oldCategory: getParentCategoryForSubcat(editingOptions.currentValue),
+                getNewCategory: (tag) => getParentCategoryForSubcat(tag),
+              }
+            : undefined
+        }
+        onSetValue={(val) => {
+          if (!editingOptions) return;
+          if (editingOptions.field === "Facility Width Sub-category" && val) {
+            const newParent = getParentCategoryForSubcat(val);
+            if (newParent) {
+              const dict = attrMappings["Facility Width per Direction"] ?? {};
+              const entry = Object.entries(dict).find(([, label]) => label === newParent);
+              const rawCode = entry?.[0];
+              const code = rawCode !== undefined
+                ? (isNaN(Number(rawCode)) ? rawCode : Number(rawCode))
+                : null;
+              editCurrentAttrMany({
+                "Facility Width Sub-category": val,
+                ...(code !== null ? { "Facility Width per Direction": code } : {}),
+              });
+              return;
+            }
+          }
+          editCurrentAttr(editingOptions.field, val);
+        }}
+        options={editingOptions
+          ? Array.from(
+            new Set(
+              Object.values(projectData)
+                .flatMap((pd) => pd?.attrs ?? [])
+                .flatMap((row) => {
+                  const v = row[editingOptions.field];
+                  if (v == null || String(v).trim() === "") return [];
+                  // Split by comma to get individual values, not combined permutations
+                  return String(v).split(",").map((s) => s.trim()).filter(Boolean);
+                })
+            )
+          ).sort()
+          : []}
+        onSave={handleSaveOptions}
+        onSetParentNotPresent={
+          editingOptions?.field === "FO Type"
+            ? () => onEdit("Fixed Obstacle on Facility", 2)
+            : editingOptions?.field === "NFO Type"
+            ? () => onEdit("Non-Fixed Obstacle on Facility", 2)
+            : editingOptions?.field === "Delineation Type" && !editingOptions?.delineationNotPresent
+            ? () => onEdit("Delineation", 2)
+            : editingOptions?.field === "Issue Type (Slippery)"
+            ? () => onEdit("Loose or slippery surface", 2)
+            : editingOptions?.field === "Crossing Type"
+            ? () => onEdit("Crossing Facility", 2)
+            : undefined
+        }
+      />
+
+
+      {/* Forced delineation type selection — shown when user switches Delineation Not Present→Present */}
+      <PresentMultiTagModal
+        open={pendingPresentDelineationChange}
+        title="Select Delineation Type"
+        description='Delineation was set to "Present". Please select the type(s) that apply:'
+        options={presentDelineationTypeOptions}
+        onConfirm={(val) => {
+          editCurrentAttr("Delineation Type", val);
+          setPendingPresentDelineationChange(false);
+        }}
+      />
+      <PresentMultiTagModal
+        open={pendingNotPresentDelineationChange}
+        singleSelect
+        title="Set Delineation Condition"
+        description='Delineation was set to "Not Present". Is it Absent or In Poor Condition?'
+        options={["Absent", "In Poor Condition"]}
+        onConfirm={(val) => {
+          editCurrentAttr("Delineation Type", val);
+          setPendingNotPresentDelineationChange(false);
+        }}
+      />
+      <PresentMultiTagModal
+        open={pendingPresentFOChange}
+        title="Select FO Type"
+        description='Fixed Obstacle was set to "Present". Please select the type(s) that apply:'
+        options={foTypeOptions}
+        onConfirm={(val) => {
+          editCurrentAttr("FO Type", val);
+          setPendingPresentFOChange(false);
+        }}
+      />
+      <PresentMultiTagModal
+        open={pendingPresentNFOChange}
+        title="Select NFO Type"
+        description='Non-Fixed Obstacle was set to "Present". Please select the type(s) that apply:'
+        options={nfoTypeOptions}
+        onConfirm={(val) => {
+          editCurrentAttr("NFO Type", val);
+          setPendingPresentNFOChange(false);
+        }}
+      />
+      <PresentMultiTagModal
+        open={pendingPresentSlipperyChange}
+        title="Select Issue Type (Slippery)"
+        description='"Loose or slippery surface" was set to "Present". Please select the issue type(s) that apply:'
+        options={slipperyIssueTypeOptions}
+        onConfirm={(val) => {
+          editCurrentAttr("Issue Type (Slippery)", val);
+          setPendingPresentSlipperyChange(false);
+        }}
+      />
+      <PresentMultiTagModal
+        open={pendingFacilityWidthParentChange !== null}
+        singleSelect
+        title="Select Facility Width Sub-category"
+        description={`Facility Width was set to "${pendingFacilityWidthParentChange?.categoryLabel}". Please select the specific sub-category:`}
+        options={pendingFacilityWidthParentChange?.subCategories ?? []}
+        onConfirm={(val) => {
+          editCurrentAttrMany({ "Facility Width Sub-category": val });
+          setPendingFacilityWidthParentChange(null);
+        }}
+        onCancel={() => {
+          if (pendingFacilityWidthParentChange) {
+            editCurrentAttrMany({
+              "Facility Width per Direction": pendingFacilityWidthParentChange.originalParentCode,
+              "Facility Width Sub-category": pendingFacilityWidthParentChange.originalSubCategory,
+            });
+          }
+          setPendingFacilityWidthParentChange(null);
+        }}
+      />
     </Box>
   );
 }

@@ -50,6 +50,7 @@ Browser
       v           v      v
    ./data/      ./in/  backend/shapefiles/
 ```
+*Layman's explanation: This diagram shows how the user's browser, the website interface, and the background system work together to manage project data.*
 
 Docker bind-mounts `./data/` and `./in/`, so project data and source image folders survive rebuilds and restarts.
 
@@ -94,6 +95,7 @@ backend/
 ├── models/
 └── shapefiles/
 ```
+*Layman's explanation: This is a directory map showing how the background system's files are organized to handle project logic and data.*
 
 ### 4.1 Registered Blueprints
 
@@ -141,6 +143,8 @@ frontend/
 │   ├── components/
 │   └── utils/projectSearch.ts
 ```
+*Layman's explanation: This is a directory map showing how the website's interface files are organized for building the user interface.*
+
 
 Two frontend details are easy to miss but now matter architecturally:
 
@@ -168,6 +172,7 @@ data/
             ├── results.csv
             └── treatment.csv
 ```
+*Layman's explanation: This shows how a project's data, such as photos, results, and settings, is neatly filed away in folders on the system.*
 
 ### 6.1 `project_metadata.json`
 

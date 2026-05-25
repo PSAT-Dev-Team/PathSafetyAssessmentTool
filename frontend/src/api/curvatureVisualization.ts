@@ -16,6 +16,7 @@ export interface CurvatureVisualizationResponse {
   radius: number | null;
   width: number | null;
   curvature: number; // 1 = Sharp Turn, 2 = No Sharp Turn
+  curvature_subcategory?: string | null;
   circle_geojson: {
     type: string;
     geometry: {
@@ -103,12 +104,14 @@ export interface CurvatureVisualizationResponse {
 export async function fetchCurvatureVisualization(
   projectName: string,
   coords: [number, number][],
-  index?: number
+  index?: number,
+  signal?: AbortSignal,
 ): Promise<CurvatureVisualizationResponse> {
   const response = await fetch(
     `${API_BASE_URL}/api/projects/${projectName}/curvature/visualize`,
     {
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
       },
