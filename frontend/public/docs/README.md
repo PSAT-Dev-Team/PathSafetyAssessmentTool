@@ -11,6 +11,7 @@ Main documents:
 - [api-reference.md](api-reference.md)
 - [cv-pipeline.md](cv-pipeline.md)
 - [scoring.md](scoring.md)
+- [treatments.md](treatments.md)
 - [frontend.md](frontend.md)
 - [common-issues.md](common-issues.md)
 - [contributing.md](contributing.md)

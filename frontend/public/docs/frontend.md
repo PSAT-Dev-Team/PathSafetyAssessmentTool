@@ -208,6 +208,7 @@ location /api/ {
     proxy_pass http://backend:8000/api/;
 }
 ```
+*Layman's explanation: This configuration tells the system how to correctly route messages between the website interface and the background system.*
 
 ## Supporting implementation details
 
