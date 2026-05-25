@@ -463,7 +463,7 @@ export async function copySegments(
 }
 
 export async function autocodeImage(project: string, imageRef: string) {
-  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/image`, {
+  const res = await fetchAutocode(`/api/projects/${encodeURIComponent(project)}/autocode/image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ imageRef }),
@@ -482,7 +482,7 @@ export async function autocodeImage(project: string, imageRef: string) {
 }
 
 export async function autocodeGIS(project: string, coords: number[][]) {
-  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/gis`, {
+  const res = await fetchAutocode(`/api/projects/${encodeURIComponent(project)}/autocode/gis`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ coords }),
@@ -557,6 +557,9 @@ type AutoCodeAllPayload =
 
 type AutoCodeAllResult = AutoCodeSingleResult | AutoCodeBulkResult;
 
+const AUTOCODE_NETWORK_ERROR =
+  "Cannot reach the backend autocode service. Make sure the backend is running on http://127.0.0.1:8000, preferably via Run-PSAT.bat or the psat conda environment.";
+
 // ---------- Helper Functions ----------
 
 // Extract error message from response (handles both JSON and text errors)
@@ -567,6 +570,17 @@ async function readError(res: Response) {
     return j?.error || text;
   } catch {
     return text;
+  }
+}
+
+async function fetchAutocode(input: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error(AUTOCODE_NETWORK_ERROR);
+    }
+    throw error;
   }
 }
 
@@ -590,7 +604,7 @@ async function readError(res: Response) {
  * @returns Response with updates and tracking data (see AutoCodeAllResult types)
  */
 export async function autocodeAll(project: string, payload: AutoCodeAllPayload): Promise<AutoCodeAllResult> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/all`, {
+  const res = await fetchAutocode(`/api/projects/${encodeURIComponent(project)}/autocode/all`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -617,7 +631,7 @@ export async function autocodeAllStream(
   payload: AutoCodeAllPayload,
   onProgress: (processed: number, total: number, errors: number) => void,
 ): Promise<AutoCodeBulkResult> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/autocode/all`, {
+  const res = await fetchAutocode(`/api/projects/${encodeURIComponent(project)}/autocode/all`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, stream: true }),
@@ -628,26 +642,33 @@ export async function autocodeAllStream(
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
 
-    // SSE events are separated by double newlines
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop()!; // keep incomplete trailing chunk
+      // SSE events are separated by double newlines
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop()!; // keep incomplete trailing chunk
 
-    for (const part of parts) {
-      const line = part.trim();
-      if (!line.startsWith("data:")) continue;
-      const event = JSON.parse(line.slice(5).trim());
-      if (event.type === "progress") {
-        onProgress(event.processed, event.total, event.errors ?? 0);
-      } else if (event.type === "done") {
-        const { type: _type, ...result } = event;
-        return result as AutoCodeBulkResult;
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+        const event = JSON.parse(line.slice(5).trim());
+        if (event.type === "progress") {
+          onProgress(event.processed, event.total, event.errors ?? 0);
+        } else if (event.type === "done") {
+          const { type: _type, ...result } = event;
+          return result as AutoCodeBulkResult;
+        }
       }
     }
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error(AUTOCODE_NETWORK_ERROR);
+    }
+    throw error;
   }
   throw new Error("SSE stream ended without a 'done' event");
 }

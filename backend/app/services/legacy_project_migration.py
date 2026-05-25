@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 
@@ -12,6 +13,7 @@ DEFAULT_CONFIG = {
     "destination_folder": "../data",
     "in_folder": "../in",
 }
+_QUARTER_SUFFIX_RE = re.compile(r"(?:[_\-\s]*(?:[1-4]Q\d{2,4}|Q[1-4]\d{2,4}))$", re.IGNORECASE)
 
 
 def _repo_root() -> Path:
@@ -121,6 +123,26 @@ def _make_image_namespace(source_name: str) -> str:
     return namespace or "source"
 
 
+def _normalize_source_folder_key(source_name: str) -> str:
+    cleaned = _QUARTER_SUFFIX_RE.sub("", str(source_name or "").strip())
+    return "".join(ch for ch in cleaned.lower() if ch.isalnum())
+
+
+def _build_source_folder_alias_map(in_root: Path) -> dict[str, str]:
+    alias_map: dict[str, str] = {}
+    if not in_root.exists() or not in_root.is_dir():
+        return alias_map
+
+    for child in in_root.iterdir():
+        if not child.is_dir():
+            continue
+        alias_key = _normalize_source_folder_key(child.name)
+        if not alias_key:
+            continue
+        alias_map.setdefault(alias_key, child.name)
+    return alias_map
+
+
 def _load_project_metadata(project_dir: Path) -> dict:
     metadata_path = project_dir / PROJECT_METADATA_FILENAME
     if not metadata_path.exists():
@@ -173,22 +195,40 @@ def _resolve_source_image(
     stripped_name = _strip_project_prefix(project_name, image_name)
     namespace_map = {_make_image_namespace(source).lower(): source for source in source_folders}
 
+    alias_map = _build_source_folder_alias_map(in_root)
+
+    def resolve_source_folder_name(source_folder_name: str) -> str | None:
+        direct_candidate = in_root / source_folder_name
+        if direct_candidate.is_dir():
+            return source_folder_name
+        return alias_map.get(_normalize_source_folder_key(source_folder_name))
+
     if "__" in stripped_name:
         namespace, original_name = stripped_name.split("__", 1)
         source_folder = namespace_map.get(namespace.lower())
         if source_folder:
-            candidate = in_root / source_folder / original_name
+            resolved_source_folder = resolve_source_folder_name(source_folder)
+            if resolved_source_folder is None:
+                return None, "missing_namespaced_source"
+            candidate = in_root / resolved_source_folder / original_name
             if candidate.is_file():
                 return candidate, None
         return None, "missing_namespaced_source"
 
     if len(source_folders) == 1:
-        candidate = in_root / source_folders[0] / stripped_name
+        resolved_source_folder = resolve_source_folder_name(source_folders[0])
+        if resolved_source_folder is None:
+            return None, "missing_single_source"
+        candidate = in_root / resolved_source_folder / stripped_name
         if candidate.is_file():
             return candidate, None
         return None, "missing_single_source"
 
-    matches = [(in_root / source_folder / stripped_name) for source_folder in source_folders]
+    matches = []
+    for source_folder in source_folders:
+        resolved_source_folder = resolve_source_folder_name(source_folder)
+        if resolved_source_folder is not None:
+            matches.append(in_root / resolved_source_folder / stripped_name)
     existing = [candidate for candidate in matches if candidate.is_file()]
     if len(existing) == 1:
         return existing[0], None
