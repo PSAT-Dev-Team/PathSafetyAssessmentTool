@@ -461,6 +461,23 @@ export default function Sidebar() {
               </Button>
             );
           })}
+          {onTreatmentDetail && projectName && (
+            <div className="psat-report-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+              <Button
+                onClick={() => {
+                  const projects = projectName.split(",").map((p: string) => p.trim()).filter(Boolean);
+                  sessionStorage.setItem("treatment_loadedProjects", JSON.stringify(projects));
+                  navigate("/analysis/report");
+                }}
+                style={{ backgroundColor: "#a220e3", color: "white" }}
+                variant="solid"
+                size="sm"
+                width="100%"
+              >
+                📄 Open Report Builder
+              </Button>
+            </div>
+          )}
           {pathname === "/analysis/path" && (
             <div className="psat-report-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
               <Button
