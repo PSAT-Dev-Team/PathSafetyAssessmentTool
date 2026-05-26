@@ -25,7 +25,9 @@ const to4326 = (p: Position): [number, number] => {
 };
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const CANVAS_W = 794;
+const CANVAS_W   = 794;
+const PAGE_H     = 1123;
+const LAYOUT_KEY = "psat_report_layout";
 
 const RISK_COLORS: Record<number, string> = {
   1: "#87C424", 2: "#FFCC1A", 3: "#FF5B1A", 4: "#CD1AFF",
@@ -105,25 +107,29 @@ interface ScoreStats {
 }
 
 // ── Default layout ───────────────────────────────────────────────────────────
-// Page 1 & 2: core sections (visible by default)
-// Page 3 (y > 2246): supplementary sections (hidden by default, user opts in)
+// Page 1: title, summary (with filters), map
+// Page 2: risk bands, top risk stretches
+// Page 3+: treatments, supplementary (off by default)
+// Auto-fit corrects positions on first load.
 const DEFAULT_ELEMENTS: ElementState[] = [
-  // — Page 1 & 2 —
-  { id: "title",            type: "title",            label: "Title",              x: 20, y: 20,   width: 754, height: 175, visible: true  },
-  { id: "riskBands",        type: "riskBands",        label: "Risk Bands",         x: 20, y: 210,  width: 754, height: 420, visible: true  },
-  { id: "map",              type: "map",              label: "Map",                x: 20, y: 645,  width: 754, height: 300, visible: true  },
-  { id: "summary",          type: "summary",          label: "Summary",            x: 20, y: 960,  width: 754, height: 115, visible: true  },
-  { id: "topRisk",          type: "topRisk",          label: "Top Risk Stretches", x: 20, y: 1155, width: 754, height: 700, visible: true,  viewMode: "tabular", topN: 10 },
-  { id: "treatmentSummary", type: "treatmentSummary", label: "Treatments",         x: 20, y: 1870, width: 754, height: 360, visible: true  },
-  // — Page 3 (supplementary, off by default) —
-  { id: "projectDetails",   type: "projectDetails",   label: "Project Details",    x: 20, y: 2270, width: 754, height: 220, visible: false },
-  { id: "riskStats",        type: "riskStats",        label: "Risk Statistics",    x: 20, y: 2510, width: 754, height: 190, visible: false },
-  { id: "topAttributes",    type: "topAttributes",    label: "Risk Factors",       x: 20, y: 2720, width: 754, height: 210, visible: false },
-  { id: "recommendations",  type: "recommendations",  label: "Recommendations",    x: 20, y: 2950, width: 754, height: 160, visible: false },
-  { id: "methodology",      type: "methodology",      label: "Methodology",        x: 20, y: 3130, width: 754, height: 210, visible: false },
-  { id: "segmentGallery",   type: "segmentGallery",   label: "Image Gallery",      x: 20, y: 3260, width: 754, height: 110, visible: false },
-  { id: "deepDive",         type: "deepDive",         label: "Deep-Dive Analytics",x: 20, y: 2270, width: 754, height: 340, visible: false },
-  { id: "filterAnalysis",  type: "filterAnalysis",  label: "Filter Analysis",     x: 20, y: 2630, width: 754, height: 340, visible: false },
+  // — Page 1 —
+  { id: "title",            type: "title",            label: "Title",              x: 20, y: 20,   width: 754, height: 205, visible: true  },
+  { id: "summary",          type: "summary",          label: "Summary",            x: 20, y: 240,  width: 754, height: 150, visible: true  },
+  { id: "map",              type: "map",              label: "Map",                x: 20, y: 405,  width: 754, height: 350, visible: true  },
+  // — Page 2 —
+  { id: "riskBands",        type: "riskBands",        label: "Risk Bands",         x: 20, y: 1163, width: 754, height: 450, visible: true  },
+  { id: "topRisk",          type: "topRisk",          label: "Top Risk Stretches", x: 20, y: 1633, width: 754, height: 730, visible: true,  viewMode: "tabular", topN: 10 },
+  // — Page 3 —
+  { id: "treatmentSummary", type: "treatmentSummary", label: "Treatments",         x: 20, y: 2386, width: 754, height: 360, visible: true  },
+  // — Supplementary (off by default) —
+  { id: "projectDetails",   type: "projectDetails",   label: "Project Details",    x: 20, y: 2790, width: 754, height: 220, visible: false },
+  { id: "riskStats",        type: "riskStats",        label: "Risk Statistics",    x: 20, y: 3030, width: 754, height: 190, visible: false },
+  { id: "topAttributes",    type: "topAttributes",    label: "Risk Factors",       x: 20, y: 3240, width: 754, height: 210, visible: false },
+  { id: "recommendations",  type: "recommendations",  label: "Recommendations",    x: 20, y: 3470, width: 754, height: 160, visible: false },
+  { id: "methodology",      type: "methodology",      label: "Methodology",        x: 20, y: 3650, width: 754, height: 210, visible: false },
+  { id: "segmentGallery",   type: "segmentGallery",   label: "Image Gallery",      x: 20, y: 3880, width: 754, height: 110, visible: false },
+  { id: "deepDive",         type: "deepDive",         label: "Deep-Dive Analytics",x: 20, y: 2790, width: 754, height: 340, visible: false },
+  { id: "filterAnalysis",   type: "filterAnalysis",   label: "Filter Analysis",    x: 20, y: 3150, width: 754, height: 340, visible: false },
 ];
 
 // ── Shared table styles ──────────────────────────────────────────────────────
@@ -265,6 +271,7 @@ export default function ReportBuilderPage() {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const hasAutoFit         = useRef(false);
   const [elements, setElements] = useState<ElementState[]>(DEFAULT_ELEMENTS);
+  const [currentPage, setCurrentPage] = useState(0);
 
   // ── Editable metadata ────────────────────────────────────────────────────
   const [reportTitle,          setReportTitle]          = useState("Path Analysis Executive Summary");
@@ -302,6 +309,7 @@ export default function ReportBuilderPage() {
   const [allAttributeRows,  setAllAttributeRows]  = useState<Record<string, Record<string, unknown>[]>>({});
 
   const [exporting, setExporting] = useState<"pdf" | "word" | null>(null);
+  const [hasSaved, setHasSaved] = useState(() => { try { return !!localStorage.getItem(LAYOUT_KEY); } catch { return false; } });
 
   // ── Session storage ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -527,15 +535,16 @@ export default function ReportBuilderPage() {
     const H = 30; // handle
     switch (el.type) {
       case "title":          return H + 175;
-      case "riskBands":      return H + (distributions ? 420 : 60);
-      case "map":            return H + 320;
-      case "summary":        return H + 100;
+      case "riskBands":      return H + (distributions ? 450 : 60);
+      case "map":            return H + 350;
+      case "summary":        return H + 100 + (activeFilterNames.length > 0 ? 46 : 0);
       case "topRisk": {
         const n = el.topN ?? 10;
-        const base = H + 52 + 42; // header + view toggle
-        if (!el.viewMode || el.viewMode === "tabular") return base + 32 + n * 52 + 10;
-        if (el.viewMode === "grid")  return base + Math.ceil(n / 3) * (222 + 8) + 16;
-        return base + n * 68 + 10; // list
+        const header = 56;  // title + subtitle
+        const toggle = 58;  // view toggle (may wrap to 2 lines)
+        if (!el.viewMode || el.viewMode === "tabular") return H + header + toggle + 34 + n * 56 + 20;
+        if (el.viewMode === "grid")  return H + header + toggle + Math.ceil(n / 3) * 232 + 20;
+        return H + header + toggle + n * 72 + 20; // list
       }
       case "treatmentSummary": {
         if (treatmentSummaries.length === 0) return H + 100;
@@ -565,6 +574,7 @@ export default function ReportBuilderPage() {
   }, [distributions, treatmentSummaries, loadedProjects, projectMeta, scoreStats, attributeFrequency, topRiskRows, activeFilterNames]);
 
   // ── Auto-fit: resize all visible elements + restack with no gaps ─────────
+  // Elements that would straddle a page break are pushed to the next page.
   const autoFitElements = useCallback(() => {
     setElements((prev) => {
       const visible = prev.filter((e) => e.visible).sort((a, b) => a.y - b.y);
@@ -572,6 +582,13 @@ export default function ReportBuilderPage() {
       const updates = new Map<string, { height: number; y: number }>();
       visible.forEach((el) => {
         const h = computeIdealHeight(el);
+        if (h < PAGE_H) {
+          const pageAtStart = Math.floor(cursor / PAGE_H);
+          const pageAtEnd   = Math.floor((cursor + h - 1) / PAGE_H);
+          if (pageAtEnd > pageAtStart) {
+            cursor = (pageAtStart + 1) * PAGE_H + 20;
+          }
+        }
         updates.set(el.id, { height: h, y: cursor });
         cursor += h + 10;
       });
@@ -624,6 +641,51 @@ export default function ReportBuilderPage() {
       setSectionTitles((prev) => ({ ...prev, [id]: title })),
     []
   );
+
+  // ── Save / Restore layout ─────────────────────────────────────────────────
+  const saveLayout = useCallback(() => {
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify({
+        elements, reportTitle, oicName, purpose, recommendations,
+        reportDate, imageDate, auditDate, projectNameOverrides, sectionTitles,
+      }));
+      setHasSaved(true);
+    } catch (e) { console.error("Save layout failed:", e); }
+  }, [elements, reportTitle, oicName, purpose, recommendations, reportDate, imageDate, auditDate, projectNameOverrides, sectionTitles]);
+
+  const restoreLayout = useCallback(() => {
+    try {
+      const saved = localStorage.getItem(LAYOUT_KEY);
+      if (!saved) return;
+      const l = JSON.parse(saved);
+      if (l.elements)              setElements(l.elements);
+      if (l.reportTitle !== undefined)          setReportTitle(l.reportTitle);
+      if (l.oicName !== undefined)              setOicName(l.oicName);
+      if (l.purpose !== undefined)              setPurpose(l.purpose);
+      if (l.recommendations !== undefined)      setRecommendations(l.recommendations);
+      if (l.reportDate !== undefined)           setReportDate(l.reportDate);
+      if (l.imageDate !== undefined)            setImageDate(l.imageDate);
+      if (l.auditDate !== undefined)            setAuditDate(l.auditDate);
+      if (l.projectNameOverrides !== undefined) setProjectNameOverrides(l.projectNameOverrides);
+      if (l.sectionTitles !== undefined)        setSectionTitles(l.sectionTitles);
+    } catch (e) { console.error("Restore layout failed:", e); }
+  }, []);
+
+  // ── Page navigation ───────────────────────────────────────────────────────
+  const goToPage = useCallback((page: number) => {
+    setCurrentPage(page);
+    if (!canvasContainerRef.current || !canvasRef.current) return;
+    const canvasTop = canvasRef.current.offsetTop;
+    canvasContainerRef.current.scrollTo({ top: canvasTop + page * PAGE_H, behavior: "smooth" });
+  }, []);
+
+  const handleCanvasScroll = useCallback(() => {
+    if (!canvasContainerRef.current || !canvasRef.current) return;
+    const scrolled = canvasContainerRef.current.scrollTop;
+    const canvasTop = canvasRef.current.offsetTop;
+    const scrollInCanvas = Math.max(0, scrolled - canvasTop);
+    setCurrentPage(Math.floor(scrollInCanvas / PAGE_H));
+  }, []);
 
   // ── PDF export ────────────────────────────────────────────────────────────
   const handleDownloadPDF = async () => {
@@ -1067,7 +1129,7 @@ export default function ReportBuilderPage() {
         return (
           <div style={{ padding: "12px 18px" }}>
             <EditableText value={secTitle(el.id, "Summary")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e", display: "block", marginBottom: 10 }} />
-            <div style={{ display: "flex", gap: 32 }}>
+            <div style={{ display: "flex", gap: 32, marginBottom: activeFilterNames.length > 0 ? 10 : 0 }}>
               <div style={{ textAlign: "center" }}>
                 <div style={{ fontSize: 28, fontWeight: 700, color: "#a020d0" }}>{loadedProjects.length}</div>
                 <div style={{ fontSize: 11, color: "#666" }}>Projects</div>
@@ -1083,6 +1145,14 @@ export default function ReportBuilderPage() {
                 </div>
               )}
             </div>
+            {activeFilterNames.length > 0 && (
+              <div style={{ padding: "6px 10px", background: "#f5f0fa", borderRadius: 6, border: "1px solid #e8d8f8", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 8px" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#a020d0", textTransform: "uppercase", letterSpacing: 0.4, flexShrink: 0 }}>Active Filters:</span>
+                {activeFilterNames.map((f) => (
+                  <span key={f} style={{ fontSize: 11, color: "#555", background: "#ede8f8", borderRadius: 10, padding: "1px 8px" }}>{f}</span>
+                ))}
+              </div>
+            )}
           </div>
         );
 
@@ -1430,11 +1500,12 @@ export default function ReportBuilderPage() {
 
   const pageBreaks = useMemo(() => {
     const breaks: number[] = [];
-    const PAGE_H = 1123;
     let y = PAGE_H;
     while (y < canvasH) { breaks.push(y); y += PAGE_H; }
     return breaks;
   }, [canvasH]);
+
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(canvasH / PAGE_H)), [canvasH]);
 
   // ── Checklist memo ────────────────────────────────────────────────────────
   const [showSections, setShowSections] = useState(false);
@@ -1463,6 +1534,21 @@ export default function ReportBuilderPage() {
           ⇅ Auto-fit
         </button>
 
+        <button className="rb-btn rb-btn-secondary" onClick={saveLayout} title="Save current layout to browser storage">
+          💾 Save
+        </button>
+        {hasSaved && (
+          <button className="rb-btn rb-btn-secondary" onClick={restoreLayout} title="Restore previously saved layout">
+            ↩ Restore
+          </button>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+          <button className="rb-btn rb-btn-secondary" onClick={() => goToPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} style={{ padding: "6px 10px" }}>◀</button>
+          <span style={{ fontSize: 12, color: "#555", whiteSpace: "nowrap", minWidth: 64, textAlign: "center" }}>Page {currentPage + 1} / {totalPages}</span>
+          <button className="rb-btn rb-btn-secondary" onClick={() => goToPage(Math.min(totalPages - 1, currentPage + 1))} disabled={currentPage >= totalPages - 1} style={{ padding: "6px 10px" }}>▶</button>
+        </div>
+
         <div className="rb-export-group">
           <button className="rb-btn" onClick={handleDownloadPDF} disabled={!!exporting}>
             {exporting === "pdf" ? "Generating…" : "↓ PDF"}
@@ -1490,7 +1576,25 @@ export default function ReportBuilderPage() {
         </div>
       )}
 
-      <div className="rb-canvas-container" ref={canvasContainerRef}>
+      <div style={{ position: "relative", flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {/* Floating page nav arrows on the right side */}
+        <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, zIndex: 100, pointerEvents: "none" }}>
+          <button
+            onClick={() => goToPage(Math.max(0, currentPage - 1))}
+            disabled={currentPage === 0}
+            style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #d0c0e8", background: currentPage === 0 ? "#f0f0f0" : "#fff", cursor: currentPage === 0 ? "not-allowed" : "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.12)", opacity: currentPage === 0 ? 0.35 : 1, pointerEvents: "auto", color: "#a020d0" }}
+          >▲</button>
+          <div style={{ background: "#fff", border: "1px solid #e0d0f0", borderRadius: 14, padding: "4px 10px", fontSize: 11, color: "#a020d0", fontWeight: 700, textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.1)", whiteSpace: "nowrap" }}>
+            {currentPage + 1} / {totalPages}
+          </div>
+          <button
+            onClick={() => goToPage(Math.min(totalPages - 1, currentPage + 1))}
+            disabled={currentPage >= totalPages - 1}
+            style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #d0c0e8", background: currentPage >= totalPages - 1 ? "#f0f0f0" : "#fff", cursor: currentPage >= totalPages - 1 ? "not-allowed" : "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.12)", opacity: currentPage >= totalPages - 1 ? 0.35 : 1, pointerEvents: "auto", color: "#a020d0" }}
+          >▼</button>
+        </div>
+
+        <div className="rb-canvas-container" ref={canvasContainerRef} onScroll={handleCanvasScroll}>
         <div className="rb-canvas-hint">
           Drag elements by their purple handle · Resize from corners · Check/uncheck sections above · Export when ready
         </div>
@@ -1518,6 +1622,7 @@ export default function ReportBuilderPage() {
               </div>
             </Rnd>
           ))}
+        </div>
         </div>
       </div>
     </div>
