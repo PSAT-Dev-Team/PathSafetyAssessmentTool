@@ -185,6 +185,8 @@ class GIS:
     """简单规则判断"""
     def __init__(self, store: LayerStore):
         self.store = store
+        # Cache prepared path layers to avoid repeated CRS/Z/validity processing.
+        self._prepared_path_layers: dict[str, dict[str, object]] = {}
 
     def _near(self, layer, pt, dist):
         gdf = self.store.get(layer)
@@ -701,6 +703,14 @@ class GIS:
             "shared": "shared_path",
             "footpath": "footpath"
         }
+        prepared_layers = {}
+        for layer_key in priority:
+            try:
+                gdf = self._load_path_layer(layer_names[layer_key])
+                if gdf is not None and not gdf.empty:
+                    prepared_layers[layer_key] = gdf
+            except KeyError:
+                continue
 
         # ========================================================================
         # STAGE 1: EXPANDING RING SEARCH FOR WIDTH
@@ -717,23 +727,8 @@ class GIS:
 
             for layer_key in priority:
                 try:
-                    gdf = self.store.get(layer_names[layer_key])
+                    gdf = prepared_layers.get(layer_key)
                     if gdf is None or gdf.empty:
-                        continue
-
-                    # Ensure metric CRS
-                    if gdf.crs.to_epsg() != 3414:
-                        gdf = gdf.to_crs("EPSG:3414")
-
-                    # Remove Z-coordinates if present
-                    if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
-                        gdf.geometry = gdf.geometry.apply(
-                            lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
-                        )
-
-                    # Filter to valid geometries
-                    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
-                    if gdf.empty:
                         continue
 
                     # Spatial query using index
@@ -784,6 +779,7 @@ class GIS:
         min_radius = None
         analysis_layers = []
         analysis_lines = []
+        primary_segments = []
 
         try:
             buffer_curv = pt.buffer(collect_radius + 0.5)
@@ -815,6 +811,7 @@ class GIS:
                     "layer_used": effective_curvature_layer,
                     "analysis_layers": analysis_layers,
                     "analysis_lines": analysis_lines,
+                    "analysis_segments": primary_segments,
                 },
             )
 
@@ -829,19 +826,31 @@ class GIS:
         }
 
     def _load_path_layer(self, store_key):
-        gdf = self.store.get(store_key)
-        if gdf is None or gdf.empty:
-            return gdf
+        raw_gdf = self.store.get(store_key)
+        if raw_gdf is None or raw_gdf.empty:
+            return raw_gdf
 
+        raw_signature = (id(raw_gdf), len(raw_gdf))
+        cached = self._prepared_path_layers.get(store_key)
+        if cached is not None and cached.get("raw_signature") == raw_signature:
+            return cached.get("prepared")
+
+        gdf = raw_gdf
         if gdf.crs is not None and gdf.crs.to_epsg() != 3414:
             gdf = gdf.to_crs("EPSG:3414")
 
         if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
+            gdf = gdf.copy()
             gdf.geometry = gdf.geometry.apply(
                 lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
             )
 
-        return gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+        prepared = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
+        self._prepared_path_layers[store_key] = {
+            "raw_signature": raw_signature,
+            "prepared": prepared,
+        }
+        return prepared
 
     @staticmethod
     def _flatten_line_geometries(geom):
@@ -1652,21 +1661,29 @@ class GIS:
         is_sharp_curve = (min_radius is not None) and (min_radius < sharp_turn_threshold)
         radius_diagnostics = None
         analysis_lines = analysis_details.get("analysis_lines")
+        analysis_segments = analysis_details.get("analysis_segments", [])
         if is_sharp_curve and analysis_lines:
-            _, radius_diagnostics = self._calculate_min_radius_from_lines(
-                analysis_lines,
-                analysis_point,
-                collect_radius=collect_radius,
-                epsilon=1e-6,
-                return_details=True,
-            )
-            if radius_diagnostics is not None:
-                is_sharp_curve = self._supports_sharp_curve_details(
-                    radius_diagnostics,
-                    sharp_turn_threshold=sharp_turn_threshold,
+            # Diagnostics and strict shape validation are only needed for visual explainability,
+            # not for high-throughput autocode calls.
+            if include_diagnostics:
+                _, radius_diagnostics = self._calculate_min_radius_from_lines(
+                    analysis_lines,
+                    analysis_point,
+                    collect_radius=collect_radius,
+                    epsilon=1e-6,
+                    return_details=True,
                 )
+                if radius_diagnostics is not None:
+                    is_sharp_curve = self._supports_sharp_curve_details(
+                        radius_diagnostics,
+                        sharp_turn_threshold=sharp_turn_threshold,
+                    )
 
-        has_kink, has_path_junction = self._check_angle_curvature(analysis_point, collect_radius=collect_radius)
+        # Once a sharp curve is already confirmed, skip expensive junction/kink checks.
+        if is_sharp_curve:
+            has_kink, has_path_junction = False, False
+        else:
+            has_kink, has_path_junction = self._check_angle_curvature(analysis_point, collect_radius=collect_radius)
         is_sharp_bend = is_sharp_curve or has_kink
 
         if is_sharp_bend or has_path_junction:
@@ -1707,6 +1724,7 @@ class GIS:
             "width_layer": analysis_details.get("width_layer"),
             "first_geometry_layer": analysis_details.get("first_geometry_layer"),
             "analysis_layers": analysis_details.get("analysis_layers", []),
+            "analysis_segments": analysis_segments,
             "curvature": curvature,
             "subcategory": subcategory,
             "has_sharp_curve": is_sharp_curve,
@@ -1805,17 +1823,8 @@ class GIS:
         all_segments = []
         for store_key in all_layer_names.values():
             try:
-                gdf = self.store.get(store_key)
+                gdf = self._load_path_layer(store_key)
                 if gdf is None or gdf.empty:
-                    continue
-                if gdf.crs.to_epsg() != 3414:
-                    gdf = gdf.to_crs("EPSG:3414")
-                if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
-                    gdf.geometry = gdf.geometry.apply(
-                        lambda g: self._remove_z_coordinate(g) if g is not None else None
-                    )
-                gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
-                if gdf.empty:
                     continue
                 cands = list(gdf.sindex.intersection(buf.bounds))
                 if not cands:
@@ -2055,12 +2064,6 @@ class GIS:
         }
 
         # Load path layers and collect paths within the circle
-        priority = ["cycling", "shared", "footpath"]
-        layer_names = {
-            "cycling": "cycling_path",
-            "shared": "shared_path",
-            "footpath": "footpath"
-        }
         color_map = {
             "cycling": [0, 180, 0],      # Green
             "shared": [230, 140, 0],     # Orange
@@ -2069,80 +2072,34 @@ class GIS:
 
         paths = []
 
-        # Collect paths from all layers within the circle for visualization
-        for layer_key in priority:
-            try:
-                gdf = self.store.get(layer_names[layer_key])
-                if gdf is None or gdf.empty:
-                    continue
-
-                # Ensure metric CRS
-                if gdf.crs.to_epsg() != 3414:
-                    gdf = gdf.to_crs("EPSG:3414")
-
-                # Remove Z-coordinates if present
-                if len(gdf) > 0 and gdf.geometry.iloc[0].has_z:
-                    gdf.geometry = gdf.geometry.apply(
-                        lambda geom: self._remove_z_coordinate(geom) if geom is not None else None
-                    )
-
-                # Filter to valid geometries
-                gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid].copy()
-                if gdf.empty:
-                    continue
-
-                # Spatial query using index
-                candidate_indices = list(gdf.sindex.intersection(circle_geom_3414.bounds))
-                if not candidate_indices:
-                    continue
-
-                candidates = gdf.iloc[candidate_indices]
-                intersecting = candidates[candidates.intersects(circle_geom_3414)]
-
-                if intersecting.empty:
-                    continue
-
-                # Process each intersecting path
-                for geom in intersecting.geometry:
-                    if geom is None or geom.is_empty:
-                        continue
-
-                    try:
-                        # Clip to circle
-                        clipped = geom.intersection(circle_geom_3414)
-                    except Exception:
-                        clipped = geom.buffer(0).intersection(circle_geom_3414)
-
-                    # Extract LineStrings from clipped geometry
-                    lines = []
-
-                    if clipped.geom_type == 'LineString':
-                        lines = [clipped]
-                    elif clipped.geom_type == 'MultiLineString':
-                        lines = list(clipped.geoms)
-                    elif clipped.geom_type == 'GeometryCollection':
-                        lines = [g for g in clipped.geoms if g.geom_type == 'LineString']
-
-                    # Transform each line to WGS84 and add to paths
-                    for line in lines:
-                        if line.is_empty:
-                            continue
-
-                        coords_wgs84 = []
-                        for x, y in line.coords:
-                            lon, lat = transformer.transform(x, y)
-                            coords_wgs84.append([lon, lat])
-
-                        paths.append({
-                            "type": layer_key,
-                            "color": color_map.get(layer_key, [0, 0, 0]),
-                            "coordinates": coords_wgs84,
-                            "is_analysis_layer": (layer_key == found_layer)
-                        })
-
-            except Exception as e:
-                print(f"Warning: Error collecting paths from {layer_key} for visualization: {e}")
+        # Reuse the already-selected analysis segments instead of re-querying all path layers.
+        analysis_segments = analysis.get("analysis_segments") or []
+        for segment in analysis_segments:
+            layer_key = segment.get("layer_key")
+            geom = segment.get("geometry")
+            if layer_key is None or geom is None or geom.is_empty:
                 continue
+
+            try:
+                clipped = geom.intersection(circle_geom_3414)
+            except Exception:
+                clipped = geom
+
+            for line in self._flatten_line_geometries(clipped):
+                if line.is_empty:
+                    continue
+
+                coords_wgs84 = []
+                for x, y in line.coords:
+                    lon, lat = transformer.transform(x, y)
+                    coords_wgs84.append([lon, lat])
+
+                paths.append({
+                    "type": layer_key,
+                    "color": color_map.get(layer_key, [0, 0, 0]),
+                    "coordinates": coords_wgs84,
+                    "is_analysis_layer": True,
+                })
 
         # Get point coordinates in WGS84
         if isinstance(point, tuple):
