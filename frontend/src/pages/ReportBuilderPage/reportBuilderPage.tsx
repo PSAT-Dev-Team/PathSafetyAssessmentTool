@@ -73,7 +73,7 @@ const METHODOLOGY_TEXT = `This report uses the CycleRAP (Cycling Road Assessment
 type ElementType =
   | "title" | "riskBands" | "map" | "summary" | "topRisk" | "treatmentSummary"
   | "projectDetails" | "riskStats" | "topAttributes" | "recommendations" | "methodology" | "segmentGallery"
-  | "deepDive" | "filterAnalysis";
+  | "deepDive" | "filterAnalysis" | "benchmarkStats";
 
 type ViewMode = "list" | "grid" | "tabular";
 
@@ -118,7 +118,8 @@ const DEFAULT_ELEMENTS: ElementState[] = [
   { id: "map",              type: "map",              label: "Map",                x: 20, y: 405,  width: 754, height: 350, visible: true  },
   // — Page 2 —
   { id: "riskBands",        type: "riskBands",        label: "Risk Bands",         x: 20, y: 1163, width: 754, height: 450, visible: true  },
-  { id: "topRisk",          type: "topRisk",          label: "Top Risk Stretches", x: 20, y: 1633, width: 754, height: 730, visible: true,  viewMode: "tabular", topN: 10 },
+  { id: "benchmarkStats",   type: "benchmarkStats",   label: "Benchmarking Stats", x: 20, y: 1633, width: 754, height: 340, visible: true  },
+  { id: "topRisk",          type: "topRisk",          label: "Top Risk Stretches", x: 20, y: 1993, width: 754, height: 730, visible: true,  viewMode: "tabular", topN: 10 },
   // — Page 3 —
   { id: "treatmentSummary", type: "treatmentSummary", label: "Treatments",         x: 20, y: 2386, width: 754, height: 360, visible: true  },
   // — Supplementary (off by default) —
@@ -265,24 +266,62 @@ function ReportMiniMap({ projects, bandMap }: { projects: string[]; bandMap: Map
 }
 
 // ── Main page ────────────────────────────────────────────────────────────────
+// ── Read saved layout once (used by lazy state initialisers below) ──────────
+function _readSaved(): Record<string, unknown> | null {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
 export default function ReportBuilderPage() {
   const navigate = useNavigate();
   const canvasRef          = useRef<HTMLDivElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const hasAutoFit         = useRef(false);
-  const [elements, setElements] = useState<ElementState[]>(DEFAULT_ELEMENTS);
+
+  // ── State: auto-restored from localStorage if a saved layout exists ──────
+  const [elements, setElements] = useState<ElementState[]>(() => {
+    const l = _readSaved();
+    if (Array.isArray(l?.elements)) {
+      const saved = l.elements as ElementState[];
+      // Inject any new default elements missing from the saved layout (e.g. benchmarkStats added after save)
+      const savedIds = new Set(saved.map((e: ElementState) => e.id));
+      const injected = DEFAULT_ELEMENTS.filter((e) => !savedIds.has(e.id));
+      return injected.length > 0 ? [...saved, ...injected] : saved;
+    }
+    return DEFAULT_ELEMENTS;
+  });
   const [currentPage, setCurrentPage] = useState(0);
 
   // ── Editable metadata ────────────────────────────────────────────────────
-  const [reportTitle,          setReportTitle]          = useState("Path Analysis Executive Summary");
-  const [projectNameOverrides, setProjectNameOverrides] = useState<Record<string, string>>({});
-  const [sectionTitles,        setSectionTitles]        = useState<Record<string, string>>({});
-  const [oicName,              setOicName]              = useState("");
-  const [purpose,              setPurpose]              = useState("");
-  const [recommendations,      setRecommendations]      = useState("");
-  const [reportDate,           setReportDate]           = useState(() => new Date().toISOString().split("T")[0]);
-  const [imageDate,            setImageDate]            = useState("");
-  const [auditDate,            setAuditDate]            = useState("");
+  const [reportTitle,          setReportTitle]          = useState(() => {
+    const l = _readSaved(); return typeof l?.reportTitle === "string" ? l.reportTitle : "Path Analysis Executive Summary";
+  });
+  const [projectNameOverrides, setProjectNameOverrides] = useState<Record<string, string>>(() => {
+    const l = _readSaved(); return (l?.projectNameOverrides && typeof l.projectNameOverrides === "object") ? l.projectNameOverrides as Record<string, string> : {};
+  });
+  const [sectionTitles,        setSectionTitles]        = useState<Record<string, string>>(() => {
+    const l = _readSaved(); return (l?.sectionTitles && typeof l.sectionTitles === "object") ? l.sectionTitles as Record<string, string> : {};
+  });
+  const [oicName,              setOicName]              = useState(() => {
+    const l = _readSaved(); return typeof l?.oicName === "string" ? l.oicName : "";
+  });
+  const [purpose,              setPurpose]              = useState(() => {
+    const l = _readSaved(); return typeof l?.purpose === "string" ? l.purpose : "";
+  });
+  const [recommendations,      setRecommendations]      = useState(() => {
+    const l = _readSaved(); return typeof l?.recommendations === "string" ? l.recommendations : "";
+  });
+  const [reportDate,           setReportDate]           = useState(() => {
+    const l = _readSaved(); return typeof l?.reportDate === "string" ? l.reportDate : new Date().toISOString().split("T")[0];
+  });
+  const [imageDate,            setImageDate]            = useState(() => {
+    const l = _readSaved(); return typeof l?.imageDate === "string" ? l.imageDate : "";
+  });
+  const [auditDate,            setAuditDate]            = useState(() => {
+    const l = _readSaved(); return typeof l?.auditDate === "string" ? l.auditDate : "";
+  });
 
   // ── Projects ─────────────────────────────────────────────────────────────
   const [loadedProjects,    setLoadedProjects]    = useState<string[]>([]);
@@ -310,6 +349,15 @@ export default function ReportBuilderPage() {
 
   const [exporting, setExporting] = useState<"pdf" | "word" | null>(null);
   const [hasSaved, setHasSaved] = useState(() => { try { return !!localStorage.getItem(LAYOUT_KEY); } catch { return false; } });
+  // true when this mount auto-restored a previously saved layout
+  const [wasAutoRestored] = useState(() => { try { return !!localStorage.getItem(LAYOUT_KEY); } catch { return false; } });
+  const [restoreBannerVisible, setRestoreBannerVisible] = useState(wasAutoRestored);
+
+  // ── Project picker (shown when session storage has no projects) ───────────
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [availableProjects, setAvailableProjects] = useState<string[]>([]);
+  const [pickerSelected,    setPickerSelected]    = useState<Set<string>>(new Set());
+  const [pickerLoading,     setPickerLoading]     = useState(false);
 
   // ── Session storage ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -319,9 +367,22 @@ export default function ReportBuilderPage() {
     const paP: string[] = pa      ? JSON.parse(pa)      : [];
     const trP: string[] = tr      ? JSON.parse(tr)      : [];
     const flt: string[] = filters ? JSON.parse(filters) : [];
-    setLoadedProjects([...new Set([...paP, ...trP])]);
+    const combined = [...new Set([...paP, ...trP])];
+    setLoadedProjects(combined);
     setTreatmentProjects(trP);
     setActiveFilterNames(flt);
+    if (combined.length === 0) {
+      setPickerLoading(true);
+      fetch("/api/projects")
+        .then((r) => r.json())
+        .then((d) => {
+          const names: string[] = (d.projects ?? []).map((p: { name: string }) => p.name).sort();
+          setAvailableProjects(names);
+          setShowProjectPicker(true);
+        })
+        .catch(() => setShowProjectPicker(true))
+        .finally(() => setPickerLoading(false));
+    }
   }, []);
 
   // ── Attribute data fetch (for filter analysis) ────────────────────────────
@@ -492,14 +553,6 @@ export default function ReportBuilderPage() {
     go();
   }, [treatmentProjects]);
 
-  // ── Auto-fit on first data load ───────────────────────────────────────────
-  // Triggered once when score data arrives; subsequent toggles trigger it too.
-  useEffect(() => {
-    if (!distributions || hasAutoFit.current) return;
-    hasAutoFit.current = true;
-    setTimeout(autoFitElements, 150);
-  }, [distributions, autoFitElements]);
-
   // ── Derived / computed ────────────────────────────────────────────────────
   const scoreStats = useMemo((): ScoreStats | null => {
     if (allScoreRows.length === 0) return null;
@@ -535,16 +588,17 @@ export default function ReportBuilderPage() {
     const H = 30; // handle
     switch (el.type) {
       case "title":          return H + 175;
-      case "riskBands":      return H + (distributions ? 450 : 60);
+      case "riskBands":      return H + (distributions ? 480 : 60);
       case "map":            return H + 350;
-      case "summary":        return H + 100 + (activeFilterNames.length > 0 ? 46 : 0);
+      case "summary":        return H + 110 + (activeFilterNames.length > 0 ? 46 : 0);
       case "topRisk": {
         const n = el.topN ?? 10;
-        const header = 56;  // title + subtitle
-        const toggle = 58;  // view toggle (may wrap to 2 lines)
-        if (!el.viewMode || el.viewMode === "tabular") return H + header + toggle + 34 + n * 56 + 20;
-        if (el.viewMode === "grid")  return H + header + toggle + Math.ceil(n / 3) * 232 + 20;
-        return H + header + toggle + n * 72 + 20; // list
+        const header = 60;   // title + subtitle
+        const toggle = 62;   // view mode + topN controls (may wrap)
+        const thead  = 36;   // table header row
+        if (!el.viewMode || el.viewMode === "tabular") return H + header + toggle + thead + n * 52 + 24;
+        if (el.viewMode === "grid")  return H + header + toggle + Math.ceil(n / 3) * 240 + 24;
+        return H + header + toggle + n * 76 + 24; // list
       }
       case "treatmentSummary": {
         if (treatmentSummaries.length === 0) return H + 100;
@@ -561,6 +615,7 @@ export default function ReportBuilderPage() {
         });
         return h + 16;
       }
+      case "benchmarkStats":  return H + 36 + 32 + 5 * 56 + 24; // header + thead + 5 rows (VB/BB/SB/BP/Overall) + footer
       case "riskStats":       return H + 36 + (scoreStats ? 5 * 32 + 20 : 50);
       case "topAttributes":   return H + 36 + (attributeFrequency.length > 0 ? attributeFrequency.length * 34 + 16 : 50);
       case "recommendations": return H + 36 + 120;
@@ -598,6 +653,14 @@ export default function ReportBuilderPage() {
       });
     });
   }, [computeIdealHeight]);
+
+  // ── Auto-fit on first data load ───────────────────────────────────────────
+  // Must come after autoFitElements is defined to avoid a TDZ crash.
+  useEffect(() => {
+    if (!distributions || hasAutoFit.current) return;
+    hasAutoFit.current = true;
+    setTimeout(autoFitElements, 150);
+  }, [distributions, autoFitElements]);
 
   // ── Element helpers ───────────────────────────────────────────────────────
   const updateElement = useCallback((id: string, changes: Partial<ElementState>) => {
@@ -670,6 +733,12 @@ export default function ReportBuilderPage() {
       if (l.sectionTitles !== undefined)        setSectionTitles(l.sectionTitles);
     } catch (e) { console.error("Restore layout failed:", e); }
   }, []);
+
+  // ── Project picker confirm ────────────────────────────────────────────────
+  const loadSelectedProjects = useCallback(() => {
+    setLoadedProjects([...pickerSelected]);
+    setShowProjectPicker(false);
+  }, [pickerSelected]);
 
   // ── Page navigation ───────────────────────────────────────────────────────
   const goToPage = useCallback((page: number) => {
@@ -837,7 +906,7 @@ export default function ReportBuilderPage() {
 
   // ── Top Risk renderers ────────────────────────────────────────────────────
   const renderTopRiskList = (rows: TopRiskRow[]) => (
-    <div style={{ flex: 1, overflowY: "auto", padding: "4px 8px" }}>
+    <div style={{ flex: 1, overflow: "visible", padding: "4px 8px" }}>
       {rows.map((row, i) => {
         const e = getEnriched(row); const t = getSegmentTreatments(row);
         return (
@@ -872,7 +941,7 @@ export default function ReportBuilderPage() {
   );
 
   const renderTopRiskGrid = (rows: TopRiskRow[]) => (
-    <div style={{ flex: 1, overflowY: "auto", padding: "8px 10px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, alignContent: "start" }}>
+    <div style={{ flex: 1, overflow: "visible", padding: "8px 10px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, alignContent: "start" }}>
       {rows.map((row, i) => {
         const e = getEnriched(row); const t = getSegmentTreatments(row);
         return (
@@ -907,7 +976,7 @@ export default function ReportBuilderPage() {
   );
 
   const renderTopRiskTabular = (rows: TopRiskRow[]) => (
-    <div style={{ flex: 1, overflowY: "auto" }}>
+    <div style={{ flex: 1, overflow: "visible" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
         <thead>
           <tr style={{ background: "#f5f0fa", position: "sticky", top: 0, zIndex: 1 }}>
@@ -969,7 +1038,7 @@ export default function ReportBuilderPage() {
     );
     if (treatmentSummaries.length === 0) return <div style={{ padding: "12px 14px", color: "#888", fontSize: 12 }}>Loading treatment data…</div>;
     return (
-      <div style={{ padding: "6px 12px", overflowY: "auto", height: "100%" }}>
+      <div style={{ padding: "6px 12px" }}>
         {treatmentSummaries.map((summary) => {
           const total = projectSegmentCounts[summary.project] ?? 0;
           const sorted = Object.entries(summary.treatmentCounts).sort(([, a], [, b]) => b - a);
@@ -1080,7 +1149,7 @@ export default function ReportBuilderPage() {
       // ── Risk Bands ─────────────────────────────────────────────────────────
       case "riskBands":
         return (
-          <div style={{ padding: "10px 14px", height: "calc(100% - 30px)", overflowY: "auto" }}>
+          <div style={{ padding: "10px 14px" }}>
             <EditableText value={secTitle(el.id, "Risk Band Distribution")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e", display: "block", marginBottom: 10 }} />
             {!distributions ? <div style={{ color: "#888", fontSize: 12 }}>Loading…</div> : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px 20px" }}>
@@ -1156,6 +1225,113 @@ export default function ReportBuilderPage() {
           </div>
         );
 
+      // ── Benchmarking Statistics ────────────────────────────────────────────
+      case "benchmarkStats": {
+        const crashRows = [
+          { key: "VB"      as const, label: "Vehicle–Bicycle",   short: "VB" },
+          { key: "BB"      as const, label: "Bicycle–Bicycle",   short: "BB" },
+          { key: "SB"      as const, label: "Single-Bicycle",    short: "SB" },
+          { key: "BP"      as const, label: "Bicycle–Pedestrian",short: "BP" },
+          { key: "Overall" as const, label: "Overall Risk",      short: "ALL" },
+        ];
+
+        // Count segments that are Low or Medium overall
+        const safePct = distributions
+          ? (((distributions.Overall[1] || 0) + (distributions.Overall[2] || 0)) / totalSegments * 100).toFixed(1)
+          : null;
+
+        return (
+          <div style={{ padding: "10px 14px" }}>
+            <EditableText
+              value={secTitle(el.id, "Benchmarking Statistics")}
+              onChange={(t) => setSecTitle(el.id, t)}
+              style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e", display: "block", marginBottom: 4 }}
+            />
+            <div style={{ fontSize: 10, color: "#888", marginBottom: 10 }}>
+              Risk band distribution &amp; score averages across all crash types · {totalSegments} segments total
+              {safePct !== null && (
+                <span style={{ marginLeft: 12, color: "#27ae60", fontWeight: 600 }}>
+                  ✓ {safePct}% Low or Medium overall
+                </span>
+              )}
+            </div>
+
+            {!distributions ? (
+              <div style={{ color: "#888", fontSize: 12 }}>No score data — run scoring first.</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+                <thead>
+                  <tr style={{ background: "#f5f0fa" }}>
+                    <th style={{ ...thStyle, width: 140 }}>Crash Type</th>
+                    {[1, 2, 3, 4].map((band) => (
+                      <th key={band} style={{ ...thStyle, textAlign: "center", color: RISK_COLORS[band] }}>
+                        {RISK_LABELS[band]}
+                      </th>
+                    ))}
+                    <th style={{ ...thStyle, textAlign: "center" }}>Avg Score</th>
+                    <th style={{ ...thStyle, textAlign: "center" }}>Distribution</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {crashRows.map(({ key, label, short }, ri) => {
+                    const dist  = distributions[key];
+                    const total = Object.values(dist).reduce((a, b) => a + b, 0) || 1;
+                    const isOverall = key === "Overall";
+                    const avg = scoreStats?.[key as keyof ScoreStats]?.avg ?? "—";
+                    return (
+                      <tr
+                        key={key}
+                        style={{
+                          borderBottom: "1px solid #f0eaf8",
+                          background: isOverall ? "#f0e8fc" : ri % 2 === 0 ? "#fff" : "#fafafa",
+                          fontWeight: isOverall ? 700 : 400,
+                        }}
+                      >
+                        <td style={{ ...tdStyle, fontWeight: isOverall ? 700 : 600, color: "#1a1a2e" }}>
+                          {label}
+                        </td>
+                        {[1, 2, 3, 4].map((band) => {
+                          const count = dist[band] || 0;
+                          const pct   = (count / total * 100);
+                          return (
+                            <td key={band} style={{ ...tdStyle, textAlign: "center", padding: "4px 4px" }}>
+                              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                                <span style={{ color: RISK_COLORS[band], fontWeight: isOverall ? 800 : 600, fontSize: isOverall ? 11 : 10 }}>
+                                  {pct.toFixed(1)}%
+                                </span>
+                                <span style={{ color: "#bbb", fontSize: 8 }}>({count})</span>
+                              </div>
+                            </td>
+                          );
+                        })}
+                        <td style={{ ...tdStyle, textAlign: "center", fontWeight: isOverall ? 700 : 500, color: isOverall ? "#a020d0" : "#333" }}>
+                          {avg}
+                        </td>
+                        {/* Mini stacked bar */}
+                        <td style={{ ...tdStyle, padding: "4px 8px", width: 100 }}>
+                          <div style={{ display: "flex", height: 10, borderRadius: 4, overflow: "hidden", gap: 1 }}>
+                            {[1, 2, 3, 4].map((band) => {
+                              const pct = (dist[band] || 0) / total * 100;
+                              return pct > 0 ? (
+                                <div
+                                  key={band}
+                                  title={`${RISK_LABELS[band]}: ${pct.toFixed(1)}%`}
+                                  style={{ width: `${pct}%`, background: RISK_COLORS[band], minWidth: pct > 0 ? 2 : 0 }}
+                                />
+                              ) : null;
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      }
+
       // ── Top Risk Stretches ─────────────────────────────────────────────────
       case "topRisk": {
         const viewMode = el.viewMode || "tabular";
@@ -1201,7 +1377,7 @@ export default function ReportBuilderPage() {
         return (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <SectionHeader title={secTitle(el.id, "Project Details")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle={loadedProjects.length > 1 ? `${loadedProjects.length} projects` : undefined} />
-            <div style={{ flex: 1, overflowY: "auto", padding: "10px 16px" }}>
+            <div style={{ flex: 1, overflow: "visible", padding: "10px 16px" }}>
               {loadedProjects.length === 0
                 ? <div style={{ color: "#888", fontSize: 12 }}>No projects loaded.</div>
                 : loadedProjects.map((name, pi) => {
@@ -1228,7 +1404,7 @@ export default function ReportBuilderPage() {
         return (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <SectionHeader title={secTitle(el.id, "Risk Score Statistics")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle="Min / max / average scores across all segments" />
-            <div style={{ flex: 1, overflowY: "auto", padding: "6px 10px" }}>
+            <div style={{ flex: 1, overflow: "visible", padding: "6px 10px" }}>
               {!scoreStats
                 ? <div style={{ color: "#888", fontSize: 12, padding: 8 }}>No score data available.</div>
                 : (
@@ -1576,6 +1752,30 @@ export default function ReportBuilderPage() {
         </div>
       )}
 
+      {/* ── Restore banner ──────────────────────────────────────────────── */}
+      {restoreBannerVisible && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", background: "#f0e8fc", borderBottom: "1px solid #d8c4f4", fontSize: 13, color: "#5a2a8a", flexShrink: 0 }}>
+          <span style={{ fontSize: 16 }}>↩</span>
+          <span style={{ flex: 1 }}>
+            <strong>Layout restored</strong> — your previously saved report layout has been applied automatically.
+            {" "}New data from the current session will be loaded into the existing sections.
+          </span>
+          <button
+            onClick={autoFitElements}
+            style={{ padding: "3px 10px", borderRadius: 8, border: "1px solid #b090d8", background: "#fff", color: "#7030b8", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+          >
+            ⇅ Re-fit
+          </button>
+          <button
+            onClick={() => setRestoreBannerVisible(false)}
+            style={{ padding: "3px 8px", borderRadius: 8, border: "1px solid #d0c0e8", background: "transparent", color: "#a080c0", fontSize: 12, cursor: "pointer" }}
+            title="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div style={{ position: "relative", flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Floating page nav arrows on the right side */}
         <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, zIndex: 100, pointerEvents: "none" }}>
@@ -1625,6 +1825,48 @@ export default function ReportBuilderPage() {
         </div>
         </div>
       </div>
+
+      {/* ── Project picker overlay ─────────────────────────────────────── */}
+      {showProjectPicker && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 480, maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.22)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#2d1a4a" }}>Select Projects for Report</div>
+            <div style={{ fontSize: 13, color: "#666", lineHeight: 1.5 }}>
+              No projects were carried over from Path Analysis. Select one or more projects below, or go to Path Analysis to load and filter data first.
+            </div>
+            {pickerLoading ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#888", fontSize: 14 }}>Loading projects…</div>
+            ) : availableProjects.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#888", fontSize: 14 }}>No projects found on this profile.</div>
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button className="rb-btn rb-btn-secondary" style={{ fontSize: 12, padding: "4px 12px" }} onClick={() => setPickerSelected(new Set(availableProjects))}>Select All</button>
+                  <button className="rb-btn rb-btn-secondary" style={{ fontSize: 12, padding: "4px 12px" }} onClick={() => setPickerSelected(new Set())}>Clear</button>
+                  <span style={{ marginLeft: "auto", fontSize: 12, color: "#aaa" }}>{pickerSelected.size} / {availableProjects.length} selected</span>
+                </div>
+                <div style={{ overflowY: "auto", flex: 1, maxHeight: 300, display: "flex", flexDirection: "column", gap: 4, border: "1px solid #e8e0f0", borderRadius: 10, padding: "10px 12px" }}>
+                  {availableProjects.map((name) => {
+                    const checked = pickerSelected.has(name);
+                    return (
+                      <label key={name} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "7px 8px", borderRadius: 8, background: checked ? "#f2e8fc" : "transparent" }}>
+                        <input type="checkbox" checked={checked} onChange={() => setPickerSelected((prev) => { const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n; })} style={{ accentColor: "#a020d0", width: 16, height: 16, flexShrink: 0 }} />
+                        <span style={{ fontSize: 13, color: "#333" }}>{name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button className="rb-btn rb-btn-secondary" onClick={() => navigate("/analysis/path")} style={{ fontSize: 13 }}>← Path Analysis</button>
+              <button className="rb-btn" disabled={pickerSelected.size === 0} onClick={loadSelectedProjects} style={{ fontSize: 13 }}>
+                Load {pickerSelected.size > 0 ? `${pickerSelected.size} Project${pickerSelected.size > 1 ? "s" : ""}` : "Projects"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
