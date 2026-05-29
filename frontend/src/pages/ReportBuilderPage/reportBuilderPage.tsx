@@ -311,6 +311,12 @@ export default function ReportBuilderPage() {
   const [exporting, setExporting] = useState<"pdf" | "word" | null>(null);
   const [hasSaved, setHasSaved] = useState(() => { try { return !!localStorage.getItem(LAYOUT_KEY); } catch { return false; } });
 
+  // ── Project picker (shown when no projects in session storage) ────────────
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [availableProjects, setAvailableProjects] = useState<string[]>([]);
+  const [pickerSelected,    setPickerSelected]    = useState<Set<string>>(new Set());
+  const [pickerLoading,     setPickerLoading]     = useState(false);
+
   // ── Session storage ───────────────────────────────────────────────────────
   useEffect(() => {
     const pa      = sessionStorage.getItem("pathAnalysis_loadedProjects");
@@ -319,9 +325,22 @@ export default function ReportBuilderPage() {
     const paP: string[] = pa      ? JSON.parse(pa)      : [];
     const trP: string[] = tr      ? JSON.parse(tr)      : [];
     const flt: string[] = filters ? JSON.parse(filters) : [];
-    setLoadedProjects([...new Set([...paP, ...trP])]);
+    const combined = [...new Set([...paP, ...trP])];
+    setLoadedProjects(combined);
     setTreatmentProjects(trP);
     setActiveFilterNames(flt);
+    if (combined.length === 0) {
+      setPickerLoading(true);
+      fetch("/api/projects")
+        .then((r) => r.json())
+        .then((d) => {
+          const names: string[] = (d.projects ?? []).map((p: { name: string }) => p.name).sort();
+          setAvailableProjects(names);
+          setShowProjectPicker(true);
+        })
+        .catch(() => setShowProjectPicker(true))
+        .finally(() => setPickerLoading(false));
+    }
   }, []);
 
   // ── Attribute data fetch (for filter analysis) ────────────────────────────
@@ -686,6 +705,13 @@ export default function ReportBuilderPage() {
     const scrollInCanvas = Math.max(0, scrolled - canvasTop);
     setCurrentPage(Math.floor(scrollInCanvas / PAGE_H));
   }, []);
+
+  // ── Project picker: confirm selection and load ────────────────────────────
+  const loadSelectedProjects = useCallback(() => {
+    const selected = [...pickerSelected];
+    setLoadedProjects(selected);
+    setShowProjectPicker(false);
+  }, [pickerSelected]);
 
   // ── PDF export ────────────────────────────────────────────────────────────
   const handleDownloadPDF = async () => {
@@ -1625,6 +1651,74 @@ export default function ReportBuilderPage() {
         </div>
         </div>
       </div>
+
+      {/* ── Project picker overlay ─────────────────────────────────────── */}
+      {showProjectPicker && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 480, maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.22)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#2d1a4a" }}>Select Projects for Report</div>
+            <div style={{ fontSize: 13, color: "#666", lineHeight: 1.5 }}>
+              No projects were carried over from Path Analysis. Select one or more projects below to populate the report, or go to Path Analysis first to load and filter data.
+            </div>
+
+            {pickerLoading ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#888", fontSize: 14 }}>Loading projects…</div>
+            ) : availableProjects.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#888", fontSize: 14 }}>
+                No projects found on this profile. Add projects in Path Analysis first.
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="rb-btn rb-btn-secondary" style={{ fontSize: 12, padding: "4px 12px" }} onClick={() => setPickerSelected(new Set(availableProjects))}>
+                    Select All
+                  </button>
+                  <button className="rb-btn rb-btn-secondary" style={{ fontSize: 12, padding: "4px 12px" }} onClick={() => setPickerSelected(new Set())}>
+                    Clear
+                  </button>
+                  <span style={{ marginLeft: "auto", fontSize: 12, color: "#aaa", alignSelf: "center" }}>
+                    {pickerSelected.size} / {availableProjects.length} selected
+                  </span>
+                </div>
+                <div style={{ overflowY: "auto", flex: 1, maxHeight: 320, display: "flex", flexDirection: "column", gap: 4, border: "1px solid #e8e0f0", borderRadius: 10, padding: "10px 12px" }}>
+                  {availableProjects.map((name) => {
+                    const checked = pickerSelected.has(name);
+                    return (
+                      <label key={name} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "7px 8px", borderRadius: 8, background: checked ? "#f2e8fc" : "transparent", transition: "background 0.15s" }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setPickerSelected((prev) => {
+                            const next = new Set(prev);
+                            next.has(name) ? next.delete(name) : next.add(name);
+                            return next;
+                          })}
+                          style={{ accentColor: "#a020d0", width: 16, height: 16, flexShrink: 0 }}
+                        />
+                        <span style={{ fontSize: 13, color: "#333" }}>{name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}>
+              <button className="rb-btn rb-btn-secondary" onClick={() => navigate("/analysis/path")} style={{ fontSize: 13 }}>
+                ← Path Analysis
+              </button>
+              <button
+                className="rb-btn"
+                disabled={pickerSelected.size === 0}
+                onClick={loadSelectedProjects}
+                style={{ fontSize: 13 }}
+              >
+                Load {pickerSelected.size > 0 ? `${pickerSelected.size} Project${pickerSelected.size > 1 ? "s" : ""}` : "Projects"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
