@@ -1236,7 +1236,7 @@ export default function ReportBuilderPage() {
         ];
 
         // Count segments that are Low or Medium overall
-        const safePct = distributions
+        const safePct = (distributions && totalSegments > 0)
           ? (((distributions.Overall[1] || 0) + (distributions.Overall[2] || 0)) / totalSegments * 100).toFixed(1)
           : null;
 
