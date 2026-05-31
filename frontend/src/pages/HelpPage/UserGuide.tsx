@@ -5,12 +5,13 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const DOCS_LIST = [
-  { id: "getting-started", title: "1. Getting Started", path: "/docs/user-getting-started.md" },
-  { id: "coding-page", title: "2. Coding Page", path: "/docs/user-coding-page.md" },
-  { id: "map-view", title: "3. Map View & Analysis", path: "/docs/user-map-view.md" },
-  { id: "path-analysis", title: "4. Path Analysis", path: "/docs/user-path-analysis.md" },
-  { id: "treatment-application", title: "5. Treatment Application", path: "/docs/user-treatment-application.md" },
-  { id: "gis-management", title: "6. GIS Layer Management", path: "/docs/user-gis-management.md" },
+  { id: "getting-started",      title: "1. Getting Started",           path: "/docs/user-getting-started.md" },
+  { id: "coding-page",          title: "2. Coding Page",               path: "/docs/user-coding-page.md" },
+  { id: "map-view",             title: "3. Map View & Analysis",       path: "/docs/user-map-view.md" },
+  { id: "path-analysis",        title: "4. Path Analysis",             path: "/docs/user-path-analysis.md" },
+  { id: "finer-filtering",      title: "  ↳ 4.3 Finer Filtering",     path: "/docs/user-finer-filtering.md" },
+  { id: "treatment-application",title: "5. Treatment Application",     path: "/docs/user-treatment-application.md" },
+  { id: "gis-management",       title: "6. GIS Layer Management",      path: "/docs/user-gis-management.md" },
 ];
 
 export default function UserGuide() {

@@ -222,7 +222,8 @@ def segment_details():
 
                 row = attrs_df.iloc[seg_index]
 
-                image_ref = str(row.get("Image Reference", "") or "").strip()
+                # Try both capitalisation variants of the image reference column
+                image_ref = str(row.get("Image reference", "") or row.get("Image Reference", "") or "").strip()
                 image_url = f"/api/projects/{project_name}/images/{image_ref}" if image_ref else None
 
                 contributions = []
@@ -272,6 +273,38 @@ def generate_docx():
         score_data = data.get("scoreData") or {}
         total_segments = data.get("totalSegments", 0)
         top_risk_rows = data.get("topRiskRows", [])
+        oic_name = data.get("oicName", "")
+        purpose = data.get("purpose", "")
+        report_date = data.get("reportDate", "")
+        image_date = data.get("imageDate", "")
+        audit_date = data.get("auditDate", "")
+        recommendations_text = data.get("recommendations", "")
+        score_stats = data.get("scoreStats") or {}
+        attribute_frequency = data.get("attributeFrequency") or {}
+        project_segment_counts = data.get("projectSegmentCounts") or {}
+        project_meta_map = data.get("projectMeta") or {}
+        active_filter_names = data.get("activeFilterNames") or []
+        all_attribute_rows = data.get("allAttributeRows") or {}
+        report_title = data.get("reportTitle") or "Path Analysis Executive Summary"
+        project_display_names = data.get("projectDisplayNames") or {}
+        section_titles = data.get("sectionTitles") or {}
+        map_image_b64 = data.get("mapImageB64")
+        deep_dive_image_b64 = data.get("deepDiveImageB64")
+        filter_analysis_image_b64 = data.get("filterAnalysisImageB64")
+
+        def disp(name):
+            return project_display_names.get(name, name)
+
+        def sec_title(el_id, default_title):
+            return section_titles.get(el_id, default_title)
+
+        def insert_b64_image(b64_str, width_cm=15.5):
+            import base64
+            try:
+                img_bytes = base64.b64decode(b64_str)
+                doc.add_picture(io.BytesIO(img_bytes), width=Cm(width_cm))
+            except Exception:
+                pass
 
         doc = Document()
 
@@ -303,17 +336,48 @@ def generate_docx():
             el_type = el.get("type")
 
             if el_type == "title":
-                h = doc.add_heading("Path Analysis Executive Summary", level=1)
+                h = doc.add_heading(report_title, level=1)
                 h.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 if selected_projects:
                     p = doc.add_paragraph(f"Projects: {', '.join(selected_projects)}")
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                if oic_name:
+                    p_oic = doc.add_paragraph()
+                    p_oic.add_run("OIC In-charge: ").bold = True
+                    p_oic.add_run(oic_name)
+                if purpose:
+                    p_pur = doc.add_paragraph()
+                    p_pur.add_run("Purpose: ").bold = True
+                    p_pur.add_run(purpose)
+
+                def fmt_iso_date(iso_str):
+                    if not iso_str:
+                        return ""
+                    try:
+                        from datetime import datetime as _dt
+                        return _dt.fromisoformat(iso_str).strftime("%d %B %Y")
+                    except Exception:
+                        return iso_str
+
+                if report_date:
+                    p_rd = doc.add_paragraph()
+                    p_rd.add_run("Report Date: ").bold = True
+                    p_rd.add_run(fmt_iso_date(report_date))
+                if image_date:
+                    p_id = doc.add_paragraph()
+                    p_id.add_run("Image Date: ").bold = True
+                    p_id.add_run(fmt_iso_date(image_date))
+                if audit_date:
+                    p_ad = doc.add_paragraph()
+                    p_ad.add_run("Audit Date: ").bold = True
+                    p_ad.add_run(fmt_iso_date(audit_date))
+
                 p_date = doc.add_paragraph(f"Generated: {date.today().strftime('%d %B %Y')}")
                 p_date.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 doc.add_paragraph()
 
             elif el_type == "summary":
-                doc.add_heading("Summary", level=2)
+                doc.add_heading(sec_title(el.get("id",""), "Summary"), level=2)
                 p1 = doc.add_paragraph()
                 p1.add_run("Projects Analyzed: ").bold = True
                 p1.add_run(str(len(selected_projects)))
@@ -323,7 +387,7 @@ def generate_docx():
                 doc.add_paragraph()
 
             elif el_type == "riskBands":
-                doc.add_heading("Risk Band Distribution", level=2)
+                doc.add_heading(sec_title(el.get("id",""), "Risk Band Distribution"), level=2)
                 if score_data:
                     for crash_key, crash_label in CRASH_TYPE_LABELS.items():
                         dist = score_data.get(crash_key, {})
@@ -354,35 +418,293 @@ def generate_docx():
                     doc.add_paragraph()
 
             elif el_type == "map":
-                doc.add_heading("Map View", level=2)
-                p = doc.add_paragraph(
-                    "[Insert map screenshot here — use the map view from the Path Analysis page]"
-                )
-                p.runs[0].italic = True
-                p.runs[0].font.color.rgb = DocxRGB(0x88, 0x88, 0x88)
+                doc.add_heading(sec_title(el.get("id",""), "Map View"), level=2)
+                if map_image_b64:
+                    insert_b64_image(map_image_b64)
+                else:
+                    p = doc.add_paragraph("[Map image not available — export again from the Report Builder]")
+                    p.runs[0].italic = True
+                    p.runs[0].font.color.rgb = DocxRGB(0x88, 0x88, 0x88)
                 doc.add_paragraph()
 
             elif el_type == "topRisk":
-                doc.add_heading("Top Risk Segments", level=2)
+                doc.add_heading(sec_title(el.get("id",""), "Top Risk Stretches"), level=2)
                 if top_risk_rows:
-                    table = doc.add_table(rows=1, cols=7)
+                    treatment_names_map = data.get("treatmentNames", {})
+                    table = doc.add_table(rows=1, cols=9)
                     table.style = "Table Grid"
                     hdr = table.rows[0].cells
-                    for i, h in enumerate(["#", "Project", "Segment", "VB", "BB", "SB", "BP"]):
+                    for i, h in enumerate(["#", "Project", "Seg", "Score", "VB", "BB", "SB", "BP", "Applied Treatments"]):
                         hdr[i].text = h
                     BAND_LABELS_SHORT = {1: "Low", 2: "Med", 3: "High", 4: "Extreme"}
                     for rank, row in enumerate(top_risk_rows, start=1):
                         cells = table.add_row().cells
                         cells[0].text = str(rank)
-                        cells[1].text = str(row.get("_project", ""))
+                        cells[1].text = disp(str(row.get("_project", "")))
                         cells[2].text = str(row.get("_segIndex", ""))
-                        cells[3].text = BAND_LABELS_SHORT.get(row.get("VB Band", 0), "—")
-                        cells[4].text = BAND_LABELS_SHORT.get(row.get("BB Band", 0), "—")
-                        cells[5].text = BAND_LABELS_SHORT.get(row.get("SB Band", 0), "—")
-                        cells[6].text = BAND_LABELS_SHORT.get(row.get("BP Band", 0), "—")
+                        max_score = row.get("_maxScore", 0)
+                        cells[3].text = f"{float(max_score):.1f}" if max_score else "—"
+                        cells[4].text = BAND_LABELS_SHORT.get(row.get("VB Band", 0), "—")
+                        cells[5].text = BAND_LABELS_SHORT.get(row.get("BB Band", 0), "—")
+                        cells[6].text = BAND_LABELS_SHORT.get(row.get("SB Band", 0), "—")
+                        cells[7].text = BAND_LABELS_SHORT.get(row.get("BP Band", 0), "—")
+                        applied = row.get("_treatments", [])
+                        if applied:
+                            treatment_lines = []
+                            for t_id in applied:
+                                t_name = treatment_names_map.get(
+                                    str(t_id),
+                                    treatment_names_map.get(int(t_id) if str(t_id).isdigit() else t_id, f"Treatment {t_id}")
+                                )
+                                treatment_lines.append(f"{t_id}. {t_name}")
+                            cells[8].text = "\n".join(treatment_lines)
+                        else:
+                            cells[8].text = "None"
                     doc.add_paragraph()
                 else:
                     doc.add_paragraph("No segment score data available.")
+                    doc.add_paragraph()
+
+            elif el_type == "treatmentSummary":
+                treatment_summaries = data.get("treatmentSummaries", [])
+                treatment_names = data.get("treatmentNames", {})
+
+                doc.add_heading(sec_title(el.get("id",""), "Treatment Summary"), level=2)
+
+                if not treatment_summaries:
+                    doc.add_paragraph("No treatment data available.")
+                    doc.add_paragraph()
+                else:
+                    for summary in treatment_summaries:
+                        project_name = summary.get("project", "Unknown")
+                        treated_segs = summary.get("treatedSegments", 0)
+                        treatment_counts = summary.get("treatmentCounts", {})
+
+                        doc.add_heading(disp(project_name), level=3)
+
+                        p = doc.add_paragraph()
+                        p.add_run("Treated Segments: ").bold = True
+                        p.add_run(str(treated_segs))
+
+                        if treatment_counts:
+                            tbl = doc.add_table(rows=1, cols=3)
+                            tbl.style = "Table Grid"
+                            hdr = tbl.rows[0].cells
+                            hdr[0].text = "ID"
+                            hdr[1].text = "Treatment"
+                            hdr[2].text = "Segments Applied"
+
+                            sorted_treatments = sorted(
+                                treatment_counts.items(),
+                                key=lambda x: -int(x[1])
+                            )
+                            for t_id_str, count in sorted_treatments:
+                                t_name = treatment_names.get(
+                                    t_id_str,
+                                    treatment_names.get(int(t_id_str) if str(t_id_str).isdigit() else t_id_str, f"Treatment {t_id_str}")
+                                )
+                                row_cells = tbl.add_row().cells
+                                row_cells[0].text = str(t_id_str)
+                                row_cells[1].text = str(t_name)
+                                row_cells[2].text = str(count)
+                            doc.add_paragraph()
+                        else:
+                            doc.add_paragraph("No treatments applied yet.")
+                            doc.add_paragraph()
+
+            elif el_type == "projectDetails":
+                doc.add_heading(sec_title(el.get("id",""), "Project Details"), level=2)
+                if selected_projects:
+                    for proj_name in selected_projects:
+                        doc.add_heading(disp(proj_name), level=3)
+                        meta = project_meta_map.get(proj_name, {})
+                        seg_count = project_segment_counts.get(proj_name, 0)
+
+                        def add_detail_row(label, value):
+                            p = doc.add_paragraph()
+                            p.add_run(f"{label}: ").bold = True
+                            p.add_run(str(value))
+
+                        add_detail_row("Segments", seg_count)
+                        length_km = meta.get("lengthKm")
+                        if length_km is not None:
+                            add_detail_row("Length", f"{float(length_km):.1f} km")
+
+                        def fmt_date(iso_str):
+                            if not iso_str:
+                                return "—"
+                            try:
+                                from datetime import datetime
+                                dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+                                return dt.strftime("%-d %b %Y") if hasattr(dt, 'strftime') else str(iso_str)
+                            except Exception:
+                                return str(iso_str)
+
+                        add_detail_row("Survey",   fmt_date(meta.get("dateCreated")))
+                        add_detail_row("Analysis", fmt_date(meta.get("lastUpdated")))
+                    doc.add_paragraph()
+                else:
+                    doc.add_paragraph("No project data available.")
+                    doc.add_paragraph()
+
+            elif el_type == "riskStats":
+                doc.add_heading(sec_title(el.get("id",""), "Risk Score Statistics"), level=2)
+                if score_stats:
+                    tbl = doc.add_table(rows=1, cols=4)
+                    tbl.style = "Table Grid"
+                    hdr = tbl.rows[0].cells
+                    for i, h in enumerate(["Crash Type", "Min Score", "Max Score", "Avg Score"]):
+                        hdr[i].text = h
+                    crash_labels = {"Overall": "Overall Risk", "VB": "Vehicle–Bicycle",
+                                    "BB": "Bicycle–Bicycle", "SB": "Single-Bicycle", "BP": "Bicycle–Pedestrian"}
+                    for ct_key, ct_label in crash_labels.items():
+                        stats = score_stats.get(ct_key, {})
+                        row_cells = tbl.add_row().cells
+                        row_cells[0].text = ct_label
+                        row_cells[1].text = str(stats.get("min", "—"))
+                        row_cells[2].text = str(stats.get("max", "—"))
+                        row_cells[3].text = str(stats.get("avg", "—"))
+                    doc.add_paragraph()
+                else:
+                    doc.add_paragraph("No score statistics available.")
+                    doc.add_paragraph()
+
+            elif el_type == "topAttributes":
+                doc.add_heading(sec_title(el.get("id",""), "Top Risk Factors"), level=2)
+                doc.add_paragraph("Most frequently contributing risk attributes among top-risk segments:")
+                if attribute_frequency:
+                    tbl = doc.add_table(rows=1, cols=2)
+                    tbl.style = "Table Grid"
+                    hdr = tbl.rows[0].cells
+                    hdr[0].text = "Risk Factor"
+                    hdr[1].text = "Segments Affected"
+                    for attr_name, count in sorted(attribute_frequency.items(), key=lambda x: -int(x[1])):
+                        row_cells = tbl.add_row().cells
+                        row_cells[0].text = str(attr_name)
+                        row_cells[1].text = str(count)
+                    doc.add_paragraph()
+                else:
+                    doc.add_paragraph("No attribute frequency data available.")
+                    doc.add_paragraph()
+
+            elif el_type == "recommendations":
+                doc.add_heading(sec_title(el.get("id",""), "Recommendations"), level=2)
+                if recommendations_text and recommendations_text.strip():
+                    for line in recommendations_text.strip().split("\n"):
+                        doc.add_paragraph(line if line.strip() else "")
+                else:
+                    p = doc.add_paragraph("[No recommendations entered]")
+                    p.runs[0].italic = True
+                    p.runs[0].font.color.rgb = DocxRGB(0xAA, 0xAA, 0xAA)
+                doc.add_paragraph()
+
+            elif el_type == "methodology":
+                doc.add_heading(sec_title(el.get("id",""), "Methodology"), level=2)
+                doc.add_heading("CycleRAP v2 — Cycling Road Assessment Programme", level=3)
+                methodology_body = (
+                    "This report uses the CycleRAP (Cycling Road Assessment Programme) methodology to assess "
+                    "the safety of cycling infrastructure. Each segment is evaluated against a set of risk "
+                    "attributes covering facility design, surface quality, hazards, intersections, and usage "
+                    "patterns. A risk multiplier is computed for each attribute based on its coded value, and "
+                    "the combined score determines the segment's risk band (Low / Medium / High / Extreme) for "
+                    "four crash types: Vehicle–Bicycle (VB), Bicycle–Bicycle (BB), Single-Bicycle (SB), and "
+                    "Bicycle–Pedestrian (BP). Higher scores and bands indicate greater risk exposure and a "
+                    "greater need for intervention."
+                )
+                doc.add_paragraph(methodology_body)
+                doc.add_paragraph()
+
+            elif el_type == "segmentGallery":
+                doc.add_heading(sec_title(el.get("id",""), "Segment Image Gallery"), level=2)
+                doc.add_paragraph(
+                    "[Segment images are shown in the PDF export. In the Word document, please insert "
+                    "segment images manually from the Path Analysis page or Image Gallery export.]"
+                ).runs[0].italic = True
+                doc.add_paragraph()
+
+            elif el_type == "deepDive":
+                doc.add_heading(sec_title(el.get("id",""), "Deep-Dive Risk Analytics"), level=2)
+
+                if deep_dive_image_b64:
+                    insert_b64_image(deep_dive_image_b64)
+                    doc.add_paragraph()
+
+                # Overall risk distribution table
+                doc.add_heading("Overall Risk Distribution", level=3)
+                overall_dist = (score_data.get("Overall") or {}) if score_data else {}
+                BAND_NAMES = {1: "Low", 2: "Medium", 3: "High", 4: "Extreme"}
+                if overall_dist:
+                    total_segs = sum(int(v) for v in overall_dist.values())
+                    tbl = doc.add_table(rows=1, cols=3)
+                    tbl.style = "Table Grid"
+                    hdr = tbl.rows[0].cells
+                    hdr[0].text = "Risk Band"
+                    hdr[1].text = "Segments"
+                    hdr[2].text = "Percentage"
+                    for band_num in [1, 2, 3, 4]:
+                        count = int(overall_dist.get(band_num, overall_dist.get(str(band_num), 0)))
+                        pct = f"{count / total_segs * 100:.1f}%" if total_segs > 0 else "—"
+                        row_cells = tbl.add_row().cells
+                        row_cells[0].text = BAND_NAMES.get(band_num, str(band_num))
+                        row_cells[1].text = str(count)
+                        row_cells[2].text = pct
+                else:
+                    doc.add_paragraph("No score data available.").runs[0].italic = True
+                doc.add_paragraph()
+
+                # Top contributing attributes table
+                doc.add_heading("Top Contributing Attributes Across Project", level=3)
+                if attribute_frequency:
+                    tbl2 = doc.add_table(rows=1, cols=2)
+                    tbl2.style = "Table Grid"
+                    hdr2 = tbl2.rows[0].cells
+                    hdr2[0].text = "Attribute"
+                    hdr2[1].text = "Segments Affected"
+                    for attr_name, count in sorted(attribute_frequency.items(), key=lambda x: -int(x[1])):
+                        row_cells = tbl2.add_row().cells
+                        row_cells[0].text = str(attr_name)
+                        row_cells[1].text = str(count)
+                else:
+                    doc.add_paragraph("No attribute frequency data available.").runs[0].italic = True
+                doc.add_paragraph()
+
+            elif el_type == "filterAnalysis":
+                doc.add_heading(sec_title(el.get("id",""), "Filter Analysis"), level=2)
+
+                if filter_analysis_image_b64:
+                    insert_b64_image(filter_analysis_image_b64)
+                    doc.add_paragraph()
+
+                if not active_filter_names:
+                    doc.add_paragraph("No active filters were applied in Path Analysis.").runs[0].italic = True
+                    doc.add_paragraph()
+                else:
+                    # Combine all attribute rows across projects
+                    all_rows_combined = []
+                    for proj_rows in all_attribute_rows.values():
+                        all_rows_combined.extend(proj_rows)
+
+                    for filter_name in active_filter_names:
+                        doc.add_heading(filter_name, level=3)
+                        value_counts = {}
+                        for row_data in all_rows_combined:
+                            val = row_data.get(filter_name)
+                            if val is not None and str(val).strip() != "":
+                                key = str(val)
+                                value_counts[key] = value_counts.get(key, 0) + 1
+
+                        if not value_counts:
+                            doc.add_paragraph("No data for this attribute.").runs[0].italic = True
+                        else:
+                            tbl_f = doc.add_table(rows=1, cols=2)
+                            tbl_f.style = "Table Grid"
+                            hdr_f = tbl_f.rows[0].cells
+                            hdr_f[0].text = "Value"
+                            hdr_f[1].text = "Segments"
+                            for val_key in sorted(value_counts.keys(), key=lambda x: (int(x) if x.lstrip("-").isdigit() else x)):
+                                r_cells = tbl_f.add_row().cells
+                                r_cells[0].text = val_key
+                                r_cells[1].text = str(value_counts[val_key])
                     doc.add_paragraph()
 
         output = io.BytesIO()

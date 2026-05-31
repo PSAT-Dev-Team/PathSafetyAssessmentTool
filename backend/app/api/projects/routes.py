@@ -898,7 +898,7 @@ def _load_gradient_profile_catalog() -> dict[str, dict]:
         _GRADIENT_PROFILE_CATALOG = result
         return result
 
-    for meta_path in sorted(base_dir.glob("*/metadata.json")):
+    for meta_path in sorted(base_dir.rglob("metadata.json")):
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             profile_path = meta_path.parent / "gradient_profile.csv"

@@ -1,10 +1,13 @@
 /* ── Page layout ── */
+/* Negative margin cancels the 24px padding that app-main adds,
+   so the report canvas fills the full available viewport height. */
 .rb-page {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: calc(100vh - 48px); /* 24px top + 24px bottom of app-main padding */
   background: #e0e0e0;
   overflow: hidden;
+  margin: -24px; /* pull edge-to-edge inside app-main */
 }
 
 /* ── Toolbar ── */
@@ -16,8 +19,29 @@
   background: #fff;
   border-bottom: 1px solid #ddd;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-  flex-wrap: wrap;
   flex-shrink: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+/* ── Sections toggle panel ── */
+.rb-sections-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px 18px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: #faf8fd;
+  border-bottom: 1px solid #e0d8f0;
+  max-height: 130px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.rb-btn-sections-active {
+  background: #f0e4f8;
+  border-color: #a020d0;
+  color: #a020d0;
 }
 
 .rb-toggle-group {
@@ -52,6 +76,22 @@
 .rb-toggle.rb-toggle-on {
   background: #f0e4f8;
   border-color: #a020d0;
+  color: #a020d0;
+}
+
+/* ── Report Sections checklist items ── */
+.rb-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #444;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.rb-checklist-item:hover {
   color: #a020d0;
 }
 

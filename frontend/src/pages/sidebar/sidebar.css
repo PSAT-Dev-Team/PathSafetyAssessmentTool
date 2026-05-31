@@ -164,6 +164,9 @@
   padding: 10px 12px;
   border-top: 1px solid var(--chakra-colors-border-subtle);
   background: var(--chakra-colors-bg);
+  max-height: calc(100vh - 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .psat-checkbox-label {
