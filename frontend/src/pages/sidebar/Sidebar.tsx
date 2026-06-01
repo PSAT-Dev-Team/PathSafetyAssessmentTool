@@ -51,6 +51,7 @@ export default function Sidebar() {
   const { activeProfile, logout } = useProfile();
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [treatmentExitDialogOpen, setTreatmentExitDialogOpen] = useState(false);
+  const hasSavedReport = useMemo(() => { try { return !!localStorage.getItem("psat_report_layout"); } catch { return false; } }, []);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -474,8 +475,13 @@ export default function Sidebar() {
                 size="sm"
                 width="100%"
               >
-                📄 Open Report Builder
+                {hasSavedReport ? "📄 Continue Report" : "📄 Open Report Builder"}
               </Button>
+              {hasSavedReport && (
+                <div style={{ fontSize: 11, color: "#b060e0", textAlign: "center", lineHeight: 1.4 }}>
+                  Your saved report layout will be restored
+                </div>
+              )}
             </div>
           )}
           {pathname === "/analysis/path" && (
@@ -487,7 +493,7 @@ export default function Sidebar() {
                 size="sm"
                 width="100%"
               >
-                📄 Open Report Builder
+                {hasSavedReport ? "📄 Continue Report" : "📄 Open Report Builder"}
               </Button>
 
               <div className="psat-report-dropdown-container">

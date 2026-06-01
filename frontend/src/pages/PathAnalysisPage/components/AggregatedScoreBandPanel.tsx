@@ -83,22 +83,10 @@ export function AggregatedScoreBandPanel({
         if (sbBand >= 1 && sbBand <= 4) distributions.SB[sbBand]++;
         if (bpBand >= 1 && bpBand <= 4) distributions.BP[bpBand]++;
 
-        // For Overall: Calculate from the MAX of the 4 crash type scores
-        // This matches the logic in PathAnalysisMapView
-        const vbScore = row["VB"] || 0;
-        const bbScore = row["BB"] || 0;
-        const sbScore = row["SB"] || 0;
-        const bpScore = row["BP"] || 0;
-        const maxScore = Math.max(vbScore, bbScore, sbScore, bpScore);
-
-        // Bin the score using the same thresholds as PathAnalysisMapView
-        let overallBand = 1; // Default to Low
-        if (maxScore < 10) overallBand = 1; // Low
-        else if (maxScore <= 25) overallBand = 2; // Medium
-        else if (maxScore <= 60) overallBand = 3; // High
-        else overallBand = 4; // Extreme
-
-        distributions.Overall[overallBand]++;
+        // Overall band = max of the four individual bands (matches backend logic)
+        const overallBand = row["Overall Risk Level Band"] ??
+          Math.max(vbBand || 0, bbBand || 0, sbBand || 0, bpBand || 0);
+        if (overallBand >= 1 && overallBand <= 4) distributions.Overall[overallBand]++;
       });
 
       return distributions;

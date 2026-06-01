@@ -134,6 +134,12 @@ export default function PathAnalysisPage() {
   }, [activeFilters, loadedProjects, hiddenProjects]);
 
   useEffect(() => {
+    if (chartData.categoryStatus.length > 0) {
+      sessionStorage.setItem(SESSION_KEY_PREFIX + "categoryStatus", JSON.stringify(chartData.categoryStatus));
+    }
+  }, [chartData.categoryStatus]);
+
+  useEffect(() => {
     setHiddenProjects((prev) => prev.filter((projectName) => loadedProjects.includes(projectName)));
   }, [loadedProjects]);
 

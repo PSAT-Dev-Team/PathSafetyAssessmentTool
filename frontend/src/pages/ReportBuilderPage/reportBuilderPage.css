@@ -1,10 +1,13 @@
 /* ── Page layout ── */
+/* Negative margin cancels the 24px padding that app-main adds,
+   so the report canvas fills the full available viewport height. */
 .rb-page {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: calc(100vh - 48px); /* 24px top + 24px bottom of app-main padding */
   background: #e0e0e0;
   overflow: hidden;
+  margin: -24px; /* pull edge-to-edge inside app-main */
 }
 
 /* ── Toolbar ── */

@@ -222,7 +222,8 @@ def segment_details():
 
                 row = attrs_df.iloc[seg_index]
 
-                image_ref = str(row.get("Image Reference", "") or "").strip()
+                # Try both capitalisation variants of the image reference column
+                image_ref = str(row.get("Image reference", "") or row.get("Image Reference", "") or "").strip()
                 image_url = f"/api/projects/{project_name}/images/{image_ref}" if image_ref else None
 
                 contributions = []

@@ -37,21 +37,21 @@ PSAT calculates four independent risk scores per segment:
 
 #### Risk Bands for BB, BP, SB
 
-| Band | Label | Score Range | Map Colour |
-|---|---|---|---|
-| 1 | Low | < 5 | 🟢 Green |
-| 2 | Medium | 5 – 10 | 🟡 Yellow |
-| 3 | High | 10 – 20 | 🟠 Orange |
-| 4 | Extreme | > 20 | 🔴 Red |
+| Band | Label | Score Range | Map Colour | Hex |
+|---|---|---|---|---|
+| 1 | Low | < 5 | 🟢 Green | `#87C424` |
+| 2 | Medium | 5 – 10 | 🟡 Yellow | `#FFCC1A` |
+| 3 | High | 10 – 20 | 🟠 Orange | `#FF5B1A` |
+| 4 | Extreme | > 20 | 🟣 Purple | `#CD1AFF` |
 
 #### Risk Bands for VB (Vehicle–Bicyclist)
 
-| Band | Label | Score Range | Map Colour |
-|---|---|---|---|
-| 1 | Low | < 10 | 🟢 Green |
-| 2 | Medium | 10 – 25 | 🟡 Yellow |
-| 3 | High | 25 – 60 | 🟠 Orange |
-| 4 | Extreme | > 60 | 🔴 Red |
+| Band | Label | Score Range | Map Colour | Hex |
+|---|---|---|---|---|
+| 1 | Low | < 10 | 🟢 Green | `#87C424` |
+| 2 | Medium | 10 – 25 | 🟡 Yellow | `#FFCC1A` |
+| 3 | High | 25 – 60 | 🟠 Orange | `#FF5B1A` |
+| 4 | Extreme | > 60 | 🟣 Purple | `#CD1AFF` |
 
 > **Overall Risk Level Band** = the **highest** band across BB, BP, SB, and VB for that segment. A single Extreme sub-score makes the overall band Extreme regardless of the others.
 
