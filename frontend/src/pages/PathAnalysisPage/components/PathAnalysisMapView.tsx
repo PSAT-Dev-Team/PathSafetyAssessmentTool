@@ -939,6 +939,13 @@ export default function AttributeAnalysisMapView({
     return () => { aborted = true; };
   }, [selectedProjects, projectColors, refreshTrigger]);
 
+  // O(1) lookup of a project's index in projectsData by name (avoids per-cell findIndex)
+  const projectIndexByName = useMemo(() => {
+    const map: Record<string, number> = {};
+    projectsData.forEach((p, i) => { map[p.projectName] = i; });
+    return map;
+  }, [projectsData]);
+
   // Helper function to get column value as string
   function getColumnValue(point: any, columnKey: string): string {
     if (columnKey === "Project") return point.projectName;
@@ -946,12 +953,12 @@ export default function AttributeAnalysisMapView({
     if (columnKey === "Image Reference") return point.f.properties?.["Image Reference"] ?? "-";
     if (columnKey === "Coordinates") return `${point.latlng[0].toFixed(6)}, ${point.latlng[1].toFixed(6)}`;
     if (columnKey === "Overall Risk Score") {
-      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
+      const projectDataIndex = projectIndexByName[point.projectName] ?? -1;
       const score = getOverallRiskScore(projectDataIndex, point.idx);
       return score.toFixed(2);
     }
     if (columnKey === "Overall Risk Level") {
-      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
+      const projectDataIndex = projectIndexByName[point.projectName] ?? -1;
       if (projectDataIndex < 0 || !projectsData[projectDataIndex].scores) {
         return "Low";
       }
@@ -1106,6 +1113,12 @@ export default function AttributeAnalysisMapView({
       return primaryFocusAttribute;
     }
 
+    // When multiple filters are active, preserve Level 2 coloring to avoid
+    // forcing Not Present rows into child-level "Not Selected" greys.
+    if (activeFilters.length > 1) {
+      return primaryFocusAttribute;
+    }
+
     const subcatConfig = SUBCATEGORY_MAP[primaryFocusAttribute];
     if (!subcatConfig || visibleSegments.length === 0) {
       return primaryFocusAttribute;
@@ -1119,14 +1132,11 @@ export default function AttributeAnalysisMapView({
       }
     });
 
-    const enabledParentCategories = new Set(
-      Object.keys(subcatConfig.parentCategories).filter(
-        (parentCategory) => categoryToggles[primaryFocusAttribute]?.[parentCategory] !== false,
-      ),
-    );
-
+    // Determine remaining Level-2 categories from the real visible values and current toggles,
+    // rather than only SUBCATEGORY_MAP keys. This keeps legacy/non-mapped values from
+    // incorrectly collapsing focus to Level 3.
     const remainingParentCategories = Array.from(visibleParentCategories).filter(
-      (parentCategory) => enabledParentCategories.has(parentCategory),
+      (parentCategory) => categoryToggles[primaryFocusAttribute]?.[parentCategory] !== false,
     );
 
     if (remainingParentCategories.length !== 1) {
@@ -1150,7 +1160,7 @@ export default function AttributeAnalysisMapView({
     });
 
     return hasChildValues ? subcatConfig.childAttr : primaryFocusAttribute;
-  }, [categoryToggles, getFocusedAttributeValue, primaryFocusAttribute, visibleSegments]);
+  }, [activeFilters.length, categoryToggles, getFocusedAttributeValue, primaryFocusAttribute, visibleSegments]);
 
   // Generate colors for attribute categories based on the effective focus level.
   const attributeCategoryColors = useMemo(() => {
@@ -1177,6 +1187,10 @@ export default function AttributeAnalysisMapView({
         "Traffic Light": "#EA580C",
         "Pillar": "#F59E0B",
         "Bollards": "#CA8A04",
+        "Billboards": "#7C3AED",
+        "Billboard": "#7C3AED",
+        "Sign Poles": "#0284C7",
+        "Sign Pole": "#0284C7",
         "Fence": "#0891B2",
         "Vegetation": "#16A34A",
         "Others": "#6B7280",
@@ -2528,6 +2542,7 @@ export default function AttributeAnalysisMapView({
                   maxZoom={22}
                   style={{ width: "100%", height: "100%" }}
                   scrollWheelZoom
+                  preferCanvas={true}
                 >
                   <MapCursorController
                     mode={(isDeleteMode || isPolygonMode) ? 'delete' : (isPointAddMode || isPolygonAddMode) ? 'add' : 'default'}
@@ -2556,7 +2571,7 @@ export default function AttributeAnalysisMapView({
 
                   {/* Render all points in a dedicated pane above any overlay layers */}
                   <Pane name="segmentsPane" style={{ zIndex: 450 }}>
-                    {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
+                    {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }) => {
                       const radius = 5;
                       let label = `${projectName} - #${idx + 1}`;
                       if (f.properties?.["Image Reference"]) {
@@ -2568,7 +2583,7 @@ export default function AttributeAnalysisMapView({
 
                       return (
                         <CircleMarker
-                          key={`${projectName}-${idx}-${globalIdx}`}
+                          key={`${projectName}-${idx}`}
                           center={latlng}
                           radius={radius}
                           pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}

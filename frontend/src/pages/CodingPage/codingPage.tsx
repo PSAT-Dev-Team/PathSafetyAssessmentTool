@@ -2426,7 +2426,7 @@ export default function CodingPage() {
         >
           <Box flex="1" minH={0} display="flex" flexDirection="column">
             <AttributesPanel
-              row={editedRow}
+              row={currentAttr}
               originalRow={originalCurrentAttr}
               mappings={attrMappings}
               panelHeight={undefined} // Let it fill the parent
