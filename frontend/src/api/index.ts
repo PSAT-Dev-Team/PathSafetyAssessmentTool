@@ -756,6 +756,27 @@ export async function calculateScore(project: string): Promise<CalculateScoreRes
 }
 
 /**
+ * Fetch previously-calculated cycleRAP scores for the entire project.
+ *
+ * This is a read-only GET that returns the persisted results WITHOUT
+ * recomputing or writing to disk (unlike calculateScore's POST /score).
+ * Use this for read paths like Path Analysis; fall back to calculateScore
+ * only when no persisted results exist yet.
+ *
+ * @param project - Project name
+ * @returns Persisted score results (result_rows may be empty if never scored)
+ */
+export async function fetchProjectResults(project: string): Promise<CalculateScoreResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/results`, {
+    method: "GET",
+  });
+  if (!res.ok) {
+    throw new Error(await readError(res));
+  }
+  return (await res.json()) as CalculateScoreResult;
+}
+
+/**
  * Calculate cycleRAP scores for a single row
  *
  * @param project - Project name

@@ -14,7 +14,7 @@ import "leaflet/dist/leaflet.css";
 import L, { divIcon } from "leaflet";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
-import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, downloadFilteredImages, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
+import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchProjectResults, downloadFilteredImages, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
 
 const SAFETY_FOCUS_ATTRIBUTES = new Set(["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"]);
 type GradeBucket = {
@@ -904,12 +904,23 @@ export default function AttributeAnalysisMapView({
             fetchProjectAttributes(projectName),
           ]);
 
-          // Fetch scores (optional - if fails, continue with empty scores)
+          // Fetch scores (optional - if fails, continue with empty scores).
+          // Prefer the read-only GET /results (no recompute, no disk write).
+          // Only fall back to POST /score (which computes + persists) when the
+          // project has never been scored yet.
           let scores: Record<string, any>[] = [];
           try {
-            const scoresResponse = await calculateScore(projectName);
-            scores = scoresResponse.result_rows || [];
+            const resultsResponse = await fetchProjectResults(projectName);
+            scores = resultsResponse.result_rows || [];
           } catch (e) {
+          }
+          // Only compute+persist (the expensive POST) if no cached results exist.
+          if (scores.length === 0) {
+            try {
+              const scoresResponse = await calculateScore(projectName);
+              scores = scoresResponse.result_rows || [];
+            } catch (e) {
+            }
           }
 
           return {

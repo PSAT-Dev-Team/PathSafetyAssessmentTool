@@ -12,8 +12,9 @@ import {
   Dialog,
   Portal,
   CloseButton,
+  Menu,
 } from "@chakra-ui/react";
-import { LuCheck, LuCopy, LuImage } from "react-icons/lu";
+import { LuCheck, LuCopy, LuImage, LuChevronDown } from "react-icons/lu";
 import { Switch } from "../../components/ui/switch";
 import { toaster } from "../../components/ui/toaster";
 
@@ -679,18 +680,6 @@ export default function TreatmentDetailPage() {
     [currentPage, len]
   );
 
-  const copyTreatmentIds = useMemo(() => {
-    if (selectedTreatments.size > 0) {
-      return Array.from(selectedTreatments);
-    }
-
-    if (accordionView === "segment") {
-      return treatmentState[currentIndex]?.treatment_ids ?? [];
-    }
-
-    return [];
-  }, [accordionView, currentIndex, selectedTreatments, treatmentState]);
-
   const handleContributorClick = useCallback((name: string) => {
     const targetGroup = resolveContributorTabGroup(name);
     if (targetGroup) {
@@ -1299,9 +1288,9 @@ export default function TreatmentDetailPage() {
     return buildProjectImageUrl(currentCtx.name, imgRef);
   }, [currentCtx, imgRef]);
 
-  const handleCopyTreatmentSelection = useCallback(async () => {
-    if (copyTreatmentIds.length === 0) return;
-    const message = buildTreatmentCopyMessage(copyTreatmentIds);
+  const handleCopyTreatmentPrompt = useCallback(async (ids: number[]) => {
+    if (ids.length === 0) return;
+    const message = buildTreatmentCopyMessage(ids);
     setCopyButtonState("copying");
 
     try {
@@ -1320,7 +1309,7 @@ export default function TreatmentDetailPage() {
         type: "error",
       });
     }
-  }, [copyTreatmentIds]);
+  }, []);
 
   const handleCopyCurrentImage = useCallback(async () => {
     if (!currentImageUrl) return;
@@ -1371,6 +1360,9 @@ export default function TreatmentDetailPage() {
         : copyButtonState === "error"
           ? "Copy failed"
           : "Copy prompt";
+
+  const hasApplied = appliedTreatmentIds.length > 0;
+  const hasSelected = selectedTreatments.size > 0;
 
   const imageCopyButtonLabel =
     imageCopyButtonState === "copying"
@@ -1739,22 +1731,41 @@ export default function TreatmentDetailPage() {
               </Flex>
 
               <Flex width="full" gap="2" align="stretch" wrap="wrap">
-                <Button
-                  size="sm"
-                  minW="118px"
-                  variant="outline"
-                  aria-label="Copy treatment prompt"
-                  title="Copy treatment prompt"
-                  disabled={copyTreatmentIds.length === 0}
-                  loading={copyButtonState === "copying"}
-                  gap="1"
-                  onClick={() => {
-                    void handleCopyTreatmentSelection();
-                  }}
-                >
-                  {copyButtonState === "copied" ? <LuCheck /> : <LuCopy />}
-                  <span>{copyButtonLabel}</span>
-                </Button>
+                <Menu.Root positioning={{ placement: "bottom-start", strategy: "fixed" }}>
+                  <Menu.Trigger asChild>
+                    <Button
+                      size="sm"
+                      minW="118px"
+                      variant="outline"
+                      aria-label="Copy treatment prompt"
+                      disabled={!hasApplied && !hasSelected}
+                      loading={copyButtonState === "copying"}
+                      gap="1"
+                    >
+                      {copyButtonState === "copied" ? <LuCheck /> : <LuCopy />}
+                      <span>{copyButtonLabel}</span>
+                      <LuChevronDown />
+                    </Button>
+                  </Menu.Trigger>
+                  <Menu.Positioner>
+                    <Menu.Content zIndex={1500}>
+                      <Menu.Item
+                        value="copy-applied"
+                        disabled={!hasApplied}
+                        onClick={() => { void handleCopyTreatmentPrompt(appliedTreatmentIds); }}
+                      >
+                        Copy Applied
+                      </Menu.Item>
+                      <Menu.Item
+                        value="copy-selected"
+                        disabled={!hasSelected}
+                        onClick={() => { void handleCopyTreatmentPrompt(Array.from(selectedTreatments)); }}
+                      >
+                        Copy Selected
+                      </Menu.Item>
+                    </Menu.Content>
+                  </Menu.Positioner>
+                </Menu.Root>
                 <Button
                   size="sm"
                   minW="108px"
