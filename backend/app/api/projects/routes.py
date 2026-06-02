@@ -383,8 +383,13 @@ def df_to_records(df) -> list:
 _CTX = {"ready": False, "pm": None}
 
 
+def invalidate_ctx() -> None:
+    """Reset the project context so the next request re-initialises for the active profile."""
+    _CTX["ready"] = False
+    _CTX["pm"] = None
 
-def get_ctx(): 
+
+def get_ctx():
     """Lazy init: prepare the old-code dependencies the first time and reuse thereafter."""
     if _CTX["ready"]:
         return _CTX
@@ -399,6 +404,19 @@ def get_ctx():
 
     # CycleRAP resource directory (same as your former src_path/CycleRAP)
     CRI.cycleRAP_interface.initialise(pm.src_path / "CycleRAP")
+
+    # If a profile is active, redirect the project manager to that profile's project root
+    # instead of the legacy ../data directory from config.json.
+    try:
+        from app.services import profile_store as _ps
+        active_id = _ps.get_active_profile_id()
+        if active_id:
+            profile_projects_root = _ps.get_profile_projects_root(active_id)
+            if profile_projects_root.exists():
+                pm.des_path = profile_projects_root
+                pm._discover_projects()
+    except Exception as _exc:
+        print(f"[Context] Could not resolve profile projects root: {_exc}", flush=True)
 
     _CTX.update({"pm": pm, "ready": True})
     return _CTX
