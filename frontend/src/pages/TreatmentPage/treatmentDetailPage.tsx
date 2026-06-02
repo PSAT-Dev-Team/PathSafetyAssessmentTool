@@ -36,7 +36,7 @@ import {
 
 import type { AttributeRow } from "../../api";
 import ImagePanel from "../CodingPage/components/ImagePanel";
-import AttributesPanel from "../CodingPage/components/AttributesPanel";
+import AttributesPanel, { resolveContributorTabGroup } from "../CodingPage/components/AttributesPanel";
 import GeoDataPanel from "../CodingPage/components/GeoDataPanel";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
 import { aggregateTopContributors } from "../../utils/aggregateTopContributors";
@@ -625,6 +625,7 @@ export default function TreatmentDetailPage() {
   const [activeProject, setActiveProject] = useState<string>(() => projectNames[0] ?? "");
   const [attrMappings, setAttrMappings] = useState<Record<string, Record<string, string>>>({});
   const [showPostTreatment, setShowPostTreatment] = useState<boolean>(false);
+  const [activeAttributeGroupTab, setActiveAttributeGroupTab] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Treatment application state
@@ -689,6 +690,13 @@ export default function TreatmentDetailPage() {
 
     return [];
   }, [accordionView, currentIndex, selectedTreatments, treatmentState]);
+
+  const handleContributorClick = useCallback((name: string) => {
+    const targetGroup = resolveContributorTabGroup(name);
+    if (targetGroup) {
+      setActiveAttributeGroupTab(targetGroup);
+    }
+  }, []);
 
   const appliedTreatmentIds = useMemo(() => {
     return treatmentState[currentIndex]?.treatment_ids ?? [];
@@ -1912,6 +1920,7 @@ export default function TreatmentDetailPage() {
                 showPostTreatment && selectedTreatments.size > 0
               }
               projectContributors={projectContributors}
+              onContributorClick={handleContributorClick}
             />
           </Box>
 
@@ -1962,6 +1971,7 @@ export default function TreatmentDetailPage() {
                   showPostTreatment ? changedFieldSources : {}
                 }
                 highlightMessage="Modified by treatment"
+                activeGroupTab={activeAttributeGroupTab}
                 readOnly={true}
               />
             </Box>

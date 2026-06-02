@@ -39,7 +39,7 @@ import { autocodeImage, autocodeGIS, autocodeAllStream } from "../../api";
 
 
 import ImagePanel from "./components/ImagePanel";
-import AttributesPanel from "./components/AttributesPanel";
+import AttributesPanel, { resolveContributorTabGroup } from "./components/AttributesPanel";
 import AttributeOptionsDialog from "./components/AttributeOptionsDialog";
 import GeoDataPanel from "./components/GeoDataPanel";
 import { saveAttributes } from "../../api";
@@ -343,6 +343,7 @@ export default function CodingPage() {
     originalParentCode: string | number | null;
     originalSubCategory: string | null;
   } | null>(null);
+  const [activeAttributeGroupTab, setActiveAttributeGroupTab] = useState<string | null>(null);
 
   // Image preloading state
   const [imagesLoaded, setImagesLoaded] = useState(false);
@@ -373,6 +374,13 @@ export default function CodingPage() {
   const [curvError, setCurvError] = useState<string | null>(null);
   const [isAnalysisSidebarOpen, setIsAnalysisSidebarOpen] = useState(false);
   const [showCurvatureOverlay, setShowCurvatureOverlay] = useState(false);
+
+  const handleContributorClick = useCallback((name: string) => {
+    const targetGroup = resolveContributorTabGroup(name);
+    if (targetGroup) {
+      setActiveAttributeGroupTab(targetGroup);
+    }
+  }, []);
 
   useEffect(() => {
     if (!initialSegment || !currentProjectName || hasInitializedSegmentRef.current) return;
@@ -2363,6 +2371,7 @@ export default function CodingPage() {
             <SegmentScoresCard
               scores={scores[currentIndex] || null}
               projectContributors={projectContributors}
+              onContributorClick={handleContributorClick}
             />
           </Box>
 
@@ -2427,6 +2436,7 @@ export default function CodingPage() {
               changedFields={changedFieldsByRow[currentIndex] || []}
               fieldSources={fieldSourcesByRow[currentIndex] || {}}
               highlightColor="yellow"
+              activeGroupTab={activeAttributeGroupTab}
               onEditOptions={(field) => {
                 const raw = currentAttr?.[field];
                 let currentValue = raw != null ? String(raw) : null;

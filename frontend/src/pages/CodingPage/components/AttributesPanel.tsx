@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { AttributeRow, AttrMappings } from "../../../api";
 import {
   Card,
@@ -55,6 +55,7 @@ type Props = {
   highlightColor?: "green" | "yellow";
   flex?: number | string;
   onEditOptions?: (fieldName: string) => void;
+  activeGroupTab?: string | null;
 };
 
 /** ====== Group ordering (tab order) ====== */
@@ -67,6 +68,12 @@ const GROUP_ORDER = [
 ] as const;
 
 const OPTIONAL_FIELDS_HIDE_WHEN_EMPTY = new Set(["Gradient Status"]);
+
+const normalizeLookupToken = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 
 /** ====== Display fields under each group (keep your original order) ====== */
 const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
@@ -187,6 +194,40 @@ const KEY_ALIASES: Record<string, string> = {
   "Number of lanes – intersecting road": "Number of lanes – intersecting road",
 };
 
+const CONTRIBUTOR_GROUP_INDEX: Record<string, (typeof GROUP_ORDER)[number]> = (() => {
+  const index: Record<string, (typeof GROUP_ORDER)[number]> = {};
+  for (const group of GROUP_ORDER) {
+    for (const displayName of GROUP_RULES[group]) {
+      const realKey = KEY_ALIASES[displayName] ?? displayName;
+      index[normalizeLookupToken(displayName)] = group;
+      index[normalizeLookupToken(realKey)] = group;
+    }
+  }
+  return index;
+})();
+
+export function resolveContributorTabGroup(contributorName: string): string | null {
+  const normalized = normalizeLookupToken(String(contributorName || ""));
+  if (!normalized) {
+    return null;
+  }
+
+  const direct = CONTRIBUTOR_GROUP_INDEX[normalized];
+  if (direct) {
+    return direct;
+  }
+
+  let bestMatch: { group: (typeof GROUP_ORDER)[number]; tokenLength: number } | null = null;
+  for (const [token, group] of Object.entries(CONTRIBUTOR_GROUP_INDEX)) {
+    if (normalized.includes(token) || token.includes(normalized)) {
+      if (!bestMatch || token.length > bestMatch.tokenLength) {
+        bestMatch = { group, tokenLength: token.length };
+      }
+    }
+  }
+  return bestMatch?.group ?? null;
+}
+
 /** ====== Utils ====== */
 function groupEntries(row: AttributeRow) {
   // Build a copy of the row that includes any missing fields defined in GROUP_RULES
@@ -260,6 +301,7 @@ export default function AttributesPanel({
   highlightMessage = "*Highlighted attributes have been modified from the original values",
   highlightColor = "green",
   flex,
+  activeGroupTab,
   projectName, // Passed from parent
   onEditOptions,
 }: Props & { projectName?: string }) {
@@ -321,6 +363,22 @@ export default function AttributesPanel({
   }, [grouped]);
 
   const defaultTab = groupsWithFields[0] ?? "Facility configuration";
+  const [selectedTab, setSelectedTab] = useState(defaultTab);
+
+  useEffect(() => {
+    if (groupsWithFields.length === 0) {
+      return;
+    }
+    if (!groupsWithFields.includes(selectedTab as any)) {
+      setSelectedTab(defaultTab);
+    }
+  }, [groupsWithFields, selectedTab, defaultTab]);
+
+  useEffect(() => {
+    if (activeGroupTab && groupsWithFields.includes(activeGroupTab as any)) {
+      setSelectedTab(activeGroupTab);
+    }
+  }, [activeGroupTab, groupsWithFields]);
 
   // Check if any fields have been changed (for showing the info text)
   const hasChangedFields = changedFieldsSet.size > 0;
@@ -400,7 +458,7 @@ export default function AttributesPanel({
 
       {/* Tabs occupy the body; content area scrolls independently */}
       <Card.Body display="flex" flexDir="column" minH={0} p="0">
-        <Tabs.Root defaultValue={defaultTab}>
+        <Tabs.Root value={selectedTab} onValueChange={(e) => setSelectedTab(e.value)}>
           <Tabs.List
             px="2"
             py="2"
