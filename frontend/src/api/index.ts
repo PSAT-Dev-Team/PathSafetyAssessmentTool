@@ -1370,3 +1370,22 @@ export async function downloadFilteredImages(payload: { projects: Record<string,
 
   return res.blob();
 }
+
+/**
+ * Export filtered segments as a zipped shapefile.
+ * @param payload - Map of project names to list of image references (current filtered view)
+ */
+export async function exportShapefile(payload: { projects: Record<string, string[]> }): Promise<Blob> {
+  const res = await fetch("/api/projects/export-shapefile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorText = await readError(res);
+    throw new Error(errorText || "Shapefile export failed");
+  }
+
+  return res.blob();
+}

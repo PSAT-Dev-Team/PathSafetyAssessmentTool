@@ -14,7 +14,7 @@ import "leaflet/dist/leaflet.css";
 import L, { divIcon } from "leaflet";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
-import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchProjectResults, downloadFilteredImages, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
+import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchProjectResults, downloadFilteredImages, exportShapefile, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
 
 const SAFETY_FOCUS_ATTRIBUTES = new Set(["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"]);
 type GradeBucket = {
@@ -1716,6 +1716,42 @@ export default function AttributeAnalysisMapView({
     }
   };
 
+  // Export filtered segments as a shapefile ZIP
+  const handleDownloadShapefile = async () => {
+    try {
+      const projectImages: Record<string, string[]> = {};
+      sortedData.forEach(point => {
+        const projectName = point.projectName;
+        const imageRef = point.f.properties?.["Image Reference"];
+        if (projectName && imageRef && imageRef !== "-" && imageRef !== "None" && imageRef !== "") {
+          if (!projectImages[projectName]) {
+            projectImages[projectName] = [];
+          }
+          projectImages[projectName].push(imageRef);
+        }
+      });
+
+      if (Object.keys(projectImages).length === 0) {
+        alert("No segments with image references found in the current view.");
+        return;
+      }
+
+      const blob = await exportShapefile({ projects: projectImages });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `shapefile_export_${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+    } catch (e: any) {
+      console.error("Failed to export shapefile", e);
+      alert(`Failed to export shapefile: ${e.message}`);
+    }
+  };
+
   // Calculate category distribution data for the chart
   const categoryDistributionData = useMemo(() => {
     if (!effectiveFocusAttribute) return [];
@@ -2174,6 +2210,14 @@ export default function AttributeAnalysisMapView({
                 onClick={handleDownloadImages}
               >
                 Download Images
+              </Button>
+              <Button
+                colorPalette="green"
+                size="sm"
+                variant="outline"
+                onClick={handleDownloadShapefile}
+              >
+                Download Shapefile
               </Button>
             </HStack>
           )}
