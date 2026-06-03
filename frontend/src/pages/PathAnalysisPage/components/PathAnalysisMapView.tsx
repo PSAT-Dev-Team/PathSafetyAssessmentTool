@@ -323,6 +323,7 @@ export default function AttributeAnalysisMapView({
   onHiddenProjectsChange,
 }: AttributeAnalysisMapViewProps) {
   const navigate = useNavigate();
+  const tableContainerRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<string>("map");
   const [projectsData, setProjectsData] = useState<ProjectData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1622,6 +1623,15 @@ export default function AttributeAnalysisMapView({
     }
   };
 
+  const handleTableProjectJump = (projectName: string) => {
+    const container = tableContainerRef.current;
+    if (!container) return;
+    const row = container.querySelector<HTMLTableRowElement>(`tr[data-project="${CSS.escape(projectName)}"]`);
+    if (row) {
+      row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  };
+
   // CSV helper: escape CSV values with proper quoting
   const escapeCSV = (value: string): string => {
     if (value.includes(",") || value.includes('"') || value.includes("\n")) {
@@ -2642,6 +2652,26 @@ export default function AttributeAnalysisMapView({
         {/* Table Tab Content */}
         <Tabs.Content value="table">
           <Box>
+            {selectedProjects.length > 0 && allPoints.length > 0 && (
+              <Box p="4" borderBottom="1px solid" borderColor="gray.200">
+                <Text fontSize="sm" fontWeight="semibold" mb="2">
+                  Jump to Project:
+                </Text>
+                <Flex gap="2" flexWrap="wrap">
+                  {selectedProjects.map((proj) => (
+                    <Button
+                      key={proj}
+                      size="sm"
+                      colorPalette="blue"
+                      variant="outline"
+                      onClick={() => handleTableProjectJump(proj)}
+                    >
+                      {proj}
+                    </Button>
+                  ))}
+                </Flex>
+              </Box>
+            )}
             {allPoints.length === 0 ? (
               <Box p="6">
                 <Text color="gray.500">No data to display. Please select projects and load them.</Text>
@@ -2650,31 +2680,6 @@ export default function AttributeAnalysisMapView({
               <>
                 {/* Above-table controls */}
                 <Box p="4" borderBottom="1px solid" borderColor="gray.200" bg="gray.50" _dark={{ bg: "gray.700" }}>
-                  {/* Global Search */}
-                  <Flex gap="4" mb="3" align="flex-start">
-                    <Box flex="1" maxW="400px">
-                      <Text fontSize="sm" fontWeight="semibold" mb="1">Global Search:</Text>
-                      <Input
-                        placeholder="Search across all columns..."
-                        value={globalSearch}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGlobalSearch(e.target.value)}
-                        size="sm"
-                      />
-                    </Box>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      mt="6"
-                      onClick={() => {
-                        setGlobalSearch("");
-                        setColumnFilters({});
-                        setSortConfig([]);
-                      }}
-                    >
-                      Clear All
-                    </Button>
-                  </Flex>
-
                   {/* Sort Controls */}
                   {sortConfig.length > 0 && (
                     <Box>
@@ -2700,14 +2705,29 @@ export default function AttributeAnalysisMapView({
                     </Box>
                   )}
 
-                  {/* Filtered count display */}
-                  <Text fontSize="sm" color="gray.600" _dark={{ color: "gray.400" }} mt="3">
-                    Showing {sortedData.length} of {allPoints.length} segments
-                  </Text>
+                  {/* Filtered count + clear */}
+                  <Flex align="center" gap="3" mt="3">
+                    <Text fontSize="sm" color="gray.600" _dark={{ color: "gray.400" }}>
+                      Showing {sortedData.length} of {allPoints.length} segments
+                    </Text>
+                    {(sortConfig.length > 0 || Object.keys(columnFilters).length > 0) && (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => {
+                          setGlobalSearch("");
+                          setColumnFilters({});
+                          setSortConfig([]);
+                        }}
+                      >
+                        Clear All
+                      </Button>
+                    )}
+                  </Flex>
                 </Box>
 
                 {/* Table */}
-                <Box overflowX="auto" overflowY="auto" maxH="650px">
+                <Box ref={tableContainerRef} overflowX="auto" overflowY="auto" maxH="650px">
                   <table
                     style={{
                       width: "100%",
@@ -2776,7 +2796,7 @@ export default function AttributeAnalysisMapView({
                         </tr>
                       ) : (
                         sortedData.map(({ idx, latlng, f, projectName, color, attributes }, globalIdx) => (
-                          <tr key={`${projectName}-${idx}-${globalIdx}`}>
+                          <tr key={`${projectName}-${idx}-${globalIdx}`} data-project={projectName}>
                             {tableColumns.map(col => {
                               const value = getColumnValue(
                                 { idx, latlng, f, projectName, color, attributes },

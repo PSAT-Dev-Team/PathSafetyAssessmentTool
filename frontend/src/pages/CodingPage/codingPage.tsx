@@ -1015,15 +1015,27 @@ export default function CodingPage() {
         try {
           const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
           if (rows) {
+            const prevChanged = projectDataCache[currentProjectName]?.changedFieldsByRow ?? {};
+            const prevSources = projectDataCache[currentProjectName]?.fieldSourcesByRow ?? {};
+            const mergedChanged: Record<number, string[]> = { ...prevChanged };
+            for (const [k, v] of Object.entries(allChangedFieldsByRow)) {
+              const n = Number(k);
+              mergedChanged[n] = [...new Set([...(mergedChanged[n] ?? []), ...(v as string[])])];
+            }
+            const mergedSources: Record<number, Record<string, string>> = { ...prevSources };
+            for (const [k, v] of Object.entries(allSourcesByRow)) {
+              const n = Number(k);
+              mergedSources[n] = { ...(mergedSources[n] ?? {}), ...(v as Record<string, string>) };
+            }
             updateProjectData(currentProjectName, {
               attrs: rows,
-              changedFieldsByRow: allChangedFieldsByRow,
-              fieldSourcesByRow: allSourcesByRow,
+              changedFieldsByRow: mergedChanged,
+              fieldSourcesByRow: mergedSources,
               isDirty: true,
             });
 
             // Save metadata
-            saveAutocodeMetadata(currentProjectName, allChangedFieldsByRow, allSourcesByRow);
+            saveAutocodeMetadata(currentProjectName, mergedChanged, mergedSources);
 
             // Update autocode baseline with new values from all segments
             updateAutocodeBaseline(rows);
@@ -1122,14 +1134,26 @@ export default function CodingPage() {
           // Use updated_attributes returned by the batch call — avoids an extra fetchProjectAttributes round trip
           const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
           if (rows) {
+            const prevChanged = projectDataCache[currentProjectName]?.changedFieldsByRow ?? {};
+            const prevSources = projectDataCache[currentProjectName]?.fieldSourcesByRow ?? {};
+            const mergedChanged: Record<number, string[]> = { ...prevChanged };
+            for (const [k, v] of Object.entries(allChangedFieldsByRow)) {
+              const n = Number(k);
+              mergedChanged[n] = [...new Set([...(mergedChanged[n] ?? []), ...(v as string[])])];
+            }
+            const mergedSources: Record<number, Record<string, string>> = { ...prevSources };
+            for (const [k, v] of Object.entries(allSourcesByRow)) {
+              const n = Number(k);
+              mergedSources[n] = { ...(mergedSources[n] ?? {}), ...(v as Record<string, string>) };
+            }
             updateProjectData(currentProjectName, {
               attrs: rows,
-              changedFieldsByRow: allChangedFieldsByRow,
-              fieldSourcesByRow: allSourcesByRow,
+              changedFieldsByRow: mergedChanged,
+              fieldSourcesByRow: mergedSources,
               isDirty: true,
             });
 
-            saveAutocodeMetadata(currentProjectName, allChangedFieldsByRow, allSourcesByRow);
+            saveAutocodeMetadata(currentProjectName, mergedChanged, mergedSources);
             updateAutocodeBaseline(rows);
 
             const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/score`, {
@@ -1252,15 +1276,27 @@ export default function CodingPage() {
             try {
               const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
               if (rows) {
+                const prevChanged = projectDataCache[projectName]?.changedFieldsByRow ?? {};
+                const prevSources = projectDataCache[projectName]?.fieldSourcesByRow ?? {};
+                const mergedChanged: Record<number, string[]> = { ...prevChanged };
+                for (const [k, v] of Object.entries(projectChangedFieldsByRow)) {
+                  const n = Number(k);
+                  mergedChanged[n] = [...new Set([...(mergedChanged[n] ?? []), ...(v as string[])])];
+                }
+                const mergedSources: Record<number, Record<string, string>> = { ...prevSources };
+                for (const [k, v] of Object.entries(projectSourcesByRow)) {
+                  const n = Number(k);
+                  mergedSources[n] = { ...(mergedSources[n] ?? {}), ...(v as Record<string, string>) };
+                }
                 updateProjectData(projectName, {
                   attrs: rows,
-                  changedFieldsByRow: projectChangedFieldsByRow,
-                  fieldSourcesByRow: projectSourcesByRow,
+                  changedFieldsByRow: mergedChanged,
+                  fieldSourcesByRow: mergedSources,
                   isDirty: true,
                 });
 
                 // Save metadata
-                saveAutocodeMetadata(projectName, projectChangedFieldsByRow, projectSourcesByRow);
+                saveAutocodeMetadata(projectName, mergedChanged, mergedSources);
 
 
                 // Update autocode baseline for this project
