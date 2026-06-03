@@ -2165,7 +2165,7 @@ export default function CodingPage() {
     (valStr: string) => {
       const raw = Number(valStr);
       if (!Number.isFinite(raw)) return;
-      const clamped = Math.min(Math.max(1, len || 1), raw);
+      const clamped = Math.min(Math.max(1, raw), len || 1);
       gotoPage(clamped);
     },
     [gotoPage, len]
@@ -2518,7 +2518,6 @@ export default function CodingPage() {
             maxW="120px"
             min={1}
             max={len || 1}
-            defaultValue={String(currentPage)}
             value={pageInput}
             onValueChange={(e) => setPageInput(e.value)}
           >

@@ -2172,7 +2172,7 @@ class GIS:
 
         # Use the PathAssignmentTool's utility function to get radius and width
         # radius is not used here but returned for potential future use
-        _radius, width = get_radius_and_width_at_point(
+        _radius, total_width = get_radius_and_width_at_point(
             pt,
             start_radius=start_radius,
             max_radius=max_radius,
@@ -2181,10 +2181,16 @@ class GIS:
             base_dir=base_dir
         )
 
-        # Categorize the found width using the same thresholds as PathAssignmentTool
-        if width is None:
+        # The shapefile WIDTH column stores the TOTAL facility width (both directions).
+        # This attribute is "Facility Width per Direction", so convert total -> per
+        # direction by halving before categorizing. (Total width is what the Coding
+        # page box bar displays for visuals; the per-direction value drives the code.)
+        if total_width is None:
             return default_value, None  # Default: Narrow (2), no sub-category
-        elif width > 4:
+        width = total_width / 2.0
+
+        # Categorize the per-direction width using the same thresholds as PathAssignmentTool
+        if width > 4:
             category, subcat = 3, ">4m"
         elif width > 2:
             category = 2
