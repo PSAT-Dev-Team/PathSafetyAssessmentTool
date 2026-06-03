@@ -169,7 +169,9 @@ export default function Home() {
       for (const criterion of sortConfig) {
         let result = 0;
 
-        if (criterion.key === 'last_updated') {
+        if (criterion.key === 'name') {
+          result = a.name.localeCompare(b.name);
+        } else if (criterion.key === 'last_updated') {
           const dateA = new Date(a.last_updated || 0).getTime();
           const dateB = new Date(b.last_updated || 0).getTime();
           result = dateA - dateB;
@@ -427,7 +429,7 @@ export default function Home() {
     };
   };
 
-  const renderHeader = (label: string, key: string, width: number) => {
+  const renderHeader = (label: string, key: string, width?: number) => {
     const meta = getSortMeta(key);
     return (
       <th
@@ -658,7 +660,7 @@ export default function Home() {
             <thead>
               <tr>
                 <th style={{ width: 48 }}></th>
-                <th>Project Name</th>
+                {renderHeader("Project Name", "name")}
                 {renderHeader("Verification Status", "verification_status", 140)}
                 {renderHeader("Distance Verified", "distance_verified", 140)}
                 {renderHeader("Autocode Status", "autocode_status", 140)}

@@ -18,6 +18,12 @@ export default function Home() {
   // Project List
   const [Projectlist, setProjectList] = useState<FileResponse | null>(null);
 
+  // Sort: null = default (last edited), "asc" = A→Z, "desc" = Z→A
+  const [sortDir, setSortDir] = useState<"asc" | "desc" | null>(null);
+
+  const cycleSort = () =>
+    setSortDir((d) => (d === null ? "asc" : d === "asc" ? "desc" : null));
+
   // Filter
   const [nameQuery, setNameQuery] = useState("");
 
@@ -44,10 +50,15 @@ export default function Home() {
   // UseMemo projects
   const projects: ProjectListItem[] = useMemo(() => {
     if (!Projectlist?.projects) return [];
-    return Projectlist.projects
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [Projectlist]);
+    return Projectlist.projects.slice().sort((a, b) => {
+      if (sortDir === "asc") return a.name.localeCompare(b.name);
+      if (sortDir === "desc") return b.name.localeCompare(a.name);
+      // default: most recently edited first
+      const ta = a.last_updated ?? a.date_created ?? "";
+      const tb = b.last_updated ?? b.date_created ?? "";
+      return tb.localeCompare(ta);
+    });
+  }, [Projectlist, sortDir]);
 
   // for Filters
   const filtered = useMemo(() => {
@@ -119,7 +130,17 @@ export default function Home() {
           <thead>
             <tr>
               <th style={{ width: 48 }}></th>
-              <th>Project Name</th>
+              <th
+                style={{ cursor: "pointer", userSelect: "none" }}
+                onClick={cycleSort}
+              >
+                Project Name{" "}
+                {sortDir !== null && (
+                  <span style={{ fontSize: 11, opacity: 0.6 }}>
+                    {sortDir === "asc" ? "▲" : "▼"}
+                  </span>
+                )}
+              </th>
             </tr>
           </thead>
           <tbody>
