@@ -1663,21 +1663,20 @@ class GIS:
         analysis_lines = analysis_details.get("analysis_lines")
         analysis_segments = analysis_details.get("analysis_segments", [])
         if is_sharp_curve and analysis_lines:
-            # Diagnostics and strict shape validation are only needed for visual explainability,
-            # not for high-throughput autocode calls.
-            if include_diagnostics:
-                _, radius_diagnostics = self._calculate_min_radius_from_lines(
-                    analysis_lines,
-                    analysis_point,
-                    collect_radius=collect_radius,
-                    epsilon=1e-6,
-                    return_details=True,
+            _, radius_diagnostics = self._calculate_min_radius_from_lines(
+                analysis_lines,
+                analysis_point,
+                collect_radius=collect_radius,
+                epsilon=1e-6,
+                return_details=True,
+            )
+            if radius_diagnostics is not None:
+                is_sharp_curve = self._supports_sharp_curve_details(
+                    radius_diagnostics,
+                    sharp_turn_threshold=sharp_turn_threshold,
                 )
-                if radius_diagnostics is not None:
-                    is_sharp_curve = self._supports_sharp_curve_details(
-                        radius_diagnostics,
-                        sharp_turn_threshold=sharp_turn_threshold,
-                    )
+            if not include_diagnostics:
+                radius_diagnostics = None
 
         # Once a sharp curve is already confirmed, skip expensive junction/kink checks.
         if is_sharp_curve:

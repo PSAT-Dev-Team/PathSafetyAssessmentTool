@@ -22,7 +22,7 @@ Scripts will be listed here as they are added.
 
 | Script | Purpose |
 |--------|---------|
-| *(none yet)* | — |
+| [summarise_in_folder.py](summarise_in_folder.py) | Rename unsuffixed folders, de-duplicate same-quarter copies, and merge region splits (e.g. `_NE1_1Q2026` + `_NE4_1Q2026` → `_1Q2026`). Set `DRY_RUN = False` to apply. |
 
 ---
 

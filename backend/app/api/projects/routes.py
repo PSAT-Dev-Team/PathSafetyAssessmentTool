@@ -4311,14 +4311,6 @@ def get_curvature_visualization(project_name: str):
 
         # Generate visualization data
         viz_data = _gis.get_curvature_visualization(pt, collect_radius=5.0)
-
-        # Calculate curvature category for display
-        curvature = 2  # Default: No Sharp Turn
-        if viz_data["radius"] is not None and viz_data["radius"] < 10.0:
-            curvature = 1  # Sharp Turn Present
-
-        # Add curvature category to response
-        viz_data["curvature"] = curvature
         viz_data["ok"] = True
 
         return ok(viz_data)
