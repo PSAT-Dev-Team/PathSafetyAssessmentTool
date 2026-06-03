@@ -1654,7 +1654,12 @@ export default function TreatmentDetailPage() {
                             <Text fontSize="2xs" color="blue.600" _dark={{ color: "blue.300" }} mt="1" fontWeight="semibold">
                               {effectivenessLoading && effectivenessCounts[t.id] === undefined
                                 ? "Improves …%"
-                                : `Improves ${attrs.length > 0 ? ((effectivenessCounts[t.id] ?? 0) / attrs.length * 100).toFixed(1) : "0.0"}% of segments`}
+                                : (() => {
+                                    const count = effectivenessCounts[t.id] ?? 0;
+                                    const pct = attrs.length > 0 ? count / attrs.length * 100 : 0;
+                                    const display = count > 0 ? Math.max(0.1, pct).toFixed(1) : "0.0";
+                                    return `Improves ${display}% of segments`;
+                                  })()}
                             </Text>
                           )}
                           {accordionView === "segment" && segmentScoreDrops[t.id] !== undefined && (
