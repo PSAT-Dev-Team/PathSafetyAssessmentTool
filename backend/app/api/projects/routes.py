@@ -2100,7 +2100,12 @@ def treatment_effectiveness(project_name: str):
         attrs_df = ver.attributes.df
         n = len(attrs_df)
         if n == 0:
-            return jsonify({"ok": True, "total_segments": 0, "counts": {str(tid): 0 for tid in requested_ids}})
+            return jsonify({
+                "ok": True,
+                "total_segments": 0,
+                "counts": {str(tid): 0 for tid in requested_ids},
+                "applicable_counts": {str(tid): 0 for tid in requested_ids},
+            })
 
         # Baseline scoring once
         before_df = calculate_cyclerap_score_native(attrs_df)
@@ -2108,10 +2113,12 @@ def treatment_effectiveness(project_name: str):
 
         treatment_map = {t["id"]: t for t in TREATMENTS}
         counts: dict[str, int] = {}
+        applicable_counts: dict[str, int] = {}
 
         for tid in requested_ids:
             if tid not in treatment_map:
                 counts[str(tid)] = 0
+                applicable_counts[str(tid)] = 0
                 continue
             treatment = treatment_map[tid]
 
@@ -2125,6 +2132,8 @@ def treatment_effectiveness(project_name: str):
                         break
                     set_mask &= attrs_df[attr_name].isin(valid_values)
                 mask |= set_mask
+
+            applicable_counts[str(tid)] = int(mask.sum())
 
             if not mask.any():
                 counts[str(tid)] = 0
@@ -2148,6 +2157,7 @@ def treatment_effectiveness(project_name: str):
             "ok": True,
             "total_segments": int(n),
             "counts": counts,
+            "applicable_counts": applicable_counts,
         })
 
     except Exception as e:

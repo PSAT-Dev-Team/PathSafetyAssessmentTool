@@ -588,6 +588,7 @@ export default function TreatmentDetailPage() {
   // Keyed by treatment id; populated asynchronously from the backend once per
   // project set, used to rank the "By Treatment" list top-down.
   const [effectivenessCounts, setEffectivenessCounts] = useState<Record<number, number>>({});
+  const [applicableCounts, setApplicableCounts] = useState<Record<number, number>>({});
   const [effectivenessLoading, setEffectivenessLoading] = useState<boolean>(false);
 
   // Score drop for each treatment applied in isolation on the currently viewed segment.
@@ -924,6 +925,7 @@ export default function TreatmentDetailPage() {
         if (cancelled) return;
 
         const aggregated: Record<number, number> = {};
+        const aggregatedApplicable: Record<number, number> = {};
         for (const r of results) {
           if (!r || !r.ok) continue;
           for (const [tidStr, count] of Object.entries(r.counts)) {
@@ -931,8 +933,14 @@ export default function TreatmentDetailPage() {
             if (!Number.isFinite(tid)) continue;
             aggregated[tid] = (aggregated[tid] ?? 0) + (count ?? 0);
           }
+          for (const [tidStr, count] of Object.entries(r.applicable_counts ?? {})) {
+            const tid = parseInt(tidStr, 10);
+            if (!Number.isFinite(tid)) continue;
+            aggregatedApplicable[tid] = (aggregatedApplicable[tid] ?? 0) + (count ?? 0);
+          }
         }
         setEffectivenessCounts(aggregated);
+        setApplicableCounts(aggregatedApplicable);
       } finally {
         if (!cancelled) setEffectivenessLoading(false);
       }
@@ -1656,9 +1664,10 @@ export default function TreatmentDetailPage() {
                                 ? "Improves …%"
                                 : (() => {
                                     const count = effectivenessCounts[t.id] ?? 0;
-                                    const pct = attrs.length > 0 ? count / attrs.length * 100 : 0;
+                                    const applicable = applicableCounts[t.id] ?? 0;
+                                    const pct = applicable > 0 ? count / applicable * 100 : 0;
                                     const display = count > 0 ? Math.max(0.1, pct).toFixed(1) : "0.0";
-                                    return `Improves ${display}% of segments`;
+                                    return `Improves ${display}% of applicable segments`;
                                   })()}
                             </Text>
                           )}

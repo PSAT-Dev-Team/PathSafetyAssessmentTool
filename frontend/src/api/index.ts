@@ -1187,6 +1187,7 @@ export type TreatmentEffectivenessResult = {
   ok: boolean;
   total_segments: number;
   counts: Record<string, number>;
+  applicable_counts: Record<string, number>;
 };
 
 export async function getTreatmentEffectiveness(
