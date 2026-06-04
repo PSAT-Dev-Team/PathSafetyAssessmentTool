@@ -11,9 +11,11 @@ import {
   Separator,
   Tabs,
   Button,
+  Flex,
 } from "@chakra-ui/react";
 import { FaSyncAlt } from "react-icons/fa";
-import { LuPencil } from "react-icons/lu";
+import { LuPencil, LuInfo } from "react-icons/lu";
+import { Tooltip } from "../../../components/ui/tooltip";
 import { useState } from "react";
 import { toaster } from "../../../components/ui/toaster";
 import "./AttributesPanel.css";
@@ -37,6 +39,65 @@ const CHILD_REQUIRES_PARENT_PRESENT: Record<string, string> = {
   "NFO Type": "Non-Fixed Obstacle on Facility",
   "Issue Type (Slippery)": "Loose or slippery surface",
   "Crossing Type": "Crossing Facility",
+};
+
+/** Hover tooltips keyed by real row key (what `k` is in the render loop). */
+const ATTRIBUTE_TOOLTIPS: Record<string, string> = {
+  // Facility configuration
+  "Area type": "Classify the surrounding land use. Singapore paths are mostly Suburban (HDB/residential). Use Urban for CBD and dense commercial zones, Industrial for business parks and logistics areas, Recreational for parks. Not scored directly but provides environmental context.",
+  "Facility Type": "The type of cycling facility at this segment. Off-Road Bicycle Path (dedicated red tarmac) carries the lowest risk; Mixed Traffic Road Lane the highest. Most Singapore PCN segments are Multi-Use Path or Off-Road Bicycle Path. Drives VB and BP scores significantly.",
+  "Adjacent Sidewalk 0-1m": "Is there a footpath or pedestrian walkway within arm's reach of the cycling path? Common in Singapore where covered walkways run immediately beside cycling tracks. Increases BP (cyclist–pedestrian conflict) risk.",
+  "Adjacent Sidewalk 1-3m": "Pedestrian footpath further away but still within the risk zone. Contributes to BP score when pedestrians are likely to stray into the cycling lane.",
+  "Adjacent Road Lane 0-1m": "Is there a motor vehicle lane essentially touching or directly beside the path? Look for road surface, kerb edge, or live traffic in the image. A primary VB trigger. CV auto-codes this for most segments — verify when ambiguous.",
+  "Adjacent Road Lane 1-3m": "A motor vehicle road nearby but separated by a small buffer. Still a VB risk factor. CV auto-codes; confirm when traffic is visible in the mid-ground of the image.",
+  "Adjacent Vehicle Parking 0-1m": "Is there a car park bay, loading bay, or on-street parking directly beside the path? Door-opening hazard and sight-line obstruction. Triggers the CM3 compounding exponent and SB departure risk.",
+  "Adjacent Vehicle Parking 1-3m": "Parked vehicles slightly further out. Still contributes to SB departure risk. Common along HDB estate perimeter roads and neighbourhood carparks.",
+  "Adjacent object or level change 0-1m": "A non-vehicle edge hazard immediately beside the path: concrete drain, kerb drop, retaining wall, or steep embankment. CV mirrors the Adjacent Road Lane 0–1m result. Open concrete drains are a common Singapore example. Affects SB score.",
+  "Adjacent object or level change 1-3m": "Same class of edge hazard at 1–3m distance. Contributes to SB departure risk at lower severity.",
+
+  // Facility clear width
+  "Facility access": "Can cyclists enter and exit this segment without obstruction? Code Inadequate if there are bollard gates, anti-motorcycle chicanes, narrow entry posts, or raised kerb lips at the segment boundary. Triggers CM40 with a risk multiplier.",
+  "Light Segregation": "Is there a physical or painted separator between the cycling path and motor vehicle traffic? Covers kerbs, railings, painted buffers, and flexible post delineators. Default is Present when a path is detected. A protective factor — reduces VB risk when present.",
+  "Fixed Obstacle on Facility": "A permanent physical object on the cycling path: lamp post, utility pillar, bollard, fence, or large vegetation. Check the image carefully for anything cyclists must steer around. Triggers the CM3 compounding exponent. Use FO Type sub-field to record what it is.",
+  "Non-Fixed Obstacle on Facility": "A movable or temporary object blocking or narrowing the path: litter bin, traffic cone, construction barrier, or parked bicycle. Triggers the CM3 compounding exponent. Use NFO Type sub-field.",
+  "Facility Width per Direction": "Usable cycling width in the direction of travel. Very Narrow paths carry the highest risk multiplier; Wide paths are neutral. GIS auto-codes from path width data. Use the Facility Width Sub-category to record the approximate width range.",
+  "Width Restriction": "Is there a local pinch point mid-segment that narrows the path below its general width — e.g. a signpost, tree stump, or irregular bollard arrangement? Adds risk even when the overall width is adequate.",
+  "Adjacent Severe Hazard 0-1m": "A high-consequence hazard immediately beside the path that would cause serious injury if struck: deep open drain, bridge parapet gap, or unguarded steep drop. Increases SB severity substantially. Common at elevated PCN sections and waterway paths.",
+  "Adjacent Severe Hazard 1-3m": "Same class of severe hazard at 1–3m distance. Still a significant SB severity factor.",
+  "Line of Sight": "Whether cyclists have clear forward visibility at curves or obstructions. Not yet active in CycleRAP scoring — stored for future use. Code if clearly observable; otherwise leave as-is.",
+
+  // Facility surface conditions
+  "Delineation": "Is there visible marking separating cycling space from pedestrian space? In Singapore: red tarmac, red-and-white painted lines, shared-path arrows, or \"Cyclists\" / \"Pedestrians\" signage. Not Present adds risk to CM3 and VB. CV model auto-codes this — verify when markings are faded or absent.",
+  "Major Surface Deformation or Drain Opening": "Is there a significant structural surface defect: deep pothole, cracked and raised joint, exposed drain grating with a wheel-trapping gap, or severely buckled surface? Triggers the CM3 compounding exponent and CM25 (speed/fall risk). Distinct from loose/slippery — this is physical surface failure.",
+  "Loose or slippery surface": "Is there loose material, wet algae, fallen leaves, sand, or a slippery coating that makes the surface treacherous? Adds a large CM3 risk multiplier and triggers CM16 (departure/fall). Use the Issue Type sub-field to specify the material.",
+  "Grade": "Is this segment on a slope steep enough to affect cycling control? Steep grade adds CM3 risk and triggers CM16 (departure/fall). Most Singapore paths are flat — flag ramp sections, hillside paths, or drainage easements. Check the gradient profile in the GIS context panel if available.",
+  "Gradient Status": "Auto-populated when LiDAR-derived gradient data is available for this segment. Read-only; hidden when empty. Use as a reference when coding Grade.",
+  "Curvature": "Does this segment include a tight bend that forces sudden steering or cuts forward visibility? Sharp Turn adds a large CM3 risk multiplier and triggers CM16. Use the Curvature Sub-category to record the approximate bend radius.",
+  "Tram or Train Rails": "Are there rail tracks crossing or embedded in the cycling path at a shallow angle? Rail grooves are a well-known bicycle-wheel trap. Present triggers CM25 (speed/fall risk). Rare in Singapore — check near LRT or KTM level crossings.",
+  "Street Lighting": "Is the segment illuminated at night by street lamps or dedicated path lighting? Most Singapore urban and suburban paths have lighting. Not Present adds risk to CM3 and VB. Default is Present.",
+
+  // Intersection
+  "Intersection Approach": "How is the cycling approach to a road crossing arranged? Shared means the cyclist merges with or crosses through motor vehicle flow without a dedicated cycling route. Separate/NA means a clearly marked dedicated cyclist approach exists, or there is no crossing at this segment. Most signalised Singapore crossings with a bicycle waiting box qualify as Separate.",
+  "Intersection or Road Crossing": "Is there a road junction or formal road crossing within this segment? A primary trigger for CM3 compounding and CM40 (vehicle interaction). GIS auto-codes from the road crossing layer. Look for painted crossing markings or junction lines in the image.",
+  "Crossing Facility": "Is there a formal aid to help cyclists cross the road: toucan/pelican signal button, painted bicycle crossing box, or a cycle-specific signal phase? Not Present raises VB risk. Use the Crossing Type sub-field to specify what is present.",
+  "Property Access": "Does a driveway, carpark entrance, or building service access cut across the cycling path within this segment? Reversing or turning vehicles create unpredictable conflicts. Triggers CM3 compounding and CM40. Very common at HDB multi-storey carparks, shopping centres, and industrial units.",
+  "Pedestrian Crossing": "Is there a formal pedestrian crossing (zebra or signalised) within this segment that cyclists must also navigate through? Triggers CM3 compounding. Often co-located with MRT exits, bus interchange areas, and school zone crossings.",
+  "Intersecting Bicycle Facility": "Does another cycling path or PCN route cross or join the current segment? Triggers CM3 compounding. Look for bicycle route merge points and PCN junctions visible on the map.",
+  "Number of lanes – adjacent road": "How many lanes in each direction does the road running beside this segment have? Multi-lane roads increase VB risk. GIS auto-codes from the kerb layer; manually verify for complex or split-road arrangements.",
+  "Number of lanes – intersecting road": "How many lanes does the road being crossed at this segment's intersection have? More lanes mean a longer, more exposed crossing. Increases VB risk.",
+
+  // Flow & Speed
+  "Flow Direction": "Is cycling occurring or permitted in both directions on this path? Two-way flow introduces head-on conflict risk and carries a large CM3 multiplier. Most Singapore PCN paths are one-way by convention even where no physical barrier exists. Check for bidirectional arrow markings or contra-flow use in the image.",
+  "Peak pedestrian flow along or across facility": "How busy is this path or crossing with pedestrians at peak hours? GIS auto-codes from sensor and count data where available. Higher pedestrian activity directly increases BP (cyclist–pedestrian) risk.",
+  "Peak bicycle/LV traffic flow": "How busy is the cycling path at peak hour? Moderate-to-high flow increases CM3 risk. GIS auto-codes from count sensors. Consider paths near MRT stations, schools, or cycling rental hubs.",
+  "Observed proportion of cargo bikes and mopeds": "What proportion of cyclists use cargo bikes, delivery e-bikes, or large LPMs? Low is the default. Moderate-to-high increases CM3 risk and BB (cyclist–cyclist) severity. Consider proximity to delivery hubs, industrial clusters, or food court corridors.",
+  "Heavy vehicle flow": "How much heavy vehicle traffic (lorries, buses, prime movers) uses the adjacent road? Moderate-to-high increases VB risk. GIS auto-codes using bus lane proximity as a proxy.",
+  "Bicycle/LV speed – average": "Estimated average cycling speed on this segment. Higher speed increases severity for fall, speed-related, and vehicle-conflict scenarios. Most Singapore shared paths are designed for lower speeds; flag where e-bikes are common or where path geometry encourages faster riding.",
+  "Bicycle/LV speed differential": "How much does cycling speed vary between faster and slower users on this path? High differential (e.g. speed e-bikes overtaking pedestrian-pace cyclists) increases CM3 risk and BB severity. Common on wide shared paths near rental bike stations.",
+  "Road AADT": "Annual Average Daily Traffic: total vehicles using the adjacent road per day. The only attribute with no auto-code path — always code manually. Obtain from LTA road data or engineering drawings. Higher AADT increases VB score via a stepped lookup.",
+  "Road operating speed (mean)": "Observed average vehicle speed on the adjacent road. GIS auto-codes from the LinkID layer. Feeds into VB scoring via a sigmoid formula — the key multiplier for vehicle-bicycle conflict severity.",
+  "Road operating speed (unit)": "Select the unit for Road Operating Speed (mean). Singapore roads use km/h.",
+  "Road speed limit": "The posted legal speed limit of the adjacent road. GIS auto-codes from the speed limit layer. Displayed for context only — does not feed directly into CycleRAP scoring formulas.",
 };
 
 /** ====== Props ====== */
@@ -511,19 +572,39 @@ export default function AttributesPanel({
                           transition="all 0.2s"
                         >
                           <Box display="flex" alignItems="center" justifyContent="space-between" gap="1">
-                            <Text
-                              fontSize="xs"
-                              color={isEdited ? "red.800" : isChanged ? changedText : "gray.600"}
-                              fontWeight={isEdited || isChanged ? "bold" : "semibold"}
-                            >
-                              {k}
-                              {isChanged && source && ` ✨ (${source})`}
-                              {isEdited && (
-                                <Text as="span" color="red.600" fontWeight="bold" ml="1">
-                                  (Manual Edit Done)
-                                </Text>
+                            <Flex align="center" gap={1}>
+                              <Text
+                                fontSize="xs"
+                                color={isEdited ? "red.800" : isChanged ? changedText : "gray.600"}
+                                fontWeight={isEdited || isChanged ? "bold" : "semibold"}
+                              >
+                                {k}
+                                {isChanged && source && ` ✨ (${source})`}
+                                {isEdited && (
+                                  <Text as="span" color="red.600" fontWeight="bold" ml="1">
+                                    (Manual Edit Done)
+                                  </Text>
+                                )}
+                              </Text>
+                              {ATTRIBUTE_TOOLTIPS[k] && (
+                                <Tooltip
+                                  content={ATTRIBUTE_TOOLTIPS[k]}
+                                  showArrow
+                                  portalled
+                                  contentProps={{ maxW: "280px", fontSize: "xs" }}
+                                >
+                                  <Box
+                                    as="span"
+                                    color="gray.400"
+                                    cursor="default"
+                                    lineHeight={1}
+                                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                  >
+                                    <LuInfo size={12} />
+                                  </Box>
+                                </Tooltip>
                               )}
-                            </Text>
+                            </Flex>
                             {PARENT_TO_CHILD_FIELD[k] && onEditOptions && (() => {
                               const childField = PARENT_TO_CHILD_FIELD[k];
                               const parentKey = CHILD_REQUIRES_PARENT_PRESENT[childField];
