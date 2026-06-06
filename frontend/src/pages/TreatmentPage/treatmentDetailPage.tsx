@@ -1573,7 +1573,9 @@ export default function TreatmentDetailPage() {
                 displayTreatments = getApplicableTreatments(currentAttr)
                   .sort((a, b) => (segmentScoreDrops[b.id] ?? 0) - (segmentScoreDrops[a.id] ?? 0));
               } else {
-                displayTreatments = allApplicableTreatments;
+                displayTreatments = allApplicableTreatments.filter(t =>
+                  effectivenessLoading || (effectivenessCounts[t.id] ?? 0) > 0
+                );
               }
 
               if (displayTreatments.length === 0) {
@@ -1665,9 +1667,11 @@ export default function TreatmentDetailPage() {
                                 : (() => {
                                     const count = effectivenessCounts[t.id] ?? 0;
                                     const applicable = applicableCounts[t.id] ?? 0;
-                                    const pct = applicable > 0 ? count / applicable * 100 : 0;
+                                    const denominator = applicable > 0 ? applicable : attrs.length;
+                                    const pct = (denominator > 0 && count > 0) ? count / denominator * 100 : 0;
                                     const display = count > 0 ? Math.max(0.1, pct).toFixed(1) : "0.0";
-                                    return `Improves ${display}% of applicable segments`;
+                                    const scope = applicable > 0 ? "applicable segments" : "segments";
+                                    return `Improves ${display}% of ${scope}`;
                                   })()}
                             </Text>
                           )}
