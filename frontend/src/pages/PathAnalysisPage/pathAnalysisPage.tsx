@@ -13,25 +13,6 @@ import "./pathAnalysisPage.css";
 
 const SESSION_KEY_PREFIX = "pathAnalysis_";
 
-const DEFAULT_REPORT_CONFIG = {
-  showTitle: true,
-  showTitleText: true,
-  showTitleDescription: true,
-  showRiskBands: true,
-  showRiskBandsOverall: true,
-  showRiskBandsLegend: true,
-  showRiskBandsCrashTypes: true,
-  showRiskBandsVB: true,
-  showRiskBandsBB: true,
-  showRiskBandsSB: true,
-  showRiskBandsBP: true,
-  showFilters: true,
-  showMap: true,
-  showMapView: true,
-  showCharts: true,
-  showPieChart: true,
-  showBarChart: true,
-};
 
 const loadState = <T,>(key: string, defaultVal: T): T => {
   try {
@@ -89,27 +70,6 @@ export default function PathAnalysisPage() {
     totalSegmentsViewed: 0,
   });
 
-  const [reportConfig, setReportConfig] = useState(() => {
-    try {
-      const stored = sessionStorage.getItem("psat_report_config");
-      if (stored) return JSON.parse(stored);
-      return DEFAULT_REPORT_CONFIG;
-    } catch {
-      return DEFAULT_REPORT_CONFIG;
-    }
-  });
-
-  useEffect(() => {
-    const handleConfigChange = (event: CustomEvent) => {
-      setReportConfig(event.detail);
-    };
-
-    window.addEventListener("psat:report:config-changed", handleConfigChange as EventListener);
-    return () => {
-      window.removeEventListener("psat:report:config-changed", handleConfigChange as EventListener);
-    };
-  }, []);
-
   useEffect(() => {
     if (loadedProjects.length > 0) return;
     fetchProjectList()
@@ -145,49 +105,35 @@ export default function PathAnalysisPage() {
 
   return (
     <Box w="100%" h="100vh" overflowY="auto" p="6" className="path-analysis-container">
-      {reportConfig.showTitle && (
-        <Box mb="6" className="report-element report-title-box">
-          {reportConfig.showTitleText !== false && (
-            <Text fontSize="2xl" fontWeight="bold" mb="2">
-              Path Analysis
-            </Text>
-          )}
-          {reportConfig.showTitleDescription !== false && (
-            <Text fontSize="sm" color="fg.muted">
-              Analyze projects based on its attributes.
-            </Text>
-          )}
-        </Box>
-      )}
+      <Box mb="6">
+        <Text fontSize="2xl" fontWeight="bold" mb="2">
+          Path Analysis
+        </Text>
+        <Text fontSize="sm" color="fg.muted">
+          Analyze projects based on its attributes.
+        </Text>
+      </Box>
 
-      {reportConfig.showRiskBands && visibleProjects.length > 0 && (
-        <Box mb="6" className="report-element report-risk-bands">
-          <AggregatedScoreBandPanel selectedProjects={visibleProjects} reportConfig={reportConfig} />
+      {visibleProjects.length > 0 && (
+        <Box mb="6">
+          <AggregatedScoreBandPanel selectedProjects={visibleProjects} />
         </Box>
       )}
 
       {visibleProjects.length > 0 && (
-        <Box mb="6" className="report-element report-top-contributors">
+        <Box mb="6">
           <AggregatedTopContributorsPanel selectedProjects={visibleProjects} />
         </Box>
       )}
 
-      <Box
-        mb="6"
-        className="report-element report-filters"
-        display={reportConfig.showFilters ? "block" : "none"}
-      >
+      <Box mb="6">
         <FilterPanel
           activeFilters={activeFilters}
           onActiveFiltersChange={setActiveFilters}
         />
       </Box>
 
-      <Box
-        mb="6"
-        className="report-element report-map"
-        display={reportConfig.showMap && reportConfig.showMapView !== false ? "block" : "none"}
-      >
+      <Box mb="6">
         <PathAnalysisMapView
           selectedProjects={visibleProjects}
           selectedAttributes={activeFilters}
@@ -198,29 +144,23 @@ export default function PathAnalysisPage() {
         />
       </Box>
 
-      {reportConfig.showCharts &&
-        (reportConfig.showPieChart !== false || reportConfig.showBarChart !== false) &&
-        chartData.primaryFocusAttribute &&
-        chartData.categoryDistributionData.length > 0 && (
-          <Box
-            borderWidth="1px"
-            borderRadius="lg"
-            p="6"
-            bg="white"
-            _dark={{ bg: "gray.800" }}
-            className="report-element report-charts"
-          >
-            <AttributeDistributionChart
-              categoryData={chartData.categoryDistributionData}
-              selectedAttribute={chartData.primaryFocusAttribute}
-              categoryStatus={chartData.categoryStatus}
-              showPieChart={reportConfig.showPieChart}
-              showBarChart={reportConfig.showBarChart}
-              totalSegmentsLoaded={chartData.totalSegmentsLoaded}
-              totalSegmentsViewed={chartData.totalSegmentsViewed}
-            />
-          </Box>
-        )}
+      {chartData.primaryFocusAttribute && chartData.categoryDistributionData.length > 0 && (
+        <Box
+          borderWidth="1px"
+          borderRadius="lg"
+          p="6"
+          bg="white"
+          _dark={{ bg: "gray.800" }}
+        >
+          <AttributeDistributionChart
+            categoryData={chartData.categoryDistributionData}
+            selectedAttribute={chartData.primaryFocusAttribute}
+            categoryStatus={chartData.categoryStatus}
+            totalSegmentsLoaded={chartData.totalSegmentsLoaded}
+            totalSegmentsViewed={chartData.totalSegmentsViewed}
+          />
+        </Box>
+      )}
     </Box>
   );
 }

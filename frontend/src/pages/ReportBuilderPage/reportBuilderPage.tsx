@@ -1,9 +1,23 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Rnd } from "react-rnd";
-import html2canvas from "html2canvas";
+import {
+  DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors,
+} from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
+import {
+  SortableContext, verticalListSortingStrategy, useSortable, arrayMove,
+  sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
+import SectionErrorBoundary from "./SectionErrorBoundary";
+// html2canvas-pro is a maintained drop-in fork of html2canvas (^1.4.1) that fixes
+// the text-baseline bug which rendered text shifted *down* (form-control values,
+// pills, table cells all sat too low in the exported PDF — niklasvh/html2canvas
+// issues #2107 / #2775 / #2691, fix PR #2938). API-compatible: same default export.
+import html2canvas from "html2canvas-pro";
 import jsPDF from "jspdf";
 import { useNavigate } from "react-router-dom";
-import { MapContainer, TileLayer, Polyline, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, useMap } from "react-leaflet";
 import L from "leaflet";
 import proj4 from "proj4";
 import type { FeatureCollection, Position } from "geojson";
@@ -25,9 +39,21 @@ const to4326 = (p: Position): [number, number] => {
 };
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const CANVAS_W   = 794;
-const PAGE_H     = 1123;
+const CANVAS_W = 794;
+const PAGE_H = 1123;
+const PAGE_GAP = 24;
 const LAYOUT_KEY = "psat_report_layout";
+
+// ── Project Details paging ───────────────────────────────────────────────────
+// Project Details renders ALL projects, chunked into pages of PROJ_PAGE_SIZE.
+// Each non-final chunk is sized to exactly one PAGE_H so its boundary lands on
+// the PDF page-break grid (a real page break in the report), instead of a
+// click-to-paginate widget. Heights below are generous per-project estimates
+// used both for chunk-fit and section sizing.
+const PROJ_PAGE_SIZE = 5;
+const PROJ_ROW_H = 188; // est. height of one project's detail block
+const PROJ_HEADER_H = 66;  // full section header (first chunk)
+const PROJ_CONT_HEADER_H = 30; // "(continued)" header (later chunks)
 
 const RISK_COLORS: Record<number, string> = {
   1: "#87C424", 2: "#FFCC1A", 3: "#FF5B1A", 4: "#CD1AFF",
@@ -40,15 +66,15 @@ const CRASH_TYPE_LABELS: Record<string, string> = {
   SB: "Single-Bicycle", BP: "Bicycle–Pedestrian",
 };
 const TREATMENT_NAMES: Record<number, string> = {
-  1:  "Upgrade to on-road bicycle lane with light segregation",
-  2:  "Safety barrier (Adjacent road 0-1m)",
-  3:  "Safety barrier (Adjacent road 1-3m)",
-  4:  "Upgrade to cycling-priority street",
-  5:  "Upgrade to multi-use path",
-  6:  "Upgrade to off-road bicycle path",
-  7:  "Convert to one-way facility",
-  8:  "Improve surface conditions",
-  9:  "Install light segregation",
+  1: "Upgrade to on-road bicycle lane with light segregation",
+  2: "Safety barrier (Adjacent road 0-1m)",
+  3: "Safety barrier (Adjacent road 1-3m)",
+  4: "Upgrade to cycling-priority street",
+  5: "Upgrade to multi-use path",
+  6: "Upgrade to off-road bicycle path",
+  7: "Convert to one-way facility",
+  8: "Improve surface conditions",
+  9: "Install light segregation",
   10: "Install street lighting",
   11: "Remove fixed obstacles",
   12: "Remove non-fixed obstacles",
@@ -73,9 +99,9 @@ const METHODOLOGY_TEXT = `This report uses the CycleRAP (Cycling Road Assessment
 type ElementType =
   | "title" | "riskBands" | "map" | "summary" | "topRisk" | "treatmentSummary"
   | "projectDetails" | "riskStats" | "topAttributes" | "recommendations" | "methodology" | "segmentGallery"
-  | "deepDive" | "filterAnalysis" | "benchmarkStats";
+  | "benchmarkStats";
 
-type ViewMode = "list" | "grid" | "tabular";
+type ViewMode = "grid" | "tabular" | "full-page";
 
 interface ElementState {
   id: string; type: ElementType; label: string;
@@ -87,7 +113,7 @@ interface Distributions {
   VB: BandDist; BB: BandDist; SB: BandDist; BP: BandDist; Overall: BandDist;
 }
 interface TopRiskRow {
-  _project: string; _segIndex: number; _maxScore: number; _maxBand: number;
+  _project: string; _segIndex: number; _sumScore: number; _maxBand: number;
   VB: number; "VB Band": number; BB: number; "BB Band": number;
   SB: number; "SB Band": number; BP: number; "BP Band": number;
   "Overall Risk Level Band"?: number;
@@ -125,24 +151,18 @@ interface FilterCategoryStatus {
 // Auto-fit corrects positions on first load.
 const DEFAULT_ELEMENTS: ElementState[] = [
   // — Page 1 —
-  { id: "title",            type: "title",            label: "Title",              x: 20, y: 20,   width: 754, height: 205, visible: true  },
-  { id: "summary",          type: "summary",          label: "Summary",            x: 20, y: 240,  width: 754, height: 150, visible: true  },
-  { id: "map",              type: "map",              label: "Map",                x: 20, y: 405,  width: 754, height: 350, visible: true  },
+  { id: "title", type: "title", label: "Title", x: 20, y: 20, width: 754, height: 205, visible: true },
+  { id: "summary", type: "summary", label: "Summary", x: 20, y: 240, width: 754, height: 150, visible: true },
+  { id: "map", type: "map", label: "Map", x: 20, y: 405, width: 754, height: 350, visible: true },
   // — Page 2 —
-  { id: "riskBands",        type: "riskBands",        label: "Risk Bands",         x: 20, y: 1163, width: 754, height: 450, visible: true  },
-  { id: "benchmarkStats",   type: "benchmarkStats",   label: "Benchmarking Stats", x: 20, y: 1633, width: 754, height: 340, visible: true  },
-  { id: "topRisk",          type: "topRisk",          label: "Top Risk Stretches", x: 20, y: 1993, width: 754, height: 730, visible: true,  viewMode: "tabular", topN: 10 },
+  { id: "riskBands", type: "riskBands", label: "Risk Bands", x: 20, y: 1163, width: 754, height: 450, visible: true },
+  { id: "benchmarkStats", type: "benchmarkStats", label: "Benchmarking Stats", x: 20, y: 1633, width: 754, height: 340, visible: true },
+  { id: "topRisk", type: "topRisk", label: "Top Risk Stretches", x: 20, y: 1993, width: 754, height: 730, visible: true, viewMode: "full-page", topN: 10 },
   // — Page 3 —
-  { id: "treatmentSummary", type: "treatmentSummary", label: "Treatments",         x: 20, y: 2386, width: 754, height: 360, visible: true  },
+  { id: "treatmentSummary", type: "treatmentSummary", label: "Treatments", x: 20, y: 2386, width: 754, height: 360, visible: true },
   // — Supplementary (off by default) —
-  { id: "projectDetails",   type: "projectDetails",   label: "Project Details",    x: 20, y: 2790, width: 754, height: 220, visible: false },
-  { id: "riskStats",        type: "riskStats",        label: "Risk Statistics",    x: 20, y: 3030, width: 754, height: 190, visible: false },
-  { id: "topAttributes",    type: "topAttributes",    label: "Risk Factors",       x: 20, y: 3240, width: 754, height: 210, visible: false },
-  { id: "recommendations",  type: "recommendations",  label: "Recommendations",    x: 20, y: 3470, width: 754, height: 160, visible: false },
-  { id: "methodology",      type: "methodology",      label: "Methodology",        x: 20, y: 3650, width: 754, height: 210, visible: false },
-  { id: "segmentGallery",   type: "segmentGallery",   label: "Image Gallery",      x: 20, y: 3880, width: 754, height: 300, visible: false },
-  { id: "deepDive",         type: "deepDive",         label: "Deep-Dive Analytics",x: 20, y: 2790, width: 754, height: 340, visible: false },
-  { id: "filterAnalysis",   type: "filterAnalysis",   label: "Filter Analysis",    x: 20, y: 3150, width: 754, height: 340, visible: false },
+  { id: "projectDetails", type: "projectDetails", label: "Project Details", x: 20, y: 2790, width: 754, height: 220, visible: false },
+  { id: "topAttributes", type: "topAttributes", label: "Risk Factors", x: 20, y: 3030, width: 754, height: 210, visible: false },
 ];
 
 // ── Shared table styles ──────────────────────────────────────────────────────
@@ -153,16 +173,16 @@ const thStyle: React.CSSProperties = {
 const tdStyle: React.CSSProperties = { padding: "3px 6px", fontSize: 10, color: "#333" };
 
 // ── Small components ─────────────────────────────────────────────────────────
-function SegmentImage({ src, width, height }: { src?: string; width: number; height: number }) {
+function SegmentImage({ src, width, height }: { src?: string; width: number | string; height: number | string }) {
   const [errored, setErrored] = useState(false);
   if (!src || errored) {
     return (
       <div style={{ width, height, background: "#eee", borderRadius: 3, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-        <span style={{ fontSize: 9, color: "#bbb" }}>No image</span>
+        <span style={{ fontSize: 14, color: "#bbb" }}>No image available</span>
       </div>
     );
   }
-  return <img src={src} alt="" onError={() => setErrored(true)} style={{ width, height, objectFit: "cover", borderRadius: 3, flexShrink: 0 }} />;
+  return <img src={src} alt="" onError={() => setErrored(true)} style={{ width, height, objectFit: "cover", borderRadius: 3, flexShrink: 0, display: "block" }} />;
 }
 
 function AttrTag({ name, multiplier }: { name: string; multiplier: number }) {
@@ -225,25 +245,31 @@ function EditableText({ value, onChange, style, placeholder }: {
 }
 
 // ── Leaflet map sub-components ───────────────────────────────────────────────
-function FitAllBounds({ geoEntries }: { geoEntries: GeoEntry[] }) {
+function FitAllBounds({ points }: { points: L.LatLngExpression[] }) {
   const map = useMap();
   useEffect(() => {
-    if (geoEntries.length === 0) return;
-    const pts: L.LatLngExpression[] = [];
-    geoEntries.forEach(({ data }) => {
-      data.features?.forEach((f) => {
-        if (f.geometry?.type === "LineString") {
-          f.geometry.coordinates.forEach((p) => pts.push(to4326(p)));
-        }
-      });
-    });
-    if (pts.length > 0) map.fitBounds(L.latLngBounds(pts), { padding: [20, 20] });
-  }, [geoEntries, map]);
+    if (points.length === 0) return;
+    map.fitBounds(L.latLngBounds(points), { padding: [20, 20] });
+  }, [points, map]);
   return null;
 }
 
-function ReportMiniMap({ projects, bandMap }: { projects: string[]; bandMap: Map<string, number> }) {
+function ReportMiniMap({ projects, bandMap, orderIndex }: { projects: string[]; bandMap: Map<string, number>; orderIndex: number }) {
   const [geoEntries, setGeoEntries] = useState<GeoEntry[]>([]);
+  // The MapContainer key combines a per-mount random base with the section's
+  // position in the report (`orderIndex`). react-leaflet 5 creates the Leaflet
+  // map in a ref callback guarded by `!mapInstanceRef.current` and only removes
+  // it on unmount — so when a section reorder moves the map's subtree, React
+  // keeps the same fiber/<div> and Leaflet never re-inits cleanly, eventually
+  // throwing "Map container is being reused by another instance". Folding
+  // `orderIndex` into the key turns each reorder into a deliberate clean
+  // remount: the old MapContainer unmounts (its effect cleanup calls
+  // `map.remove()`, clearing `_leaflet_id`) and a brand-new <div> is created.
+  // `geoEntries` lives in this component's state (not remounted), so the
+  // reorder rebuilds only the Leaflet map — no geodata refetch.
+  const mapBase = useRef(`reportmap-${Math.random().toString(36).slice(2)}`);
+  const mapKey = `${mapBase.current}-${orderIndex}`;
+
   useEffect(() => {
     if (projects.length === 0) return;
     setGeoEntries([]);
@@ -257,30 +283,95 @@ function ReportMiniMap({ projects, bandMap }: { projects: string[]; bandMap: Map
     ).then((r) => setGeoEntries(r.filter(Boolean) as GeoEntry[]));
   }, [projects]);
 
+  // One point per scored segment, placed at the LineString's first coordinate —
+  // mirrors PathAnalysisPage's map (CircleMarker points, not lines).
+  const points = useMemo(() => {
+    const out: { key: string; latlng: [number, number]; color: string }[] = [];
+    geoEntries.forEach(({ name, data }) => {
+      data.features?.forEach((f, i) => {
+        const g = f.geometry;
+        if (g?.type !== "LineString" || !Array.isArray(g.coordinates) || g.coordinates.length === 0) return;
+        // Use array index (1-based) to look up band — consistent with how _segIndex is set in score rows
+        const band = bandMap.get(`${name}_${i + 1}`);
+        // Skip features with no scored band — eliminates connector/padding features
+        if (band === undefined) return;
+        out.push({ key: `${name}_${i}`, latlng: to4326(g.coordinates[0]), color: RISK_COLORS[band] });
+      });
+    });
+    return out;
+  }, [geoEntries, bandMap]);
+  const latlngs = useMemo(() => points.map((p) => p.latlng), [points]);
+
   return (
-    <MapContainer style={{ width: "100%", height: "100%" }} center={[1.35, 103.82]} zoom={12} scrollWheelZoom zoomControl>
+    <MapContainer key={mapKey} style={{ width: "100%", height: "100%" }} center={[1.35, 103.82]} zoom={12} scrollWheelZoom zoomControl>
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
       />
-      {geoEntries.map(({ name, data }) =>
-        data.features?.map((f, i) => {
-          if (f.geometry?.type !== "LineString") return null;
-          // Use array index (1-based) to look up band — consistent with how _segIndex is set in score rows
-          const segIndex = i + 1;
-          const band = bandMap.get(`${name}_${segIndex}`);
-          // Skip features with no scored band — eliminates connector/padding features that cause connecting lines
-          if (band === undefined) return null;
-          const positions: L.LatLngExpression[] = f.geometry.coordinates.map((p) => to4326(p));
-          return <Polyline key={`${name}_${i}`} positions={positions} pathOptions={{ color: RISK_COLORS[band], weight: 4, opacity: 0.85 }} />;
-        })
-      )}
-      <FitAllBounds geoEntries={geoEntries} />
+      {points.map(({ key, latlng, color }) => (
+        <CircleMarker
+          key={key}
+          center={latlng}
+          radius={5}
+          pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
+        />
+      ))}
+      <FitAllBounds points={latlngs} />
     </MapContainer>
   );
 }
 
 // ── Main page ────────────────────────────────────────────────────────────────
+// ── Page-break avoidance ──────────────────────────────────────────────────────
+// If placing an element at `y` with height `h` would straddle a page break,
+// push it to just after the break. Elements taller than a full page are left
+// as-is (nothing we can do without splitting them).
+function avoidPageBreak(y: number, h: number, margin = 20): number {
+  if (h >= PAGE_H) return y;
+  // Push sections that land inside the shadow zone at the top of a new page
+  const prevBreak = Math.floor(y / PAGE_H) * PAGE_H;
+  if (prevBreak > 0 && y < prevBreak + margin) {
+    return avoidPageBreak(prevBreak + margin, h, margin);
+  }
+  // Push sections that straddle the next page break, ONLY if they can fit on a single page
+  const nextBreak = Math.ceil(y / PAGE_H) * PAGE_H;
+  const usableH = PAGE_H - PAGE_GAP - margin;
+  if (nextBreak > y && y + h > nextBreak - PAGE_GAP && h <= usableH) {
+    return avoidPageBreak(nextBreak + margin, h, margin);
+  }
+  return y;
+}
+
+// ── Flow layout (replaces resolveOverlaps) ───────────────────────────────────
+// Sections now render in document flow in array order (dnd-kit drives the order).
+// This pass turns the ordered list + per-section heights into the `marginTop`
+// spacer each section needs: a constant 10px gap, plus any extra push required
+// so the section doesn't straddle a page break (avoidPageBreak). `top` is kept
+// for reference/debug; `bottom` is the total stacked height for canvas sizing.
+interface FlowEntry { height: number; top: number; marginTop: number }
+function computeFlowLayout(
+  visible: ElementState[],
+  heightOf: (el: ElementState) => number,
+): { map: Map<string, FlowEntry>; bottom: number } {
+  const map = new Map<string, FlowEntry>();
+  let cursor = 20;     // top padding before the first section
+  let prevBottom = 0;  // bottom edge of the previously placed section
+  for (const el of visible) {
+    const height = heightOf(el);
+    let top = avoidPageBreak(cursor, height);
+    // Project Details chunks projects into PAGE_H-tall pages. When it spans more
+    // than one page it must begin exactly on a page boundary so every internal
+    // chunk boundary coincides with the PDF slice grid (real page breaks).
+    if ((el.type === "projectDetails" || (el.type === "topRisk" && el.viewMode === "full-page")) && height > PAGE_H && prevBottom > 0) {
+      top = Math.ceil(cursor / PAGE_H) * PAGE_H;
+    }
+    map.set(el.id, { height, top, marginTop: top - prevBottom });
+    prevBottom = top + height;
+    cursor = prevBottom + 10;
+  }
+  return { map, bottom: prevBottom };
+}
+
 // ── Read saved layout once (used by lazy state initialisers below) ──────────
 function _readSaved(): Record<string, unknown> | null {
   try {
@@ -289,17 +380,137 @@ function _readSaved(): Record<string, unknown> | null {
   } catch { return null; }
 }
 
+// ── Report section (canvas) ──────────────────────────────────────────────────
+// One per visible section, laid out in normal document flow + a `marginTop`
+// spacer (page-break avoidance). Reordering is done from the left Sections panel,
+// so these are static — not draggable.
+function ReportSection({
+  id, label, height, marginTop, onHide, children,
+}: {
+  id: string; label: string; height: number; marginTop: number;
+  onHide: () => void; children: React.ReactNode;
+}) {
+  const style: React.CSSProperties = {
+    position: "relative",
+    marginLeft: 20,
+    width: CANVAS_W - 40,
+    height,
+    marginTop,
+    zIndex: 1,
+  };
+  return (
+    <div style={style}>
+      <div className="rb-element" data-element-id={id}>
+        <button
+          className="rb-element-close"
+          onClick={onHide}
+          title={`Hide ${label}`}
+          aria-label={`Hide ${label}`}
+        >×</button>
+        <div className="rb-element-body">
+          <SectionErrorBoundary label={label} resetKeys={[marginTop, height]}>
+            {children}
+          </SectionErrorBoundary>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Compact reorder-list row (the "Sections" panel) ──────────────────────────
+// A lightweight row — grip handle + visibility checkbox + label — for reordering
+// sections without dragging the full (map/chart-heavy) canvas section. Shares
+// the same `elements` array order, so reordering here reorders the report.
+function SortableSectionRow({
+  id, label, visible, onToggle, children
+}: {
+  id: string; label: string; visible: boolean; onToggle: () => void; children?: React.ReactNode;
+}) {
+  const {
+    attributes, listeners, setNodeRef, setActivatorNodeRef,
+    transform, transition, isDragging,
+  } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 2 : 1,
+  };
+
+  if (children) {
+    return (
+      <div ref={setNodeRef} style={{ ...style, display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0, padding: "6px 0 0 0" }} className={`rb-reorder-row${isDragging ? " rb-reorder-row-dragging" : ""}`}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 10px 6px", boxSizing: "border-box" }}>
+          <span
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            className="rb-reorder-grip"
+            title="Drag to reorder"
+            aria-label={`Reorder ${label}`}
+            style={{ cursor: isDragging ? "grabbing" : "grab", touchAction: "none" }}
+          >
+            <GripVertical size={16} />
+          </span>
+          <input
+            type="checkbox"
+            checked={visible}
+            onChange={onToggle}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{ accentColor: "#a020d0", cursor: "pointer", flexShrink: 0 }}
+            title={visible ? "Hide section" : "Show section"}
+          />
+          <span className="rb-reorder-label" style={{ opacity: visible ? 1 : 0.45 }}>{label}</span>
+        </div>
+        <div style={{ width: "100%", boxSizing: "border-box" }}>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} className={`rb-reorder-row${isDragging ? " rb-reorder-row-dragging" : ""}`}>
+      <span
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        className="rb-reorder-grip"
+        title="Drag to reorder"
+        aria-label={`Reorder ${label}`}
+        style={{ cursor: isDragging ? "grabbing" : "grab", touchAction: "none" }}
+      >
+        <GripVertical size={16} />
+      </span>
+      <input
+        type="checkbox"
+        checked={visible}
+        onChange={onToggle}
+        onPointerDown={(e) => e.stopPropagation()}
+        style={{ accentColor: "#a020d0", cursor: "pointer", flexShrink: 0 }}
+        title={visible ? "Hide section" : "Show section"}
+      />
+      <span className="rb-reorder-label" style={{ opacity: visible ? 1 : 0.45 }}>{label}</span>
+    </div>
+  );
+}
+
 export default function ReportBuilderPage() {
   const navigate = useNavigate();
-  const canvasRef          = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
-  const hasAutoFit         = useRef(false);
+  const hasAutoFit = useRef(false);
 
   // ── State: auto-restored from localStorage if a saved layout exists ──────
   const [elements, setElements] = useState<ElementState[]>(() => {
+    const REMOVED_IDS = new Set(["riskStats", "recommendations", "methodology", "segmentGallery", "deepDive", "filterAnalysis"]);
     const l = _readSaved();
     if (Array.isArray(l?.elements)) {
-      const saved = l.elements as ElementState[];
+      // Migration: display order is now driven by array order, not `el.y`.
+      // Pre-dnd-kit layouts encoded their arrangement purely in `y` (react-rnd
+      // never reordered the array), so sort by `y` once to preserve it.
+      const saved = (l.elements as ElementState[])
+        .filter((e) => !REMOVED_IDS.has(e.id))
+        .sort((a, b) => a.y - b.y);
       // Inject any new default elements missing from the saved layout (e.g. benchmarkStats added after save)
       const savedIds = new Set(saved.map((e: ElementState) => e.id));
       const injected = DEFAULT_ELEMENTS.filter((e) => !savedIds.has(e.id));
@@ -310,55 +521,53 @@ export default function ReportBuilderPage() {
   const [currentPage, setCurrentPage] = useState(0);
 
   // ── Editable metadata ────────────────────────────────────────────────────
-  const [reportTitle,          setReportTitle]          = useState(() => {
-    const l = _readSaved(); return typeof l?.reportTitle === "string" ? l.reportTitle : "Path Analysis Executive Summary";
+  const [reportTitle, setReportTitle] = useState(() => {
+    const l = _readSaved(); return typeof l?.reportTitle === "string" ? l.reportTitle : "Path Safety Analysis Executive Summary";
   });
   const [projectNameOverrides, setProjectNameOverrides] = useState<Record<string, string>>(() => {
     const l = _readSaved(); return (l?.projectNameOverrides && typeof l.projectNameOverrides === "object") ? l.projectNameOverrides as Record<string, string> : {};
   });
-  const [sectionTitles,        setSectionTitles]        = useState<Record<string, string>>(() => {
+  const [sectionTitles, setSectionTitles] = useState<Record<string, string>>(() => {
     const l = _readSaved(); return (l?.sectionTitles && typeof l.sectionTitles === "object") ? l.sectionTitles as Record<string, string> : {};
   });
-  const [oicName,              setOicName]              = useState(() => {
+  const [oicName, setOicName] = useState(() => {
     const l = _readSaved(); return typeof l?.oicName === "string" ? l.oicName : "";
   });
-  const [purpose,              setPurpose]              = useState(() => {
+  const [purpose, setPurpose] = useState(() => {
     const l = _readSaved(); return typeof l?.purpose === "string" ? l.purpose : "";
   });
-  const [recommendations,      setRecommendations]      = useState(() => {
+  const [recommendations, setRecommendations] = useState(() => {
     const l = _readSaved(); return typeof l?.recommendations === "string" ? l.recommendations : "";
   });
-  const [reportDate,           setReportDate]           = useState(() => {
+  const [reportDate, setReportDate] = useState(() => {
     const l = _readSaved(); return typeof l?.reportDate === "string" ? l.reportDate : new Date().toISOString().split("T")[0];
   });
-  const [imageDate,            setImageDate]            = useState(() => {
+  const [imageDate, setImageDate] = useState(() => {
     const l = _readSaved(); return typeof l?.imageDate === "string" ? l.imageDate : "";
   });
 
   // ── Projects ─────────────────────────────────────────────────────────────
-  const [loadedProjects,    setLoadedProjects]    = useState<string[]>([]);
-  const [treatmentProjects, setTreatmentProjects] = useState<string[]>([]);
+  const [loadedProjects, setLoadedProjects] = useState<string[]>([]);
 
   // ── Score data ────────────────────────────────────────────────────────────
-  const [distributions,        setDistributions]        = useState<Distributions | null>(null);
-  const [totalSegments,        setTotalSegments]         = useState(0);
-  const [projectSegmentCounts, setProjectSegmentCounts]  = useState<Record<string, number>>({});
-  const [topRiskRows,          setTopRiskRows]           = useState<TopRiskRow[]>([]);
-  const [allScoreRows,         setAllScoreRows]          = useState<TopRiskRow[]>([]);
-  const [allBandMap,           setAllBandMap]            = useState<Map<string, number>>(new Map());
-  const [enrichedMap,          setEnrichedMap]           = useState<Map<string, EnrichedDetail>>(new Map());
+  const [distributions, setDistributions] = useState<Distributions | null>(null);
+  const [totalSegments, setTotalSegments] = useState(0);
+  const [projectSegmentCounts, setProjectSegmentCounts] = useState<Record<string, number>>({});
+  const [topRiskRows, setTopRiskRows] = useState<TopRiskRow[]>([]);
+  const [allScoreRows, setAllScoreRows] = useState<TopRiskRow[]>([]);
+  const [allBandMap, setAllBandMap] = useState<Map<string, number>>(new Map());
+  const [enrichedMap, setEnrichedMap] = useState<Map<string, EnrichedDetail>>(new Map());
 
   // ── Treatment data ────────────────────────────────────────────────────────
-  const [treatmentSummaries,  setTreatmentSummaries]  = useState<ProjectTreatmentSummary[]>([]);
+  const [treatmentSummaries, setTreatmentSummaries] = useState<ProjectTreatmentSummary[]>([]);
   const [segmentTreatmentMap, setSegmentTreatmentMap] = useState<Map<string, number[]>>(new Map());
 
   // ── Project metadata (name, dates, length) ────────────────────────────────
   const [projectMeta, setProjectMeta] = useState<Record<string, { dateCreated?: string; lastUpdated?: string; lengthKm?: number }>>({});
 
   // ── Path Analysis filter sync ─────────────────────────────────────────────
-  const [activeFilterNames,    setActiveFilterNames]    = useState<string[]>([]);
+  const [activeFilterNames, setActiveFilterNames] = useState<string[]>([]);
   const [activeCategoryStatus, setActiveCategoryStatus] = useState<FilterCategoryStatus[]>([]);
-  const [allAttributeRows,     setAllAttributeRows]     = useState<Record<string, Record<string, unknown>[]>>({});
 
   const [exporting, setExporting] = useState<"pdf" | "word" | null>(null);
   const [hasSaved, setHasSaved] = useState(() => { try { return !!localStorage.getItem(LAYOUT_KEY); } catch { return false; } });
@@ -371,22 +580,21 @@ export default function ReportBuilderPage() {
   // ── Project picker (shown when session storage has no projects) ───────────
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [availableProjects, setAvailableProjects] = useState<string[]>([]);
-  const [pickerSelected,    setPickerSelected]    = useState<Set<string>>(new Set());
-  const [pickerLoading,     setPickerLoading]     = useState(false);
+  const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
+  const [pickerLoading, setPickerLoading] = useState(false);
 
   // ── Session storage ───────────────────────────────────────────────────────
   useEffect(() => {
-    const pa        = sessionStorage.getItem("pathAnalysis_loadedProjects");
-    const tr        = sessionStorage.getItem("treatment_loadedProjects");
-    const filters   = sessionStorage.getItem("pathAnalysis_activeFilters");
+    const pa = sessionStorage.getItem("pathAnalysis_loadedProjects");
+    const tr = sessionStorage.getItem("treatment_loadedProjects");
+    const filters = sessionStorage.getItem("pathAnalysis_activeFilters");
     const catStatus = sessionStorage.getItem("pathAnalysis_categoryStatus");
-    const paP: string[] = pa      ? JSON.parse(pa)      : [];
-    const trP: string[] = tr      ? JSON.parse(tr)      : [];
+    const paP: string[] = pa ? JSON.parse(pa) : [];
+    const trP: string[] = tr ? JSON.parse(tr) : [];
     const flt: string[] = filters ? JSON.parse(filters) : [];
     const cst: FilterCategoryStatus[] = catStatus ? JSON.parse(catStatus) : [];
     const combined = [...new Set([...paP, ...trP])];
     setLoadedProjects(combined);
-    setTreatmentProjects(trP);
     setActiveFilterNames(flt);
     setActiveCategoryStatus(cst);
     if (combined.length === 0) {
@@ -403,28 +611,6 @@ export default function ReportBuilderPage() {
     }
   }, []);
 
-  // ── Attribute data fetch (for filter analysis) ────────────────────────────
-  useEffect(() => {
-    if (loadedProjects.length === 0 || activeFilterNames.length === 0) return;
-    const go = async () => {
-      const entries = await Promise.all(
-        loadedProjects.map(async (name) => {
-          try {
-            const res = await fetch(`/api/projects/${encodeURIComponent(name)}/versions/latest/attributes`);
-            const json = await res.json();
-            const rows: Record<string, unknown>[] = (json.rows ?? []).map(
-              (r: Record<string, unknown>) => ({ ...r, _project: name })
-            );
-            return { name, rows };
-          } catch { return { name, rows: [] }; }
-        })
-      );
-      const map: Record<string, Record<string, unknown>[]> = {};
-      entries.forEach(({ name, rows }) => { map[name] = rows; });
-      setAllAttributeRows(map);
-    };
-    go();
-  }, [loadedProjects, activeFilterNames]);
 
   // ── Project metadata fetch (dates + route length) ────────────────────────
   useEffect(() => {
@@ -500,15 +686,15 @@ export default function ReportBuilderPage() {
       setDistributions(dist);
       setAllBandMap(bMap);
 
-      const withMax = allRows.map((row) => {
-        const maxScore = Math.max(row["VB"] || 0, row["BB"] || 0, row["SB"] || 0, row["BP"] || 0);
+      const withSum = allRows.map((row) => {
+        const sumScore = (row["VB"] || 0) + (row["BB"] || 0) + (row["SB"] || 0) + (row["BP"] || 0);
         const maxBand = row["Overall Risk Level Band"] ??
           Math.max(row["VB Band"] || 0, row["BB Band"] || 0, row["SB Band"] || 0, row["BP Band"] || 0);
-        return { ...row, _maxScore: maxScore, _maxBand: maxBand };
-      }).sort((a, b) => b._maxScore - a._maxScore);
+        return { ...row, _sumScore: sumScore, _maxBand: maxBand };
+      }).sort((a, b) => b._sumScore - a._sumScore);
 
-      setAllScoreRows(withMax);
-      setTopRiskRows(withMax.slice(0, 10));
+      setAllScoreRows(withSum);
+      setTopRiskRows(withSum.slice(0, 10));
     };
     fetchAll();
   }, [loadedProjects]);
@@ -537,11 +723,11 @@ export default function ReportBuilderPage() {
 
   // ── Treatment fetch ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (treatmentProjects.length === 0) return;
+    if (loadedProjects.length === 0) return;
     const go = async () => {
       const newSegTreatMap = new Map<string, number[]>();
       const summaries = await Promise.all(
-        treatmentProjects.map(async (name) => {
+        loadedProjects.map(async (name) => {
           try {
             const res = await fetch(`/api/projects/${encodeURIComponent(name)}/treatments/all`);
             const data = await res.json();
@@ -563,7 +749,7 @@ export default function ReportBuilderPage() {
       setTreatmentSummaries(summaries.filter(Boolean) as ProjectTreatmentSummary[]);
     };
     go();
-  }, [treatmentProjects]);
+  }, [loadedProjects]);
 
   // ── Derived / computed ────────────────────────────────────────────────────
   const scoreStats = useMemo((): ScoreStats | null => {
@@ -574,11 +760,11 @@ export default function ReportBuilderPage() {
       return { min: sorted[0].toFixed(1), max: sorted[sorted.length - 1].toFixed(1), avg: avg.toFixed(1) };
     };
     return {
-      VB:      stat(allScoreRows.map((r) => r.VB || 0)),
-      BB:      stat(allScoreRows.map((r) => r.BB || 0)),
-      SB:      stat(allScoreRows.map((r) => r.SB || 0)),
-      BP:      stat(allScoreRows.map((r) => r.BP || 0)),
-      Overall: stat(allScoreRows.map((r) => r._maxScore || 0)),
+      VB: stat(allScoreRows.map((r) => r.VB || 0)),
+      BB: stat(allScoreRows.map((r) => r.BB || 0)),
+      SB: stat(allScoreRows.map((r) => r.SB || 0)),
+      BP: stat(allScoreRows.map((r) => r.BP || 0)),
+      Overall: stat(allScoreRows.map((r) => r._sumScore || 0)),
     };
   }, [allScoreRows]);
 
@@ -603,18 +789,39 @@ export default function ReportBuilderPage() {
   const computeIdealHeight = useCallback((el: ElementState): number => {
     const H = 30; // handle
     switch (el.type) {
-      case "title":          return H + 175;
-      case "riskBands":      return H + (distributions ? 480 : 60);
-      case "map":            return H + 350;
-      case "summary":        return H + 110 + (activeFilterNames.length > 0 ? 46 : 0);
+      case "title": {
+        // The "Projects:" line wraps when many/long project names are listed;
+        // each extra wrapped line pushes the date inputs down. Without accounting
+        // for this the fixed-height body (overflow:hidden) clips the bottom rows.
+        const projChars = loadedProjects.reduce((s, n) => s + (projectNameOverrides[n] ?? n).length + 2, 9 /* "Projects: " */);
+        const projLines = Math.max(1, Math.ceil(projChars / 80)); // ~80 chars/line at fontSize 12 across 754px
+        return H + 160 + projLines * 17;
+      }
+      case "riskBands": return H + (distributions ? 480 : 60);
+      case "map": return H + 350;
+      case "summary": {
+        // The "Active Filters" panel grows one row per filter, and each row's
+        // category chips wrap — a flat constant clips it once >1 filter is set.
+        if (activeFilterNames.length === 0) return H + 110;
+        let h = H + 110 + 38; // base stats + panel padding/label
+        activeFilterNames.forEach((fn) => {
+          const st = activeCategoryStatus.find((s) => s.attribute === fn);
+          const chips = st?.rangeFilter ? 1 : Math.max(1, st?.categories.length ?? 1);
+          h += Math.max(1, Math.ceil(chips / 5)) * 18 + 6; // wrapped chip lines + row gap
+        });
+        return h;
+      }
       case "topRisk": {
         const n = el.topN ?? 10;
         const header = 60;   // title + subtitle
-        const toggle = 62;   // view mode + topN controls (may wrap)
-        const thead  = 36;   // table header row
-        if (!el.viewMode || el.viewMode === "tabular") return H + header + toggle + thead + n * 52 + 24;
-        if (el.viewMode === "grid")  return H + header + toggle + Math.ceil(n / 3) * 240 + 24;
-        return H + header + toggle + n * 76 + 24; // list
+        const thead = 36;   // table header row
+        if (el.viewMode === "full-page") {
+          // Exactly one stretch per page. Total height = n * PAGE_H.
+          // Since the section itself includes a header (about 60px), we reserve n full pages.
+          return n * PAGE_H;
+        }
+        if (!el.viewMode || el.viewMode === "tabular") return H + header + thead + n * 52 + 24;
+        return H + header + Math.ceil(n / 3) * 240 + 24; // grid
       }
       case "treatmentSummary": {
         if (treatmentSummaries.length === 0) return H + 100;
@@ -624,50 +831,39 @@ export default function ReportBuilderPage() {
       }
       case "projectDetails": {
         if (loadedProjects.length === 0) return H + 60;
-        let h = H + 36;
-        loadedProjects.forEach((name, i) => {
-          const meta = projectMeta[name] ?? {};
-          h += 34 + (2 + (meta.lengthKm !== undefined ? 1 : 0) + 1) * 26 + (i < loadedProjects.length - 1 ? 18 : 0);
-        });
-        return h + 16;
+        // All projects render, chunked PROJ_PAGE_SIZE per PAGE_H-tall page. Each
+        // non-final chunk occupies a full page; the section's total height is
+        // (chunks-1) full pages + the natural height of the final chunk.
+        const numChunks = Math.ceil(loadedProjects.length / PROJ_PAGE_SIZE);
+        const lastCount = loadedProjects.length - (numChunks - 1) * PROJ_PAGE_SIZE;
+        const headerH = numChunks > 1 ? PROJ_CONT_HEADER_H : PROJ_HEADER_H;
+        const lastChunkH = H + headerH + lastCount * PROJ_ROW_H + 16;
+        return (numChunks - 1) * PAGE_H + lastChunkH;
       }
-      case "benchmarkStats":  return H + 36 + 32 + 5 * 56 + 24; // header + thead + 5 rows (VB/BB/SB/BP/Overall) + footer
-      case "riskStats":       return H + 36 + (scoreStats ? 5 * 32 + 20 : 50);
-      case "topAttributes":   return H + 36 + (attributeFrequency.length > 0 ? attributeFrequency.length * 34 + 16 : 50);
-      case "recommendations": return H + 36 + 120;
-      case "methodology":     return H + 36 + 130;
-      case "segmentGallery":  return H + 36 + Math.max(1, Math.ceil(topRiskRows.length / 6)) * 92 + 16;
-      case "deepDive":        return H + 36 + 300;
-      case "filterAnalysis":
-        return activeFilterNames.length === 0 ? H + 100 : H + 36 + activeFilterNames.length * 148 + 16;
+      case "benchmarkStats": return H + 36 + 32 + 5 * 56 + 24; // header + thead + 5 rows (VB/BB/SB/BP/Overall) + footer
+      case "riskStats": return H + 36 + (scoreStats ? 5 * 54 + 24 : 50); // each row: label line + range bar + scale labels + spacing
+      case "topAttributes": return H + 36 + (attributeFrequency.length > 0 ? attributeFrequency.length * 34 + 16 : 50);
+      case "recommendations": {
+        // Auto-suggestion panel grows one (often wrapping) line per top risk
+        // factor; flat 120 clipped the panel + textarea when several appear.
+        const sug = Math.min(5, attributeFrequency.length) + (topRiskRows.some((r) => r._maxBand === 4) ? 1 : 0);
+        const boxH = sug > 0 ? 30 + sug * 24 : 0;
+        return H + 36 + boxH + 78; // + editable notes textarea (min height) & gaps
+      }
+      case "methodology": return H + 36 + 290; // intro paragraph (~5 wrapped lines) + thresholds table (6 rows) + segment-length note
+      case "segmentGallery": return H + 36 + Math.max(1, Math.ceil(topRiskRows.length / 6)) * 92 + 16;
       default: return el.height;
     }
-  }, [distributions, treatmentSummaries, loadedProjects, projectMeta, scoreStats, attributeFrequency, topRiskRows, activeFilterNames]);
+  }, [distributions, treatmentSummaries, loadedProjects, projectMeta, scoreStats, attributeFrequency, topRiskRows, activeFilterNames, activeCategoryStatus, projectNameOverrides]);
 
-  // ── Auto-fit: resize all visible elements + restack with no gaps ─────────
-  // Elements that would straddle a page break are pushed to the next page.
+  // ── Auto-fit: snapshot ideal heights into state ───────────────────────────
+  // Gap removal and page-break spacing are now automatic (see `layout` memo +
+  // computeFlowLayout), so this only persists each section's ideal height so
+  // saved layouts carry accurate `height` values. Order/`y` are untouched.
   const autoFitElements = useCallback(() => {
-    setElements((prev) => {
-      const visible = prev.filter((e) => e.visible).sort((a, b) => a.y - b.y);
-      let cursor = 20;
-      const updates = new Map<string, { height: number; y: number }>();
-      visible.forEach((el) => {
-        const h = computeIdealHeight(el);
-        if (h < PAGE_H) {
-          const pageAtStart = Math.floor(cursor / PAGE_H);
-          const pageAtEnd   = Math.floor((cursor + h - 1) / PAGE_H);
-          if (pageAtEnd > pageAtStart) {
-            cursor = (pageAtStart + 1) * PAGE_H + 20;
-          }
-        }
-        updates.set(el.id, { height: h, y: cursor });
-        cursor += h + 10;
-      });
-      return prev.map((el) => {
-        const u = updates.get(el.id);
-        return u ? { ...el, ...u } : el;
-      });
-    });
+    setElements((prev) =>
+      prev.map((el) => (el.visible ? { ...el, height: computeIdealHeight(el) } : el)),
+    );
   }, [computeIdealHeight]);
 
   // ── Auto-fit on first data load ───────────────────────────────────────────
@@ -684,23 +880,45 @@ export default function ReportBuilderPage() {
   }, []);
   const hideElement = useCallback((id: string) => updateElement(id, { visible: false }), [updateElement]);
   const showElement = useCallback((id: string) => {
-    updateElement(id, { visible: true });
-    // Scroll the canvas container so the element comes into view
     setElements((prev) => {
-      const el = prev.find((e) => e.id === id);
-      if (el && canvasContainerRef.current) {
-        setTimeout(() => {
-          canvasContainerRef.current?.scrollTo({ top: Math.max(0, el.y - 60), behavior: "smooth" });
-        }, 30);
-      }
-      return prev;
+      const target = prev.find((e) => e.id === id);
+      if (!target) return prev;
+      const h = computeIdealHeight(target);
+      // Re-show and move to the end of the array so it stacks below all other
+      // visible sections (array order drives display order).
+      const updated = [
+        ...prev.filter((e) => e.id !== id),
+        { ...target, visible: true, height: h },
+      ];
+      // Scroll the canvas to the bottom once the new section has laid out.
+      setTimeout(() => {
+        const c = canvasContainerRef.current;
+        if (c) c.scrollTo({ top: c.scrollHeight, behavior: "smooth" });
+      }, 30);
+      return updated;
     });
-  }, [updateElement]);
+  }, [computeIdealHeight]);
+
+  // ── Drag end: reorder the elements array (dnd-kit drives ordering) ─────────
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setElements((prev) => {
+      const oldIndex = prev.findIndex((e) => e.id === active.id);
+      const newIndex = prev.findIndex((e) => e.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
+    });
+  }, []);
   const getEnriched = (row: TopRiskRow): EnrichedDetail => {
     const fromMap = enrichedMap.get(`${row._project}_${row._segIndex}`);
     // Pull top contributors directly from the scoring result row (already computed during scoring)
     const topAttributes: { name: string; multiplier: number }[] = [];
-    for (let i = 1; i <= 3; i++) {
+    for (let i = 1; i <= 5; i++) {
       const name = row[`Top ${i} Contributor` as keyof TopRiskRow] as string | undefined;
       const contribution = row[`Top ${i} Contribution` as keyof TopRiskRow] as number | undefined;
       if (name && contribution != null && contribution > 0) {
@@ -754,16 +972,32 @@ export default function ReportBuilderPage() {
       const saved = localStorage.getItem(LAYOUT_KEY);
       if (!saved) return;
       const l = JSON.parse(saved);
-      if (l.elements)              setElements(l.elements);
-      if (l.reportTitle !== undefined)          setReportTitle(l.reportTitle);
-      if (l.oicName !== undefined)              setOicName(l.oicName);
-      if (l.purpose !== undefined)              setPurpose(l.purpose);
-      if (l.recommendations !== undefined)      setRecommendations(l.recommendations);
-      if (l.reportDate !== undefined)           setReportDate(l.reportDate);
-      if (l.imageDate !== undefined)            setImageDate(l.imageDate);
+      if (l.elements) setElements(l.elements);
+      if (l.reportTitle !== undefined) setReportTitle(l.reportTitle);
+      if (l.oicName !== undefined) setOicName(l.oicName);
+      if (l.purpose !== undefined) setPurpose(l.purpose);
+      if (l.recommendations !== undefined) setRecommendations(l.recommendations);
+      if (l.reportDate !== undefined) setReportDate(l.reportDate);
+      if (l.imageDate !== undefined) setImageDate(l.imageDate);
       if (l.projectNameOverrides !== undefined) setProjectNameOverrides(l.projectNameOverrides);
-      if (l.sectionTitles !== undefined)        setSectionTitles(l.sectionTitles);
+      if (l.sectionTitles !== undefined) setSectionTitles(l.sectionTitles);
     } catch (e) { console.error("Restore layout failed:", e); }
+  }, []);
+
+  const resetLayout = useCallback(() => {
+    if (window.confirm("Are you sure you want to reset the layout to default? All unsaved changes will be lost.")) {
+      localStorage.removeItem(LAYOUT_KEY);
+      setElements(DEFAULT_ELEMENTS);
+      setReportTitle("Path Safety Analysis Executive Summary");
+      setOicName("");
+      setPurpose("");
+      setRecommendations("");
+      setReportDate(new Date().toISOString().split("T")[0]);
+      setImageDate("");
+      setProjectNameOverrides({});
+      setSectionTitles({});
+      setHasSaved(false);
+    }
   }, []);
 
   // ── Project picker confirm ────────────────────────────────────────────────
@@ -793,7 +1027,79 @@ export default function ReportBuilderPage() {
     if (!canvasRef.current) return;
     setExporting("pdf");
     try {
-      const captured = await html2canvas(canvasRef.current, { scale: 2, useCORS: true, logging: false, backgroundColor: "#ffffff" });
+      const canvas = canvasRef.current;
+      const restore: Array<() => void> = [];
+
+      // Hide decorative page labels so they don't appear in the PDF
+      canvas.querySelectorAll<HTMLElement>(".rb-page-label").forEach((el) => {
+        const prev = el.style.visibility;
+        el.style.visibility = "hidden";
+        restore.push(() => { el.style.visibility = prev; });
+      });
+
+      // WYSIWYG capture — do NOT mutate section heights here.
+      //
+      // The canvas is A4-proportioned by construction (CANVAS_W 794px ≈ 210mm,
+      // PAGE_H 1123px ≈ 297mm at 96 DPI). `computeFlowLayout` + `avoidPageBreak`
+      // insert `marginTop` spacers so no section straddles a PAGE_H boundary, and
+      // the PDF below slices the captured image on that exact same 297mm/PAGE_H
+      // grid. The preview draws its page-break markers on the same grid too.
+      //
+      // Previously this function expanded every `.rb-element` to its scrollHeight
+      // (to reveal text that overflowed the estimated section height). But the
+      // image is still sliced on the fixed PAGE_H grid, so any expanded section
+      // pushed all following sections downward → positions no longer matched the
+      // preview, sections straddled page breaks (the marginTop spacers were
+      // computed for the un-expanded heights), and the map (a later section) was
+      // displaced. Each section is already sized to its content by
+      // `computeIdealHeight` in the preview, so capturing the canvas exactly as
+      // rendered keeps the PDF identical to what the user sees and aligned to the
+      // page grid. (If a section ever clips, fix its `computeIdealHeight` estimate
+      // so the preview grows too — never re-expand only at export time.)
+      //
+      // html2canvas renders the text of native form controls (<input>, <textarea>)
+      // with broken vertical alignment — the value/placeholder is drawn *below* the
+      // box (visible on the Title section's OIC/Purpose/Date fields). Fix it in the
+      // cloned capture doc only (live UI untouched): replace each field with a <div>
+      // holding the same text, vertically centred via flex. Match each clone to its
+      // live counterpart by index to copy the exact rendered height so layout (and
+      // thus the page-break grid) is preserved.
+      const liveFields = Array.from(
+        canvas.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea"),
+      ).filter((f) => !(f instanceof HTMLInputElement && (f.type === "checkbox" || f.type === "radio")));
+
+      const captured = await html2canvas(canvas, {
+        scale: 2, useCORS: true, logging: false, backgroundColor: "#ffffff",
+        onclone: (doc) => {
+          const cloneFields = Array.from(
+            doc.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(".rb-canvas input, .rb-canvas textarea"),
+          ).filter((f) => !(f instanceof HTMLInputElement && (f.type === "checkbox" || f.type === "radio")));
+          cloneFields.forEach((field, i) => {
+            const live = liveFields[i];
+            const isArea = field.tagName === "TEXTAREA";
+            const div = doc.createElement("div");
+            div.style.cssText = field.style.cssText;       // same box/padding/border/font
+            div.style.boxSizing = "border-box";
+            div.style.display = "flex";
+            div.style.alignItems = isArea ? "flex-start" : "center";
+            div.style.whiteSpace = isArea ? "pre-wrap" : "nowrap";
+            div.style.overflow = "hidden";
+            // Native form controls render their value/placeholder oddly under
+            // html2canvas(-pro), so swap to a <div>. With the baseline fix in
+            // html2canvas-pro, flex align-items:center now centres correctly.
+            // Match the clone to its live counterpart by index to copy the exact
+            // offsetHeight (the clone isn't laid out when onclone runs).
+            if (live) div.style.height = `${live.offsetHeight}px`;
+            const val = field.value;
+            div.textContent = val || field.placeholder || "";
+            if (!val && field.placeholder) div.style.color = "#aaa";
+            field.parentNode?.replaceChild(div, field);
+          });
+        },
+      });
+
+      restore.forEach((fn) => fn());
+
       const imgData = captured.toDataURL("image/png");
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pdfW = 210, pdfH = 297;
@@ -829,10 +1135,8 @@ export default function ReportBuilderPage() {
 
     // Capture visual sections as images for Word embed
     const visibleIds = new Set(elements.filter((e) => e.visible).map((e) => e.id));
-    const [mapImageB64, deepDiveImageB64, filterAnalysisImageB64] = await Promise.all([
-      visibleIds.has("map")            ? captureElementImage("map")            : Promise.resolve(null),
-      visibleIds.has("deepDive")       ? captureElementImage("deepDive")       : Promise.resolve(null),
-      visibleIds.has("filterAnalysis") ? captureElementImage("filterAnalysis") : Promise.resolve(null),
+    const [mapImageB64] = await Promise.all([
+      visibleIds.has("map") ? captureElementImage("map") : Promise.resolve(null),
     ]);
 
     try {
@@ -858,12 +1162,9 @@ export default function ReportBuilderPage() {
           projectMeta,
           activeFilterNames,
           activeCategoryStatus,
-          allAttributeRows,
           projectDisplayNames: projectNameOverrides,
           sectionTitles,
           mapImageB64,
-          deepDiveImageB64,
-          filterAnalysisImageB64,
         }),
       });
       if (!res.ok) throw new Error("Failed");
@@ -907,64 +1208,146 @@ export default function ReportBuilderPage() {
   const renderViewToggle = (el: ElementState) => {
     const topN = el.topN ?? 10;
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderBottom: "1px solid #ede8f5", background: "#faf8fd", flexShrink: 0, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 10, color: "#aaa", marginRight: 2 }}>View:</span>
-        {(["list", "grid", "tabular"] as ViewMode[]).map((mode) => {
-          const active = (el.viewMode || "tabular") === mode;
-          return (
-            <button key={mode}
-              style={{ padding: "2px 9px", borderRadius: 10, border: `1px solid ${active ? "#a020d0" : "#ddd"}`, background: active ? "#f0e4f8" : "#fff", color: active ? "#a020d0" : "#777", cursor: "pointer", fontSize: 10, fontWeight: active ? 700 : 400 }}
-              onClick={(e) => { e.stopPropagation(); updateElement(el.id, { viewMode: mode }); setTimeout(autoFitElements, 50); }}
-              onMouseDown={(e) => e.stopPropagation()}>
-              {mode === "list" ? "List" : mode === "grid" ? "Grid" : "Tabular"}
-            </button>
-          );
-        })}
-        <span style={{ marginLeft: 8, fontSize: 10, color: "#aaa" }}>Show top:</span>
-        {[3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
-          const active = topN === n;
-          return (
-            <button key={n}
-              style={{ padding: "2px 6px", borderRadius: 10, border: `1px solid ${active ? "#a020d0" : "#ddd"}`, background: active ? "#f0e4f8" : "#fff", color: active ? "#a020d0" : "#777", cursor: "pointer", fontSize: 10, fontWeight: active ? 700 : 400, minWidth: 24 }}
-              onClick={(e) => { e.stopPropagation(); updateElement(el.id, { topN: n }); setTimeout(autoFitElements, 50); }}
-              onMouseDown={(e) => e.stopPropagation()}>{n}
-            </button>
-          );
-        })}
-        <span style={{ fontSize: 10, color: "#ccc" }}>stretches</span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px 8px", borderTop: "1px dashed #e0d8f0", background: "transparent" }} onPointerDown={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: "#aaa", marginRight: 2, width: 30 }}>View:</span>
+          {(["grid", "tabular", "full-page"] as ViewMode[]).map((mode) => {
+            const active = (el.viewMode || "tabular") === mode;
+            return (
+              <button key={mode}
+                style={{ padding: "2px 9px", borderRadius: 10, border: `1px solid ${active ? "#a020d0" : "#ddd"}`, background: active ? "#f0e4f8" : "#fff", color: active ? "#a020d0" : "#777", cursor: "pointer", fontSize: 10, fontWeight: active ? 700 : 400 }}
+                onClick={(e) => { e.stopPropagation(); updateElement(el.id, { viewMode: mode }); setTimeout(autoFitElements, 50); }}
+                onMouseDown={(e) => e.stopPropagation()}>
+                {mode === "grid" ? "Grid" : mode === "tabular" ? "Tabular" : "Full Page"}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: "#aaa", marginRight: 2, width: 30 }}>Top:</span>
+          {[3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+            const active = topN === n;
+            return (
+              <button key={n}
+                style={{ padding: "2px 5px", borderRadius: 10, border: `1px solid ${active ? "#a020d0" : "#ddd"}`, background: active ? "#f0e4f8" : "#fff", color: active ? "#a020d0" : "#777", cursor: "pointer", fontSize: 10, fontWeight: active ? 700 : 400, minWidth: 20 }}
+                onClick={(e) => { e.stopPropagation(); updateElement(el.id, { topN: n }); setTimeout(autoFitElements, 50); }}
+                onMouseDown={(e) => e.stopPropagation()}>{n}
+              </button>
+            );
+          })}
+        </div>
       </div>
     );
   };
 
   // ── Top Risk renderers ────────────────────────────────────────────────────
-  const renderTopRiskList = (rows: TopRiskRow[]) => (
-    <div style={{ flex: 1, overflow: "visible", padding: "4px 8px" }}>
+  const renderTopRiskFullPage = (rows: TopRiskRow[], elId: string) => (
+    <div style={{ flex: 1, overflow: "visible", display: "flex", flexDirection: "column" }}>
       {rows.map((row, i) => {
-        const e = getEnriched(row); const t = getSegmentTreatments(row);
+        const e = getEnriched(row);
+        const t = getSegmentTreatments(row);
+        const isFirst = i === 0;
+        const isLast = i === rows.length - 1;
+
+        // Each page must exactly equal PAGE_H (except possibly the last one)
+        // so that the chunks break precisely on the PDF boundaries.
+        const height = isLast ? "auto" : PAGE_H;
+
         return (
-          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 4px", borderBottom: "1px solid #f0f0f0" }}>
-            <span style={{ width: 22, fontSize: 11, fontWeight: 700, color: "#888", flexShrink: 0, paddingTop: 2 }}>#{i + 1}</span>
-            <SegmentImage src={e.imageUrl} width={72} height={50} />
-            <div style={{ width: 100, flexShrink: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#222", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dispName(row._project)}</div>
-              <div style={{ fontSize: 10, color: "#777" }}>Seg {row._segIndex}</div>
-            </div>
-            <div style={{ width: 44, textAlign: "center", flexShrink: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#222", lineHeight: 1 }}>{row._maxScore.toFixed(1)}</div>
-              <div style={{ fontSize: 8, color: "#aaa" }}>score</div>
-            </div>
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#888", letterSpacing: 0.3, marginBottom: 2 }}>BEFORE</div>
-              {e.topAttributes.length > 0 ? e.topAttributes.map((a, j) => <AttrTag key={j} {...a} />) : <span style={{ fontSize: 9, color: "#bbb" }}>—</span>}
-              <TreatmentBadge ids={t} />
-            </div>
-            <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-              {(["VB", "BB", "SB", "BP"] as const).map((ct) => (
-                <div key={ct} style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 8, color: "#aaa", marginBottom: 1 }}>{ct}</div>
-                  {renderBandBadge(row[`${ct} Band` as keyof TopRiskRow] as number, true)}
+          <div key={i} style={{ height, boxSizing: "border-box", paddingBottom: isLast ? 0 : PAGE_GAP, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            {isFirst ? (
+              <div style={{ padding: "8px 12px 12px", flexShrink: 0 }}>
+                <EditableText value={secTitle(elId, "Top Risk Stretches")} onChange={(val) => setSecTitle(elId, val)} style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e" }} />
+                <div style={{ fontSize: 10, color: "#999" }}>Ranked highest to lowest · Before risk factors & after treatments applied</div>
+              </div>
+            ) : (
+              <div style={{ padding: "10px 14px 12px", flexShrink: 0, fontSize: 20, fontWeight: 600, color: "#1a1a2e" }}>
+                {secTitle(elId, "Top Risk Stretches")} <span style={{ color: "#aaa", fontWeight: 500 }}>(#{i + 1})</span>
+              </div>
+            )}
+
+            <div style={{ flex: 1, background: "#fff", border: `2px solid ${RISK_COLORS[row._maxBand] || "#ddd"}`, borderRadius: 8, margin: "0 14px", display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
+              {/* Image Section */}
+              <div style={{ height: 360, position: "relative", flexShrink: 0 }}>
+                <SegmentImage src={e.imageUrl} width="100%" height="100%" />
+                {/* Ranking Badge */}
+                <div style={{ position: "absolute", top: 16, left: 16, background: RISK_COLORS[row._maxBand] || "#333", color: "#fff", width: 48, height: 48, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: "bold", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+                  {i + 1}
                 </div>
-              ))}
+              </div>
+
+              {/* Content Section */}
+              <div style={{ flex: 1, padding: "24px 32px", display: "flex", flexDirection: "column", gap: 20, overflow: "auto" }}>
+                {/* Header: Project & Segment & Score */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #eee", paddingBottom: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: "#1a1a2e", marginBottom: 4 }}>{dispName(row._project)}</div>
+                    <div style={{ fontSize: 16, color: "#666" }}>Segment {row._segIndex}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 36, fontWeight: 800, color: RISK_COLORS[row._maxBand] || "#222", lineHeight: 1 }}>{row._sumScore.toFixed(1)}</div>
+                    <div style={{ fontSize: 12, color: "#888", textTransform: "uppercase", letterSpacing: 1, marginTop: 4 }}>Risk Score</div>
+                  </div>
+                </div>
+
+                {/* Main Factors */}
+                <div style={{ display: "flex", gap: 40 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#a020d0", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 12 }}>Top Contributing Attribute</div>
+                    {e.topAttributes.length > 0 ? (
+                      <div style={{ fontSize: 18, color: "#333", fontWeight: 500, display: "flex", alignItems: "center" }}>
+                        <span style={{ marginRight: 8, color: "#cc2200" }}>⚠️</span>
+                        {e.topAttributes[0].name}
+                        <span style={{ marginLeft: 12, fontSize: 14, color: "#cc2200", fontWeight: 700, background: "#fdeded", padding: "2px 8px", borderRadius: 12 }}>−{e.topAttributes[0].multiplier.toFixed(1)}</span>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 16, color: "#bbb", fontStyle: "italic" }}>No contributing factors identified</div>
+                    )}
+
+                    {e.topAttributes.length > 1 && (
+                      <div style={{ marginTop: 16 }}>
+                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>Other significant factors:</div>
+                        <ul style={{ margin: 0, paddingLeft: 18, color: "#555", fontSize: 13, lineHeight: 1.6 }}>
+                          {e.topAttributes.slice(1).map((a, j) => (
+                            <li key={j}>{a.name} <span style={{ color: "#cc2200", fontWeight: 600 }}>(−{a.multiplier.toFixed(1)})</span></li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Applied Treatments */}
+                  <div style={{ width: 280, flexShrink: 0, background: "#f5fbf6", padding: 16, borderRadius: 8, border: "1px solid #c8e8d0" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#27ae60", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 10 }}>Applied Treatments</div>
+                    {t.length > 0 ? (
+                      <ul style={{ margin: 0, paddingLeft: 16, color: "#226633", fontSize: 12, lineHeight: 1.5 }}>
+                        {t.map(id => <li key={id}>{TREATMENT_NAMES[id] ?? `Treatment ${id}`}</li>)}
+                      </ul>
+                    ) : (
+                      <div style={{ fontSize: 12, color: "#88ca99", fontStyle: "italic" }}>No treatments applied</div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ flex: 1, minHeight: 20 }} /> {/* Spacer */}
+
+                {/* Crash Type Scores */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, background: "#faf8fd", padding: 16, borderRadius: 8, border: "1px solid #ede8f5", flexShrink: 0 }}>
+                  {(["VB", "BB", "SB", "BP"] as const).map((ct) => {
+                    const band = row[`${ct} Band` as keyof TopRiskRow] as number;
+                    const score = row[ct as keyof TopRiskRow] as number;
+                    return (
+                      <div key={ct} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>{CRASH_TYPE_LABELS[ct] || ct}</div>
+                        <div style={{ fontSize: 24, fontWeight: 700, color: RISK_COLORS[band] || "#333" }}>{score.toFixed(1)}</div>
+                        <div style={{ padding: "4px 12px", borderRadius: 12, background: RISK_COLORS[band] || "#eee", color: band === 2 ? "#333" : "#fff", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
+                          {RISK_LABELS[band] || "None"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         );
@@ -984,7 +1367,7 @@ export default function ReportBuilderPage() {
               <div style={{ fontSize: 11, fontWeight: 700, color: "#222", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dispName(row._project)}</div>
               <div style={{ fontSize: 10, color: "#777", marginBottom: 4 }}>Segment {row._segIndex}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                <span style={{ fontSize: 17, fontWeight: 700, color: "#222" }}>{row._maxScore.toFixed(1)}</span>
+                <span style={{ fontSize: 17, fontWeight: 700, color: "#222" }}>{row._sumScore.toFixed(1)}</span>
                 {renderBandBadge(row._maxBand)}
               </div>
               <div style={{ fontSize: 9, fontWeight: 700, color: "#888", letterSpacing: 0.3, marginBottom: 2 }}>CONTRIBUTING FACTORS</div>
@@ -1017,7 +1400,7 @@ export default function ReportBuilderPage() {
             <th style={{ ...thStyle, width: 110 }}>Project</th>
             <th style={{ ...thStyle, width: 32 }}>Seg</th>
             <th style={{ ...thStyle, width: 44 }}>Score</th>
-            <th style={thStyle}>Top 3 Risk Factors (Before)</th>
+            <th style={thStyle}>Top 5 Risk Factors (Before)</th>
             <th style={thStyle}>Applied Treatments (After)</th>
             <th style={{ ...thStyle, width: 36, textAlign: "center" }}>VB</th>
             <th style={{ ...thStyle, width: 36, textAlign: "center" }}>BB</th>
@@ -1035,7 +1418,7 @@ export default function ReportBuilderPage() {
                 <td style={{ padding: "4px 6px" }}><SegmentImage src={e.imageUrl} width={55} height={38} /></td>
                 <td style={{ ...tdStyle, maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dispName(row._project)}</td>
                 <td style={tdStyle}>{row._segIndex}</td>
-                <td style={{ ...tdStyle, fontWeight: 700, fontSize: 12 }}>{row._maxScore.toFixed(1)}</td>
+                <td style={{ ...tdStyle, fontWeight: 700, fontSize: 12 }}>{row._sumScore.toFixed(1)}</td>
                 <td style={{ ...tdStyle, maxWidth: 160 }}>
                   {e.topAttributes.length > 0 ? e.topAttributes.map((a, j) => <AttrTag key={j} {...a} />) : <span style={{ color: "#bbb" }}>—</span>}
                 </td>
@@ -1059,19 +1442,10 @@ export default function ReportBuilderPage() {
   );
 
   // ── Treatment Summary renderer ────────────────────────────────────────────
-  const renderTreatmentSummary = () => {
-    if (treatmentProjects.length === 0) return (
-      <div style={{ padding: "12px 14px", color: "#888", fontSize: 12 }}>
-        No treatment data loaded.
-        <div style={{ marginTop: 6, fontSize: 11, color: "#aaa", lineHeight: 1.5 }}>
-          Open the Report Builder from the <strong>Treatment page</strong> sidebar after applying treatments.
-        </div>
-      </div>
-    );
-    if (treatmentSummaries.length === 0) return <div style={{ padding: "12px 14px", color: "#888", fontSize: 12 }}>Loading treatment data…</div>;
+  const renderTreatmentSummary = (summaries: ProjectTreatmentSummary[]) => {
     return (
       <div style={{ padding: "6px 12px" }}>
-        {treatmentSummaries.map((summary) => {
+        {summaries.map((summary) => {
           const total = projectSegmentCounts[summary.project] ?? 0;
           const sorted = Object.entries(summary.treatmentCounts).sort(([, a], [, b]) => b - a);
           return (
@@ -1116,15 +1490,15 @@ export default function ReportBuilderPage() {
   const SectionHeader = ({ title, subtitle, onTitleChange }: { title: string; subtitle?: string; onTitleChange?: (t: string) => void }) => (
     <div style={{ padding: "8px 14px 6px", flexShrink: 0, borderBottom: "1px solid #ede8f5" }}>
       {onTitleChange
-        ? <EditableText value={title} onChange={onTitleChange} style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e" }} />
-        : <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e" }}>{title}</div>
+        ? <EditableText value={title} onChange={onTitleChange} style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e" }} />
+        : <div style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e" }}>{title}</div>
       }
       {subtitle && <div style={{ fontSize: 10, color: "#999" }}>{subtitle}</div>}
     </div>
   );
 
   // ── Element content ───────────────────────────────────────────────────────
-  const renderContent = (el: ElementState) => {
+  const renderContent = (el: ElementState, orderIndex = 0) => {
     switch (el.type) {
 
       // ── Title ──────────────────────────────────────────────────────────────
@@ -1136,16 +1510,16 @@ export default function ReportBuilderPage() {
               <strong>Projects:</strong>{" "}
               {loadedProjects.length > 0
                 ? loadedProjects.map((name, i) => (
-                    <span key={name}>
-                      {i > 0 && ", "}
-                      <EditableText
-                        value={dispName(name)}
-                        onChange={(v) => setProjectName(name, v)}
-                        style={{ fontSize: 12, color: "#555" }}
-                        placeholder={name}
-                      />
-                    </span>
-                  ))
+                  <span key={name}>
+                    {i > 0 && ", "}
+                    <EditableText
+                      value={dispName(name)}
+                      onChange={(v) => setProjectName(name, v)}
+                      style={{ fontSize: 12, color: "#555" }}
+                      placeholder={name}
+                    />
+                  </span>
+                ))
                 : "—"}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 14px" }}>
@@ -1185,7 +1559,7 @@ export default function ReportBuilderPage() {
       case "riskBands":
         return (
           <div style={{ padding: "10px 14px" }}>
-            <EditableText value={secTitle(el.id, "Risk Band Distribution")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e", display: "block", marginBottom: 10 }} />
+            <EditableText value={secTitle(el.id, "Risk Band Distribution")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e", display: "block", marginBottom: 10 }} />
             {!distributions ? <div style={{ color: "#888", fontSize: 12 }}>Loading…</div> : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px 20px" }}>
                 {(["Overall", "VB", "BB", "SB", "BP"] as const).map((type) => {
@@ -1209,7 +1583,7 @@ export default function ReportBuilderPage() {
           <div style={{ height: "calc(100% - 30px)", display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 4, margin: 2 }}>
             {loadedProjects.length === 0
               ? <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, background: "#f7f7f7", border: "2px dashed #ccc", borderRadius: 4 }}><span style={{ fontSize: 12, color: "#aaa" }}>No projects loaded</span></div>
-              : <div style={{ flex: 1, overflow: "hidden" }}><ReportMiniMap projects={loadedProjects} bandMap={allBandMap} /></div>}
+              : <div style={{ flex: 1, overflow: "hidden" }}><ReportMiniMap projects={loadedProjects} bandMap={allBandMap} orderIndex={orderIndex} /></div>}
             {loadedProjects.length > 0 && (
               <div style={{ display: "flex", gap: 18, padding: "4px 10px", background: "#faf8fd", borderTop: "1px solid #ede8f5", flexShrink: 0, alignItems: "center" }}>
                 <span style={{ fontSize: 11, color: "#555" }}>
@@ -1232,7 +1606,7 @@ export default function ReportBuilderPage() {
       case "summary":
         return (
           <div style={{ padding: "12px 18px" }}>
-            <EditableText value={secTitle(el.id, "Summary")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e", display: "block", marginBottom: 10 }} />
+            <EditableText value={secTitle(el.id, "Summary")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e", display: "block", marginBottom: 10 }} />
             <div style={{ display: "flex", gap: 32, marginBottom: activeFilterNames.length > 0 ? 10 : 0 }}>
               <div style={{ textAlign: "center" }}>
                 <div style={{ fontSize: 28, fontWeight: 700, color: "#a020d0" }}>{loadedProjects.length}</div>
@@ -1270,9 +1644,13 @@ export default function ReportBuilderPage() {
                             </span>
                           ) : status?.categories ? (
                             status.categories.map((cat) => (
-                              <span key={cat.category} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, padding: "1px 6px", borderRadius: 8, background: cat.isActive ? cat.color + "22" : "#f0f0f0", border: `1px solid ${cat.isActive ? cat.color : "#ddd"}`, color: cat.isActive ? "#333" : "#bbb" }}>
-                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: cat.isActive ? cat.color : "#ccc", display: "inline-block", flexShrink: 0 }} />
-                                {cat.category}
+                              // inline-block + vertical-align middle + lineHeight:1 (not
+                              // inline-flex) so html2canvas centres the dot & label in the
+                              // PDF — it ignores flex align-items and drops text to the
+                              // bottom of the line box. Browser-identical to the old flex pill.
+                              <span key={cat.category} style={{ display: "inline-block", whiteSpace: "nowrap", lineHeight: 1, fontSize: 9, padding: "2px 6px", borderRadius: 8, background: cat.isActive ? cat.color + "22" : "#f0f0f0", border: `1px solid ${cat.isActive ? cat.color : "#ddd"}`, color: cat.isActive ? "#333" : "#bbb" }}>
+                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: cat.isActive ? cat.color : "#ccc", display: "inline-block", verticalAlign: "middle", marginRight: 3 }} />
+                                <span style={{ verticalAlign: "middle" }}>{cat.category}</span>
                               </span>
                             ))
                           ) : (
@@ -1296,11 +1674,11 @@ export default function ReportBuilderPage() {
       // ── Benchmarking Statistics ────────────────────────────────────────────
       case "benchmarkStats": {
         const crashRows = [
-          { key: "VB"      as const, label: "Vehicle–Bicycle",   short: "VB" },
-          { key: "BB"      as const, label: "Bicycle–Bicycle",   short: "BB" },
-          { key: "SB"      as const, label: "Single-Bicycle",    short: "SB" },
-          { key: "BP"      as const, label: "Bicycle–Pedestrian",short: "BP" },
-          { key: "Overall" as const, label: "Overall Risk",      short: "ALL" },
+          { key: "VB" as const, label: "Vehicle–Bicycle", short: "VB" },
+          { key: "BB" as const, label: "Bicycle–Bicycle", short: "BB" },
+          { key: "SB" as const, label: "Single-Bicycle", short: "SB" },
+          { key: "BP" as const, label: "Bicycle–Pedestrian", short: "BP" },
+          { key: "Overall" as const, label: "Overall Risk", short: "ALL" },
         ];
 
         // Count segments that are Low or Medium overall
@@ -1313,7 +1691,7 @@ export default function ReportBuilderPage() {
             <EditableText
               value={secTitle(el.id, "Benchmarking Statistics")}
               onChange={(t) => setSecTitle(el.id, t)}
-              style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e", display: "block", marginBottom: 4 }}
+              style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e", display: "block", marginBottom: 4 }}
             />
             <div style={{ fontSize: 10, color: "#888", marginBottom: 10 }}>
               Risk band distribution &amp; score averages across all crash types · {totalSegments} segments total
@@ -1342,7 +1720,7 @@ export default function ReportBuilderPage() {
                 </thead>
                 <tbody>
                   {crashRows.map(({ key, label, short }, ri) => {
-                    const dist  = distributions[key];
+                    const dist = distributions[key];
                     const total = Object.values(dist).reduce((a, b) => a + b, 0) || 1;
                     const isOverall = key === "Overall";
                     const avg = scoreStats?.[key as keyof ScoreStats]?.avg ?? "—";
@@ -1360,7 +1738,7 @@ export default function ReportBuilderPage() {
                         </td>
                         {[1, 2, 3, 4].map((band) => {
                           const count = dist[band] || 0;
-                          const pct   = (count / total * 100);
+                          const pct = (count / total * 100);
                           return (
                             <td key={band} style={{ ...tdStyle, textAlign: "center", padding: "4px 4px" }}>
                               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
@@ -1404,30 +1782,102 @@ export default function ReportBuilderPage() {
       case "topRisk": {
         const viewMode = el.viewMode || "tabular";
         const displayRows = topRiskRows.slice(0, el.topN ?? 10);
+
+        if (viewMode === "full-page") {
+          return (
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              {displayRows.length === 0 ? (
+                <>
+                  <div style={{ padding: "8px 12px 2px", flexShrink: 0 }}>
+                    <EditableText value={secTitle(el.id, "Top Risk Stretches")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e" }} />
+                    <div style={{ fontSize: 10, color: "#999" }}>Ranked highest to lowest · Before risk factors & after treatments applied</div>
+                  </div>
+                  <div style={{ padding: 14, color: "#888", fontSize: 12 }}>No score data. Run scoring first.</div>
+                </>
+              ) : (
+                renderTopRiskFullPage(displayRows, el.id)
+              )}
+            </div>
+          );
+        }
+
         return (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <div style={{ padding: "8px 12px 2px", flexShrink: 0 }}>
-              <EditableText value={secTitle(el.id, "Top Risk Stretches")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e" }} />
+              <EditableText value={secTitle(el.id, "Top Risk Stretches")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e" }} />
               <div style={{ fontSize: 10, color: "#999" }}>Ranked highest to lowest · Before risk factors & after treatments applied</div>
             </div>
-            {renderViewToggle(el)}
             {displayRows.length === 0
               ? <div style={{ padding: 14, color: "#888", fontSize: 12 }}>No score data. Run scoring first.</div>
-              : viewMode === "list"   ? renderTopRiskList(displayRows)
-              : viewMode === "grid"   ? renderTopRiskGrid(displayRows)
-              :                         renderTopRiskTabular(displayRows)}
+              : viewMode === "grid" ? renderTopRiskGrid(displayRows)
+                : renderTopRiskTabular(displayRows)}
           </div>
         );
       }
 
       // ── Treatment Summary ──────────────────────────────────────────────────
-      case "treatmentSummary":
+      case "treatmentSummary": {
+        if (loadedProjects.length === 0) {
+          return (
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              <SectionHeader title={secTitle(el.id, "Treatment Summary")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle="" />
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <div style={{ padding: "12px 14px", color: "#888", fontSize: 12 }}>No project data loaded.</div>
+              </div>
+            </div>
+          );
+        }
+        if (treatmentSummaries.length === 0) {
+          return (
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              <SectionHeader title={secTitle(el.id, "Treatment Summary")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle={`Data from: ${loadedProjects.map(dispName).join(", ")}`} />
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <div style={{ padding: "12px 14px", color: "#888", fontSize: 12 }}>Loading treatment data…</div>
+              </div>
+            </div>
+          );
+        }
+
+        const chunks: ProjectTreatmentSummary[][] = [];
+        let currentChunk: ProjectTreatmentSummary[] = [];
+        let currentHeight = 0;
+        const MAX_H = 920; // safe max height for content below header
+        
+        for (const summary of treatmentSummaries) {
+          const sorted = Object.keys(summary.treatmentCounts);
+          const estHeight = 80 + (sorted.length === 0 ? 30 : sorted.length * 36);
+          
+          if (currentHeight + estHeight > MAX_H && currentChunk.length > 0) {
+            chunks.push(currentChunk);
+            currentChunk = [summary];
+            currentHeight = estHeight;
+          } else {
+            currentChunk.push(summary);
+            currentHeight += estHeight;
+          }
+        }
+        if (currentChunk.length > 0) chunks.push(currentChunk);
+
         return (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <SectionHeader title={secTitle(el.id, "Treatment Summary")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle={treatmentProjects.length > 0 ? `Data from: ${treatmentProjects.map(dispName).join(", ")}` : "Open from the Treatment page to include this data"} />
-            <div style={{ flex: 1, overflow: "hidden" }}>{renderTreatmentSummary()}</div>
+          <div style={{ flex: 1, overflow: "visible", display: "flex", flexDirection: "column" }}>
+            {chunks.map((chunk, i) => {
+              const isLast = i === chunks.length - 1;
+              const height = isLast ? "auto" : PAGE_H;
+              const projectsInChunk = chunk.map(c => c.project);
+              const subtitle = `Data from: ${projectsInChunk.map(dispName).join(", ")}`;
+
+              return (
+                <div key={i} style={{ height, boxSizing: "border-box", paddingBottom: isLast ? 0 : PAGE_GAP, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                  <SectionHeader title={secTitle(el.id, "Treatment Summary") + (i > 0 ? " (Cont.)" : "")} onTitleChange={i === 0 ? (t) => setSecTitle(el.id, t) : undefined} subtitle={subtitle} />
+                  <div style={{ flex: 1, overflow: "hidden" }}>
+                    {renderTreatmentSummary(chunk)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
+      }
 
       // ── Project Details ────────────────────────────────────────────────────
       case "projectDetails": {
@@ -1442,56 +1892,78 @@ export default function ReportBuilderPage() {
             <span style={{ fontWeight: 600, color: "#1a1a2e" }}>{value}</span>
           </div>
         );
-        return (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <SectionHeader title={secTitle(el.id, "Project Details")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle={`${loadedProjects.length} project${loadedProjects.length !== 1 ? "s" : ""} · ${totalSegments} segments · ${totalKm.toFixed(1)} km total`} />
-            <div style={{ flex: 1, overflowY: "auto", padding: "8px 14px" }}>
-              {loadedProjects.length === 0
-                ? <div style={{ color: "#888", fontSize: 12 }}>No projects loaded.</div>
-                : loadedProjects.map((name, pi) => {
-                    const meta   = projectMeta[name] ?? {};
-                    const count  = projectSegmentCounts[name] ?? 0;
-                    const lenKm  = (count * 10 / 1000).toFixed(1);
-                    // Per-project overall risk distribution
-                    const projRows = allScoreRows.filter((r) => r._project === name);
-                    const projDist: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
-                    projRows.forEach((r) => { const b = r._maxBand; if (b >= 1 && b <= 4) projDist[b]++; });
-                    const projTotal = projRows.length || 1;
-                    return (
-                      <div key={name} style={{ marginBottom: pi < loadedProjects.length - 1 ? 16 : 0, paddingBottom: pi < loadedProjects.length - 1 ? 14 : 0, borderBottom: pi < loadedProjects.length - 1 ? "1px solid #ede8f5" : "none" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                          <EditableText value={dispName(name)} onChange={(v) => setProjectName(name, v)} style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2e", flex: 1 }} />
-                          {projRows.length > 0 && renderBandBadge(Math.round(Object.entries(projDist).sort(([, a], [, b]) => b - a)[0][0] as unknown as number))}
-                        </div>
-                        <div style={{ marginBottom: 6 }}>
-                          {detailRow("Segments",  `${count}`)}
-                          {detailRow("Length",    `${lenKm} km`)}
-                          {detailRow("Survey",    fmtDate(meta.dateCreated))}
-                          {detailRow("Analysis",  fmtDate(meta.lastUpdated))}
-                        </div>
-                        {projRows.length > 0 && (
-                          <div>
-                            <div style={{ fontSize: 9, color: "#aaa", marginBottom: 3, textTransform: "uppercase", letterSpacing: 0.4 }}>Overall Risk Distribution</div>
-                            <div style={{ display: "flex", height: 10, borderRadius: 4, overflow: "hidden", gap: 1 }}>
-                              {[1, 2, 3, 4].map((b) => {
-                                const pct = projDist[b] / projTotal * 100;
-                                return pct > 0 ? <div key={b} title={`${RISK_LABELS[b]}: ${pct.toFixed(1)}%`} style={{ width: `${pct}%`, background: RISK_COLORS[b], minWidth: 2 }} /> : null;
-                              })}
-                            </div>
-                            <div style={{ display: "flex", gap: 10, marginTop: 3 }}>
-                              {[1, 2, 3, 4].map((b) => projDist[b] > 0 ? (
-                                <span key={b} style={{ fontSize: 9, color: RISK_COLORS[b], fontWeight: 600 }}>
-                                  {RISK_LABELS[b]} {(projDist[b] / projTotal * 100).toFixed(1)}%
-                                </span>
-                              ) : null)}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-              }
+        const renderProject = (name: string, isLastInChunk: boolean) => {
+          const meta = projectMeta[name] ?? {};
+          const count = projectSegmentCounts[name] ?? 0;
+          const lenKm = (count * 10 / 1000).toFixed(1);
+          const projRows = allScoreRows.filter((r) => r._project === name);
+          const projDist: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
+          projRows.forEach((r) => { const b = r._maxBand; if (b >= 1 && b <= 4) projDist[b]++; });
+          const projTotal = projRows.length || 1;
+          return (
+            <div key={name} style={{ marginBottom: isLastInChunk ? 0 : 16, paddingBottom: isLastInChunk ? 0 : 14, borderBottom: isLastInChunk ? "none" : "1px solid #ede8f5" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <EditableText value={dispName(name)} onChange={(v) => setProjectName(name, v)} style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2e", flex: 1 }} />
+                {projRows.length > 0 && renderBandBadge(Math.round(Object.entries(projDist).sort(([, a], [, b]) => b - a)[0][0] as unknown as number))}
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                {detailRow("Segments", `${count}`)}
+                {detailRow("Length", `${lenKm} km`)}
+                {detailRow("Survey", fmtDate(meta.dateCreated))}
+                {detailRow("Analysis", fmtDate(meta.lastUpdated))}
+              </div>
+              {projRows.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 9, color: "#aaa", marginBottom: 3, textTransform: "uppercase", letterSpacing: 0.4 }}>Overall Risk Distribution</div>
+                  <div style={{ display: "flex", height: 10, borderRadius: 4, overflow: "hidden", gap: 1 }}>
+                    {[1, 2, 3, 4].map((b) => {
+                      const pct = projDist[b] / projTotal * 100;
+                      return pct > 0 ? <div key={b} title={`${RISK_LABELS[b]}: ${pct.toFixed(1)}%`} style={{ width: `${pct}%`, background: RISK_COLORS[b], minWidth: 2 }} /> : null;
+                    })}
+                  </div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 3 }}>
+                    {[1, 2, 3, 4].map((b) => projDist[b] > 0 ? (
+                      <span key={b} style={{ fontSize: 9, color: RISK_COLORS[b], fontWeight: 600 }}>
+                        {RISK_LABELS[b]} {(projDist[b] / projTotal * 100).toFixed(1)}%
+                      </span>
+                    ) : null)}
+                  </div>
+                </div>
+              )}
             </div>
+          );
+        };
+        const numChunks = Math.max(1, Math.ceil(loadedProjects.length / PROJ_PAGE_SIZE));
+        return (
+          // Each chunk (except the last) is exactly PAGE_H tall so its boundary
+          // lands on the PDF page-break grid — a real page break between every
+          // PROJ_PAGE_SIZE projects, not a click-to-paginate widget.
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            {loadedProjects.length === 0 ? (
+              <>
+                <SectionHeader title={secTitle(el.id, "Project Details")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle="0 projects" />
+                <div style={{ padding: "8px 14px", color: "#888", fontSize: 12 }}>No projects loaded.</div>
+              </>
+            ) : (
+              Array.from({ length: numChunks }).map((_, ci) => {
+                const chunkProjects = loadedProjects.slice(ci * PROJ_PAGE_SIZE, (ci + 1) * PROJ_PAGE_SIZE);
+                const isLastChunk = ci === numChunks - 1;
+                return (
+                  <div key={ci} style={{ height: isLastChunk ? "auto" : PAGE_H, paddingBottom: isLastChunk ? 0 : PAGE_GAP, boxSizing: "border-box", flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                    {ci === 0 ? (
+                      <SectionHeader title={secTitle(el.id, "Project Details")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle={`${loadedProjects.length} project${loadedProjects.length !== 1 ? "s" : ""} · ${totalSegments} segments · ${totalKm.toFixed(1)} km total`} />
+                    ) : (
+                      <div style={{ padding: "10px 14px 0", fontSize: 20, fontWeight: 600, color: "#1a1a2e" }}>
+                        {secTitle(el.id, "Project Details")} <span style={{ color: "#aaa", fontWeight: 500 }}>(continued)</span>
+                      </div>
+                    )}
+                    <div style={{ flex: 1, overflow: "hidden", padding: "8px 14px" }}>
+                      {chunkProjects.map((name, pi) => renderProject(name, pi === chunkProjects.length - 1))}
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         );
       }
@@ -1507,38 +1979,38 @@ export default function ReportBuilderPage() {
               {!scoreStats
                 ? <div style={{ color: "#888", fontSize: 12, padding: 8 }}>No score data available.</div>
                 : (["Overall", "VB", "BB", "SB", "BP"] as const).map((ct, i) => {
-                    const { min, max, avg } = scoreStats[ct];
-                    const scale = SCALE_MAX[ct] || 100;
-                    const minN = parseFloat(min) || 0;
-                    const maxN = parseFloat(max) || 0;
-                    const avgN = parseFloat(avg) || 0;
-                    const minPct = Math.min(100, minN / scale * 100);
-                    const maxPct = Math.min(100, maxN / scale * 100);
-                    const avgPct = Math.min(100, avgN / scale * 100);
-                    const isOverall = ct === "Overall";
-                    return (
-                      <div key={ct} style={{ marginBottom: i < 4 ? 10 : 0, paddingBottom: i < 4 ? 10 : 0, borderBottom: i < 4 ? "1px solid #f5f0fa" : "none" }}>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: isOverall ? 700 : 600, color: isOverall ? "#a020d0" : "#333", width: 130, flexShrink: 0 }}>{CRASH_TYPE_LABELS[ct]}</span>
-                          <span style={{ fontSize: 10, color: "#87C424", fontWeight: 700 }}>min {min}</span>
-                          <span style={{ fontSize: 10, color: "#aaa" }}>·</span>
-                          <span style={{ fontSize: 10, color: "#555", fontWeight: 600 }}>avg {avg}</span>
-                          <span style={{ fontSize: 10, color: "#aaa" }}>·</span>
-                          <span style={{ fontSize: 10, color: "#CD1AFF", fontWeight: 700 }}>max {max}</span>
-                        </div>
-                        <div style={{ position: "relative", height: 12, background: "#f0eaf8", borderRadius: 6, overflow: "hidden" }}>
-                          {/* range band */}
-                          <div style={{ position: "absolute", left: `${minPct}%`, width: `${Math.max(0, maxPct - minPct)}%`, background: isOverall ? "#a020d0" : "#c080e8", height: "100%", opacity: 0.35 }} />
-                          {/* avg marker */}
-                          <div style={{ position: "absolute", left: `${avgPct}%`, width: 2, height: "100%", background: isOverall ? "#a020d0" : "#8040c0", transform: "translateX(-1px)" }} />
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 1 }}>
-                          <span style={{ fontSize: 8, color: "#ccc" }}>0</span>
-                          <span style={{ fontSize: 8, color: "#ccc" }}>{scale}</span>
-                        </div>
+                  const { min, max, avg } = scoreStats[ct];
+                  const scale = SCALE_MAX[ct] || 100;
+                  const minN = parseFloat(min) || 0;
+                  const maxN = parseFloat(max) || 0;
+                  const avgN = parseFloat(avg) || 0;
+                  const minPct = Math.min(100, minN / scale * 100);
+                  const maxPct = Math.min(100, maxN / scale * 100);
+                  const avgPct = Math.min(100, avgN / scale * 100);
+                  const isOverall = ct === "Overall";
+                  return (
+                    <div key={ct} style={{ marginBottom: i < 4 ? 10 : 0, paddingBottom: i < 4 ? 10 : 0, borderBottom: i < 4 ? "1px solid #f5f0fa" : "none" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, fontWeight: isOverall ? 700 : 600, color: isOverall ? "#a020d0" : "#333", width: 130, flexShrink: 0 }}>{CRASH_TYPE_LABELS[ct]}</span>
+                        <span style={{ fontSize: 10, color: "#87C424", fontWeight: 700 }}>min {min}</span>
+                        <span style={{ fontSize: 10, color: "#aaa" }}>·</span>
+                        <span style={{ fontSize: 10, color: "#555", fontWeight: 600 }}>avg {avg}</span>
+                        <span style={{ fontSize: 10, color: "#aaa" }}>·</span>
+                        <span style={{ fontSize: 10, color: "#CD1AFF", fontWeight: 700 }}>max {max}</span>
                       </div>
-                    );
-                  })
+                      <div style={{ position: "relative", height: 12, background: "#f0eaf8", borderRadius: 6, overflow: "hidden" }}>
+                        {/* range band */}
+                        <div style={{ position: "absolute", left: `${minPct}%`, width: `${Math.max(0, maxPct - minPct)}%`, background: isOverall ? "#a020d0" : "#c080e8", height: "100%", opacity: 0.35 }} />
+                        {/* avg marker */}
+                        <div style={{ position: "absolute", left: `${avgPct}%`, width: 2, height: "100%", background: isOverall ? "#a020d0" : "#8040c0", transform: "translateX(-1px)" }} />
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 1 }}>
+                        <span style={{ fontSize: 8, color: "#ccc" }}>0</span>
+                        <span style={{ fontSize: 8, color: "#ccc" }}>{scale}</span>
+                      </div>
+                    </div>
+                  );
+                })
               }
             </div>
           </div>
@@ -1547,35 +2019,35 @@ export default function ReportBuilderPage() {
 
       // ── Top Contributing Attributes ────────────────────────────────────────
       case "topAttributes": {
-        const ATTR_COLORS = ["#a020d0","#4472C4","#C0504D","#9BBB59","#4BACC6","#F79646","#7030A0","#2C4770","#E46C0A","#A9D18E"];
+        const ATTR_COLORS = ["#a020d0", "#4472C4", "#C0504D", "#9BBB59", "#4BACC6", "#F79646", "#7030A0", "#2C4770", "#E46C0A", "#A9D18E"];
         return (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <SectionHeader title={secTitle(el.id, "Top Risk Factors")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle={`Most frequently occurring risk contributors · ${totalSegments} segments total`} />
-            <div style={{ flex: 1, overflowY: "auto", padding: "8px 14px" }}>
+            <div style={{ flex: 1, overflow: "hidden", padding: "8px 14px" }}>
               {attributeFrequency.length === 0
                 ? <div style={{ color: "#888", fontSize: 12 }}>No attribute data. Run scoring first.</div>
                 : (() => {
-                    const maxCount = attributeFrequency[0]?.[1] ?? 1;
-                    return attributeFrequency.map(([name, count], i) => {
-                      const pct = totalSegments > 0 ? (count / totalSegments * 100) : 0;
-                      const barPct = count / maxCount * 100;
-                      const color = ATTR_COLORS[i % ATTR_COLORS.length];
-                      return (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                          <div style={{ width: 20, fontSize: 10, fontWeight: 700, color: "#bbb", textAlign: "right", flexShrink: 0 }}>#{i + 1}</div>
-                          <div style={{ flex: 1, overflow: "hidden" }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-                              <span style={{ fontSize: 11, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "72%" }}>{name}</span>
-                              <span style={{ fontSize: 10, color: "#888", flexShrink: 0, marginLeft: 4 }}>{count} segs · {pct.toFixed(1)}%</span>
-                            </div>
-                            <div style={{ height: 9, background: "#f0f0f0", borderRadius: 4, overflow: "hidden" }}>
-                              <div style={{ width: `${barPct}%`, background: color, height: "100%", opacity: 0.8 }} />
-                            </div>
+                  const maxCount = attributeFrequency[0]?.[1] ?? 1;
+                  return attributeFrequency.map(([name, count], i) => {
+                    const pct = totalSegments > 0 ? (count / totalSegments * 100) : 0;
+                    const barPct = count / maxCount * 100;
+                    const color = ATTR_COLORS[i % ATTR_COLORS.length];
+                    return (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <div style={{ width: 20, fontSize: 10, fontWeight: 700, color: "#bbb", textAlign: "right", flexShrink: 0 }}>#{i + 1}</div>
+                        <div style={{ flex: 1, overflow: "hidden" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                            <span style={{ fontSize: 11, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "72%" }}>{name}</span>
+                            <span style={{ fontSize: 10, color: "#888", flexShrink: 0, marginLeft: 4 }}>{count} segs · {pct.toFixed(1)}%</span>
+                          </div>
+                          <div style={{ height: 9, background: "#f0f0f0", borderRadius: 4, overflow: "hidden" }}>
+                            <div style={{ width: `${barPct}%`, background: color, height: "100%", opacity: 0.8 }} />
                           </div>
                         </div>
-                      );
-                    });
-                  })()}
+                      </div>
+                    );
+                  });
+                })()}
             </div>
           </div>
         );
@@ -1626,7 +2098,7 @@ export default function ReportBuilderPage() {
         return (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <SectionHeader title={secTitle(el.id, "Methodology")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle="CycleRAP v2 — Cycling Road Assessment Programme" />
-            <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
+            <div style={{ flex: 1, overflow: "hidden", padding: "10px 14px" }}>
               <p style={{ fontSize: 11, color: "#444", lineHeight: 1.75, margin: "0 0 10px" }}>{METHODOLOGY_TEXT}</p>
               {/* Risk band thresholds table */}
               <div style={{ marginBottom: 10 }}>
@@ -1642,10 +2114,10 @@ export default function ReportBuilderPage() {
                   </thead>
                   <tbody>
                     {[
-                      { label: "Vehicle–Bicycle (VB)",    ranges: ["< 10", "10 – 25", "25 – 60", "> 60"] },
-                      { label: "Bicycle–Bicycle (BB)",    ranges: ["< 5",  "5 – 10",  "10 – 20", "> 20"] },
-                      { label: "Single-Bicycle (SB)",     ranges: ["< 5",  "5 – 10",  "10 – 20", "> 20"] },
-                      { label: "Bicycle–Pedestrian (BP)", ranges: ["< 5",  "5 – 10",  "10 – 20", "> 20"] },
+                      { label: "Vehicle–Bicycle (VB)", ranges: ["< 10", "10 – 25", "25 – 60", "> 60"] },
+                      { label: "Bicycle–Bicycle (BB)", ranges: ["< 5", "5 – 10", "10 – 20", "> 20"] },
+                      { label: "Single-Bicycle (SB)", ranges: ["< 5", "5 – 10", "10 – 20", "> 20"] },
+                      { label: "Bicycle–Pedestrian (BP)", ranges: ["< 5", "5 – 10", "10 – 20", "> 20"] },
                     ].map(({ label, ranges }, i) => (
                       <tr key={label} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa", borderBottom: "1px solid #f0eaf8" }}>
                         <td style={{ ...tdStyle, fontWeight: 600 }}>{label}</td>
@@ -1674,7 +2146,7 @@ export default function ReportBuilderPage() {
         return (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <SectionHeader title={secTitle(el.id, "Segment Image Gallery")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle="Images for top-risk segments, ordered by rank" />
-            <div style={{ flex: 1, overflowY: "auto", padding: "8px 10px" }}>
+            <div style={{ flex: 1, overflow: "hidden", padding: "8px 10px" }}>
               {topRiskRows.length === 0
                 ? <div style={{ color: "#888", fontSize: 12 }}>No segments loaded.</div>
                 : (
@@ -1702,201 +2174,22 @@ export default function ReportBuilderPage() {
           </div>
         );
 
-      // ── Deep-Dive Risk Analytics ───────────────────────────────────────────
-      case "deepDive": {
-        const BAR_COLORS = ["#4472C4","#C0504D","#9BBB59","#8064A2","#4BACC6","#F79646","#2C4770","#E46C0A","#A9D18E","#7030A0"];
-
-        const pieData = distributions
-          ? [
-              { name: "Low",     value: distributions.Overall[1] || 0, color: RISK_COLORS[1] },
-              { name: "Medium",  value: distributions.Overall[2] || 0, color: RISK_COLORS[2] },
-              { name: "High",    value: distributions.Overall[3] || 0, color: RISK_COLORS[3] },
-              { name: "Extreme", value: distributions.Overall[4] || 0, color: RISK_COLORS[4] },
-            ].filter((d) => d.value > 0)
-          : [];
-
-        const barData = attributeFrequency.slice(0, 8).map(([name, count]) => ({
-          name: name.length > 16 ? name.slice(0, 14) + "…" : name,
-          count,
-        }));
-
-        const noData = (msg: string) => (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "80%", color: "#bbb", fontSize: 11 }}>{msg}</div>
-        );
-
-        return (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <SectionHeader title={secTitle(el.id, "Deep-Dive Risk Analytics")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle="Overall risk distribution · Top risk factors · Per-project comparison" />
-            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr auto", gap: 0, overflow: "hidden" }}>
-
-              {/* Left: Pie chart */}
-              <div style={{ display: "flex", flexDirection: "column", padding: "8px 6px 4px 12px", borderRight: "1px solid #f0eaf8", overflow: "hidden" }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#444", marginBottom: 4, textAlign: "center" }}>Overall Risk Distribution</div>
-                {pieData.length === 0
-                  ? noData("No score data yet")
-                  : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="72%" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={9}>
-                          {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                        </Pie>
-                        <RechartTooltip formatter={(val: number) => [`${val} segments`, ""]} />
-                        <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  )}
-              </div>
-
-              {/* Right: Bar chart */}
-              <div style={{ display: "flex", flexDirection: "column", padding: "8px 8px 4px 6px", overflow: "hidden" }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#444", marginBottom: 4, textAlign: "center" }}>Top Contributing Attributes Across Project</div>
-                {barData.length === 0
-                  ? noData("No attribute data yet")
-                  : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={barData} margin={{ top: 4, right: 8, left: -18, bottom: 50 }} barCategoryGap="30%">
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="name" tick={{ fontSize: 9 }} angle={-40} textAnchor="end" interval={0} />
-                        <YAxis tick={{ fontSize: 9 }} allowDecimals={false} />
-                        <RechartTooltip formatter={(val: number) => [`${val} segments`, "Segments"]} />
-                        <Bar dataKey="count" radius={[3, 3, 0, 0]}>
-                          {barData.map((_, i) => <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-              </div>
-
-              {/* Bottom: per-project comparison (spans both columns) */}
-              {loadedProjects.length > 1 && distributions && (
-                <div style={{ gridColumn: "1 / -1", borderTop: "1px solid #f0eaf8", padding: "6px 12px 4px" }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#444", marginBottom: 5 }}>Per-Project Overall Risk Comparison</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {loadedProjects.map((pName) => {
-                      const projRows = allScoreRows.filter((r) => r._project === pName);
-                      const pTotal   = projRows.length || 1;
-                      const pDist: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
-                      projRows.forEach((r) => { const b = r._maxBand; if (b >= 1 && b <= 4) pDist[b]++; });
-                      const worstBand = [4,3,2,1].find((b) => pDist[b] > 0) ?? 1;
-                      return (
-                        <div key={pName} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 10, color: "#555", width: 130, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={dispName(pName)}>{dispName(pName)}</span>
-                          <div style={{ flex: 1, display: "flex", height: 12, borderRadius: 4, overflow: "hidden", gap: 1 }}>
-                            {[1,2,3,4].map((b) => {
-                              const pct = pDist[b] / pTotal * 100;
-                              return pct > 0 ? <div key={b} title={`${RISK_LABELS[b]}: ${pct.toFixed(1)}%`} style={{ width: `${pct}%`, background: RISK_COLORS[b], minWidth: 2 }} /> : null;
-                            })}
-                          </div>
-                          <div style={{ width: 44, flexShrink: 0 }}>{renderBandBadge(worstBand, true)}</div>
-                          <span style={{ fontSize: 9, color: "#aaa", width: 32, flexShrink: 0, textAlign: "right" }}>{projRows.length} seg</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-            </div>
-          </div>
-        );
-      }
-
-      // ── Filter Analysis ────────────────────────────────────────────────────
-      case "filterAnalysis": {
-        const allRows = Object.values(allAttributeRows).flat();
-        if (activeFilterNames.length === 0) {
-          return (
-            <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <SectionHeader title={secTitle(el.id, "Filter Analysis")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle="Reflects active filters from Path Analysis" />
-              <div style={{ padding: "12px 14px", color: "#888", fontSize: 12 }}>
-                No filters active in Path Analysis.
-                <div style={{ marginTop: 4, fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
-                  Go to Path Analysis, enable attribute filters, then return here to see their distributions.
-                </div>
-              </div>
-            </div>
-          );
-        }
-        const FALLBACK_COLORS = ["#a020d0","#4472C4","#C0504D","#9BBB59","#4BACC6","#F79646"];
-        return (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <SectionHeader title={secTitle(el.id, "Filter Analysis")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle={`${activeFilterNames.length} active filter${activeFilterNames.length > 1 ? "s" : ""}: ${activeFilterNames.join(" · ")}`} />
-            {allRows.length === 0
-              ? <div style={{ padding: "12px 14px", color: "#888", fontSize: 12 }}>Loading attribute data…</div>
-              : (
-                <div style={{ flex: 1, overflowY: "auto", padding: "8px 14px", display: "flex", flexDirection: "column", gap: 18 }}>
-                  {activeFilterNames.map((filterName, fi) => {
-                    const catStatus = activeCategoryStatus.find((s) => s.attribute === filterName);
-                    const colorByCategory = new Map<string, string>(
-                      catStatus?.categories.map((c) => [c.category, c.color]) ?? []
-                    );
-                    const activeSet = new Set<string>(
-                      catStatus?.categories.filter((c) => c.isActive).map((c) => c.category) ?? []
-                    );
-                    const valueCounts = new Map<string, number>();
-                    allRows.forEach((row) => {
-                      const val = row[filterName];
-                      if (val !== null && val !== undefined && val !== "") {
-                        const key = String(val);
-                        valueCounts.set(key, (valueCounts.get(key) || 0) + 1);
-                      }
-                    });
-                    const chartData = [...valueCounts.entries()]
-                      .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
-                      .map(([name, count]) => ({
-                        name,
-                        count,
-                        fill: colorByCategory.get(name) ?? FALLBACK_COLORS[fi % FALLBACK_COLORS.length],
-                        isActive: activeSet.size === 0 || activeSet.has(name),
-                      }));
-                    const inactiveCount = chartData.filter((d) => !d.isActive).length;
-                    return (
-                      <div key={filterName} style={{ flexShrink: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: "#333" }}>{filterName}</span>
-                          {inactiveCount > 0 && (
-                            <span style={{ fontSize: 9, color: "#e08800", background: "#fff8e0", borderRadius: 8, padding: "1px 6px", border: "1px solid #f0d080" }}>
-                              {inactiveCount} category{inactiveCount > 1 ? "s" : ""} hidden on map
-                            </span>
-                          )}
-                        </div>
-                        {chartData.length === 0
-                          ? <div style={{ fontSize: 10, color: "#bbb" }}>No data for this attribute.</div>
-                          : (
-                            <ResponsiveContainer width="100%" height={90}>
-                              <BarChart data={chartData} margin={{ top: 2, right: 8, left: -20, bottom: 22 }} barCategoryGap="30%">
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                <XAxis dataKey="name" tick={{ fontSize: 9 }} angle={-30} textAnchor="end" interval={0} />
-                                <YAxis tick={{ fontSize: 9 }} allowDecimals={false} />
-                                <RechartTooltip formatter={(val: number, _: string, props: {payload?: {isActive?: boolean}}) => [`${val} segments${props.payload?.isActive === false ? " (hidden on map)" : ""}`, "Count"]} />
-                                <Bar dataKey="count" radius={[3, 3, 0, 0]}>
-                                  {chartData.map((entry, idx) => (
-                                    <Cell key={idx} fill={entry.fill} opacity={entry.isActive ? 0.85 : 0.3} />
-                                  ))}
-                                </Bar>
-                              </BarChart>
-                            </ResponsiveContainer>
-                          )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-          </div>
-        );
-      }
-
       default: return null;
     }
   };
 
+  // ── Flow layout (single source of truth for heights + page-break spacing) ──
+  const visibleElements = useMemo(() => elements.filter((e) => e.visible), [elements]);
+  const layout = useMemo(
+    () => computeFlowLayout(visibleElements, computeIdealHeight),
+    [visibleElements, computeIdealHeight],
+  );
+
   // ── Dynamic canvas size ───────────────────────────────────────────────────
   const canvasH = useMemo(() => {
-    const visible = elements.filter((e) => e.visible);
-    if (visible.length === 0) return 3400;
-    const maxBottom = Math.max(...visible.map((e) => e.y + e.height));
-    return Math.max(1200, maxBottom + 80);
-  }, [elements]);
+    if (visibleElements.length === 0) return 3400;
+    return Math.max(1200, layout.bottom + 80);
+  }, [visibleElements, layout]);
 
   const pageBreaks = useMemo(() => {
     const breaks: number[] = [];
@@ -1905,15 +2198,16 @@ export default function ReportBuilderPage() {
     return breaks;
   }, [canvasH]);
 
+  // Gap-constrained page separators: each band is clipped to the actual whitespace
+  // We no longer manually calculate page breaks.
+  // Instead, visual page backdrops with spaces between them are rendered.
   const totalPages = useMemo(() => Math.max(1, Math.ceil(canvasH / PAGE_H)), [canvasH]);
 
   // ── Checklist memo ────────────────────────────────────────────────────────
-  const [showSections, setShowSections] = useState(false);
   const sectionChecklist = useMemo(() =>
     elements.map((el) => ({ id: el.id, label: el.label, visible: el.visible })),
     [elements]
   );
-  const visibleCount = sectionChecklist.filter((s) => s.visible).length;
 
   // ── Page ──────────────────────────────────────────────────────────────────
   return (
@@ -1922,20 +2216,15 @@ export default function ReportBuilderPage() {
         <button className="rb-btn rb-btn-secondary" onClick={() => navigate(-1)}>← Back</button>
         <button className="rb-btn rb-btn-secondary" onClick={() => navigate("/analysis/path")} title="Go to Path Analysis to download table or image exports">↗ Path Analysis</button>
 
-        <button
-          className={`rb-btn${showSections ? " rb-btn-sections-active" : ""}`}
-          onClick={() => setShowSections((s) => !s)}
-          title="Toggle report sections panel"
-        >
-          ☰ Sections ({visibleCount}/{sectionChecklist.length}) {showSections ? "▲" : "▼"}
-        </button>
-
         <button className="rb-btn rb-btn-secondary" onClick={autoFitElements} title="Auto-resize all sections to fit their content and remove gaps">
           ⇅ Auto-fit
         </button>
 
         <button className="rb-btn rb-btn-secondary" onClick={saveLayout} title="Save your report layout, section arrangement, and text to this browser. The layout will be automatically restored the next time you open the Report Builder.">
           💾 Save layout
+        </button>
+        <button className="rb-btn rb-btn-secondary" onClick={resetLayout} title="Reset all sections and text to their default values">
+          🔄 Reset layout
         </button>
         {hasSaved && (
           <button className="rb-btn rb-btn-secondary" onClick={restoreLayout} title="Revert to the last manually saved layout (does not affect live project data)">
@@ -1958,23 +2247,6 @@ export default function ReportBuilderPage() {
           </button>
         </div>
       </div>
-
-      {showSections && (
-        <div className="rb-sections-panel">
-          <span className="rb-toggle-label" style={{ fontWeight: 600, color: "#a020d0", flexShrink: 0 }}>Report Sections:</span>
-          {sectionChecklist.map((sec) => (
-            <label key={sec.id} className="rb-checklist-item">
-              <input
-                type="checkbox"
-                checked={sec.visible}
-                onChange={() => sec.visible ? hideElement(sec.id) : showElement(sec.id)}
-                style={{ accentColor: "#a020d0" }}
-              />
-              <span>{sec.label}</span>
-            </label>
-          ))}
-        </div>
-      )}
 
       {/* ── Save confirmation toast ─────────────────────────────────────── */}
       {saveToastVisible && (
@@ -2019,53 +2291,92 @@ export default function ReportBuilderPage() {
         </div>
       )}
 
-      <div style={{ position: "relative", flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {/* Floating page nav arrows on the right side */}
-        <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, zIndex: 100, pointerEvents: "none" }}>
-          <button
-            onClick={() => goToPage(Math.max(0, currentPage - 1))}
-            disabled={currentPage === 0}
-            style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #d0c0e8", background: currentPage === 0 ? "#f0f0f0" : "#fff", cursor: currentPage === 0 ? "not-allowed" : "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.12)", opacity: currentPage === 0 ? 0.35 : 1, pointerEvents: "auto", color: "#a020d0" }}
-          >▲</button>
-          <div style={{ background: "#fff", border: "1px solid #e0d0f0", borderRadius: 14, padding: "4px 10px", fontSize: 11, color: "#a020d0", fontWeight: 700, textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.1)", whiteSpace: "nowrap" }}>
-            {currentPage + 1} / {totalPages}
+      <div className="rb-main">
+        <aside className="rb-sections-sidebar">
+          <div className="rb-reorder-header">
+            <span style={{ fontWeight: 600, color: "#a020d0" }}>Report Sections</span>
+            <span className="rb-reorder-hint">
+              Drag <GripVertical size={11} style={{ verticalAlign: "-2px" }} /> to reorder · check to show / hide
+            </span>
           </div>
-          <button
-            onClick={() => goToPage(Math.min(totalPages - 1, currentPage + 1))}
-            disabled={currentPage >= totalPages - 1}
-            style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #d0c0e8", background: currentPage >= totalPages - 1 ? "#f0f0f0" : "#fff", cursor: currentPage >= totalPages - 1 ? "not-allowed" : "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.12)", opacity: currentPage >= totalPages - 1 ? 0.35 : 1, pointerEvents: "auto", color: "#a020d0" }}
-          >▼</button>
-        </div>
-
-        <div className="rb-canvas-container" ref={canvasContainerRef} onScroll={handleCanvasScroll}>
-        <div className="rb-canvas-hint">
-          Drag elements by their purple handle · Resize from corners · Check/uncheck sections above · Export when ready
-        </div>
-        <div ref={canvasRef} className="rb-canvas" style={{ width: CANVAS_W, height: canvasH }}>
-          {pageBreaks.map((yBreak, idx) => (
-            <div key={yBreak}>
-              <div style={{ position: "absolute", top: yBreak, left: 0, right: 0, height: 1, background: "repeating-linear-gradient(90deg,#c090e0 0px,#c090e0 8px,transparent 8px,transparent 16px)", zIndex: 0, pointerEvents: "none" }} />
-              <div style={{ position: "absolute", top: yBreak + 3, right: 8, fontSize: 9, color: "#c090e0", pointerEvents: "none", zIndex: 0 }}>Page {idx + 2}</div>
-            </div>
-          ))}
-
-          {elements.filter((el) => el.visible).map((el) => (
-            <Rnd key={el.id}
-              size={{ width: el.width, height: el.height }}
-              position={{ x: el.x, y: el.y }}
-              onDragStop={(_e, d) => updateElement(el.id, { x: d.x, y: d.y })}
-              onResizeStop={(_e, _dir, ref, _delta, pos) => updateElement(el.id, { width: parseInt(ref.style.width), height: parseInt(ref.style.height), x: pos.x, y: pos.y })}
-              bounds="parent" dragHandleClassName="rb-element-handle" minWidth={180} minHeight={80} style={{ zIndex: 1 }}>
-              <div className="rb-element" data-element-id={el.id}>
-                <div className="rb-element-handle">
-                  <span className="rb-element-handle-label">{el.label}</span>
-                  <button className="rb-element-close" onClick={() => hideElement(el.id)} onMouseDown={(e) => e.stopPropagation()} title="Hide">×</button>
-                </div>
-                <div className="rb-element-body">{renderContent(el)}</div>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={sectionChecklist.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+              <div className="rb-reorder-list">
+                {sectionChecklist.map((sec) => {
+                  const elState = elements.find((e) => e.id === sec.id);
+                  return (
+                    <SortableSectionRow
+                      key={sec.id}
+                      id={sec.id}
+                      label={sec.label}
+                      visible={sec.visible}
+                      onToggle={() => (sec.visible ? hideElement(sec.id) : showElement(sec.id))}
+                    >
+                      {sec.id === "topRisk" && elState && sec.visible ? renderViewToggle(elState) : null}
+                    </SortableSectionRow>
+                  );
+                })}
               </div>
-            </Rnd>
-          ))}
-        </div>
+            </SortableContext>
+          </DndContext>
+        </aside>
+
+        <div style={{ position: "relative", flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          {/* Floating page nav arrows on the right side */}
+          <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, zIndex: 100, pointerEvents: "none" }}>
+            <button
+              onClick={() => goToPage(Math.max(0, currentPage - 1))}
+              disabled={currentPage === 0}
+              style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #d0c0e8", background: currentPage === 0 ? "#f0f0f0" : "#fff", cursor: currentPage === 0 ? "not-allowed" : "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.12)", opacity: currentPage === 0 ? 0.35 : 1, pointerEvents: "auto", color: "#a020d0" }}
+            >▲</button>
+            <div style={{ background: "#fff", border: "1px solid #e0d0f0", borderRadius: 14, padding: "4px 10px", fontSize: 11, color: "#a020d0", fontWeight: 700, textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.1)", whiteSpace: "nowrap" }}>
+              {currentPage + 1} / {totalPages}
+            </div>
+            <button
+              onClick={() => goToPage(Math.min(totalPages - 1, currentPage + 1))}
+              disabled={currentPage >= totalPages - 1}
+              style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #d0c0e8", background: currentPage >= totalPages - 1 ? "#f0f0f0" : "#fff", cursor: currentPage >= totalPages - 1 ? "not-allowed" : "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.12)", opacity: currentPage >= totalPages - 1 ? 0.35 : 1, pointerEvents: "auto", color: "#a020d0" }}
+            >▼</button>
+          </div>
+
+          <div className="rb-canvas-container" ref={canvasContainerRef} onScroll={handleCanvasScroll}>
+            <div className="rb-canvas-hint">
+              Reorder &amp; show / hide sections from the left panel · Auto-fit to tidy spacing · Export when ready
+            </div>
+            <div ref={canvasRef} className="rb-canvas" style={{ width: CANVAS_W, height: canvasH, background: "transparent", boxShadow: "none" }}>
+              {Array.from({ length: totalPages }).map((_, i) => (
+                <div key={`page-bg-${i}`} style={{ position: "absolute", top: i * PAGE_H, left: 0, width: CANVAS_W, height: PAGE_H, zIndex: 0, pointerEvents: "none" }}>
+                  <div style={{
+                    width: CANVAS_W,
+                    height: PAGE_H - PAGE_GAP,
+                    background: "#fff",
+                    boxShadow: "0 4px 28px rgba(0, 0, 0, 0.18)",
+                  }} />
+                  {i < totalPages - 1 && (
+                    <div className="rb-page-label" style={{ position: "absolute", bottom: PAGE_GAP / 2 - 5, right: 12, fontSize: 10, color: "#777", fontWeight: 500 }}>
+                      Page {i + 1}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {visibleElements.map((el, orderIndex) => {
+                const lay = layout.map.get(el.id);
+                return (
+                  <ReportSection
+                    key={el.id}
+                    id={el.id}
+                    label={el.label}
+                    height={lay?.height ?? computeIdealHeight(el)}
+                    marginTop={lay?.marginTop ?? 0}
+                    onHide={() => hideElement(el.id)}
+                  >
+                    {renderContent(el, orderIndex)}
+                  </ReportSection>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
