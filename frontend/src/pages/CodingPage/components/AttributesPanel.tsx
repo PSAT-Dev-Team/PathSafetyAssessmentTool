@@ -436,7 +436,7 @@ export default function AttributesPanel({
 
   useEffect(() => {
     if (activeGroupTab && groupsWithFields.includes(activeGroupTab as any)) {
-      setSelectedTab(activeGroupTab);
+      setSelectedTab(activeGroupTab as any);
     }
   }, [activeGroupTab, groupsWithFields]);
 
@@ -518,7 +518,7 @@ export default function AttributesPanel({
 
       {/* Tabs occupy the body; content area scrolls independently */}
       <Card.Body display="flex" flexDir="column" minH={0} p="0">
-        <Tabs.Root value={selectedTab} onValueChange={(e) => setSelectedTab(e.value)}>
+        <Tabs.Root value={selectedTab} onValueChange={(e) => setSelectedTab(e.value as any)}>
           <Tabs.List
             px="2"
             py="2"

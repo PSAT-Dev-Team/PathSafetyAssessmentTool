@@ -37,7 +37,6 @@ import {
 import type { AttributeRow } from "../../api";
 import { autocodeImage, autocodeGIS, autocodeAllStream } from "../../api";
 
-
 import ImagePanel from "./components/ImagePanel";
 import AttributesPanel, { resolveContributorTabGroup } from "./components/AttributesPanel";
 import AttributeOptionsDialog from "./components/AttributeOptionsDialog";
@@ -2162,53 +2161,48 @@ export default function CodingPage() {
   }, [currentData.autocodedSegmentCount]);
 
   const commitPage = useCallback(
-    (valStr: string) => {
-      const raw = Number(valStr);
+    (valStr: string, isBlur = false) => {
+      if (valStr.trim() === "" && !isBlur) return;
+      const raw = valStr.trim() === "" ? 1 : Number(valStr);
       if (!Number.isFinite(raw)) return;
       const clamped = Math.min(Math.max(1, raw), len || 1);
       gotoPage(clamped);
+      if (isBlur) setPageInput(String(clamped));
     },
     [gotoPage, len]
   );
 
   const commitSegment = useCallback(
-    (valStr: string) => {
-      const raw = Number(valStr);
+    (valStr: string, isBlur = false) => {
+      if (valStr.trim() === "" && !isBlur) return;
+      const raw = valStr.trim() === "" ? 0 : Number(valStr);
       if (!Number.isFinite(raw)) return;
       const clamped = Math.max(0, Math.min(len || 0, raw));
       // Guard against infinite loop if value hasn't changed
-      if (clamped === (currentData.verifiedSegmentCount ?? 0)) return;
+      if (clamped === (currentData.verifiedSegmentCount ?? 0)) {
+        if (isBlur) setSegmentInput(String(clamped));
+        return;
+      }
       updateVerifiedSegmentCount(currentProjectName!, clamped);
     },
     [currentProjectName, len, updateVerifiedSegmentCount, currentData.verifiedSegmentCount]
   );
 
   const commitAutocodedSegment = useCallback(
-    (valStr: string) => {
-      const raw = Number(valStr);
+    (valStr: string, isBlur = false) => {
+      if (valStr.trim() === "" && !isBlur) return;
+      const raw = valStr.trim() === "" ? 0 : Number(valStr);
       if (!Number.isFinite(raw)) return;
       const clamped = Math.max(0, Math.min(len || 0, raw));
       // Guard against infinite loop if value hasn't changed
-      if (clamped === (currentData.autocodedSegmentCount ?? 0)) return;
+      if (clamped === (currentData.autocodedSegmentCount ?? 0)) {
+        if (isBlur) setAutocodedSegmentInput(String(clamped));
+        return;
+      }
       updateAutocodedSegmentCount(currentProjectName!, clamped);
     },
     [currentProjectName, len, updateAutocodedSegmentCount, currentData.autocodedSegmentCount]
   );
-
-  useEffect(() => {
-    const t = setTimeout(() => commitPage(pageInput), 300);
-    return () => clearTimeout(t);
-  }, [pageInput, commitPage]);
-
-  useEffect(() => {
-    const t = setTimeout(() => commitSegment(segmentInput), 300);
-    return () => clearTimeout(t);
-  }, [segmentInput, commitSegment]);
-
-  useEffect(() => {
-    const t = setTimeout(() => commitAutocodedSegment(autocodedSegmentInput), 300);
-    return () => clearTimeout(t);
-  }, [autocodedSegmentInput, commitAutocodedSegment]);
 
   // Warn user before leaving the page (browser close, refresh, etc.)
   useEffect(() => {
@@ -2466,7 +2460,7 @@ export default function CodingPage() {
               <NumberInput.Control />
               <NumberInput.Input
                 placeholder="0"
-                onBlur={() => commitSegment(segmentInput)}
+                onBlur={() => commitSegment(segmentInput, true)}
                 onKeyDown={(ev) => {
                   if (ev.key === "Enter") {
                     ev.currentTarget.blur();
@@ -2493,7 +2487,7 @@ export default function CodingPage() {
               <NumberInput.Control />
               <NumberInput.Input
                 placeholder="0"
-                onBlur={() => commitAutocodedSegment(autocodedSegmentInput)}
+                onBlur={() => commitAutocodedSegment(autocodedSegmentInput, true)}
                 onKeyDown={(ev) => {
                   if (ev.key === "Enter") {
                     ev.currentTarget.blur();
@@ -2519,11 +2513,14 @@ export default function CodingPage() {
             min={1}
             max={len || 1}
             value={pageInput}
-            onValueChange={(e) => setPageInput(e.value)}
+            onValueChange={(e) => {
+              const val = e.value.replace(/^0+/, "");
+              setPageInput(val);
+            }}
           >
             <NumberInput.Control />
             <NumberInput.Input
-              onBlur={() => commitPage(pageInput)}
+              onBlur={() => commitPage(pageInput, true)}
               onKeyDown={(ev) => {
                 if (ev.key === "Enter") {
                   ev.currentTarget.blur();

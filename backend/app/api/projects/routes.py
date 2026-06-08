@@ -1606,6 +1606,55 @@ def get_attribute_mappings():
         mappings[field] = reverse
     return jsonify(mappings)
 
+def _get_custom_attr_options_file() -> Path:
+    backend_root = Path(__file__).resolve().parents[3]
+    return backend_root / "data" / "custom_attribute_options.json"
+
+@bp.get("/custom-attribute-options")
+def get_custom_attribute_options():
+    try:
+        path = _get_custom_attr_options_file()
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return jsonify(json.load(f))
+    except Exception as e:
+        print(f"Error loading custom attribute options: {e}")
+    return jsonify({})
+
+@bp.put("/custom-attribute-options")
+def update_custom_attribute_options():
+    try:
+        data = request.json or {}
+        field = data.get("field")
+        options = data.get("options", [])
+        if not field:
+            return fail("Field is required", 400)
+            
+        path = _get_custom_attr_options_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        current_options = {}
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                try:
+                    current_options = json.load(f)
+                except Exception:
+                    pass
+                
+        # Append and deduplicate
+        existing = current_options.get(field, [])
+        combined = list(dict.fromkeys(existing + options)) # Preserve order, remove duplicates
+        current_options[field] = combined
+        
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(current_options, f, indent=2)
+            
+        return ok({"success": True})
+    except Exception as e:
+        print(f"Error updating custom attribute options: {e}")
+        return fail("Failed to update options", 500)
+
+
 def _convert_attribute_types(df: pd.DataFrame) -> pd.DataFrame:
     """
     Convert attribute values to appropriate types for scoring.
