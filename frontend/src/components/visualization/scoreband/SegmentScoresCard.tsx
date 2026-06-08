@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Box, Flex, Grid, GridItem, Text, Image } from "@chakra-ui/react";
+import { Box, Flex, Grid, GridItem, Text, Image, Tooltip } from "@chakra-ui/react";
 import { RISK_BAND_COLORS } from "./colorConstants";
 
 // Import Crash Type Icons
@@ -241,8 +241,13 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                 const reduction = beforeScore !== null ? beforeScore - type.score : null;
                 const improved = reduction !== null && reduction > 0;
 
+                const tooltipLabel = ['BB', 'BP', 'SB'].includes(type.key)
+                  ? `${type.key}: Low <5 · Medium 5–10 · High 10–20 · Extreme >20`
+                  : `${type.key}: Low <10 · Medium 10–25 · High 25–60 · Extreme >60`;
+
                 return (
                   <GridItem key={type.key}>
+                    <Tooltip label={tooltipLabel} placement="top" hasArrow fontSize="xs">
                     <Flex
                       direction="row"
                       align="center"
@@ -251,10 +256,11 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                       _dark={{ bg: improved && showPreviewBackground ? "gray.900" : getDarkBgColor(type.score, type.key) }}
                       borderRadius="sm"
                       p="1"
-                      gap="4" // Controls spacing between logo and crash type scores
+                      gap="4"
                       textAlign="center"
-                      h={reduction !== null ? "80px" : "60px"}
+                      h={reduction !== null ? "90px" : "70px"}
                       color="black"
+                      cursor="default"
                     >
                       {/* Icon */}
                       <Image
@@ -279,6 +285,11 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                           {type.score.toFixed(1)}
                         </Text>
 
+                        {/* Band label */}
+                        <Text fontSize="xs" lineHeight="1" opacity={0.75} fontWeight="semibold">
+                          {getBandLabel(type.score, type.key)}
+                        </Text>
+
                         {/* Reduction indicator */}
                         {reduction !== null && improved && (
                           <Text fontSize="xs" color="inherit" _dark={{ color: "inherit" }} lineHeight="1">
@@ -287,6 +298,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                         )}
                       </Flex>
                     </Flex>
+                    </Tooltip>
                   </GridItem>
                 );
               })}
@@ -299,6 +311,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                   const totalImproved = totalReduction !== null && totalReduction > 0;
 
                   return (
+                    <Tooltip label="Sum of all crash types (VB + BB + SB + BP). Colour reflects the worst-case crash type band." placement="top" hasArrow fontSize="xs">
                     <Flex
                       direction="column"
                       align="center"
@@ -309,8 +322,9 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                       p="1"
                       gap="0"
                       textAlign="center"
-                      h={totalReduction !== null ? "80px" : "60px"}
+                      h={totalReduction !== null ? "90px" : "70px"}
                       color="black"
+                      cursor="default"
                     >
                       {/* Total label */}
                       <Text fontSize="md" fontWeight="bold" lineHeight="1">
@@ -326,6 +340,11 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                         {totalScore.toFixed(1)}
                       </Text>
 
+                      {/* Worst-case band note */}
+                      <Text fontSize="xs" lineHeight="1" opacity={0.75} fontWeight="semibold" textAlign="center">
+                        Worst-case band
+                      </Text>
+
                       {/* Reduction indicator */}
                       {totalReduction !== null && totalImproved && (
                         <Text fontSize="xs" color="inherit" _dark={{ color: "inherit" }} lineHeight="1">
@@ -333,6 +352,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                         </Text>
                       )}
                     </Flex>
+                    </Tooltip>
                   );
                 })()}
               </GridItem>
