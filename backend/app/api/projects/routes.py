@@ -1255,6 +1255,7 @@ def get_latest_attributes(project_name: str):
     ver = proj.latest()
 
     attrs_df = ver.attributes.df
+    attrs_copied = False
 
     # If results exist, merge the band values into attributes for filtering capability
     if ver.results and ver.results.df is not None and len(ver.results.df) > 0:
@@ -1265,11 +1266,30 @@ def get_latest_attributes(project_name: str):
         available_bands = [col for col in band_columns if col in results_df.columns]
 
         if available_bands and len(attrs_df) == len(results_df):
-            # Create a copy of attributes to avoid modifying the original
             attrs_df = attrs_df.copy()
-            # Merge band values into attributes
+            attrs_copied = True
             for col in available_bands:
                 attrs_df[col] = results_df[col].values
+
+    # Normalise gradient status: within a project "No LiDAR" and "Not Assessed Yet"
+    # must not coexist.  Once a gradient profile is confirmed available, every row
+    # with no grade should show "No LiDAR" regardless of whether it has been
+    # through autocode yet.
+    if _get_project_gradient_cache_state(project_name) == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE:
+        has_grade_col = "Grade" in attrs_df.columns
+        has_status_col = GRADIENT_STATUS_FIELD in attrs_df.columns
+        if has_grade_col or has_status_col:
+            if not attrs_copied:
+                attrs_df = attrs_df.copy()
+            no_grade = attrs_df["Grade"].isna() if has_grade_col else pd.Series(True, index=attrs_df.index)
+            if has_status_col:
+                stale_status = attrs_df[GRADIENT_STATUS_FIELD].isna() | (
+                    attrs_df[GRADIENT_STATUS_FIELD] == GRADIENT_STATUS_NOT_ASSESSED
+                )
+            else:
+                attrs_df[GRADIENT_STATUS_FIELD] = None
+                stale_status = pd.Series(True, index=attrs_df.index)
+            attrs_df.loc[no_grade & stale_status, GRADIENT_STATUS_FIELD] = GRADIENT_STATUS_NO_LIDAR_RESULT
 
     return jsonify({"rows": df_to_records(attrs_df)})
 
@@ -3527,21 +3547,45 @@ def roads_in_polygon():
     Response: { "roads": [ { "name": "AMK AVE 1", "points": 24, "exists": true }, ... ], "fallback": false }
     """
     import csv
-    from shapely.geometry import Polygon as ShapelyPolygon, Point
+    from shapely.geometry import Polygon as ShapelyPolygon, MultiPolygon as ShapelyMultiPolygon, Point
+    from shapely.ops import unary_union
 
     data = request.get_json(silent=True) or {}
-    polygon_coords = data.get("polygon")
-    if not polygon_coords or len(polygon_coords) < 3:
-        return fail("polygon must have at least 3 vertices", 400)
 
-    # Build shapely polygon (lon, lat order for shapely)
+    # Build shapely polygon from either legacy "polygon" key or the newer
+    # GeoJSON "selection_geometry" (Polygon / MultiPolygon / LineString / MultiLineString).
     try:
-        ring = [(pt[1], pt[0]) for pt in polygon_coords]  # swap to (lon, lat)
-        poly = ShapelyPolygon(ring)
-        if not poly.is_valid:
-            poly = poly.buffer(0)
+        sel = data.get("selection_geometry")
+        if sel:
+            geom_type = sel.get("type", "")
+            coords = sel.get("coordinates", [])
+            if geom_type == "Polygon":
+                # GeoJSON coords are [lon, lat]; outer ring is coords[0]
+                poly = ShapelyPolygon(coords[0]).buffer(0)
+            elif geom_type == "MultiPolygon":
+                parts = [ShapelyPolygon(ring[0]).buffer(0) for ring in coords]
+                poly = unary_union(parts)
+            elif geom_type == "LineString":
+                from shapely.geometry import LineString as ShapelyLineString
+                poly = ShapelyLineString(coords).buffer(0.0005)  # ~55 m buffer in degrees
+            elif geom_type == "MultiLineString":
+                from shapely.geometry import LineString as ShapelyLineString
+                lines = [ShapelyLineString(line) for line in coords]
+                poly = unary_union(lines).buffer(0.0005)
+            else:
+                return fail(f"Unsupported selection_geometry type: {geom_type}", 400)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+        else:
+            polygon_coords = data.get("polygon")
+            if not polygon_coords or len(polygon_coords) < 3:
+                return fail("polygon must have at least 3 vertices", 400)
+            ring = [(pt[1], pt[0]) for pt in polygon_coords]  # swap [lat,lon] → (lon,lat)
+            poly = ShapelyPolygon(ring)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
     except Exception as e:
-        return fail(f"Invalid polygon: {e}", 400)
+        return fail(f"Invalid geometry: {e}", 400)
 
     # Check which folders already exist locally
     ctx = get_ctx()
@@ -3552,8 +3596,10 @@ def roads_in_polygon():
     # Merged result: roads from shapefile with exists flag from CSV + folder check
     all_road_names: dict[str, dict] = {}  # { "ROAD NAME": { "points": count, "exists": bool } }
 
-    # Attempt 1: Load reference CSV (EXIF points) to mark which roads have images
-    csv_roads = set()
+    # Attempt 1: reference CSV — marks which roads have captured images.
+    # Uses the same encoding fix (utf-8-sig) as the rest of the codebase so
+    # a BOM-prefixed file doesn't silently corrupt column names.
+    csv_roads: set[str] = set()
     ref_csv_candidates = [
         backend_root / "shapefiles" / "road_reference.csv",
         backend_root / "app" / "shapefiles" / "road_reference.csv",
@@ -3561,82 +3607,60 @@ def roads_in_polygon():
     ref_csv = next((candidate for candidate in ref_csv_candidates if candidate.exists()), None)
 
     if ref_csv is not None:
-        with open(ref_csv, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                pt = Point(float(row["lon"]), float(row["lat"]))
-                if poly.contains(pt):
-                    name = row["road_name"]
-                    csv_roads.add(name)
-                    if name not in all_road_names:
-                        all_road_names[name] = {"points": 0, "exists": False}
-                    all_road_names[name]["points"] += 1
+        try:
+            with open(ref_csv, newline="", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        pt = Point(float(row["lon"]), float(row["lat"]))
+                        if poly.contains(pt):
+                            name = str(row.get("road_name", "")).strip()
+                            if not name:
+                                continue
+                            csv_roads.add(name)
+                            if name not in all_road_names:
+                                all_road_names[name] = {"points": 0, "exists": False}
+                            all_road_names[name]["points"] += 1
+                    except (KeyError, ValueError):
+                        continue
+        except Exception as e:
+            print(f"[roads-in-polygon] CSV lookup failed: {e}", flush=True)
 
-    # Mark which CSV roads have folders
     for name in csv_roads:
-        exists = in_path.exists() and (in_path / name).is_dir()
-        all_road_names[name]["exists"] = exists
+        all_road_names[name]["exists"] = in_path.exists() and (in_path / name).is_dir()
 
-    # Fallback 1: road sections shapefile (add roads not in CSV)
+    # Attempt 2: road sections shapefile — reuse the cached, already-reprojected
+    # GeoDataFrame that roads-in-bounds uses so CRS handling is identical.
     try:
-        import geopandas as gpd
-        
-        print(f"[DEBUG] Querying road sections shapefile...")
-
-        road_shp_candidates = [
-            backend_root / "shapefiles" / "planningareas" / "ROADSECTIONLINE.shp",
-            backend_root / "shapefiles" / "Road_name" / "ROADSECTIONLINE.shp",
-            backend_root / "shapefiles" / "Road_name" / "ROADNETWORKLINE.shp",
-        ]
-        
-        road_shp = next((candidate for candidate in road_shp_candidates if candidate.exists()), None)
-        print(f"[DEBUG] Found road shapefile: {road_shp}")
-        
-        if road_shp is not None:
-            print(f"[DEBUG] Reading {road_shp}...")
-            road_gdf = gpd.read_file(str(road_shp))
-            print(f"[DEBUG] Loaded {len(road_gdf)} road features, columns: {road_gdf.columns.tolist()}")
-            
-            if road_gdf.crs and road_gdf.crs.to_epsg() != 4326:
-                print(f"[DEBUG] Reprojecting from {road_gdf.crs.to_epsg()} to EPSG:4326...")
-                road_gdf = road_gdf.to_crs(epsg=4326)
-
+        road_gdf = _get_road_sections_gdf()
+        road_name_col = next(
+            (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in road_gdf.columns),
+            None,
+        )
+        if road_name_col is not None:
             intersecting_roads = road_gdf[road_gdf.geometry.intersects(poly)]
-            print(f"[DEBUG] Found {len(intersecting_roads)} intersecting road features")
-            
-            road_name_col = next(
-                (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in intersecting_roads.columns),
-                None,
+            print(
+                f"[roads-in-polygon] shapefile hit {len(intersecting_roads)} features"
+                f" | poly bounds {poly.bounds}",
+                flush=True,
             )
-            print(f"[DEBUG] Using column '{road_name_col}' for road names")
+            road_counts: dict[str, int] = {}
+            for raw_name in intersecting_roads[road_name_col].dropna().astype(str):
+                name = raw_name.strip()
+                if not name or not any(ch.isalnum() for ch in name):
+                    continue
+                road_counts[name] = road_counts.get(name, 0) + 1
 
-            if road_name_col is not None and not intersecting_roads.empty:
-                road_counts: dict[str, int] = {}
-                for raw_name in intersecting_roads[road_name_col].dropna().astype(str):
-                    name = raw_name.strip()
-                    if not name:
-                        continue
-                    if not any(ch.isalnum() for ch in name):
-                        continue
-                    road_counts[name] = road_counts.get(name, 0) + 1
-
-                print(f"[DEBUG] Extracted {len(road_counts)} unique road names from shapefile")
-                
-                # Merge shapefile roads into all_road_names
-                for name, count in road_counts.items():
-                    if name not in all_road_names:
-                        # Not in CSV; check if folder exists anyway
-                        exists = in_path.exists() and (in_path / name).is_dir()
-                        all_road_names[name] = {"points": count, "exists": exists}
-                    else:
-                        # Already in CSV; just add the point count
-                        all_road_names[name]["points"] += count
-                
-                print(f"[DEBUG] Total merged roads: {len(all_road_names)}")
+            for name, count in road_counts.items():
+                if name not in all_road_names:
+                    all_road_names[name] = {
+                        "points": count,
+                        "exists": in_path.exists() and (in_path / name).is_dir(),
+                    }
+                else:
+                    all_road_names[name]["points"] += count
     except Exception as e:
-        print(f"[WARN] Road sections fallback failed: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"[roads-in-polygon] shapefile lookup failed: {type(e).__name__}: {e}", flush=True)
 
     # If we have any road data (CSV or shapefile), return it
     if all_road_names:

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   Box,
   Button,
@@ -369,7 +369,13 @@ export default function SelectRoadsMap({ onSelectionChange, onSelectionGeometryC
   const [selectedUploadedBoundary, setSelectedUploadedBoundary] = useState<UploadedBoundaryFeature | null>(null);
   const roadsRef = useRef<SelectedRoad[]>([]);
   const polygonSourceRef = useRef<PolygonSource>(null);
-  const currentSelectionGeometry = selectedUploadedBoundary?.selectionGeometry ?? toPolygonSelectionGeometry(polygonPoints);
+  // Memoize so the geometry keeps a stable identity across renders. Without this
+  // it is a fresh object every render, which makes the effects below re-fire in a
+  // loop and perpetually cancel the debounced road query before it can run.
+  const currentSelectionGeometry = useMemo(
+    () => selectedUploadedBoundary?.selectionGeometry ?? toPolygonSelectionGeometry(polygonPoints),
+    [selectedUploadedBoundary, polygonPoints]
+  );
 
   useEffect(() => {
     roadsRef.current = roads;
