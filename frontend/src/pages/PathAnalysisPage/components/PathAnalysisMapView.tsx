@@ -14,7 +14,7 @@ import "leaflet/dist/leaflet.css";
 import L, { divIcon } from "leaflet";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
-import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, downloadFilteredImages, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
+import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchProjectResults, downloadFilteredImages, exportShapefile, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
 
 const SAFETY_FOCUS_ATTRIBUTES = new Set(["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"]);
 type GradeBucket = {
@@ -323,6 +323,7 @@ export default function AttributeAnalysisMapView({
   onHiddenProjectsChange,
 }: AttributeAnalysisMapViewProps) {
   const navigate = useNavigate();
+  const tableContainerRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<string>("map");
   const [projectsData, setProjectsData] = useState<ProjectData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -904,12 +905,23 @@ export default function AttributeAnalysisMapView({
             fetchProjectAttributes(projectName),
           ]);
 
-          // Fetch scores (optional - if fails, continue with empty scores)
+          // Fetch scores (optional - if fails, continue with empty scores).
+          // Prefer the read-only GET /results (no recompute, no disk write).
+          // Only fall back to POST /score (which computes + persists) when the
+          // project has never been scored yet.
           let scores: Record<string, any>[] = [];
           try {
-            const scoresResponse = await calculateScore(projectName);
-            scores = scoresResponse.result_rows || [];
+            const resultsResponse = await fetchProjectResults(projectName);
+            scores = resultsResponse.result_rows || [];
           } catch (e) {
+          }
+          // Only compute+persist (the expensive POST) if no cached results exist.
+          if (scores.length === 0) {
+            try {
+              const scoresResponse = await calculateScore(projectName);
+              scores = scoresResponse.result_rows || [];
+            } catch (e) {
+            }
           }
 
           return {
@@ -939,6 +951,13 @@ export default function AttributeAnalysisMapView({
     return () => { aborted = true; };
   }, [selectedProjects, projectColors, refreshTrigger]);
 
+  // O(1) lookup of a project's index in projectsData by name (avoids per-cell findIndex)
+  const projectIndexByName = useMemo(() => {
+    const map: Record<string, number> = {};
+    projectsData.forEach((p, i) => { map[p.projectName] = i; });
+    return map;
+  }, [projectsData]);
+
   // Helper function to get column value as string
   function getColumnValue(point: any, columnKey: string): string {
     if (columnKey === "Project") return point.projectName;
@@ -946,12 +965,12 @@ export default function AttributeAnalysisMapView({
     if (columnKey === "Image Reference") return point.f.properties?.["Image Reference"] ?? "-";
     if (columnKey === "Coordinates") return `${point.latlng[0].toFixed(6)}, ${point.latlng[1].toFixed(6)}`;
     if (columnKey === "Overall Risk Score") {
-      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
+      const projectDataIndex = projectIndexByName[point.projectName] ?? -1;
       const score = getOverallRiskScore(projectDataIndex, point.idx);
       return score.toFixed(2);
     }
     if (columnKey === "Overall Risk Level") {
-      const projectDataIndex = projectsData.findIndex(p => p.projectName === point.projectName);
+      const projectDataIndex = projectIndexByName[point.projectName] ?? -1;
       if (projectDataIndex < 0 || !projectsData[projectDataIndex].scores) {
         return "Low";
       }
@@ -1106,6 +1125,12 @@ export default function AttributeAnalysisMapView({
       return primaryFocusAttribute;
     }
 
+    // When multiple filters are active, preserve Level 2 coloring to avoid
+    // forcing Not Present rows into child-level "Not Selected" greys.
+    if (activeFilters.length > 1) {
+      return primaryFocusAttribute;
+    }
+
     const subcatConfig = SUBCATEGORY_MAP[primaryFocusAttribute];
     if (!subcatConfig || visibleSegments.length === 0) {
       return primaryFocusAttribute;
@@ -1119,14 +1144,11 @@ export default function AttributeAnalysisMapView({
       }
     });
 
-    const enabledParentCategories = new Set(
-      Object.keys(subcatConfig.parentCategories).filter(
-        (parentCategory) => categoryToggles[primaryFocusAttribute]?.[parentCategory] !== false,
-      ),
-    );
-
+    // Determine remaining Level-2 categories from the real visible values and current toggles,
+    // rather than only SUBCATEGORY_MAP keys. This keeps legacy/non-mapped values from
+    // incorrectly collapsing focus to Level 3.
     const remainingParentCategories = Array.from(visibleParentCategories).filter(
-      (parentCategory) => enabledParentCategories.has(parentCategory),
+      (parentCategory) => categoryToggles[primaryFocusAttribute]?.[parentCategory] !== false,
     );
 
     if (remainingParentCategories.length !== 1) {
@@ -1150,7 +1172,7 @@ export default function AttributeAnalysisMapView({
     });
 
     return hasChildValues ? subcatConfig.childAttr : primaryFocusAttribute;
-  }, [categoryToggles, getFocusedAttributeValue, primaryFocusAttribute, visibleSegments]);
+  }, [activeFilters.length, categoryToggles, getFocusedAttributeValue, primaryFocusAttribute, visibleSegments]);
 
   // Generate colors for attribute categories based on the effective focus level.
   const attributeCategoryColors = useMemo(() => {
@@ -1177,6 +1199,10 @@ export default function AttributeAnalysisMapView({
         "Traffic Light": "#EA580C",
         "Pillar": "#F59E0B",
         "Bollards": "#CA8A04",
+        "Billboards": "#7C3AED",
+        "Billboard": "#7C3AED",
+        "Sign Poles": "#0284C7",
+        "Sign Pole": "#0284C7",
         "Fence": "#0891B2",
         "Vegetation": "#16A34A",
         "Others": "#6B7280",
@@ -1597,6 +1623,15 @@ export default function AttributeAnalysisMapView({
     }
   };
 
+  const handleTableProjectJump = (projectName: string) => {
+    const container = tableContainerRef.current;
+    if (!container) return;
+    const row = container.querySelector<HTMLTableRowElement>(`tr[data-project="${CSS.escape(projectName)}"]`);
+    if (row) {
+      row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  };
+
   // CSV helper: escape CSV values with proper quoting
   const escapeCSV = (value: string): string => {
     if (value.includes(",") || value.includes('"') || value.includes("\n")) {
@@ -1678,6 +1713,42 @@ export default function AttributeAnalysisMapView({
     } catch (e: any) {
       console.error("Failed to download images", e);
       alert(`Failed to download images: ${e.message}`);
+    }
+  };
+
+  // Export filtered segments as a shapefile ZIP
+  const handleDownloadShapefile = async () => {
+    try {
+      const projectImages: Record<string, string[]> = {};
+      sortedData.forEach(point => {
+        const projectName = point.projectName;
+        const imageRef = point.f.properties?.["Image Reference"];
+        if (projectName && imageRef && imageRef !== "-" && imageRef !== "None" && imageRef !== "") {
+          if (!projectImages[projectName]) {
+            projectImages[projectName] = [];
+          }
+          projectImages[projectName].push(imageRef);
+        }
+      });
+
+      if (Object.keys(projectImages).length === 0) {
+        alert("No segments with image references found in the current view.");
+        return;
+      }
+
+      const blob = await exportShapefile({ projects: projectImages });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `shapefile_export_${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+    } catch (e: any) {
+      console.error("Failed to export shapefile", e);
+      alert(`Failed to export shapefile: ${e.message}`);
     }
   };
 
@@ -2140,6 +2211,14 @@ export default function AttributeAnalysisMapView({
               >
                 Download Images
               </Button>
+              <Button
+                colorPalette="green"
+                size="sm"
+                variant="outline"
+                onClick={handleDownloadShapefile}
+              >
+                Download Shapefile
+              </Button>
             </HStack>
           )}
         </Flex>
@@ -2528,6 +2607,7 @@ export default function AttributeAnalysisMapView({
                   maxZoom={22}
                   style={{ width: "100%", height: "100%" }}
                   scrollWheelZoom
+                  preferCanvas={true}
                 >
                   <MapCursorController
                     mode={(isDeleteMode || isPolygonMode) ? 'delete' : (isPointAddMode || isPolygonAddMode) ? 'add' : 'default'}
@@ -2556,7 +2636,7 @@ export default function AttributeAnalysisMapView({
 
                   {/* Render all points in a dedicated pane above any overlay layers */}
                   <Pane name="segmentsPane" style={{ zIndex: 450 }}>
-                    {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }, globalIdx) => {
+                    {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }) => {
                       const radius = 5;
                       let label = `${projectName} - #${idx + 1}`;
                       if (f.properties?.["Image Reference"]) {
@@ -2568,7 +2648,7 @@ export default function AttributeAnalysisMapView({
 
                       return (
                         <CircleMarker
-                          key={`${projectName}-${idx}-${globalIdx}`}
+                          key={`${projectName}-${idx}`}
                           center={latlng}
                           radius={radius}
                           pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
@@ -2616,6 +2696,26 @@ export default function AttributeAnalysisMapView({
         {/* Table Tab Content */}
         <Tabs.Content value="table">
           <Box>
+            {selectedProjects.length > 0 && allPoints.length > 0 && (
+              <Box p="4" borderBottom="1px solid" borderColor="gray.200">
+                <Text fontSize="sm" fontWeight="semibold" mb="2">
+                  Jump to Project:
+                </Text>
+                <Flex gap="2" flexWrap="wrap">
+                  {selectedProjects.map((proj) => (
+                    <Button
+                      key={proj}
+                      size="sm"
+                      colorPalette="blue"
+                      variant="outline"
+                      onClick={() => handleTableProjectJump(proj)}
+                    >
+                      {proj}
+                    </Button>
+                  ))}
+                </Flex>
+              </Box>
+            )}
             {allPoints.length === 0 ? (
               <Box p="6">
                 <Text color="gray.500">No data to display. Please select projects and load them.</Text>
@@ -2624,31 +2724,6 @@ export default function AttributeAnalysisMapView({
               <>
                 {/* Above-table controls */}
                 <Box p="4" borderBottom="1px solid" borderColor="gray.200" bg="gray.50" _dark={{ bg: "gray.700" }}>
-                  {/* Global Search */}
-                  <Flex gap="4" mb="3" align="flex-start">
-                    <Box flex="1" maxW="400px">
-                      <Text fontSize="sm" fontWeight="semibold" mb="1">Global Search:</Text>
-                      <Input
-                        placeholder="Search across all columns..."
-                        value={globalSearch}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGlobalSearch(e.target.value)}
-                        size="sm"
-                      />
-                    </Box>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      mt="6"
-                      onClick={() => {
-                        setGlobalSearch("");
-                        setColumnFilters({});
-                        setSortConfig([]);
-                      }}
-                    >
-                      Clear All
-                    </Button>
-                  </Flex>
-
                   {/* Sort Controls */}
                   {sortConfig.length > 0 && (
                     <Box>
@@ -2674,14 +2749,29 @@ export default function AttributeAnalysisMapView({
                     </Box>
                   )}
 
-                  {/* Filtered count display */}
-                  <Text fontSize="sm" color="gray.600" _dark={{ color: "gray.400" }} mt="3">
-                    Showing {sortedData.length} of {allPoints.length} segments
-                  </Text>
+                  {/* Filtered count + clear */}
+                  <Flex align="center" gap="3" mt="3">
+                    <Text fontSize="sm" color="gray.600" _dark={{ color: "gray.400" }}>
+                      Showing {sortedData.length} of {allPoints.length} segments
+                    </Text>
+                    {(sortConfig.length > 0 || Object.keys(columnFilters).length > 0) && (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => {
+                          setGlobalSearch("");
+                          setColumnFilters({});
+                          setSortConfig([]);
+                        }}
+                      >
+                        Clear All
+                      </Button>
+                    )}
+                  </Flex>
                 </Box>
 
                 {/* Table */}
-                <Box overflowX="auto" overflowY="auto" maxH="650px">
+                <Box ref={tableContainerRef} overflowX="auto" overflowY="auto" maxH="650px">
                   <table
                     style={{
                       width: "100%",
@@ -2750,7 +2840,7 @@ export default function AttributeAnalysisMapView({
                         </tr>
                       ) : (
                         sortedData.map(({ idx, latlng, f, projectName, color, attributes }, globalIdx) => (
-                          <tr key={`${projectName}-${idx}-${globalIdx}`}>
+                          <tr key={`${projectName}-${idx}-${globalIdx}`} data-project={projectName}>
                             {tableColumns.map(col => {
                               const value = getColumnValue(
                                 { idx, latlng, f, projectName, color, attributes },

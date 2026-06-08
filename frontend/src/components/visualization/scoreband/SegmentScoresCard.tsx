@@ -42,6 +42,7 @@ interface SegmentScoresCardProps {
     projectName: string;
     contributors: Array<{ name: string; contribution: number }>;
   } | null;
+  onContributorClick?: (name: string) => void;
 }
 
 const CRASH_TYPES = [
@@ -129,7 +130,7 @@ const getBandLabel = (score: number, type: string): string => {
   return "Extreme";
 };
 
-export default function SegmentScoresCard({ scores, beforeScores, showPreviewBackground, projectContributors }: SegmentScoresCardProps) {
+export default function SegmentScoresCard({ scores, beforeScores, showPreviewBackground, projectContributors, onContributorClick }: SegmentScoresCardProps) {
   const crashTypeScores = useMemo(() => {
     if (!scores) return [];
     return CRASH_TYPES.map((type) => {
@@ -390,6 +391,8 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                     borderWidth={1}
                     borderColor="gray.200"
                     _dark={{ bg: "gray.700", borderColor: "gray.600" }}
+                    cursor={onContributorClick ? "pointer" : "default"}
+                    onClick={() => onContributorClick?.(attr.name)}
                   >
                     <Text fontSize="xs" fontWeight="medium" color="gray.800" _dark={{ color: "gray.50" }}>
                       {attr.name}
@@ -422,6 +425,8 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                   borderWidth={1}
                   borderColor="gray.200"
                   _dark={{ bg: "gray.700", borderColor: "gray.600" }}
+                  cursor={onContributorClick ? "pointer" : "default"}
+                  onClick={() => onContributorClick?.(attr.name)}
                 >
                   <Text fontSize="xs" fontWeight="medium" color="gray.800" _dark={{ color: "gray.50" }}>
                     {attr.name}

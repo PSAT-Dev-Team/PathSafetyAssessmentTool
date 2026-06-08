@@ -756,6 +756,27 @@ export async function calculateScore(project: string): Promise<CalculateScoreRes
 }
 
 /**
+ * Fetch previously-calculated cycleRAP scores for the entire project.
+ *
+ * This is a read-only GET that returns the persisted results WITHOUT
+ * recomputing or writing to disk (unlike calculateScore's POST /score).
+ * Use this for read paths like Path Analysis; fall back to calculateScore
+ * only when no persisted results exist yet.
+ *
+ * @param project - Project name
+ * @returns Persisted score results (result_rows may be empty if never scored)
+ */
+export async function fetchProjectResults(project: string): Promise<CalculateScoreResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/results`, {
+    method: "GET",
+  });
+  if (!res.ok) {
+    throw new Error(await readError(res));
+  }
+  return (await res.json()) as CalculateScoreResult;
+}
+
+/**
  * Calculate cycleRAP scores for a single row
  *
  * @param project - Project name
@@ -1166,6 +1187,7 @@ export type TreatmentEffectivenessResult = {
   ok: boolean;
   total_segments: number;
   counts: Record<string, number>;
+  applicable_counts: Record<string, number>;
 };
 
 export async function getTreatmentEffectiveness(
@@ -1345,6 +1367,25 @@ export async function downloadFilteredImages(payload: { projects: Record<string,
   if (!res.ok) {
     const errorText = await readError(res);
     throw new Error(errorText || "Download failed");
+  }
+
+  return res.blob();
+}
+
+/**
+ * Export filtered segments as a zipped shapefile.
+ * @param payload - Map of project names to list of image references (current filtered view)
+ */
+export async function exportShapefile(payload: { projects: Record<string, string[]> }): Promise<Blob> {
+  const res = await fetch("/api/projects/export-shapefile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorText = await readError(res);
+    throw new Error(errorText || "Shapefile export failed");
   }
 
   return res.blob();

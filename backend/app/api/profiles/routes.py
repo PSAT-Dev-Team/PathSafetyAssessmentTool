@@ -11,9 +11,18 @@ _CLIENT_ACTIVITY_EVENT_TYPES = {"page_view"}
 
 
 def _invalidate_project_context() -> None:
-    from app.api.projects import routes as project_routes
+    try:
+        from app.api.projects import routes as project_routes
+    except Exception as exc:
+        print(f"[Profiles] Failed to import project routes for context invalidation: {exc}", flush=True)
+        return
 
-    project_routes.invalidate_ctx()
+    invalidate = getattr(project_routes, "invalidate_ctx", None)
+    if callable(invalidate):
+        try:
+            invalidate()
+        except Exception as exc:
+            print(f"[Profiles] Failed to invalidate project context: {exc}", flush=True)
 
 
 def _record_profile_event(

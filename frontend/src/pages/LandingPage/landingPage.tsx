@@ -68,9 +68,6 @@ export default function LandingPage() {
   }, [selectedProfile]);
 
   const canOpenFirstProfileSetup = profiles.length === 0 && busyAction === null && !loading;
-  const canEnterSelectedProfile = Boolean(
-    selectedProfile && activeProfile && activeProfile.id === selectedProfile.id && busyAction === null && !loading,
-  );
   const canManageSelectedProfile = Boolean(selectedProfile && busyAction === null && !loading);
   const canUseStartButton = Boolean((selectedProfile || canOpenFirstProfileSetup) && busyAction === null && !loading);
   const startButtonLabel = selectedProfile
@@ -131,11 +128,6 @@ export default function LandingPage() {
   };
 
   const startPSAT = () => {
-    if (canEnterSelectedProfile) {
-      navigate("/home");
-      return;
-    }
-
     if (canOpenFirstProfileSetup) {
       openCreateDialog();
       return;

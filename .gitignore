@@ -35,7 +35,7 @@ facil_type/
 yck_facil/
 yck_obstacles/
 obstacles/
-scripts/
+backend/scripts/
 tmp/
 Gradient Calculation/
 profiles/
@@ -57,4 +57,6 @@ completed.csv
 
 # Documentation and explanations
 *.md
+!README.md
 *.lnk
+CycleRAP_User_Guide.pdf

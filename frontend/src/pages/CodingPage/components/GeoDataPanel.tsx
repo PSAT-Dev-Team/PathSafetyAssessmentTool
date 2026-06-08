@@ -1594,8 +1594,8 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 {points.map(({ globalIdx, latlng, f }) => {
                   const isActive = globalIdx === index;
                   const baseColor = getSegmentColor(globalIdx);
-                  const color = isActive ? "#FF6B6B" : baseColor; // Use red highlight for active, otherwise use score-based color
-                  const radius = isActive ? 8 : 5;
+                  const color = isActive ? "#1E63D8" : baseColor;
+                  const radius = isActive ? 9 : 5;
                   // Handle both new and old column names for backward compatibility
                   const scoreValue = activeScores[globalIdx]?.["Overall Risk Level"] ?? activeScores[globalIdx]?.["CycleRAP score"];
                   const label = `#${globalIdx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
@@ -1607,7 +1607,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                       key={keyWithScore}
                       center={latlng}
                       radius={radius}
-                      pathOptions={{ color, weight: isActive ? 3 : 1, opacity: 0.9, fillOpacity: 0.8 }}
+                      pathOptions={{ color, weight: isActive ? 4 : 1, opacity: 0.9, fillOpacity: isActive ? 0.95 : 0.8 }}
                       pane="segmentsPane"
                       eventHandlers={{
                         click: (e) => {

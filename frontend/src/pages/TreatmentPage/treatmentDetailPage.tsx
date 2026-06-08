@@ -12,8 +12,9 @@ import {
   Dialog,
   Portal,
   CloseButton,
+  Menu,
 } from "@chakra-ui/react";
-import { LuCheck, LuCopy, LuImage } from "react-icons/lu";
+import { LuCheck, LuCopy, LuImage, LuChevronDown } from "react-icons/lu";
 import { Switch } from "../../components/ui/switch";
 import { toaster } from "../../components/ui/toaster";
 
@@ -36,7 +37,7 @@ import {
 
 import type { AttributeRow } from "../../api";
 import ImagePanel from "../CodingPage/components/ImagePanel";
-import AttributesPanel from "../CodingPage/components/AttributesPanel";
+import AttributesPanel, { resolveContributorTabGroup } from "../CodingPage/components/AttributesPanel";
 import GeoDataPanel from "../CodingPage/components/GeoDataPanel";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
 import { aggregateTopContributors } from "../../utils/aggregateTopContributors";
@@ -587,6 +588,7 @@ export default function TreatmentDetailPage() {
   // Keyed by treatment id; populated asynchronously from the backend once per
   // project set, used to rank the "By Treatment" list top-down.
   const [effectivenessCounts, setEffectivenessCounts] = useState<Record<number, number>>({});
+  const [applicableCounts, setApplicableCounts] = useState<Record<number, number>>({});
   const [effectivenessLoading, setEffectivenessLoading] = useState<boolean>(false);
 
   // Score drop for each treatment applied in isolation on the currently viewed segment.
@@ -625,6 +627,7 @@ export default function TreatmentDetailPage() {
   const [activeProject, setActiveProject] = useState<string>(() => projectNames[0] ?? "");
   const [attrMappings, setAttrMappings] = useState<Record<string, Record<string, string>>>({});
   const [showPostTreatment, setShowPostTreatment] = useState<boolean>(false);
+  const [activeAttributeGroupTab, setActiveAttributeGroupTab] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Treatment application state
@@ -678,17 +681,12 @@ export default function TreatmentDetailPage() {
     [currentPage, len]
   );
 
-  const copyTreatmentIds = useMemo(() => {
-    if (selectedTreatments.size > 0) {
-      return Array.from(selectedTreatments);
+  const handleContributorClick = useCallback((name: string) => {
+    const targetGroup = resolveContributorTabGroup(name);
+    if (targetGroup) {
+      setActiveAttributeGroupTab(targetGroup);
     }
-
-    if (accordionView === "segment") {
-      return treatmentState[currentIndex]?.treatment_ids ?? [];
-    }
-
-    return [];
-  }, [accordionView, currentIndex, selectedTreatments, treatmentState]);
+  }, []);
 
   const appliedTreatmentIds = useMemo(() => {
     return treatmentState[currentIndex]?.treatment_ids ?? [];
@@ -927,6 +925,7 @@ export default function TreatmentDetailPage() {
         if (cancelled) return;
 
         const aggregated: Record<number, number> = {};
+        const aggregatedApplicable: Record<number, number> = {};
         for (const r of results) {
           if (!r || !r.ok) continue;
           for (const [tidStr, count] of Object.entries(r.counts)) {
@@ -934,8 +933,14 @@ export default function TreatmentDetailPage() {
             if (!Number.isFinite(tid)) continue;
             aggregated[tid] = (aggregated[tid] ?? 0) + (count ?? 0);
           }
+          for (const [tidStr, count] of Object.entries(r.applicable_counts ?? {})) {
+            const tid = parseInt(tidStr, 10);
+            if (!Number.isFinite(tid)) continue;
+            aggregatedApplicable[tid] = (aggregatedApplicable[tid] ?? 0) + (count ?? 0);
+          }
         }
         setEffectivenessCounts(aggregated);
+        setApplicableCounts(aggregatedApplicable);
       } finally {
         if (!cancelled) setEffectivenessLoading(false);
       }
@@ -1291,9 +1296,9 @@ export default function TreatmentDetailPage() {
     return buildProjectImageUrl(currentCtx.name, imgRef);
   }, [currentCtx, imgRef]);
 
-  const handleCopyTreatmentSelection = useCallback(async () => {
-    if (copyTreatmentIds.length === 0) return;
-    const message = buildTreatmentCopyMessage(copyTreatmentIds);
+  const handleCopyTreatmentPrompt = useCallback(async (ids: number[]) => {
+    if (ids.length === 0) return;
+    const message = buildTreatmentCopyMessage(ids);
     setCopyButtonState("copying");
 
     try {
@@ -1312,7 +1317,7 @@ export default function TreatmentDetailPage() {
         type: "error",
       });
     }
-  }, [copyTreatmentIds]);
+  }, []);
 
   const handleCopyCurrentImage = useCallback(async () => {
     if (!currentImageUrl) return;
@@ -1363,6 +1368,9 @@ export default function TreatmentDetailPage() {
         : copyButtonState === "error"
           ? "Copy failed"
           : "Copy prompt";
+
+  const hasApplied = appliedTreatmentIds.length > 0;
+  const hasSelected = selectedTreatments.size > 0;
 
   const imageCopyButtonLabel =
     imageCopyButtonState === "copying"
@@ -1565,7 +1573,9 @@ export default function TreatmentDetailPage() {
                 displayTreatments = getApplicableTreatments(currentAttr)
                   .sort((a, b) => (segmentScoreDrops[b.id] ?? 0) - (segmentScoreDrops[a.id] ?? 0));
               } else {
-                displayTreatments = allApplicableTreatments;
+                displayTreatments = allApplicableTreatments.filter(t =>
+                  effectivenessLoading || (effectivenessCounts[t.id] ?? 0) > 0
+                );
               }
 
               if (displayTreatments.length === 0) {
@@ -1654,7 +1664,15 @@ export default function TreatmentDetailPage() {
                             <Text fontSize="2xs" color="blue.600" _dark={{ color: "blue.300" }} mt="1" fontWeight="semibold">
                               {effectivenessLoading && effectivenessCounts[t.id] === undefined
                                 ? "Improves …%"
-                                : `Improves ${attrs.length > 0 ? ((effectivenessCounts[t.id] ?? 0) / attrs.length * 100).toFixed(1) : "0.0"}% of segments`}
+                                : (() => {
+                                    const count = effectivenessCounts[t.id] ?? 0;
+                                    const applicable = applicableCounts[t.id] ?? 0;
+                                    const denominator = applicable > 0 ? applicable : attrs.length;
+                                    const pct = (denominator > 0 && count > 0) ? count / denominator * 100 : 0;
+                                    const display = count > 0 ? Math.max(0.1, pct).toFixed(1) : "0.0";
+                                    const scope = applicable > 0 ? "applicable segments" : "segments";
+                                    return `Improves ${display}% of ${scope}`;
+                                  })()}
                             </Text>
                           )}
                           {accordionView === "segment" && segmentScoreDrops[t.id] !== undefined && (
@@ -1731,22 +1749,41 @@ export default function TreatmentDetailPage() {
               </Flex>
 
               <Flex width="full" gap="2" align="stretch" wrap="wrap">
-                <Button
-                  size="sm"
-                  minW="118px"
-                  variant="outline"
-                  aria-label="Copy treatment prompt"
-                  title="Copy treatment prompt"
-                  disabled={copyTreatmentIds.length === 0}
-                  loading={copyButtonState === "copying"}
-                  gap="1"
-                  onClick={() => {
-                    void handleCopyTreatmentSelection();
-                  }}
-                >
-                  {copyButtonState === "copied" ? <LuCheck /> : <LuCopy />}
-                  <span>{copyButtonLabel}</span>
-                </Button>
+                <Menu.Root positioning={{ placement: "bottom-start", strategy: "fixed" }}>
+                  <Menu.Trigger asChild>
+                    <Button
+                      size="sm"
+                      minW="118px"
+                      variant="outline"
+                      aria-label="Copy treatment prompt"
+                      disabled={!hasApplied && !hasSelected}
+                      loading={copyButtonState === "copying"}
+                      gap="1"
+                    >
+                      {copyButtonState === "copied" ? <LuCheck /> : <LuCopy />}
+                      <span>{copyButtonLabel}</span>
+                      <LuChevronDown />
+                    </Button>
+                  </Menu.Trigger>
+                  <Menu.Positioner>
+                    <Menu.Content zIndex={1500}>
+                      <Menu.Item
+                        value="copy-applied"
+                        disabled={!hasApplied}
+                        onClick={() => { void handleCopyTreatmentPrompt(appliedTreatmentIds); }}
+                      >
+                        Copy Applied
+                      </Menu.Item>
+                      <Menu.Item
+                        value="copy-selected"
+                        disabled={!hasSelected}
+                        onClick={() => { void handleCopyTreatmentPrompt(Array.from(selectedTreatments)); }}
+                      >
+                        Copy Selected
+                      </Menu.Item>
+                    </Menu.Content>
+                  </Menu.Positioner>
+                </Menu.Root>
                 <Button
                   size="sm"
                   minW="108px"
@@ -1912,6 +1949,7 @@ export default function TreatmentDetailPage() {
                 showPostTreatment && selectedTreatments.size > 0
               }
               projectContributors={projectContributors}
+              onContributorClick={handleContributorClick}
             />
           </Box>
 
@@ -1962,6 +2000,7 @@ export default function TreatmentDetailPage() {
                   showPostTreatment ? changedFieldSources : {}
                 }
                 highlightMessage="Modified by treatment"
+                activeGroupTab={activeAttributeGroupTab}
                 readOnly={true}
               />
             </Box>
