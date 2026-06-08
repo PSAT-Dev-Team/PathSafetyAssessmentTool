@@ -1917,24 +1917,22 @@ def get_results(project_name: str):
         proj: Project = ctx["pm"].project(project_name)
         ver = proj.latest()
 
-        # Get results if they exist
-        if ver.results and ver.results.df is not None and len(ver.results.df) > 0:
-            res_df = ver.results.df
-            # Auto-calculate Top Contributors for legacy projects
-            # Note: serializer auto-adds missing schema columns with None, so we must check for null values
-            if "Top 1 Contributor" not in res_df.columns or res_df["Top 1 Contributor"].isnull().all():
-                from app.services.cyclerap_scoring import calculate_cyclerap_score_native
-                res_df = calculate_cyclerap_score_native(ver.attributes.df)
-                ver.results.df = res_df
-                ver.results.df_dirty = True
-                proj.save_all()
-
+        # Always recompute results on load so the v2.13 scoring formula picks up
+        # any stale per-segment scores written under earlier model versions.
+        if ver.attributes and ver.attributes.df is not None and len(ver.attributes.df) > 0:
+            res_df = calculate_cyclerap_score_native(ver.attributes.df)
+            if ver.results is not None:
+                stale = ver.results.df is None or not res_df.equals(ver.results.df)
+                if stale:
+                    ver.results.df = res_df
+                    ver.results.df_dirty = True
+                    proj.save_all()
             return jsonify({
                 "ok": True,
                 "result_rows": df_to_records(res_df)
             })
         else:
-            # No results yet
+            # No attributes coded yet → nothing to score
             return jsonify({
                 "ok": True,
                 "result_rows": []

@@ -1,8 +1,9 @@
 """
-Native Python implementation of cycleRAP scoring algorithm (CycleRAP v2.11).
+Native Python implementation of cycleRAP scoring algorithm (CycleRAP v2.13).
 
-This module provides an accurate implementation of the cycleRAP score calculation
-based on the CycleRAP Model v2.11, ported from cyclerap_accurate_v3.jsx.
+Updated 2026-06-03 to match the supplier reference workbook
+`CycleRAP - model - generation v2.13 - to suppliers.xlsm`. See
+`docs/cyclerap_v213_audit.md` for the structural diff.
 
 No Windows, Excel, or VBA macros required - pure Python implementation.
 """
@@ -21,9 +22,9 @@ LOOKUP_TABLES = {
     'fixed_obstacle': {1: {'risk': 1.0, 'cond': 1}, 2: {'risk': 1.0, 'cond': 0}},
     'non_fixed_obstacle': {1: {'risk': 1.0, 'cond': 1}, 2: {'risk': 1.0, 'cond': 0}},
     'delineation': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 0}},
-    # Line of Sight: Adequate (1) = no penalty; Inadequate (2) = 1.2x risk + condition trigger
-    # Poor visibility raises likelihood of conflicts with cyclists, pedestrians and vehicles
-    'line_of_sight': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 1}},
+    # Line of Sight (v2.13): severity multiplier in CM3 + CM40 only.
+    # Inadequate visibility = 1.2x risk; NOT a conditional trigger (cond=0).
+    'line_of_sight': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 0}},
     'facility_width': {1: {'risk': 1.8, 'cond': 0}, 2: {'risk': 1.5, 'cond': 0}, 3: {'risk': 1.0, 'cond': 0}},
     'flow_direction': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.5, 'cond': 0}},
     'width_restriction': {1: {'risk': 1.2, 'cond': 0}, 2: {'risk': 1.0, 'cond': 0}},
@@ -49,19 +50,21 @@ LOOKUP_TABLES = {
     'num_lanes_intersecting': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 0}},
     'property_access': {1: {'risk': 1.2, 'cond': 1}, 2: {'risk': 1.0, 'cond': 0}},
     'pedestrian_flow': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 1}, 3: {'risk': 1.5, 'cond': 1}},
-    'bicycle_flow': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 0}},
+    'bicycle_flow': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 0}, 3: {'risk': 1.5, 'cond': 0}},
     'cargo_bikes': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 0}},
     'bicycle_speed': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.5, 'cond': 0}},
     'speed_differential': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 0}},
     'heavy_vehicle': {1: {'risk': 1.0, 'cond': 0}, 2: {'risk': 1.2, 'cond': 0}},
     'light_segregation': {1: {'risk': 0.8, 'cond': 0}, 2: {'risk': 1.0, 'cond': 1}},
     'facility_type': {
-        1: {'risk': 1.0, 'cond': 0, 'bp_cond': 1, 'vb_cond': 0, 'vb_sev': 0.8},
-        2: {'risk': 1.0, 'cond': 0, 'bp_cond': 1, 'vb_cond': 0, 'vb_sev': 0.8},
-        3: {'risk': 1.0, 'cond': 0, 'bp_cond': 0, 'vb_cond': 0, 'vb_sev': 0.8},
-        4: {'risk': 1.0, 'cond': 0, 'bp_cond': 0, 'vb_cond': 0, 'vb_sev': 1.0},
-        5: {'risk': 1.0, 'cond': 0, 'bp_cond': 0, 'vb_cond': 0, 'vb_sev': 1.0},
-        6: {'risk': 1.0, 'cond': 1, 'bp_cond': 0, 'vb_cond': 1, 'vb_sev': 1.0},
+        # v2.13: vb_sev applies in CH severity chains (CH32, CH45);
+        # vb_cf is the *likelihood* factor used in CM40 product chain (CU54).
+        1: {'risk': 1.0, 'cond': 0, 'bp_cond': 1, 'vb_cond': 0, 'vb_sev': 0.8, 'vb_cf': 1.0},
+        2: {'risk': 1.0, 'cond': 0, 'bp_cond': 1, 'vb_cond': 0, 'vb_sev': 0.8, 'vb_cf': 1.0},
+        3: {'risk': 1.0, 'cond': 0, 'bp_cond': 0, 'vb_cond': 0, 'vb_sev': 0.8, 'vb_cf': 1.0},
+        4: {'risk': 1.0, 'cond': 0, 'bp_cond': 0, 'vb_cond': 0, 'vb_sev': 1.0, 'vb_cf': 1.0},
+        5: {'risk': 1.0, 'cond': 0, 'bp_cond': 0, 'vb_cond': 0, 'vb_sev': 1.0, 'vb_cf': 1.0},
+        6: {'risk': 1.0, 'cond': 1, 'bp_cond': 0, 'vb_cond': 1, 'vb_sev': 1.0, 'vb_cf': 1.2},
     }
 }
 
@@ -201,13 +204,28 @@ def get_aadt_risk_factor(aadt: float) -> float:
     return result
 
 
-def get_road_speed_risk_factor(speed: float) -> float:
-    """Calculate road speed risk factor using sigmoid formula"""
-    if speed <= 1:
+MPH_TO_KMH = 1.609344
+
+
+def get_road_speed_risk_factor(speed: float, unit: int = 1) -> float:
+    """Road-speed risk factor — CycleRAP v2.13 sigmoid.
+
+    Matches the `Speed risk factors` sheet formula:
+        1 + 27.82 / (1 + EXP(7.44925 - 0.13322 * speed_kmh))
+
+    `unit` follows the Attributes.Fields.SPEED_UNIT_STR mapping
+    (`{'km/h': 1, 'mph': 2}` from serializer.operating_speed_unit_mapping).
+    mph values are converted to km/h before the sigmoid is applied so the
+    formula always sees km/h, matching v2.13's internal convention.
+    Locally we always supply km/h (unit=1), but mph (unit=2) is honoured
+    for parity with the upstream model.
+    """
+    if speed is None or speed <= 0:
         return 1.0
-    rounded_speed = round(speed)
-    lookup_speed = rounded_speed - 1
-    return 1 + 27.82 / (1 + np.exp(5.84 - 0.091 * lookup_speed))
+    speed_kmh = float(speed) * MPH_TO_KMH if unit == 2 else float(speed)
+    if speed_kmh <= 0:
+        return 1.0
+    return 1 + 27.82 / (1 + np.exp(7.44925 - 0.13322 * speed_kmh))
 
 
 # ============ CM FORMULA IMPLEMENTATIONS ============
@@ -215,6 +233,8 @@ def calculate_cm3(row: pd.Series) -> float:
     """Calculate CM3 component (main cycling environment risk)"""
     cu_factors = [
         get_risk('loose_surface', row.get(LOOSE_SURFACE, 2)),
+        # v2.13: Line of Sight is a severity multiplier here (CU4), not a conditional
+        get_risk('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
         get_risk('delineation', row.get(DELINEATION, 2)),
         get_risk('facility_width', row.get(FACILITY_WIDTH, 3)),
         get_risk('flow_direction', row.get(FLOW_DIRECTION, 1)),
@@ -226,8 +246,6 @@ def calculate_cm3(row: pd.Series) -> float:
         get_risk('speed_differential', row.get(SPEED_DIFFERENTIAL, 1)),
         get_risk('curvature', row.get(CURVATURE, 2)),
         get_risk('street_lighting', row.get(STREET_LIGHTING, 1)),
-        # Line of Sight: inadequate visibility raises general conflict risk
-        get_risk('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
     ]
 
     cq_triggers = [
@@ -239,8 +257,6 @@ def calculate_cm3(row: pd.Series) -> float:
         get_cond('property_access', row.get(PROPERTY_ACCESS, 2)),
         get_cond('intersecting_facility', row.get(INTERSECTING_FACILITY, 2)),
         get_cond('pedestrian_crossing', row.get(PEDESTRIAN_CROSSING, 2)),
-        # Line of Sight: inadequate LOS is a condition trigger — compounds all BB/BP/SB risks
-        get_cond('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
     ]
 
     cu_product = np.prod(cu_factors)
@@ -261,6 +277,8 @@ def calculate_cm16(row: pd.Series) -> float:
 
     cu16_factors = [
         get_risk('intersection_crossing', row.get(INTERSECTION_CROSSING, 2)),
+        # v2.13: Line of Sight is a severity multiplier here (CU18), not a conditional
+        get_risk('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
         get_risk('property_access', row.get(PROPERTY_ACCESS, 2)),
         get_risk('intersecting_facility', row.get(INTERSECTING_FACILITY, 2)),
         get_risk('pedestrian_crossing', row.get(PEDESTRIAN_CROSSING, 2)),
@@ -306,29 +324,30 @@ def calculate_cm40(row: pd.Series) -> float:
         get_cond('adjacent_road_1_3m', row.get(ADJACENT_ROAD_1_3M, 2)),
         facility_vb_cond,
         get_cond('intersection_approach', row.get(INTERSECTION_APPROACH, 2)),
-        get_cond('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
     ]
     cq_sum = sum(cq40_triggers)
     if cq_sum == 0:
         return 0
 
-    facility_vb_sev = LOOKUP_TABLES['facility_type'].get(row.get(FACILITY_TYPE, 1), {}).get('vb_sev', 1.0)
+    # v2.13: CU54 uses vb_cf (col DT), not vb_sev (col DS).
+    # vb_sev is consumed only in the CH severity chains (BX26/32/40/45/49 below).
+    facility_vb_cf = LOOKUP_TABLES['facility_type'].get(row.get(FACILITY_TYPE, 1), {}).get('vb_cf', 1.0)
 
     cu40_factors = [
         get_risk('crossing_facility', row.get(CROSSING_FACILITY, 1)),
+        # v2.13: Line of Sight is a severity multiplier here (CU43), not a conditional
+        get_risk('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
         get_risk('flow_direction', row.get(FLOW_DIRECTION, 1)),
         get_risk('adjacent_parking_0_1m', row.get(ADJACENT_PARKING_0_1M, 2)),
         get_risk('adjacent_parking_1_3m', row.get(ADJACENT_PARKING_1_3M, 2)),
         get_risk('street_lighting', row.get(STREET_LIGHTING, 1)),
         get_risk('num_lanes_adjacent', row.get(NUM_LANES_ADJACENT, 1)),
         get_risk('num_lanes_intersecting', row.get(NUM_LANES_INTERSECTING, 1)),
-        get_aadt_risk_factor(float(row.get(ROAD_AADT, 5000) or 5000)),
+        get_aadt_risk_factor(float(row.get(ROAD_AADT) if row.get(ROAD_AADT) is not None else 5000)),
         get_risk('heavy_vehicle', row.get(HEAVY_VEHICLE, 1)),
         get_risk('delineation', row.get(DELINEATION, 2)),
         get_risk('light_segregation', row.get(LIGHT_SEGREGATION, 2)),
-        facility_vb_sev,
-        # Line of Sight: inadequate visibility directly increases vehicle-bicyclist conflict risk
-        get_risk('line_of_sight', row.get(LINE_OF_SIGHT, 1)),
+        facility_vb_cf,
     ]
     cu40_product = np.prod(cu40_factors)
     return cu40_product ** (1 + cq_sum * 0.1)
@@ -402,8 +421,15 @@ def calculate_cyclerap_score(row: pd.Series, cm3: float, cm16: float, cm25: floa
     sb = bx16 + bx23
 
     # === VB SCORE (Vehicle-Bicyclist) ===
-    speed_risk = get_road_speed_risk_factor(float(row.get(ROAD_SPEED, 50) or 50))
-    aadt_risk = get_aadt_risk_factor(float(row.get(ROAD_AADT, 5000) or 5000))
+    # NB: must treat 0 as a real value (sigmoid maps speed=0 → 1.0); only fall back when None/blank
+    raw_speed = row.get(ROAD_SPEED, 50)
+    raw_aadt = row.get(ROAD_AADT, 5000)
+    raw_unit = row.get(SPEED_UNIT, 1)
+    speed_unit = int(raw_unit) if raw_unit is not None else 1
+    speed_risk = get_road_speed_risk_factor(
+        float(raw_speed if raw_speed is not None else 50), unit=speed_unit,
+    )
+    aadt_risk = get_aadt_risk_factor(float(raw_aadt if raw_aadt is not None else 5000))
     facility_vb_sev = LOOKUP_TABLES['facility_type'].get(facility_type, {}).get('vb_sev', 1.0)
     facility_vb_cond = LOOKUP_TABLES['facility_type'].get(facility_type, {}).get('vb_cond', 0)
 

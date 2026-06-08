@@ -24,20 +24,6 @@
   overflow: hidden;
 }
 
-/* ── Sections toggle panel ── */
-.rb-sections-panel {
-  display: flex;
-  align-items: center;
-  gap: 10px 18px;
-  flex-wrap: wrap;
-  padding: 8px 16px;
-  background: #faf8fd;
-  border-bottom: 1px solid #e0d8f0;
-  max-height: 130px;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
-
 .rb-btn-sections-active {
   background: #f0e4f8;
   border-color: #a020d0;
@@ -93,6 +79,89 @@
 
 .rb-checklist-item:hover {
   color: #a020d0;
+}
+
+/* ── Main content area: sections sidebar + report preview ── */
+.rb-main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Report Sections reorder sidebar (left of the preview) ── */
+.rb-sections-sidebar {
+  width: 250px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 12px;
+  background: #faf8fd;
+  border-right: 1px solid #e0d8f0;
+  overflow-y: auto;
+}
+
+.rb-reorder-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.rb-reorder-hint {
+  font-size: 11px;
+  color: #999;
+  line-height: 1.4;
+}
+
+.rb-reorder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rb-reorder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid #ece4f6;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #333;
+  user-select: none;
+}
+
+.rb-reorder-row:hover {
+  border-color: #d8c4f4;
+  background: #faf6ff;
+}
+
+.rb-reorder-row-dragging {
+  border-color: #a020d0;
+  box-shadow: 0 4px 14px rgba(160, 32, 208, 0.18);
+  background: #fff;
+}
+
+.rb-reorder-grip {
+  display: inline-flex;
+  align-items: center;
+  color: #b6a6cc;
+  flex-shrink: 0;
+}
+
+.rb-reorder-grip:hover {
+  color: #a020d0;
+}
+
+.rb-reorder-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rb-export-group {
@@ -157,64 +226,46 @@
 /* ── A4 canvas ── */
 .rb-canvas {
   position: relative;
-  background: #fff;
-  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.18);
   flex-shrink: 0;
 }
 
-/* ── Draggable element ── */
+/* ── Report section ── */
+/* No card chrome (border / shadow / title bar) — content flows directly on the
+   page so each section fills the full report width. A subtle hover-only × in the
+   corner lets you hide the section without adding visible chrome to the report. */
 .rb-element {
+  position: relative;
   width: 100%;
   height: 100%;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  background: #fff;
+  background: transparent;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
   box-sizing: border-box;
 }
 
-.rb-element:hover {
-  border-color: #c0a0e0;
-}
-
-.rb-element-handle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 8px;
-  background: #f5f0fa;
-  border-bottom: 1px solid #e8e0f0;
-  cursor: grab;
-  user-select: none;
-  flex-shrink: 0;
-}
-
-.rb-element-handle:active {
-  cursor: grabbing;
-}
-
-.rb-element-handle-label {
-  font-size: 10px;
-  font-weight: 600;
-  color: #9060b0;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
 .rb-element-close {
-  background: none;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.85);
   border: none;
+  border-radius: 3px;
   cursor: pointer;
   color: #bbb;
   font-size: 16px;
   line-height: 1;
-  padding: 0 2px;
+  padding: 1px 5px;
   display: flex;
   align-items: center;
   justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.rb-element:hover .rb-element-close {
+  opacity: 1;
 }
 
 .rb-element-close:hover {
