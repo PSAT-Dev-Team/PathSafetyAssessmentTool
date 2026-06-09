@@ -43,6 +43,10 @@ When creating a project:
 - upload images into a source folder if the folder is missing
 - check that selected roads are marked as **available** before you create the project
 
+#### Road Highlight on Source Folder Select
+
+When you select a source folder in the Single Folder workflow, PSAT reads the road name from the folder and automatically **highlights the matching road on the map in amber/orange**. The map also pans and zooms to that road so you can visually confirm you are creating the project from the correct location before proceeding.
+
 ### 1.3 Navigate Between Workflows
 
 From the project list, you can send selected projects to:

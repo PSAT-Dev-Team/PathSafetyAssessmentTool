@@ -109,12 +109,15 @@ Selecting a top-level filter value for any attribute marked **❖** reveals a se
 
 ### 4.4 Export
 
-The page supports two main exports:
+The page supports three exports:
 
 | Export | Format | Contents |
 |---|---|---|
 | **Download Table** | CSV | All currently filtered segment rows |
 | **Download Images** | ZIP | All images for the currently filtered segments |
+| **Download Shapefile** | ZIP (Shapefile) | Filtered segments exported as point geometry with attributes |
+
+**Download Shapefile** exports the currently visible filtered segments as a standard GIS shapefile package (`.zip`). The file is named `shapefile_export_YYYY-MM-DD.zip` and can be opened in QGIS, ArcGIS, or any other GIS application. Only segments that have a valid image reference are included.
 
 ### 4.5 Session Continuity
 
