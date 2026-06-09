@@ -596,11 +596,12 @@ export default function AttributeAnalysisMapView({
       primaryFocusAttribute !== "Project" &&
       !activeFilters.includes(primaryFocusAttribute)
     ) {
-      // The focused attribute was removed — fall back to the first remaining filter
-      // or project-colour mode if no filters are left.
-      const fallback = activeFilters[0] ?? "Project";
-      setCategoryFilterAttributeIndex(activeFilters.length > 0 ? 0 : -1);
-      setPrimaryFocusAttribute(fallback);
+      // The focused attribute was removed — revert to project-colour mode so that
+      // the tab (-1) and primaryFocusAttribute ("Project") always agree. Jumping to
+      // the first remaining filter here races with the out-of-bounds reset below,
+      // which forces the index to -1 and leaves primaryFocusAttribute stale.
+      setCategoryFilterAttributeIndex(-1);
+      setPrimaryFocusAttribute("Project");
     }
     prevFiltersRef.current = activeFilters;
   }, [activeFilters, primaryFocusAttribute]);
