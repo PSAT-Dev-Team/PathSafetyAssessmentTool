@@ -174,7 +174,7 @@ function AdminGuide() {
               body: (
                 <Box as="ol" pl="5" mt="1">
                   <Box as="li" mb="1">On the Landing Page, click <strong>Create Profile</strong>.</Box>
-                  <Box as="li" mb="1">Enter a profile name, division, and a 4–12 digit numeric PIN.</Box>
+                  <Box as="li" mb="1">Enter your LTA Employee Email, division, and a 4–12 digit numeric PIN.</Box>
                   <Box as="li">Click <strong>Create Profile</strong>. The profile is saved and the user is automatically logged in.</Box>
                 </Box>
               ),
@@ -261,7 +261,7 @@ function AdminGuide() {
               {section.title}
             </Text>
             {section.updatedDate && (
-              <Text fontSize="xs" color="gray.400" _dark={{ color: "gray.500" }} flexShrink={0}>
+              <Text fontSize="sm" color="gray.400" _dark={{ color: "gray.500" }} flexShrink={0}>
                 Updated {section.updatedDate}
               </Text>
             )}
