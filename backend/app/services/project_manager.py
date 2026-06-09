@@ -965,11 +965,9 @@ class project_manager:
     def create_project(self, project_title, geo_data : gpd.geodataframe, dataset_name, tags=None, source_folders=None):
         proj_root = self.des_path / project_title
 
-        prefix = str(project_title) + "_"
-        rename_files_with_prefix(proj_root / global_var.PROJECT_IMAGES_FOLDER, prefix)
-
-        # Get image reference
-        image_ref = load_images_from_folder_cv(proj_root / global_var.PROJECT_IMAGES_FOLDER)
+        # Image references come directly from geo_data FILENAME — no copying or renaming.
+        # Images remain in in/ and are resolved at serve time.
+        image_ref = list(geo_data["FILENAME"]) if "FILENAME" in geo_data.columns else []
         size = len(image_ref)
 
         # Craft project metadata
