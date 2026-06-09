@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button, CloseButton, Dialog, Portal } from "@chakra-ui/react";
 import "./landingPage.css";
 
-import psatLogo2 from "./assets/PSAT Logo 2.png";
+import psatLogo2 from "./assets/PSAT Logo (Black).png";
 import cyclerapLogo from "./assets/CycleRAP-logo.png";
 import { APP_META } from "../../appMeta";
 import { toaster } from "../../components/ui/toaster";
