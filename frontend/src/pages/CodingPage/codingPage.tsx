@@ -34,8 +34,8 @@ import {
   updateProject,
 } from "../../api";
 
-import type { AttributeRow } from "../../api";
-import { autocodeImage, autocodeGIS, autocodeAllStream } from "../../api";
+import type { AttributeRow, CodingFilterContext } from "../../api";
+import { autocodeImage, autocodeGIS, autocodeAllStream, CODING_FILTER_CONTEXT_KEY } from "../../api";
 
 import ImagePanel from "./components/ImagePanel";
 import AttributesPanel, { resolveContributorTabGroup } from "./components/AttributesPanel";
@@ -427,6 +427,16 @@ export default function CodingPage() {
     }
   }, [projectNames]);
 
+  // When the URL params change (e.g. cross-project navigation from GeoDataPanel),
+  // sync activeTab to the first project in the new list if the current tab is gone.
+  useEffect(() => {
+    if (projectList.length > 0 && !projectList.includes(activeTab) && activeTab !== "coding-guide") {
+      setActiveTab(projectList[0]);
+    }
+  // activeTab intentionally excluded — we only want to react to projectList changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectList]);
+
   // Current active tab (project name or "coding-guide")
   const [activeTab, setActiveTab] = useState<string>(() => {
     if (projectNames) {
@@ -488,6 +498,33 @@ export default function CodingPage() {
   const initialSegment = queryParams.get("segment");
   const hasInitializedSegmentRef = useRef(false);
 
+  // Filter context from Path Analysis — persisted in sessionStorage for reload survival.
+  // Uses useState+useEffect so it re-evaluates on every in-app navigation (no remount).
+  const resolveFilterContext = (state: unknown): CodingFilterContext | null => {
+    const fromState = (state as any)?.filterContext as CodingFilterContext | null | undefined;
+    if (fromState !== undefined) {
+      if (fromState) sessionStorage.setItem(CODING_FILTER_CONTEXT_KEY, JSON.stringify(fromState));
+      else sessionStorage.removeItem(CODING_FILTER_CONTEXT_KEY);
+      return fromState ?? null;
+    }
+    try {
+      const stored = sessionStorage.getItem(CODING_FILTER_CONTEXT_KEY);
+      return stored ? (JSON.parse(stored) as CodingFilterContext) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const [filterContext, setFilterContext] = useState<CodingFilterContext | null>(() =>
+    resolveFilterContext(location.state)
+  );
+
+  useEffect(() => {
+    setFilterContext(resolveFilterContext(location.state));
+  // location.state reference changes on each navigation, which is exactly when we want to re-run
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
   // Save confirmation dialog state
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -508,6 +545,13 @@ export default function CodingPage() {
       setActiveAttributeGroupTab(targetGroup);
     }
   }, []);
+
+  // Reset the segment-init guard whenever the active project changes so that
+  // cross-project navigation (which reuses the same component instance) can
+  // apply the new ?segment= query param for the incoming project.
+  useEffect(() => {
+    hasInitializedSegmentRef.current = false;
+  }, [currentProjectName]);
 
   useEffect(() => {
     if (!initialSegment || !currentProjectName || hasInitializedSegmentRef.current) return;
@@ -2645,6 +2689,7 @@ export default function CodingPage() {
             index={currentIndex}
             onJump={(i) => gotoPage(i + 1)}
             scores={scores}
+            filterContext={filterContext}
             onDataChange={refreshCurrentProject}
             curvData={curvData}
             widthM={widthData?.width ?? null}

@@ -55,6 +55,27 @@ export async function fetchProjectMetadata(projectName: string): Promise<Project
 export type AttributeRow = Record<string, string | number | boolean | null>;
 export type AttributesResponse = { rows: AttributeRow[] };
 
+// Filter context passed from Path Analysis → Coding page
+export type FilteredSegmentPoint = {
+  latlng: [number, number];
+  color: string; // risk-band hex color (per-crash-type thresholds)
+  idx: number;   // 0-based segment index within the project
+};
+
+export type FilteredProjectData = {
+  projectName: string;
+  filteredIndices: number[];       // 0-based indices used to gate the current-project map
+  points: FilteredSegmentPoint[];  // one entry per filtered segment (for map rendering + click nav)
+};
+
+// All filtered projects share the same context object so navigating across projects
+// preserves the full filter picture without re-deriving it.
+export type CodingFilterContext = {
+  projects: FilteredProjectData[];
+};
+
+export const CODING_FILTER_CONTEXT_KEY = 'codingFilterContext';
+
 export async function fetchProjectAttributes(projectName: string): Promise<AttributesResponse> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/versions/latest/attributes`)
 

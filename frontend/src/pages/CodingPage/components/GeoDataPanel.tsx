@@ -12,6 +12,9 @@ import { MapCursorController } from "../../../components/common/MapCursorControl
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
+import type { CodingFilterContext } from "../../../api";
+import { CODING_FILTER_CONTEXT_KEY } from "../../../api";
+import { useNavigate } from "react-router-dom";
 
 
 import { MapContainer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle, Pane } from "react-leaflet";
@@ -33,6 +36,7 @@ type Props = {
   geoFeatures?: Feature<LineString, any>[];  // Optional pre-loaded geofeatures (for multi-project display)
   startIndex?: number;                       // Start index in global segments array (used with geoFeatures for multi-project)
   onDataChange?: () => void;                 // Callback when data is modified (e.g. deleted)
+  filterContext?: CodingFilterContext | null; // From Path Analysis: restricts which segments appear on the map
   panToBounds?: L.LatLngBounds | null;       // When set, immediately flies map to these bounds (e.g. on project tab switch)
   panKey?: number;                           // Monotonic counter to force PanToBounds effect re-fire
   curvData?: CurvatureVisualizationResponse | null;
@@ -311,7 +315,9 @@ function StatPill({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct, gradientStatus }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, filterContext, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct, gradientStatus }: Props) {
+  const navigate = useNavigate();
+
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
@@ -364,6 +370,14 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
       showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects
     }));
   }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects, projectName]);
+
+  // Auto-enable path layers when Analysis Overlay is turned on; never auto-disable them
+  useEffect(() => {
+    if (!showCurvatureOverlay) return;
+    if (!showFootpath) setShowFootpath(true);
+    if (!showCycling) setShowCycling(true);
+    if (!showShared) setShowShared(true);
+  }, [showCurvatureOverlay]); // eslint-disable-line react-hooks/exhaustive-deps
 
 // Sub-component to pan map to current selection.
 // When panKey changes (project tab clicked), MapAutoCenter suppresses its setView
@@ -546,6 +560,23 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
   }, [fc, startIndex]);
 
   const allLatLngs = useMemo(() => points.map(p => p.latlng), [points]);
+
+  // When a filter context is active, only show filtered segments + the current one.
+  // localIdx equals the 0-based position in the project's geo features (= globalIdx when startIndex=0).
+  const currentProjectFilterData = useMemo(
+    () => filterContext?.projects.find(p => p.projectName === decodedName) ?? null,
+    [filterContext, decodedName]
+  );
+
+  const otherProjectsFilterData = useMemo(
+    () => filterContext ? filterContext.projects.filter(p => p.projectName !== decodedName) : [],
+    [filterContext, decodedName]
+  );
+
+  const filterIndexSet = useMemo(
+    () => currentProjectFilterData ? new Set(currentProjectFilterData.filteredIndices) : null,
+    [currentProjectFilterData]
+  );
 
   // 当前高亮点 - use globalIdx to match the index prop (global index)
   const current = useMemo(() => points.find(p => p.globalIdx === index) ?? null, [points, index]);
@@ -1591,8 +1622,10 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
 
               {/* 所有起点 — rendered in a dedicated pane above GIS overlay layers */}
               <Pane name="segmentsPane" style={{ zIndex: 610 }}>
-                {points.map(({ globalIdx, latlng, f }) => {
+                {points.map(({ localIdx, globalIdx, latlng, f }) => {
                   const isActive = globalIdx === index;
+                  // Hide segments outside the filter set (current segment always shown)
+                  if (filterIndexSet && !filterIndexSet.has(localIdx) && !isActive) return null;
                   const baseColor = getSegmentColor(globalIdx);
                   const color = isActive ? "#1E63D8" : baseColor;
                   const radius = isActive ? 9 : 5;
@@ -1647,6 +1680,35 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                   );
                 })}
               </Pane>
+
+              {/* Cross-project filtered segments from Path Analysis */}
+              {otherProjectsFilterData.length > 0 && (
+                <Pane name="crossProjectPane" style={{ zIndex: 609 }}>
+                  {otherProjectsFilterData.flatMap(proj =>
+                    proj.points.map((pt, i) => (
+                      <CircleMarker
+                        key={`xp-${proj.projectName}-${i}`}
+                        center={pt.latlng}
+                        radius={5}
+                        pathOptions={{ color: pt.color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
+                        pane="crossProjectPane"
+                        eventHandlers={{
+                          click: () => {
+                            // Navigate to the other project, preserving the full filter context
+                            sessionStorage.setItem(CODING_FILTER_CONTEXT_KEY, JSON.stringify(filterContext));
+                            navigate(
+                              `/coding/${encodeURIComponent(proj.projectName)}?segment=${pt.idx + 1}`,
+                              { state: { returnToAnalysis: true, filterContext } }
+                            );
+                          },
+                        }}
+                      >
+                        <Tooltip>#{pt.idx + 1} — {proj.projectName}</Tooltip>
+                      </CircleMarker>
+                    ))
+                  )}
+                </Pane>
+              )}
 
               <PolygonDrawingTool
                 active={isPolygonMode || isPolygonAddMode}
