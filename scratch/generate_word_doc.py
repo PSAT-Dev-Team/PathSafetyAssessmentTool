@@ -62,16 +62,19 @@ if __name__ == "__main__":
     output = r"c:\Users\23010975\Documents\GitHub\PathSafetyAssessmentTool\DEVELOPER_GUIDE_V2(UPDATED).docx"
     
     files = [
+        "../README.md",
         "installation.md",
         "architecture.md",
-        "cv-pipeline.md",
         "api-reference.md",
+        "cv-pipeline.md",
         "scoring.md",
         "treatments.md",
         "frontend.md",
         "common-issues.md",
-        "contributing.md"
+        "contributing.md",
+        "dev-jira.md"
     ]
     
     full_paths = [os.path.join(docs_dir, f) for f in files]
     markdown_to_docx(output, full_paths)
+

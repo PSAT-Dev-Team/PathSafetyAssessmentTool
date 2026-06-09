@@ -141,11 +141,12 @@ if __name__ == '__main__':
     BASE = r'c:\Users\23010975\Documents\GitHub\PathSafetyAssessmentTool'
 
     transform(
-        f'{BASE}\\USER_GUIDE (Updated).docx',
+        f'{BASE}\\USER_GUIDE_V2(UPDATED).docx',
         f'{BASE}\\USER_GUIDE_RENUMBERED.docx',
     )
     transform(
-        f'{BASE}\\DEVELOPER_GUIDE (Updated).docx',
+        f'{BASE}\\DEVELOPER_GUIDE_V2(UPDATED).docx',
         f'{BASE}\\DEVELOPER_GUIDE_RENUMBERED.docx',
     )
     print("Done.")
+

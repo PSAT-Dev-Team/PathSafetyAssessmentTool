@@ -6,14 +6,12 @@
 
 ## Table of Contents
 
-- [1. What PSAT Does](#1-what-psat-does)
-- [2. Quick Start](#2-quick-start)
-- [3. Repository Layout](#3-repository-layout)
-- [4. Documentation Index](#4-documentation-index)
+- [1.1 What PSAT Does](#1-1-what-psat-does)
+- [1.2 Quick Start](#1-2-quick-start)
+- [1.3 Repository Layout](#1-3-repository-layout)
+- [1.4 Documentation Index](#1-4-documentation-index)
 
----
-
-## 1. What PSAT Does
+## 1.1 What PSAT Does
 
 The **Path Safety Assessment Tool (PSAT)** is an internal web application for assessing cycling and active-mobility corridors using the **CycleRAP v2.11** methodology. It combines image-driven coding, GIS lookups, manual review, scoring, and treatment testing in one workflow.
 
@@ -27,7 +25,7 @@ PSAT is used to:
 - analyse one or more projects together with filters, charts, and exports
 - test treatments and compare before/after risk outcomes, including generating AI image prompts for treatment visualisation
 
-## 2. Quick Start
+## 1.2 Quick Start
 
 ```bash
 # 1. Clone the repository
@@ -50,7 +48,7 @@ Once running:
 - **Frontend:** http://localhost
 - **Backend API:** http://localhost:8000/api
 
-## 3. Repository Layout
+## 1.3 Repository Layout
 
 ```text
 PathSafetyAssessmentTool/
@@ -95,7 +93,7 @@ PathSafetyAssessmentTool/
 └── docker-compose.yml
 ```
 
-## 4. Documentation Index
+## 1.4 Documentation Index
 
 | # | Document | Description |
 |---|---|---|

@@ -7,33 +7,32 @@ PSAT implements the **CycleRAP v2.11** risk scoring algorithm as a pure Python m
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Risk Bands](#risk-bands)
-  - [BB, BP, SB](#bb-bp-sb)
-  - [VB](#vb)
-  - [Overall Risk Level Band](#overall-risk-level-band)
-- [Algorithm: Component Formulas](#algorithm-component-formulas)
-  - [CM3 — Main Cycling Environment Risk](#cm3-main-cycling-environment-risk)
-  - [CM16 — Departure and Fall Scenarios](#cm16-departure-and-fall-scenarios)
-  - [CM25 — Speed-Related Incidents](#cm25-speed-related-incidents)
-  - [CM40 — Vehicle Interaction](#cm40-vehicle-interaction)
-  - [Final Score Combination](#final-score-combination)
-- [Worked Example: CM3](#worked-example-cm3)
-  - [Road Speed Risk Factor](#road-speed-risk-factor)
-- [Attribute Fields Reference](#attribute-fields-reference)
-  - [Facility Configuration](#facility-configuration)
-  - [Facility Clear Width](#facility-clear-width)
-  - [Facility Surface Conditions](#facility-surface-conditions)
-  - [Intersection](#intersection)
-  - [Flow & Speed](#flow-speed)
-- [`cyclerap_scoring.py` — Function Reference](#cyclerap-scoring-py-function-reference)
-  - [Output Columns](#output-columns)
-- [Treatment Logic](#treatment-logic)
-  - [Treatment List](#treatment-list)
-- [Updating the CycleRAP Algorithm](#updating-the-cyclerap-algorithm)
+- [6.1 Overview](#6-1-overview)
+- [6.2 Risk Bands](#6-2-risk-bands)
+  - [6.21 BB, BP, SB](#6-21-bb-bp-sb)
+  - [6.22 VB](#6-22-vb)
+  - [6.23 Overall Risk Level Band](#6-23-overall-risk-level-band)
+- [6.3 Algorithm: Component Formulas](#6-3-algorithm-component-formulas)
+  - [6.31 CM3 — Main Cycling Environment Risk](#6-31-cm3-main-cycling-environment-risk)
+  - [6.32 CM16 — Departure and Fall Scenarios](#6-32-cm16-departure-and-fall-scenarios)
+  - [6.33 CM25 — Speed-Related Incidents](#6-33-cm25-speed-related-incidents)
+  - [6.34 CM40 — Vehicle Interaction](#6-34-cm40-vehicle-interaction)
+  - [6.35 Final Score Combination](#6-35-final-score-combination)
+- [6.4 Worked Example: CM3](#6-4-worked-example-cm3)
+  - [6.41 Road Speed Risk Factor](#6-41-road-speed-risk-factor)
+- [6.5 Attribute Fields Reference](#6-5-attribute-fields-reference)
+  - [6.51 Facility Configuration](#6-51-facility-configuration)
+  - [6.52 Facility Clear Width](#6-52-facility-clear-width)
+  - [6.53 Facility Surface Conditions](#6-53-facility-surface-conditions)
+  - [6.54 Intersection](#6-54-intersection)
+  - [6.55 Flow & Speed](#6-55-flow-speed)
+- [6.6 `cyclerap_scoring.py` — Function Reference](#6-6-cyclerap-scoring-py-function-reference)
+  - [6.61 Output Columns](#6-61-output-columns)
+- [6.7 Treatment Logic](#6-7-treatment-logic)
+  - [6.71 Treatment List](#6-71-treatment-list)
+- [6.8 Updating the CycleRAP Algorithm](#6-8-updating-the-cyclerap-algorithm)
 
-
-## Overview
+## 6.1 Overview
 
 CycleRAP produces four independent risk scores for each road segment, each representing a distinct crash scenario:
 
@@ -50,9 +49,9 @@ An **Overall Risk Level** (the sum of all four scores) and an **Overall Risk Lev
 
 ---
 
-## Risk Bands
+## 6.2 Risk Bands
 
-### BB, BP, SB
+### 6.21 BB, BP, SB
 
 | Band | Label | Score range |
 |---|---|---|
@@ -61,7 +60,7 @@ An **Overall Risk Level** (the sum of all four scores) and an **Overall Risk Lev
 | 3 | High | 10 – 20 |
 | 4 | Extreme | > 20 |
 
-### VB
+### 6.22 VB
 
 | Band | Label | Score range |
 |---|---|---|
@@ -70,17 +69,17 @@ An **Overall Risk Level** (the sum of all four scores) and an **Overall Risk Lev
 | 3 | High | 25 – 60 |
 | 4 | Extreme | > 60 |
 
-### Overall Risk Level Band
+### 6.23 Overall Risk Level Band
 
 Equal to the **maximum** band across BB, BP, SB, and VB for that segment. This means a single extreme sub-score elevates the overall band to Extreme regardless of the others.
 
 ---
 
-## Algorithm: Component Formulas
+## 6.3 Algorithm: Component Formulas
 
 The algorithm builds four intermediate components (`CM3`, `CM16`, `CM25`, `CM40`) and then combines them into the final scores.
 
-### CM3 — Main Cycling Environment Risk
+### 6.31 CM3 — Main Cycling Environment Risk
 
 ```
 CM3 = (product of CU factors) ^ (1 + CQ_sum × 0.1)
@@ -116,19 +115,19 @@ CM3 = (product of CU factors) ^ (1 + CQ_sum × 0.1)
 | Intersecting facility | `Intersecting Bicycle Facility` | Present |
 | Pedestrian crossing | `Pedestrian Crossing` | Present |
 
-### CM16 — Departure and Fall Scenarios
+### 6.32 CM16 — Departure and Fall Scenarios
 
 Only fires if at least one of: Loose/slippery surface, Grade ≥5°, or Curvature = Sharp Turn.
 
-### CM25 — Speed-Related Incidents
+### 6.33 CM25 — Speed-Related Incidents
 
 Only fires if at least one of: Tram/train rails present, Surface deformation present.
 
-### CM40 — Vehicle Interaction
+### 6.34 CM40 — Vehicle Interaction
 
 Only fires if at least one of: Intersection crossing, Property access, Adjacent road 0–1m, Adjacent road 1–3m, Facility type = Mixed Traffic, Intersection approach = Shared.
 
-### Final Score Combination
+### 6.35 Final Score Combination
 
 The four components combine into final scores as follows:
 
@@ -157,7 +156,7 @@ VB = (cj3 + cj25) × factors   [fall/conflict — 0 if condition absent]
 
 ---
 
-## Worked Example: CM3
+## 6.4 Worked Example: CM3
 
 The following example traces a single segment through the CM3 calculation by hand.
 
@@ -246,7 +245,7 @@ Road traffic volume is converted to a risk factor using a stepped lookup table:
 | 35000 – 39999 | 2.10 |
 | ≥ 40000 | 2.25 |
 
-### Road Speed Risk Factor
+### 6.41 Road Speed Risk Factor
 
 Operating speed is converted via a sigmoid formula:
 
@@ -259,7 +258,7 @@ risk = 1 + 27.82 / (1 + exp(5.84 − 0.091 × lookup_speed))
 
 ---
 
-## Attribute Fields Reference
+## 6.5 Attribute Fields Reference
 
 The table below documents every field stored per segment. **39 fields are actively used in the scoring algorithm**; the remaining fields (Area type, Road speed limit, operating speed, unit) are stored for reference or display but do not feed into the CycleRAP formulas.
 
@@ -267,7 +266,7 @@ The table below documents every field stored per segment. **39 fields are active
 
 > Fields are grouped below to match the attribute panel groupings in the PSAT UI.
 
-### Facility Configuration
+### 6.51 Facility Configuration
 
 | # | Field name | Type | Values | Scoring use |
 |---|---|---|---|---|
@@ -282,7 +281,7 @@ The table below documents every field stored per segment. **39 fields are active
 | 9 | Adjacent object or level change 0–1m | Enum | 1 = Present, 2 = Not Present | SB departure trigger |
 | 10 | Adjacent object or level change 1–3m | Enum | 1 = Present, 2 = Not Present | SB departure trigger |
 
-### Facility Clear Width
+### 6.52 Facility Clear Width
 
 | # | Field name | Type | Values | Scoring use |
 |---|---|---|---|---|
@@ -298,7 +297,7 @@ The table below documents every field stored per segment. **39 fields are active
 
 > **Note:** Line of Sight appears in the UI but is not yet documented in the CycleRAP v2.11 scoring specification. Confirm with the team whether it contributes to scoring.
 
-### Facility Surface Conditions
+### 6.53 Facility Surface Conditions
 
 | # | Field name | Type | Values | Scoring use |
 |---|---|---|---|---|
@@ -310,7 +309,7 @@ The table below documents every field stored per segment. **39 fields are active
 | 25 | Tram or Train Rails | Enum | 1 = Present, 2 = Not Present | CM25 trigger (risk 1.5 if Present) |
 | 26 | Street Lighting | Enum | 1 = Present, 2 = Not Present | CM3 CU (1.2 if absent); VB CU (1.2) |
 
-### Intersection
+### 6.54 Intersection
 
 | # | Field name | Type | Values | Scoring use |
 |---|---|---|---|---|
@@ -323,7 +322,7 @@ The table below documents every field stored per segment. **39 fields are active
 | 33 | Number of lanes – adjacent road | Enum | 1 = 1 per Direction/NA, 2 = > 1 per Direction | VB CU (1.2 if > 1) |
 | 34 | Number of lanes – intersecting road | Enum | 1 = 1 per Direction/NA, 2 = > 1 per Direction | VB CU (1.2 if > 1) |
 
-### Flow & Speed
+### 6.55 Flow & Speed
 
 | # | Field name | Type | Values | Scoring use |
 |---|---|---|---|---|
@@ -343,7 +342,7 @@ The table below documents every field stored per segment. **39 fields are active
 
 ---
 
-## `cyclerap_scoring.py` — Function Reference
+## 6.6 `cyclerap_scoring.py` — Function Reference
 
 | Function | Description |
 |---|---|
@@ -359,7 +358,7 @@ The table below documents every field stored per segment. **39 fields are active
 | `get_risk(attr_key, value)` | Looks up risk multiplier from `LOOKUP_TABLES` |
 | `get_cond(attr_key, value)` | Looks up condition flag from `LOOKUP_TABLES` |
 
-### Output Columns
+### 6.61 Output Columns
 
 `calculate_cyclerap_score_native()` returns a DataFrame with these 10 columns per row:
 
@@ -378,7 +377,7 @@ The table below documents every field stored per segment. **39 fields are active
 
 ---
 
-## Treatment Logic
+## 6.7 Treatment Logic
 
 The 25 predefined treatments (defined in `routes.py`) each have:
 - **Triggers:** one or more sets of `{field: [allowed_values]}` conditions. If any trigger set matches, the treatment is applicable.
@@ -386,7 +385,7 @@ The 25 predefined treatments (defined in `routes.py`) each have:
 
 Treatments are evaluated by `apply_treatments`, `apply_all_treatments`, and `preview_treatments` endpoints. The projected score change (before/after) is returned so the user can see the improvement.
 
-### Treatment List
+### 6.71 Treatment List
 
 | ID | Name | Key trigger condition |
 |---|---|---|
@@ -418,7 +417,7 @@ Treatments are evaluated by `apply_treatments`, `apply_all_treatments`, and `pre
 
 ---
 
-## Updating the CycleRAP Algorithm
+## 6.8 Updating the CycleRAP Algorithm
 
 When CycleRAP releases an updated risk scoring model (e.g., transitioning from v2.11 to a newer version), the development team must update the scoring module. 
 

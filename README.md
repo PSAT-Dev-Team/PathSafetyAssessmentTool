@@ -2,7 +2,7 @@
 
 > Developer & User Guide — May 2026
 
-## Overview
+## 1.1 Overview
 
 The **Path Safety Assessment Tool (PSAT)** is a web application for assessing cycling and active-mobility corridors using the **CycleRAP v2.11** methodology. It brings together image-based auto-coding, GIS spatial lookups, manual review, risk scoring, treatment testing, and multi-project analysis in one unified workflow.
 
@@ -16,7 +16,7 @@ PSAT is used to:
 - explore and rank safety treatments with before/after score comparisons
 - manage the GIS layers that power spatial auto-coding rules
 
-## Documentation
+## 1.2 Documentation
 
 | Document | Contents |
 |---|---|
@@ -33,7 +33,7 @@ PSAT is used to:
 
 ---
 
-## Tech stack
+## 1.3 Tech stack
 
 | Layer | Technology |
 |---|---|
@@ -47,9 +47,9 @@ PSAT is used to:
 
 ---
 
-## Prerequisites
+## 1.4 Prerequisites
 
-### Required software
+### 1.41 Required software
 
 | Tool | Purpose |
 |---|---|
@@ -58,7 +58,7 @@ PSAT is used to:
 | **Node.js 20** *(non-Docker only)* | Frontend dev server |
 | **Python 3.11** *(non-Docker only)* | Backend without Docker |
 
-### Required external assets
+### 1.42 Required external assets
 
 Two asset folders must be placed in `backend/` before CV and GIS-assisted coding will work. They are not included in the repository and must be copied from the project SSD.
 
@@ -83,9 +83,9 @@ If these folders are missing the app can still boot, but GIS and CV features wil
 
 ---
 
-## Getting started
+## 1.5 Getting started
 
-### Option A — Docker (recommended)
+### 1.51 Option A — Docker (recommended)
 
 ```bash
 # 1. Clone
@@ -132,7 +132,7 @@ Rebuilds do not erase `data/` or `in/`.
 
 ---
 
-### Option B — Windows one-click (`Run-PSAT.bat`)
+### 1.52 Option B — Windows one-click (`Run-PSAT.bat`)
 
 Double-click **`Run-PSAT.bat`** from the repository root. The script:
 
@@ -166,7 +166,7 @@ pip install -r backend/requirements.txt
 
 ---
 
-### Option C — Manual (backend + frontend separately)
+### 1.53 Option C — Manual (backend + frontend separately)
 
 Backend:
 
@@ -190,14 +190,14 @@ The Vite dev server proxies `/api/*` to `http://localhost:8000`.
 
 ---
 
-## First run
+## 1.6 First run
 
 1. Open the **Projects** page at http://localhost (Docker) or http://localhost:5173 (non-Docker).
 2. Click **Create Project**.
 3. Choose a source folder from `in/`, or use the map to draw a polygon and select roads.
 4. Confirm the project is created and the app navigates to the Coding page.
 
-### Preparing `in/`
+### 1.61 Preparing `in/`
 
 Each subfolder under `in/` is one survey source. Images must contain GPS EXIF metadata.
 
@@ -212,7 +212,7 @@ in/
     └── ...
 ```
 
-### Optional: build the road reference CSV
+### 1.62 Optional: build the road reference CSV
 
 After populating `in/`, run this once to improve polygon road-selection matching:
 
@@ -225,20 +225,20 @@ This writes `backend/shapefiles/road_reference.csv`.
 
 ---
 
-## Application pages
+## 1.7 Application pages
 
-### Projects (`/home`)
+### 1.71 Projects (`/home`)
 
 Lists all projects with fuzzy search across project name, road names, and tags. Supports multi-select to open projects in coding, path-analysis, or treatment workflows. Allows rename, re-tag, and delete.
 
-### Create Project (`/projects/create`)
+### 1.72 Create Project (`/projects/create`)
 
 Two creation modes:
 
 - **Single folder** — pick one source folder from `in/`.
 - **Polygon / multi-road** — draw a polygon on the map, select intersecting roads, and create from one or more source folders at once. The backend filters images to nodes inside the polygon and namespaces copied filenames to avoid collisions.
 
-### Coding (`/coding/:projectNames`)
+### 1.73 Coding (`/coding/:projectNames`)
 
 The primary work area. Supports one or more comma-separated projects in a single session.
 
@@ -250,7 +250,7 @@ The primary work area. Supports one or more comma-separated projects in a single
 - Autocode validation: compare current attributes to a saved baseline
 - Autocode metadata provenance (which fields changed, CV vs GIS source)
 
-### Path Analysis (`/analysis/path`)
+### 1.74 Path Analysis (`/analysis/path`)
 
 Multi-project analysis workspace. Select a subset of projects, filter by tag and date range, then:
 
@@ -259,22 +259,22 @@ Multi-project analysis workspace. Select a subset of projects, filter by tag and
 - export filtered rows as CSV or download filtered images as ZIP
 - session state is persisted in `sessionStorage` so you can navigate away and return
 
-### Treatment (`/treatment` and `/treatment/:projectName`)
+### 1.75 Treatment (`/treatment` and `/treatment/:projectName`)
 
 - **Treatment page** — picker with the same fuzzy project search as the Projects page
 - **Treatment Detail page** — load one or more projects into a combined treatment session; view by segment or by treatment; rank treatments by effectiveness; preview and apply; save or reset pending changes
 
-### GIS Layers (`/gis-layers`)
+### 1.76 GIS Layers (`/gis-layers`)
 
 Browse, preview, upload, replace, and delete the shapefiles that power GIS-assisted coding.
 
-### Help (`/help`)
+### 1.77 Help (`/help`)
 
 In-app documentation viewer. Loads user and developer guides from `frontend/public/docs/`.
 
 ---
 
-## CV / ML pipeline summary
+## 1.8 CV / ML pipeline summary
 
 Auto-coding runs a pipeline of YOLO models against each segment image:
 
@@ -293,7 +293,7 @@ See [CV / ML Pipeline](docs/cv-pipeline.md) for the full pipeline and confidence
 
 ---
 
-## Scoring summary
+## 1.9 Scoring summary
 
 PSAT implements CycleRAP v2.11 as a pure Python module (`cyclerap_scoring.py`). Four scores are produced per segment:
 
@@ -319,7 +319,7 @@ See [Scoring Logic](docs/scoring.md) for the full formula reference and treatmen
 
 ---
 
-## Data persistence
+## 1.10 Data persistence
 
 Docker bind-mounts keep project data on the host:
 
@@ -352,7 +352,7 @@ data/
 
 ---
 
-## Repository layout
+## 1.11 Repository layout
 
 ```text
 PathSafetyAssessmentTool/
@@ -409,7 +409,7 @@ PathSafetyAssessmentTool/
 
 ---
 
-## Ports
+## 1.12 Ports
 
 | Service | Host port | Notes |
 |---|---|---|
@@ -420,7 +420,7 @@ If either port is already in use, change the mapping in `docker-compose.yml` or 
 
 ---
 
-## Contributing
+## 1.13 Contributing
 
 - Keep changes focused on one behaviour or documentation topic at a time.
 - Prefer fixes at the owning layer rather than UI-only workarounds.

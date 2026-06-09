@@ -4,7 +4,7 @@ Treatments in PSAT are used to simulate safety improvements on road segments. Ea
 
 ---
 
-## 1. Structure of a Treatment
+## 6.9 Structure of a Treatment
 
 Treatments are defined as a list of dictionaries in the backend. Each dictionary follows this schema:
 
@@ -20,7 +20,7 @@ Treatments are defined as a list of dictionaries in the backend. Each dictionary
 }
 ```
 
-### 1.1 Fields Explained
+### 6.91 Fields Explained
 
 | Field | Type | Description |
 |---|---|---|
@@ -29,14 +29,14 @@ Treatments are defined as a list of dictionaries in the backend. Each dictionary
 | `triggers` | List[Dict] | A list of condition sets. If **any** dictionary in the list matches the segment's attributes, the treatment is applicable (**OR logic** between list items). |
 | `effects` | Dict | A dictionary of field-value pairs. When applied, these attributes are updated to the specified values (**1-based indices** from the attribute dropdowns). |
 
-### 1.2 Trigger Logic (AND/OR)
+### 6.92 Trigger Logic (AND/OR)
 
 - **OR Logic**: The `triggers` list is a collection of alternative conditions. If a segment satisfies any one of these dictionaries, the treatment becomes a "Recommended Treatment".
 - **AND Logic**: Inside a single trigger dictionary, all specified fields must match the segment's current values. For example, `{"Facility Type": [5], "Light Segregation": [2]}` means the segment must be a Road Shoulder (5) **AND** have no Light Segregation (2).
 
 ---
 
-## 2. How to Add a New Treatment
+## 6.10 How to Add a New Treatment
 
 To add a new treatment to the system, follow these steps:
 
@@ -50,7 +50,7 @@ To add a new treatment to the system, follow these steps:
 
 ---
 
-## 3. Implementation Details
+## 6.11 Implementation Details
 
 The treatment logic is handled by the following endpoints:
 - `POST /api/projects/<name>/treatments/preview`: Calculates the score change without saving.

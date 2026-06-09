@@ -7,24 +7,23 @@ PSAT uses a suite of YOLO-based computer-vision models to automatically infer Cy
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Model Files](#model-files)
-  - [Model Loading](#model-loading)
-  - [Replacing or Updating a Model](#replacing-or-updating-a-model)
-  - [Entry Point: `autocode(image_path)`](#entry-point-autocode-image-path)
-  - [Step 1 — Path Segmentation](#step-1-path-segmentation)
-  - [Step 2 — Light Segregation (Default)](#step-2-light-segregation-default)
-  - [Step 3 — Adjacent Road (if road class `1` is present)](#step-3-adjacent-road-if-road-class-1-is-present)
-  - [Step 4 — Off-Road Bicycle Path Classification](#step-4-off-road-bicycle-path-classification)
-  - [Step 5 — Facility Type Decision (via Fixed Obstacle Model)](#step-5-facility-type-decision-via-fixed-obstacle-model)
-  - [Step 6 — Fixed Obstacle & Delineation Detection](#step-6-fixed-obstacle-delineation-detection)
-- [Auto-coding in Bulk](#auto-coding-in-bulk)
-- [Confidence Thresholds (Summary)](#confidence-thresholds-summary)
-- [Attributes Auto-coded by CV](#attributes-auto-coded-by-cv)
-- [GIS Auto-coding](#gis-auto-coding)
+- [5.1 Overview](#5-1-overview)
+- [5.2 Model Files](#5-2-model-files)
+  - [5.21 Model Loading](#5-21-model-loading)
+  - [5.22 Replacing or Updating a Model](#5-22-replacing-or-updating-a-model)
+  - [5.23 Entry Point: `autocode(image_path)`](#5-23-entry-point-autocode-image-path)
+  - [5.24 Step 1 — Path Segmentation](#5-24-step-1-path-segmentation)
+  - [5.25 Step 2 — Light Segregation (Default)](#5-25-step-2-light-segregation-default)
+  - [5.26 Step 3 — Adjacent Road (if road class `1` is present)](#5-26-step-3-adjacent-road-if-road-class-1-is-present)
+  - [5.27 Step 4 — Off-Road Bicycle Path Classification](#5-27-step-4-off-road-bicycle-path-classification)
+  - [5.28 Step 5 — Facility Type Decision (via Fixed Obstacle Model)](#5-28-step-5-facility-type-decision-via-fixed-obstacle-model)
+  - [5.29 Step 6 — Fixed Obstacle & Delineation Detection](#5-29-step-6-fixed-obstacle-delineation-detection)
+- [5.3 Auto-coding in Bulk](#5-3-auto-coding-in-bulk)
+- [5.4 Confidence Thresholds (Summary)](#5-4-confidence-thresholds-summary)
+- [5.5 Attributes Auto-coded by CV](#5-5-attributes-auto-coded-by-cv)
+- [5.6 GIS Auto-coding](#5-6-gis-auto-coding)
 
-
-## Overview
+## 5.1 Overview
 
 ```
 Street-level photograph (.jpg)
@@ -65,7 +64,7 @@ Stored in attributes.csv (merged with any existing values)
 
 ---
 
-## Model Files
+## 5.2 Model Files
 
 All model files are YOLO `.pt` files and must be placed in `backend/models/`. They are **not included in the repository** and must be copied from the project SSD.
 
@@ -79,7 +78,7 @@ All model files are YOLO `.pt` files and must be placed in `backend/models/`. Th
 | `LTA_Dill_4_Best.pt` | Classifier | Delineation / road markings |
 | `RoadClassification_best.pt` | Classifier | Road type classification |
 
-### Model Loading
+### 5.21 Model Loading
 
 Models are loaded once at first use by `CycleRAP_Coding_Helper.initialise(model_dir)` in `prediction.py`. The backend searches for `path_seg.pt` in these locations (in order):
 
@@ -90,7 +89,7 @@ Models are loaded once at first use by `CycleRAP_Coding_Helper.initialise(model_
 
 If no model directory is found, the backend raises a `RuntimeError` and returns HTTP 503 for all subsequent CV requests.
 
-### Replacing or Updating a Model
+### 5.22 Replacing or Updating a Model
 
 When a retrained or improved `.pt` file becomes available, follow these steps:
 
@@ -123,11 +122,11 @@ When a retrained or improved `.pt` file becomes available, follow these steps:
 
 All inference logic lives in the `CycleRAP_Coding_Helper` class (static methods only).
 
-### Entry Point: `autocode(image_path)`
+### 5.23 Entry Point: `autocode(image_path)`
 
 Returns a dictionary mapping every `Attributes.Fields` field to a coded integer value (or `None` if the field cannot be determined from the image).
 
-### Step 1 — Path Segmentation
+### 5.24 Step 1 — Path Segmentation
 
 ```python
 seg_results = cls.path_segmentation_model.predict(image_path)
@@ -140,11 +139,11 @@ The segmentation model produces per-pixel class masks. Detected class IDs:
 
 If no path (class `0`) is detected, a warning is logged and manual review is flagged.
 
-### Step 2 — Light Segregation (Default)
+### 5.25 Step 2 — Light Segregation (Default)
 
 If a path is detected, `Light Segregation` is set to `Present (1)` by default.
 
-### Step 3 — Adjacent Road (if road class `1` is present)
+### 5.26 Step 3 — Adjacent Road (if road class `1` is present)
 
 ```python
 adj_result = cls.adj_road_lanes_classifier.predict(cropped)[0]
@@ -158,7 +157,7 @@ The cropped path bounding box is passed to the adjacency classifier:
 
 Confidence threshold: `0.8`. Results below this threshold default to class `0` (uncertain).
 
-### Step 4 — Off-Road Bicycle Path Classification
+### 5.27 Step 4 — Off-Road Bicycle Path Classification
 
 ```python
 cls_result = cls.off_road_bicycle_classifier.predict(cropped)[0]
@@ -169,7 +168,7 @@ Confidence threshold: `0.8`. If classified as an off-road bicycle path:
 - Sets `Delineation = Present (1)`
 - If multiple path indices detected: sets `Adjacent Sidewalk 0-1m = Present`
 
-### Step 5 — Facility Type Decision (via Fixed Obstacle Model)
+### 5.28 Step 5 — Facility Type Decision (via Fixed Obstacle Model)
 
 The fixed obstacle model is run on the full image. A pixel-level segmentation map is built:
 
@@ -189,7 +188,7 @@ Decision logic:
 | Only pathway, no road | Sidewalk |
 | Default (road visible across full width) | Mixed Traffic Road Lane |
 
-### Step 6 — Fixed Obstacle & Delineation Detection
+### 5.29 Step 6 — Fixed Obstacle & Delineation Detection
 
 A second pass with `LTA_FIXEDOBSTACLE_BEST_2.pt` checks whether detected obstacle masks overlap the path mask:
 
@@ -205,7 +204,7 @@ DELINEATION_RELEVANT_LABELS = {0, 1, 2, 5}
 
 ---
 
-## Auto-coding in Bulk
+## 5.3 Auto-coding in Bulk
 
 The `/autocode/all` endpoint supports three modes:
 
@@ -219,7 +218,7 @@ When `save: false`, results are returned to the frontend for review but **not wr
 
 ---
 
-## Confidence Thresholds (Summary)
+## 5.4 Confidence Thresholds (Summary)
 
 | Model | Threshold | Below threshold → |
 |---|---|---|
@@ -232,7 +231,7 @@ When `save: false`, results are returned to the frontend for review but **not wr
 
 ---
 
-## Attributes Auto-coded by CV
+## 5.5 Attributes Auto-coded by CV
 
 The following fields can be set by the CV pipeline. All other fields require manual coding or GIS auto-coding.
 
@@ -251,7 +250,7 @@ The following fields can be set by the CV pipeline. All other fields require man
 
 ---
 
-## GIS Auto-coding
+## 5.6 GIS Auto-coding
 
 In addition to image-based CV, the `/autocode/gis` endpoint derives attributes from spatial context using the shapefiles in `backend/shapefiles/`. The following layers are used and the attributes each one sets:
 

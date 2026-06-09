@@ -6,25 +6,23 @@ PSAT uses YOLO-based computer-vision models to automatically infer CycleRAP attr
 
 ## Table of Contents
 
-- [1. Overview & Pipeline Flowchart](#1-overview--pipeline-flowchart)
-- [2. Model Files](#2-model-files)
-  - [2.1 Model Loading](#21-model-loading)
-  - [2.2 Replacing or Updating a Model](#22-replacing-or-updating-a-model)
-- [3. Inference Steps](#3-inference-steps)
-  - [3.1 Step 1 — Path Segmentation](#31-step-1--path-segmentation)
-  - [3.2 Step 2 — Light Segregation](#32-step-2--light-segregation)
-  - [3.3 Step 3 — Adjacent Road Classification](#33-step-3--adjacent-road-classification)
-  - [3.4 Step 4 — Off-Road Bicycle Path](#34-step-4--off-road-bicycle-path)
-  - [3.5 Step 5 — Facility Type Decision](#35-step-5--facility-type-decision)
-  - [3.6 Step 6 — Fixed Obstacle & Delineation](#36-step-6--fixed-obstacle--delineation)
-- [4. Bulk Auto-coding Modes](#4-bulk-auto-coding-modes)
-- [5. Confidence Thresholds](#5-confidence-thresholds)
-- [6. Attributes Auto-coded by CV](#6-attributes-auto-coded-by-cv)
-- [7. GIS Auto-coding](#7-gis-auto-coding)
+- [5.1 Overview & Pipeline Flowchart](#5-1-overview-pipeline-flowchart)
+- [5.2 Model Files](#5-2-model-files)
+  - [5.21 Model Loading](#5-21-model-loading)
+  - [5.22 Replacing or Updating a Model](#5-22-replacing-or-updating-a-model)
+- [5.3 Inference Steps](#5-3-inference-steps)
+  - [5.31 Step 1 — Path Segmentation](#5-31-step-1-path-segmentation)
+  - [5.32 Step 2 — Light Segregation](#5-32-step-2-light-segregation)
+  - [5.33 Step 3 — Adjacent Road Classification](#5-33-step-3-adjacent-road-classification)
+  - [5.34 Step 4 — Off-Road Bicycle Path](#5-34-step-4-off-road-bicycle-path)
+  - [5.35 Step 5 — Facility Type Decision](#5-35-step-5-facility-type-decision)
+  - [5.36 Step 6 — Fixed Obstacle & Delineation](#5-36-step-6-fixed-obstacle-delineation)
+- [5.4 Bulk Auto-coding Modes](#5-4-bulk-auto-coding-modes)
+- [5.5 Confidence Thresholds](#5-5-confidence-thresholds)
+- [5.6 Attributes Auto-coded by CV](#5-6-attributes-auto-coded-by-cv)
+- [5.7 GIS Auto-coding](#5-7-gis-auto-coding)
 
----
-
-## 1. Overview & Pipeline Flowchart
+## 5.1 Overview & Pipeline Flowchart
 
 ```
 Street-level photograph (.jpg)
@@ -61,7 +59,7 @@ Stored in attributes.csv (merged with existing values)
 
 ---
 
-## 2. Model Files
+## 5.2 Model Files
 
 All `.pt` files must be placed in `backend/models/`. They are **not in the repository** — copy from the project SSD.
 
@@ -75,7 +73,7 @@ All `.pt` files must be placed in `backend/models/`. They are **not in the repos
 | `LTA_Dill_4_Best.pt` | Classifier | Delineation / road markings |
 | `RoadClassification_best.pt` | Classifier | Road type classification |
 
-### 2.1 Model Loading
+### 5.21 Model Loading
 
 Models are loaded lazily on first CV request by `CycleRAP_Coding_Helper.initialise(model_dir)`. Search order:
 
@@ -86,7 +84,7 @@ Models are loaded lazily on first CV request by `CycleRAP_Coding_Helper.initiali
 
 If no directory is found → `RuntimeError` → HTTP 503 for all CV requests.
 
-### 2.2 Replacing or Updating a Model
+### 5.22 Replacing or Updating a Model
 
 1. Drop the new `.pt` file into `backend/models/` using the **exact same filename**
 2. Rebuild: `docker compose up --build`
@@ -96,17 +94,17 @@ If no directory is found → `RuntimeError` → HTTP 503 for all CV requests.
 
 ---
 
-## 3. Inference Steps
+## 5.3 Inference Steps
 
-### 3.1 Step 1 — Path Segmentation
+### 5.31 Step 1 — Path Segmentation
 
 Runs `path_seg.pt` on the full image (confidence ≥ 0.5). If no path (class `0`) is detected, the segment is flagged for manual review.
 
-### 3.2 Step 2 — Light Segregation
+### 5.32 Step 2 — Light Segregation
 
 Default: `Light Segregation = Present` whenever a path is detected.
 
-### 3.3 Step 3 — Adjacent Road Classification
+### 5.33 Step 3 — Adjacent Road Classification
 
 Runs `adj_road_lane.pt` on the cropped path bounding box (confidence ≥ 0.8):
 
@@ -116,14 +114,14 @@ Runs `adj_road_lane.pt` on the cropped path bounding box (confidence ≥ 0.8):
 | `2` | Adjacent Road Lane 0–1m = Not Present, 1–3m = Present |
 | `0` / low confidence | Uncertain — logged for manual review |
 
-### 3.4 Step 4 — Off-Road Bicycle Path
+### 5.34 Step 4 — Off-Road Bicycle Path
 
 Runs `off_road_bicycle_path.pt` (confidence ≥ 0.8). If positive:
 - `Facility Type = Off-Road Bicycle Path`
 - `Delineation = Present`
 - Multiple paths detected → `Adjacent Sidewalk 0-1m = Present`
 
-### 3.5 Step 5 — Facility Type Decision
+### 5.35 Step 5 — Facility Type Decision
 
 Runs `LTA_FIXEDOBSTACLE_BEST_2.pt` on the full image:
 
@@ -135,7 +133,7 @@ Runs `LTA_FIXEDOBSTACLE_BEST_2.pt` on the full image:
 | Only pathway, no road | Sidewalk |
 | Default | Mixed Traffic Road Lane |
 
-### 3.6 Step 6 — Fixed Obstacle & Delineation
+### 5.36 Step 6 — Fixed Obstacle & Delineation
 
 Second pass checks whether obstacle masks overlap the path mask:
 
@@ -147,7 +145,7 @@ Second pass checks whether obstacle masks overlap the path mask:
 
 ---
 
-## 4. Bulk Auto-coding Modes
+## 5.4 Bulk Auto-coding Modes
 
 | Mode | Payload | Behaviour |
 |---|---|---|
@@ -159,7 +157,7 @@ When `save: false`, results are returned to the frontend for review but **not wr
 
 ---
 
-## 5. Confidence Thresholds
+## 5.5 Confidence Thresholds
 
 | Model | Threshold | Below Threshold |
 |---|---|---|
@@ -172,7 +170,7 @@ When `save: false`, results are returned to the frontend for review but **not wr
 
 ---
 
-## 6. Attributes Auto-coded by CV
+## 5.6 Attributes Auto-coded by CV
 
 | Field | Set By |
 |---|---|
@@ -189,7 +187,7 @@ When `save: false`, results are returned to the frontend for review but **not wr
 
 ---
 
-## 7. GIS Auto-coding
+## 5.7 GIS Auto-coding
 
 The `/autocode/gis` endpoint derives attributes from shapefiles in `backend/shapefiles/`:
 
