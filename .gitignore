@@ -44,6 +44,15 @@ visualize_obstacles.py
 visualize_width_restriction.py
 run_attribute_inference.py
 visualise_width_restriction.py
+scripts/_v213_snapshot.json
+scripts/benchmark_autocode.py
+scripts/diff_v213_vs_python.py
+scripts/extract_v213_model.py
+scripts/generate_obsidian_vault.py
+scripts/generate_symbol_descriptions.py
+scripts/list_bicycle_crossings.py
+scripts/numerical_parity_v213.py
+scripts/verify_treatment12_donut.py
 
 # Data and Models
 CycleRAP - model - generation v2.13 - to suppliers.xlsm

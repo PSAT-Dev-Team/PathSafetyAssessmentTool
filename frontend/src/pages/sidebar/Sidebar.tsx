@@ -385,6 +385,7 @@ export default function Sidebar() {
                 onClick={() => {
                   const projects = projectName.split(",").map((p: string) => p.trim()).filter(Boolean);
                   sessionStorage.setItem("treatment_loadedProjects", JSON.stringify(projects));
+                  sessionStorage.removeItem("pathAnalysis_loadedProjects");
                   navigate("/analysis/report");
                 }}
                 style={{ backgroundColor: "#a220e3", color: "white" }}
@@ -404,7 +405,10 @@ export default function Sidebar() {
           {pathname === "/analysis/path" && (
             <div className="psat-report-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
               <Button
-                onClick={() => navigate("/analysis/report")}
+                onClick={() => {
+                  sessionStorage.removeItem("treatment_loadedProjects");
+                  navigate("/analysis/report");
+                }}
                 style={{ backgroundColor: "#a220e3", color: "white" }}
                 variant="solid"
                 size="sm"

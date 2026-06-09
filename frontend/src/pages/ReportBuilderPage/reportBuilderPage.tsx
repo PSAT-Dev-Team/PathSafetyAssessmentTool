@@ -155,14 +155,13 @@ const DEFAULT_ELEMENTS: ElementState[] = [
   { id: "summary", type: "summary", label: "Summary", x: 20, y: 240, width: 754, height: 150, visible: true },
   { id: "map", type: "map", label: "Map", x: 20, y: 405, width: 754, height: 350, visible: true },
   // — Page 2 —
-  { id: "riskBands", type: "riskBands", label: "Risk Bands", x: 20, y: 1163, width: 754, height: 450, visible: true },
-  { id: "benchmarkStats", type: "benchmarkStats", label: "Benchmarking Stats", x: 20, y: 1633, width: 754, height: 340, visible: true },
-  { id: "topRisk", type: "topRisk", label: "Top Risk Stretches", x: 20, y: 1993, width: 754, height: 730, visible: true, viewMode: "full-page", topN: 10 },
+  { id: "benchmarkStats", type: "benchmarkStats", label: "Benchmarking Stats", x: 20, y: 1163, width: 754, height: 340, visible: false },
+  { id: "riskBands", type: "riskBands", label: "Risk Bands", x: 20, y: 1523, width: 754, height: 450, visible: true },
+  { id: "topAttributes", type: "topAttributes", label: "Risk Factors", x: 20, y: 1993, width: 754, height: 210, visible: true },
+  { id: "projectDetails", type: "projectDetails", label: "Project Details", x: 20, y: 2223, width: 754, height: 220, visible: true },
   // — Page 3 —
-  { id: "treatmentSummary", type: "treatmentSummary", label: "Treatments", x: 20, y: 2386, width: 754, height: 360, visible: true },
-  // — Supplementary (off by default) —
-  { id: "projectDetails", type: "projectDetails", label: "Project Details", x: 20, y: 2790, width: 754, height: 220, visible: false },
-  { id: "topAttributes", type: "topAttributes", label: "Risk Factors", x: 20, y: 3030, width: 754, height: 210, visible: false },
+  { id: "topRisk", type: "topRisk", label: "Top Risk Stretches", x: 20, y: 2463, width: 754, height: 730, visible: true, viewMode: "full-page", topN: 10 },
+  { id: "treatmentSummary", type: "treatmentSummary", label: "Treatments", x: 20, y: 3213, width: 754, height: 360, visible: true },
 ];
 
 // ── Shared table styles ──────────────────────────────────────────────────────
@@ -188,7 +187,7 @@ function SegmentImage({ src, width, height }: { src?: string; width: number | st
 function AttrTag({ name, multiplier }: { name: string; multiplier: number }) {
   return (
     <span style={{ fontSize: 9, color: "#555", display: "block", lineHeight: 1.4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-      • {name} <span style={{ color: "#cc2200", fontWeight: 700 }}>−{multiplier.toFixed(1)}</span>
+      • {name} <span style={{ color: "#cc2200", fontWeight: 700 }}>+{multiplier.toFixed(1)}</span>
     </span>
   );
 }
@@ -1178,26 +1177,65 @@ export default function ReportBuilderPage() {
   };
 
   // ── Shared renderers ──────────────────────────────────────────────────────
-  const renderBandBars = (dist: BandDist, total: number) => {
-    if (total === 0) return <div style={{ color: "#888", fontSize: 11 }}>No data</div>;
+  const renderDonutLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+    const RADIAN = Math.PI / 180;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    if (percent < 0.03) return null;
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        {[1, 2, 3, 4].map((band) => {
-          const count = dist[band] || 0;
-          const pct = total > 0 ? ((count / total) * 100).toFixed(1) : "0.0";
-          return (
-            <div key={band} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <div style={{ width: 52, fontSize: 10, color: "#555", textAlign: "right", flexShrink: 0 }}>{RISK_LABELS[band]}</div>
-              <div style={{ flex: 1, background: "#f0f0f0", borderRadius: 3, height: 13, overflow: "hidden" }}>
-                <div style={{ width: `${pct}%`, background: RISK_COLORS[band], height: "100%" }} />
-              </div>
-              <div style={{ width: 60, fontSize: 10, color: "#555", flexShrink: 0 }}>{count} <span style={{ color: "#999" }}>({pct}%)</span></div>
+      <text x={x} y={y} fill="#111" textAnchor="middle" dominantBaseline="central" style={{ fontSize: "10px", fontWeight: 700 }}>
+        {`${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
+  const renderBandDonut = (dist: BandDist, total: number) => {
+    if (total === 0) return <div style={{ color: "#888", fontSize: 11, textAlign: "center", padding: "20px 0" }}>No data</div>;
+
+    const chartData = [1, 2, 3, 4].map((band) => ({
+      name: RISK_LABELS[band],
+      value: dist[band] || 0,
+      color: RISK_COLORS[band],
+      band
+    })).filter(d => d.value > 0);
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+        <div style={{ fontSize: 10, color: "#666", marginBottom: 6 }}>Total: {total} segments</div>
+        <div style={{ width: 140, height: 140 }}>
+          <PieChart width={140} height={140}>
+            <Pie
+              data={chartData}
+              cx={70}
+              cy={70}
+              labelLine={false}
+              label={renderDonutLabel}
+              innerRadius={30}
+              outerRadius={65}
+              dataKey="value"
+              stroke="none"
+              isAnimationActive={false}
+            >
+              {chartData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.color} />
+              ))}
+            </Pie>
+            <RechartTooltip contentStyle={{ fontSize: 10, padding: "4px 8px", borderRadius: 4 }} itemStyle={{ fontSize: 10, color: "#222" }} />
+          </PieChart>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "6px 12px", marginTop: 8 }}>
+          {chartData.map((item) => (
+            <div key={item.band} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: item.color }} />
+              <div style={{ color: "#222", fontWeight: 700 }}>{item.name}: {item.value}</div>
             </div>
-          );
-        })}
+          ))}
+        </div>
       </div>
     );
   };
+
 
   const renderBandBadge = (band: number, short = false) => (
     <span style={{ display: "inline-block", padding: short ? "1px 4px" : "1px 6px", borderRadius: 3, fontSize: short ? 9 : 10, fontWeight: 600, background: RISK_COLORS[band] || "#eee", color: band === 2 ? "#333" : "#fff" }}>
@@ -1298,7 +1336,7 @@ export default function ReportBuilderPage() {
                       <div style={{ fontSize: 18, color: "#333", fontWeight: 500, display: "flex", alignItems: "center" }}>
                         <span style={{ marginRight: 8, color: "#cc2200" }}>⚠️</span>
                         {e.topAttributes[0].name}
-                        <span style={{ marginLeft: 12, fontSize: 14, color: "#cc2200", fontWeight: 700, background: "#fdeded", padding: "2px 8px", borderRadius: 12 }}>−{e.topAttributes[0].multiplier.toFixed(1)}</span>
+                        <span style={{ marginLeft: 12, fontSize: 14, color: "#cc2200", fontWeight: 700, background: "#fdeded", padding: "2px 8px", borderRadius: 12 }}>+{e.topAttributes[0].multiplier.toFixed(1)}</span>
                       </div>
                     ) : (
                       <div style={{ fontSize: 16, color: "#bbb", fontStyle: "italic" }}>No contributing factors identified</div>
@@ -1309,7 +1347,7 @@ export default function ReportBuilderPage() {
                         <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>Other significant factors:</div>
                         <ul style={{ margin: 0, paddingLeft: 18, color: "#555", fontSize: 13, lineHeight: 1.6 }}>
                           {e.topAttributes.slice(1).map((a, j) => (
-                            <li key={j}>{a.name} <span style={{ color: "#cc2200", fontWeight: 600 }}>(−{a.multiplier.toFixed(1)})</span></li>
+                            <li key={j}>{a.name} <span style={{ color: "#cc2200", fontWeight: 600 }}>(+{a.multiplier.toFixed(1)})</span></li>
                           ))}
                         </ul>
                       </div>
@@ -1567,8 +1605,8 @@ export default function ReportBuilderPage() {
                   const total = Object.values(dist).reduce((s, v) => s + v, 0);
                   return (
                     <div key={type}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#444", marginBottom: 5, borderBottom: "1px solid #eee", paddingBottom: 3 }}>{CRASH_TYPE_LABELS[type]}</div>
-                      {renderBandBars(dist, total)}
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#222", textAlign: "center", marginBottom: 2 }}>{CRASH_TYPE_LABELS[type]}</div>
+                      {renderBandDonut(dist, total)}
                     </div>
                   );
                 })}
@@ -1842,11 +1880,11 @@ export default function ReportBuilderPage() {
         let currentChunk: ProjectTreatmentSummary[] = [];
         let currentHeight = 0;
         const MAX_H = 920; // safe max height for content below header
-        
+
         for (const summary of treatmentSummaries) {
           const sorted = Object.keys(summary.treatmentCounts);
           const estHeight = 80 + (sorted.length === 0 ? 30 : sorted.length * 36);
-          
+
           if (currentHeight + estHeight > MAX_H && currentChunk.length > 0) {
             chunks.push(currentChunk);
             currentChunk = [summary];

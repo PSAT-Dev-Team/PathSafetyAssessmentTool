@@ -881,14 +881,7 @@ export default function AttributeAnalysisMapView({
       return getCrossingFacilityFilterText(attributes);
     }
 
-    if (attributeName === "Delineation") {
-      const delineationType = getAttrText("Delineation Type", attributes["Delineation Type"]);
-      if (!delineationType || delineationType === "None") {
-        return "Not Present";
-      }
-      const rawDelineation = getAttrText("Delineation", attributes["Delineation"]);
-      return rawDelineation === "Not Present" ? rawDelineation : "Present";
-    }
+
 
     if (attributeName === "Delineation Type") {
       const delineationType = getAttrText("Delineation Type", attributes["Delineation Type"]);
