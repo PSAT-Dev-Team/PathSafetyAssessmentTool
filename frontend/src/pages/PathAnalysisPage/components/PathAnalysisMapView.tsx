@@ -2708,10 +2708,11 @@ export default function AttributeAnalysisMapView({
                   <Pane name="segmentsPane" style={{ zIndex: 450 }}>
                     {viewportPoints.map(({ idx, latlng, f, projectName, color, attributeValue }) => {
                       const radius = 5;
+                      const imageRef = f.properties?.["Image Reference"] as string | undefined;
+                      const imageUrl = imageRef
+                        ? `/api/projects/${encodeURIComponent(projectName)}/images/${encodeURIComponent(imageRef)}`
+                        : null;
                       let label = `${projectName} - #${idx + 1}`;
-                      if (f.properties?.["Image Reference"]) {
-                        label += ` ${f.properties["Image Reference"]}`;
-                      }
                       if (effectiveFocusAttribute && attributeValue) {
                         label += ` | ${effectiveFocusAttribute}: ${attributeValue}`;
                       }
@@ -2778,7 +2779,25 @@ export default function AttributeAnalysisMapView({
                             }
                           }}
                         >
-                          <Tooltip>{label}</Tooltip>
+                          <Tooltip>
+                            {imageUrl && (
+                              <img
+                                src={imageUrl}
+                                alt="segment"
+                                style={{
+                                  display: "block",
+                                  width: "200px",
+                                  height: "133px",
+                                  objectFit: "cover",
+                                  margin: "0 auto 4px",
+                                }}
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            )}
+                            <div>{label}</div>
+                          </Tooltip>
                         </CircleMarker>
                       );
                     })}
