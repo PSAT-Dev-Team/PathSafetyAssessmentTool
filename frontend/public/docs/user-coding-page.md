@@ -16,6 +16,7 @@ The Coding page is the main review workspace. It can open one or more selected p
 - [2.5 Manual Review](#25-manual-review)
 - [2.6 Details and GIS Context](#26-details-and-gis-context)
 - [2.7 Save and Progress Tracking](#27-save-and-progress-tracking)
+- [2.8 CycleRAP Reference](#28-cyclerap-reference)
 
 ---
 
@@ -173,9 +174,21 @@ For supported attributes, the page can show extra spatial detail within a **5m r
 - width visualization
 - grade or gradient details when profile data is available
 
+#### Auto-enable GIS Layers on Analysis Overlay
+
+When you turn on the **Analysis Overlay** toggle on the coding page map, PSAT automatically enables the **Footpath**, **Cycling Path**, and **Shared Path** GIS layers so the overlay is always shown over visible path geometry. These layers are never auto-disabled — you can manually toggle them off if you do not need them.
+
+#### Filtered Segments from Path Analysis
+
+If you navigate to the Coding page directly from Path Analysis (by clicking a segment on the Path Analysis map), the coding page map will show **only the segments that were visible in your active filter**. The currently selected segment is always shown regardless of the filter. This makes it easier to focus on a specific subset while coding without losing your analysis context.
+
 ### 2.7 Save and Progress Tracking
 
 After review:
 
 - save your attribute edits to persist them and recalculate risk scores
 - update the **Segments Verified Percentage** counter as you complete manual checks
+
+### 2.8 CycleRAP Reference
+
+The **CycleRAP** button (next to Coding Guide in the top tab bar) opens the official iRAP CycleRAP methodology page at [irap.org/cyclerap](https://irap.org/cyclerap/) in a new browser tab. Use it to look up attribute definitions, scoring rationale, or the full CycleRAP methodology while you are coding.

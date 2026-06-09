@@ -102,10 +102,15 @@ Click any segment on either map to jump directly to that segment's page in the p
 
 The Treatment Options panel includes two clipboard buttons that help you create visual representations of proposed improvements using external AI image tools:
 
-- **Copy prompt** — copies a ready-to-use text prompt describing the selected treatments in plain language. Paste this into an AI image generation tool (such as ChatGPT or DALL·E) to generate a visual mock-up of what the improved path might look like.
+- **Copy prompt** — copies a ready-to-use text prompt describing treatments in plain language. This button has a dropdown with two options:
+  - **Copy Applied** — copies a prompt based on the treatments already **applied and saved** for this segment.
+  - **Copy Selected** — copies a prompt based on the treatments currently **ticked/selected** in the panel (even if not yet applied).
+  
+  Paste the prompt into an AI image generation tool (such as ChatGPT or DALL·E) to generate a visual mock-up of what the improved path might look like.
+
 - **Copy image** — copies the current segment photograph directly to your clipboard. Paste it into the same AI tool alongside the prompt so the tool has the actual scene to work from.
 
-The prompt is automatically adapted to whichever treatments you have selected or applied for the current segment, so you always get a description that matches your choices.
+Use **Copy Selected** when you are exploring options and want to preview the AI image before committing. Use **Copy Applied** when you have already applied treatments and want to generate the final before-and-after visualisation.
 
 ---
 

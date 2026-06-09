@@ -2325,6 +2325,14 @@ export default function CodingPage() {
           >
             Coding Guide
           </Button>
+          <Button
+            onClick={() => window.open("https://irap.org/cyclerap/", "_blank", "noopener,noreferrer")}
+            variant="outline"
+            colorPalette="gray"
+            size="md"
+          >
+            CycleRAP
+          </Button>
         </Flex>
         <Box
           borderWidth="1px"
@@ -2447,6 +2455,14 @@ export default function CodingPage() {
           size="md"
         >
           Coding Guide
+        </Button>
+        <Button
+          onClick={() => window.open("https://irap.org/cyclerap/", "_blank", "noopener,noreferrer")}
+          variant="outline"
+          colorPalette="gray"
+          size="md"
+        >
+          CycleRAP
         </Button>
 
         {location.state?.returnToAnalysis && (
