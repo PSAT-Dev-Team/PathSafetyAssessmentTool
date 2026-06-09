@@ -1293,12 +1293,137 @@ def get_latest_attributes(project_name: str):
 
     return jsonify({"rows": df_to_records(attrs_df)})
 
+def _rmtree_robust(path: Path) -> bool:
+    """Delete a directory tree, working around Windows file-lock races.
+
+    Tries shutil.rmtree first; on failure deletes files one-by-one then removes
+    the (hopefully now-empty) directory. Returns True when the directory is gone.
+    """
+    if not path.is_dir():
+        return True
+    try:
+        shutil.rmtree(str(path))
+        return not path.exists()
+    except Exception:
+        pass
+    # File-by-file fallback (handles Windows thumbnail/AV lock races)
+    for item in sorted(path.rglob("*"), reverse=True):
+        try:
+            if item.is_file() or item.is_symlink():
+                item.unlink()
+            elif item.is_dir():
+                item.rmdir()
+        except Exception:
+            pass
+    try:
+        path.rmdir()
+    except Exception:
+        pass
+    return not path.exists()
+
+
+def _migrate_legacy_images(pm, project_name: str, proj) -> bool:
+    """Convert a legacy project that stores copies in images/ to reference in/ directly.
+
+    Strips the project-title prefix from every Image Reference in geo_data.gpkg,
+    verifies each stripped name resolves to a file under in/, then deletes images/.
+    Runs quietly — prints to stdout so Flask terminal shows progress.
+    """
+    try:
+        images_dir = proj.project_path / global_var.PROJECT_IMAGES_FOLDER
+        if not images_dir.is_dir():
+            return False
+
+        source_folders = getattr(proj.metadata, "source_folders", None) or []
+        if not source_folders:
+            print(f"[migrate] '{project_name}': no source_folders in metadata — skipping", flush=True)
+            return False
+
+        geo_df = proj.geo_data.df
+        if geo_df.empty or "Image Reference" not in geo_df.columns:
+            print(f"[migrate] '{project_name}': geo_data missing Image Reference column — skipping", flush=True)
+            return False
+
+        prefix = project_name + "_"
+        ns_map = {make_image_namespace(sf): sf for sf in source_folders}
+
+        def _strip_and_resolve(img_ref: str):
+            """Return (stripped_ref, in_path) or None."""
+            stripped = img_ref[len(prefix):] if img_ref.startswith(prefix) else img_ref
+            if len(source_folders) == 1:
+                candidate = pm.in_path / source_folders[0] / stripped
+                if candidate.is_file():
+                    return stripped, candidate
+            else:
+                if "__" in stripped:
+                    ns, orig = stripped.split("__", 1)
+                    if ns in ns_map:
+                        candidate = pm.in_path / ns_map[ns] / orig
+                        if candidate.is_file():
+                            return stripped, candidate
+                for sf in source_folders:
+                    candidate = pm.in_path / sf / stripped
+                    if candidate.is_file():
+                        return stripped, candidate
+            return None
+
+        img_refs = [
+            r for r in geo_df["Image Reference"].tolist()
+            if isinstance(r, str) and r.strip()
+        ]
+        if not img_refs:
+            print(f"[migrate] '{project_name}': no image refs in geo_data — skipping", flush=True)
+            return False
+
+        print(f"[migrate] '{project_name}': checking {len(img_refs)} image refs against in/...", flush=True)
+
+        new_ref_map: dict[str, str] = {}
+        for img_ref in img_refs:
+            result = _strip_and_resolve(img_ref)
+            if result is None:
+                print(f"[migrate] '{project_name}': '{img_ref}' not found in in/ — skipping migration", flush=True)
+                return False
+            new_ref_map[img_ref] = result[0]
+
+        # All images confirmed in in/ — rewrite geo_data.gpkg
+        proj.geo_data.df["Image Reference"] = proj.geo_data.df["Image Reference"].apply(
+            lambda r: new_ref_map.get(str(r), r) if pd.notna(r) else r
+        )
+        # Write to a temp file first, then replace, to avoid Windows GDAL file-lock on the
+        # existing geo_data.gpkg (SQLite connections may linger after gpd.read_file).
+        tmp_gpkg = proj.project_path / "_geo_data_migrating.gpkg"
+        try:
+            proj.geo_data.df.to_file(str(tmp_gpkg), driver="GPKG", index=False)
+            gpkg_path = proj.project_path / "geo_data.gpkg"
+            if gpkg_path.exists():
+                gpkg_path.unlink()
+            tmp_gpkg.rename(gpkg_path)
+        except Exception as write_exc:
+            if tmp_gpkg.exists():
+                tmp_gpkg.unlink(missing_ok=True)
+            raise write_exc
+        print(f"[migrate] '{project_name}': geo_data.gpkg updated ({len(new_ref_map)} refs)", flush=True)
+
+        # Delete the now-redundant images/ folder
+        deleted = _rmtree_robust(images_dir)
+        if deleted:
+            print(f"[migrate] '{project_name}': images/ deleted. Migration complete.", flush=True)
+        else:
+            print(f"[migrate] '{project_name}': images/ could not be fully deleted (file lock?). Will retry next open.", flush=True)
+        return True
+
+    except Exception as exc:
+        print(f"[migrate] '{project_name}': migration error: {exc}", flush=True)
+        return False
+
+
 @bp.get("/<project_name>/geodata")
 def get_geodata(project_name: str):
     """Return the project's GeoData (GeoJSON FeatureCollection)."""
     import json
     ctx = get_ctx()  # Reuse the existing init context
     proj = ctx["pm"].project(project_name)
+    _migrate_legacy_images(ctx["pm"], project_name, proj)
     gdf = proj.geo_data.df  # GeoPandas GeoDataFrame
 
     # GeoDataFrame -> GeoJSON string, then to dict for jsonify-friendly output
@@ -1308,37 +1433,33 @@ def get_geodata(project_name: str):
 @bp.get("/<project_name>/images/<path:filename>")
 def get_project_image(project_name: str, filename: str):
     """
-    Return an image file under the project's images directory:
+    Return an image file for the given project.
+    Checks project's local images/ dir first (legacy projects), then falls back
+    to resolving the file directly from in/ (new/migrated projects).
     GET /api/projects/<project_name>/images/<filename>
     """
     ctx = get_ctx()
     pm = ctx["pm"]
 
-    # Compute {data}/{project}/images directory
+    # Try legacy project-local images/ directory first
     images_dir: Path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
+    if images_dir.is_dir():
+        safe_path = safe_join(str(images_dir), filename)
+        if safe_path is not None:
+            file_path = Path(safe_path).resolve()
+            if str(file_path).startswith(str(images_dir)) and file_path.is_file():
+                resp = send_from_directory(images_dir, file_path.name, conditional=True)
+                resp.headers["Cache-Control"] = "public, max-age=86400"
+                return resp
 
-    # Directory existence check
-    if not images_dir.exists() or not images_dir.is_dir():
-        abort(404, description="Images folder not found")
+    # Fall back to in/ for new or migrated projects
+    in_file = _resolve_image_from_in(pm, project_name, filename)
+    if in_file is not None:
+        resp = send_from_directory(str(in_file.parent), in_file.name, conditional=True)
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
 
-    # Use safe_join to prevent directory traversal
-    safe_path = safe_join(str(images_dir), filename)
-    if safe_path is None:
-        abort(400, description="Invalid image path")
-
-    file_path = Path(safe_path).resolve()
-    # Double-check: must be under images_dir
-    if not str(file_path).startswith(str(images_dir)):
-        abort(400, description="Invalid image path")
-
-    if not file_path.exists() or not file_path.is_file():
-        abort(404, description="Image not found")
-
-    # Return via send_from_directory with conditional caching
-    resp = send_from_directory(images_dir, file_path.name, conditional=True)
-    # Optional: add Cache-Control (adjust as needed for your deployment)
-    resp.headers["Cache-Control"] = "public, max-age=86400"
-    return resp
+    abort(404, description="Image not found")
 
 @bp.post("/download-images")
 def download_images():
@@ -1381,25 +1502,25 @@ def download_images():
                 
                 try:
                     images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
-                    
-                    if not images_dir.exists() or not images_dir.is_dir():
-                        continue
-                        
-                    # Add requested images to zip
+
                     for img_filename in image_files:
-                        img_filename = str(img_filename) # Ensure string
+                        img_filename = str(img_filename)
                         # Basic security check - prevent traversal
                         if ".." in img_filename or "/" in img_filename or "\\" in img_filename:
                             continue
-                            
+
+                        # Try legacy images/ dir first, then fall back to in/
                         img_path = images_dir / img_filename
-                        # Verify file exists
-                        if img_path.exists() and img_path.is_file():
-                            # Path inside zip: "{project_name} images/{img_filename}"
-                            zip_path = f"{project_name} images/{img_filename}"
-                            zf.write(str(img_path), zip_path)
-                            
-                except Exception as e:
+                        if not (img_path.exists() and img_path.is_file()):
+                            in_file = _resolve_image_from_in(pm, project_name, img_filename)
+                            if in_file is None:
+                                continue
+                            img_path = in_file
+
+                        zip_path = f"{project_name} images/{img_filename}"
+                        zf.write(str(img_path), zip_path)
+
+                except Exception:
                     continue
                     
     except Exception as e:
@@ -3048,28 +3169,16 @@ def _build_project_geo_data_from_points(
     gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
     return cycleRAP_VA.convert_points_to_linestrings(gdf)
 
-def copy_project_images(folder_path, filename_df, imagePath, filename_prefix=None):
+def apply_image_namespaces(filename_df, filename_prefix=None):
+    """Apply source-folder namespace prefix to FILENAME for multi-folder projects.
+    Does not copy any files — images remain in in/ and are resolved at serve time.
     """
-    Copy images referenced by FILENAME into the project image folder.
-    When combining multiple source folders, prefix file names to avoid collisions.
-    """
-    if not os.path.isdir(folder_path):
-        raise FileNotFoundError(f"The folder at {folder_path} does not exist or is not a directory.")
-
-    os.makedirs(imagePath, exist_ok=True)
+    if filename_prefix is None:
+        return filename_df
     result_df = filename_df.copy()
-
-    for idx, img_name in result_df['FILENAME'].items():
-        src = os.path.join(folder_path, img_name)
-        dst_name = img_name if not filename_prefix else f"{filename_prefix}__{img_name}"
-        dst = os.path.join(imagePath, dst_name)
-
-        if os.path.isfile(src):
-            shutil.copy2(src, dst)
-            result_df.at[idx, 'FILENAME'] = dst_name
-        else:
-            print(f"Image {img_name} not found in folder {folder_path}.")
-
+    result_df["FILENAME"] = result_df["FILENAME"].apply(
+        lambda f: f"{filename_prefix}__{f}"
+    )
     return result_df
 
 def build_project_geo_data(src_dir: Path, selection_polygon: Polygon | None = None):
@@ -3079,6 +3188,42 @@ def build_project_geo_data(src_dir: Path, selection_polygon: Polygon | None = No
 def make_image_namespace(source_name: str) -> str:
     namespace = "".join(ch if ch.isalnum() else "_" for ch in source_name).strip("_")
     return namespace or "source"
+
+
+def _resolve_image_from_in(pm, project_name: str, filename: str) -> "Path | None":
+    """Resolve an image filename to its physical path under in/.
+
+    For single-folder projects the filename is the bare original name.
+    For multi-folder projects the filename is '{namespace}__{original}'.
+    Namespace is produced by make_image_namespace(source_folder_name).
+    Returns None when the image cannot be located.
+    """
+    try:
+        proj = pm.project(project_name)
+        source_folders = getattr(proj.metadata, "source_folders", None) or []
+        if not source_folders:
+            return None
+
+        if len(source_folders) == 1:
+            candidate = pm.in_path / source_folders[0] / filename
+            if candidate.is_file():
+                return candidate
+        else:
+            if "__" in filename:
+                namespace, original = filename.split("__", 1)
+                ns_map = {make_image_namespace(sf): sf for sf in source_folders}
+                if namespace in ns_map:
+                    candidate = pm.in_path / ns_map[namespace] / original
+                    if candidate.is_file():
+                        return candidate
+            # Fallback: try all source folders with the bare filename
+            for sf in source_folders:
+                candidate = pm.in_path / sf / filename
+                if candidate.is_file():
+                    return candidate
+    except Exception:
+        pass
+    return None
 
 
 def _is_loopback_request() -> bool:
@@ -3965,8 +4110,6 @@ def create_project_from_folder():
         return fail(f"folders not found: {', '.join(missing_folders)}", 404)
 
     project_path.mkdir(parents=True, exist_ok=True)
-    images_dir = project_path / global_var.PROJECT_IMAGES_FOLDER
-    images_dir.mkdir(parents=True, exist_ok=True)
 
     extracted_geo_data_parts = []
     use_image_prefix = len(src_dirs) > 1
@@ -3979,7 +4122,7 @@ def create_project_from_folder():
                 skipped_sources.append(selected_folder_name)
                 continue
             filename_prefix = make_image_namespace(selected_folder_name) if use_image_prefix else None
-            extracted_geo_data = copy_project_images(src_dir, extracted_geo_data, images_dir, filename_prefix)
+            extracted_geo_data = apply_image_namespaces(extracted_geo_data, filename_prefix)
             extracted_geo_data_parts.append(extracted_geo_data)
     except Exception as e:
         shutil.rmtree(project_path, ignore_errors=True)
@@ -4238,26 +4381,29 @@ def update_project_metadata(project_name: str):
                     df[col_name] = df[col_name].apply(_update_ref)
                     return True
 
-                try:
-                    # A. Attributes (Latest Version)
-                    latest_ver = proj.latest()
-                    if update_image_ref_in_df(latest_ver.attributes.df, "Image reference"):
-                         latest_ver.attributes.df_dirty = True
-                    
-                    # B. Treatment (Latest Version)
-                    if update_image_ref_in_df(latest_ver.treatment.df, "Image Reference"):
-                        latest_ver.treatment.df_dirty = True
-                    
-                    # C. Geo Data (Project Level)
-                    # Force load geo_data from the new path
-                    if update_image_ref_in_df(proj.geo_data.df, "Image Reference"):
-                        proj.geo_data.df_dirty = True
-                        
-                    # Save all changes
-                    proj.save_all()
-                    
-                except Exception as data_e:
-                    traceback.print_exc()
+                # Only update Image References when a legacy images/ dir exists.
+                # New projects reference in/ directly; their refs carry no project-name
+                # prefix and must not be rewritten.
+                if (new_path / global_var.PROJECT_IMAGES_FOLDER).is_dir():
+                    try:
+                        # A. Attributes (Latest Version)
+                        latest_ver = proj.latest()
+                        if update_image_ref_in_df(latest_ver.attributes.df, "Image reference"):
+                             latest_ver.attributes.df_dirty = True
+
+                        # B. Treatment (Latest Version)
+                        if update_image_ref_in_df(latest_ver.treatment.df, "Image Reference"):
+                            latest_ver.treatment.df_dirty = True
+
+                        # C. Geo Data (Project Level)
+                        if update_image_ref_in_df(proj.geo_data.df, "Image Reference"):
+                            proj.geo_data.df_dirty = True
+
+                        # Save all changes
+                        proj.save_all()
+
+                    except Exception:
+                        traceback.print_exc()
 
                 proj.metadata.last_updated = datetime.datetime.now()
                 proj.metadata.serialize(new_path)
@@ -4296,9 +4442,13 @@ def autocode_image(project_name: str):
         if not image_ref:
             return fail("imageRef is required", 400)
 
-        img_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / image_ref).resolve()
-        if not img_path.exists():
-            return fail(f"image not found: {img_path.name}", 404)
+        legacy_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / image_ref).resolve()
+        if legacy_path.is_file():
+            img_path = legacy_path
+        else:
+            img_path = _resolve_image_from_in(pm, project_name, image_ref)
+        if img_path is None or not img_path.exists():
+            return fail(f"image not found: {image_ref}", 404)
 
         skip_obstacles = bool(payload.get("skipObstacles", False))
         print(f"[Autocode] CV inference: {image_ref} (skip_obstacles={skip_obstacles})", flush=True)
@@ -4996,17 +5146,20 @@ def autocode_all(project_name: str):
             Returns:
                 str: Image filename if found and exists, None otherwise
             """
+            def _image_ref_exists(img_ref: str) -> bool:
+                """Check images/ dir first, then in/ (for new/migrated projects)."""
+                legacy = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / img_ref).resolve()
+                if legacy.is_file():
+                    return True
+                return _resolve_image_from_in(pm, project_name, img_ref) is not None
+
             # Primary source: geo_data (where image references are stored during project creation)
-            # See project_manager.py:453 where image_ref is stored in geo_tbl
             if 0 <= idx < len(proj.geo_data.df):
                 geo_row = proj.geo_data.df.iloc[idx]
-                # Try multiple possible column names for compatibility
                 for key in ("Image Reference", "Image_Reference", "image", "img", "FILENAME"):
                     if key in geo_row and pd.notna(geo_row[key]) and str(geo_row[key]).strip():
                         img_ref = str(geo_row[key]).strip()
-                        # Verify file exists before returning
-                        img_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / img_ref).resolve()
-                        if img_path.exists():
+                        if _image_ref_exists(img_ref):
                             return img_ref
 
             # Fallback: attributes table (in case it was copied there)
@@ -5015,9 +5168,7 @@ def autocode_all(project_name: str):
                 for key in ("Image Reference", "Image_Reference", "image", "img", "FILENAME"):
                     if key in attr_row and pd.notna(attr_row[key]) and str(attr_row[key]).strip():
                         img_ref = str(attr_row[key]).strip()
-                        # Verify file exists before returning
-                        img_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / img_ref).resolve()
-                        if img_path.exists():
+                        if _image_ref_exists(img_ref):
                             return img_ref
             return None
 

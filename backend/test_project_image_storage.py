@@ -41,18 +41,36 @@ def test_materialize_project_image_falls_back_to_copy(monkeypatch, tmp_path):
     assert not source.samefile(target)
 
 
-def test_copy_project_images_updates_references_without_plain_copy(tmp_path):
-    source_dir = tmp_path / "source"
-    project_images_dir = tmp_path / "project" / "images"
-    source_dir.mkdir(parents=True)
-    source_image = source_dir / "Cam1.jpg"
-    source_image.write_bytes(b"image-bytes")
+def test_apply_image_namespaces_adds_prefix(tmp_path):
+    filename_df = pd.DataFrame({"FILENAME": ["Cam1.jpg", "Cam2.jpg"]})
 
+    result_df = routes.apply_image_namespaces(filename_df, filename_prefix="RoadA")
+
+    assert result_df.loc[0, "FILENAME"] == "RoadA__Cam1.jpg"
+    assert result_df.loc[1, "FILENAME"] == "RoadA__Cam2.jpg"
+    # Original df must not be mutated
+    assert filename_df.loc[0, "FILENAME"] == "Cam1.jpg"
+
+
+def test_apply_image_namespaces_no_prefix_returns_unchanged(tmp_path):
     filename_df = pd.DataFrame({"FILENAME": ["Cam1.jpg"]})
 
-    result_df = routes.copy_project_images(source_dir, filename_df, project_images_dir, filename_prefix="RoadA")
+    result_df = routes.apply_image_namespaces(filename_df, filename_prefix=None)
 
-    linked_image = project_images_dir / "RoadA__Cam1.jpg"
+    assert result_df.loc[0, "FILENAME"] == "Cam1.jpg"
+    # Should be the same object (no copy needed when no prefix)
+    assert result_df is filename_df
+
+
+def test_apply_image_namespaces_does_not_copy_files(tmp_path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "Cam1.jpg").write_bytes(b"image-bytes")
+
+    filename_df = pd.DataFrame({"FILENAME": ["Cam1.jpg"]})
+    result_df = routes.apply_image_namespaces(filename_df, filename_prefix="RoadA")
+
+    # FILENAME is updated with namespace prefix
     assert result_df.loc[0, "FILENAME"] == "RoadA__Cam1.jpg"
-    assert linked_image.exists()
-    assert source_image.samefile(linked_image)
+    # No file was created anywhere other than source
+    assert not (tmp_path / "RoadA__Cam1.jpg").exists()
