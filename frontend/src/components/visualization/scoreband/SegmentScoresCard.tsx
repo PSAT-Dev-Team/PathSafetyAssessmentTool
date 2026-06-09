@@ -1,6 +1,8 @@
 import { useMemo } from "react";
+import React from "react";
 import { Box, Flex, Grid, GridItem, Text, Image } from "@chakra-ui/react";
 import { RISK_BAND_COLORS } from "./colorConstants";
+import { Tooltip } from "../../ui/tooltip";
 
 // Import Crash Type Icons
 import iconBB from "../../../../CycleRAP Assets/BB.png";
@@ -71,6 +73,44 @@ const CRASH_TYPES = [
     shortLabel: "VB",
   },
 ];
+
+const BB_BP_SB_TOOLTIP = (
+  <Box fontSize="xs" lineHeight="1.6">
+    <Text fontWeight="bold" mb="1">Risk Banding</Text>
+    <Text>• Low: &lt; 5</Text>
+    <Text>• Medium: 5 – 10</Text>
+    <Text>• High: 10 – 20</Text>
+    <Text>• Extreme: &gt; 20</Text>
+  </Box>
+);
+
+const VB_TOOLTIP = (
+  <Box fontSize="xs" lineHeight="1.6">
+    <Text fontWeight="bold" mb="1">Risk Banding</Text>
+    <Text>• Low: &lt; 10</Text>
+    <Text>• Medium: 10 – 25</Text>
+    <Text>• High: 25 – 60</Text>
+    <Text>• Extreme: &gt; 60</Text>
+  </Box>
+);
+
+const RISK_SCORE_TOOLTIP = (
+  <Box fontSize="xs" lineHeight="1.6" minW="380px">
+    <Text fontWeight="bold" mb="1">Risk Score</Text>
+    <Text mb="1">Sum of all crash type scores. Banding colour takes the worst case across crash types.</Text>
+    <Text fontWeight="semibold" mt="1">BB / BP / SB:</Text>
+    <Text whiteSpace="nowrap">• Low: &lt; 5 · Medium: 5–10 · High: 10–20 · Extreme: &gt; 20</Text>
+    <Text fontWeight="semibold" mt="1">VB:</Text>
+    <Text whiteSpace="nowrap">• Low: &lt; 10 · Medium: 10–25 · High: 25–60 · Extreme: &gt; 60</Text>
+  </Box>
+);
+
+const CRASH_TYPE_TOOLTIPS: Record<string, React.ReactNode> = {
+  BB: BB_BP_SB_TOOLTIP,
+  BP: BB_BP_SB_TOOLTIP,
+  SB: BB_BP_SB_TOOLTIP,
+  VB: VB_TOOLTIP,
+};
 
 const getBandColor = (score: number, type: string): string => {
   // BB, BP, SB use stricter thresholds
@@ -244,6 +284,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
 
                 return (
                   <GridItem key={type.key}>
+                    <Tooltip content={CRASH_TYPE_TOOLTIPS[type.key]} showArrow portalled openDelay={0} closeOnClick={false}>
                     <Flex
                       direction="row"
                       align="center"
@@ -256,6 +297,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                       textAlign="center"
                       h={reduction !== null ? "80px" : "60px"}
                       color="black"
+                      cursor="default"
                     >
                       {/* Icon */}
                       <Image
@@ -288,6 +330,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                         )}
                       </Flex>
                     </Flex>
+                    </Tooltip>
                   </GridItem>
                 );
               })}
@@ -300,6 +343,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                   const totalImproved = totalReduction !== null && totalReduction > 0;
 
                   return (
+                    <Tooltip content={RISK_SCORE_TOOLTIP} showArrow portalled openDelay={0} closeOnClick={false} contentProps={{ maxW: "420px" }}>
                     <Flex
                       direction="column"
                       align="center"
@@ -312,6 +356,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                       textAlign="center"
                       h={totalReduction !== null ? "80px" : "60px"}
                       color="black"
+                      cursor="default"
                     >
                       {/* Total label */}
                       <Text fontSize="md" fontWeight="bold" lineHeight="1">
@@ -334,6 +379,7 @@ export default function SegmentScoresCard({ scores, beforeScores, showPreviewBac
                         </Text>
                       )}
                     </Flex>
+                    </Tooltip>
                   );
                 })()}
               </GridItem>
