@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { AttributeRow, AttrMappings } from "../../../api";
 import {
   Card,
@@ -434,11 +434,17 @@ export default function AttributesPanel({
     }
   }, [groupsWithFields, selectedTab, defaultTab]);
 
+  // Keep a ref so the effect below can read the latest groupsWithFields without
+  // making it a trigger — otherwise every row change (new object reference) would
+  // re-apply activeGroupTab and jump the tab on every attribute edit.
+  const groupsWithFieldsRef = useRef(groupsWithFields);
+  groupsWithFieldsRef.current = groupsWithFields;
+
   useEffect(() => {
-    if (activeGroupTab && groupsWithFields.includes(activeGroupTab as any)) {
+    if (activeGroupTab && groupsWithFieldsRef.current.includes(activeGroupTab as any)) {
       setSelectedTab(activeGroupTab as any);
     }
-  }, [activeGroupTab, groupsWithFields]);
+  }, [activeGroupTab]);
 
   // Check if any fields have been changed (for showing the info text)
   const hasChangedFields = changedFieldsSet.size > 0;
@@ -590,6 +596,7 @@ export default function AttributesPanel({
                                   content={ATTRIBUTE_TOOLTIPS[k]}
                                   showArrow
                                   portalled
+                                  openDelay={100}
                                   contentProps={{ maxW: "280px", fontSize: "xs" }}
                                 >
                                   <Box

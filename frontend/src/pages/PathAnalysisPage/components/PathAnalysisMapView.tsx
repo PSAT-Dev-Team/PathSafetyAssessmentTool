@@ -17,6 +17,14 @@ import type { Feature, LineString, Position } from "geojson";
 import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchProjectResults, downloadFilteredImages, exportShapefile, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
 
 const SAFETY_FOCUS_ATTRIBUTES = new Set(["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"]);
+
+// Attributes whose missing/blank value defaults to "Adequate" (code 1) per
+// backend/src/CycleRAP/defaults.json. Scoring applies the same default
+// (row.get(attr, 1)) and the coding panel renders "Adequate" for a blank cell,
+// so Path Analysis must treat blank as "Adequate" too — otherwise the many
+// segments that were never explicitly coded (null in attributes.csv) get dropped
+// from visibleSegments and never appear even when "Adequate" is toggled on.
+const ADEQUACY_DEFAULT_ATTRS = new Set(["Line of Sight", "Facility access"]);
 type GradeBucket = {
   label: string;
   aliases: string[];
@@ -106,6 +114,22 @@ function FitBounds({ points, shouldFit }: { points: [number, number][]; shouldFi
     const bounds = L.latLngBounds(points.map(([lat, lng]) => L.latLng(lat, lng)));
     map.fitBounds(bounds, { padding: [24, 24] });
   }, [points, map, shouldFit]);
+  return null;
+}
+
+// Reports live viewport bounds after pan/zoom so the parent can cull off-screen markers.
+// Uses a debounced state update so React batches marker mount/unmount after the gesture ends.
+function ViewportWatcher({ onBoundsChange }: { onBoundsChange: (b: L.LatLngBounds) => void }) {
+  const map = useMap();
+  const cbRef = useRef(onBoundsChange);
+  cbRef.current = onBoundsChange;
+
+  useEffect(() => { cbRef.current(map.getBounds()); }, [map]);
+
+  useMapEvents({
+    moveend: (e) => cbRef.current(e.target.getBounds()),
+    zoomend: (e) => cbRef.current(e.target.getBounds()),
+  });
   return null;
 }
 
@@ -329,6 +353,13 @@ export default function AttributeAnalysisMapView({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [panToBounds, setPanToBounds] = useState<L.LatLngBounds | null>(null);
+
+  // Single canvas renderer shared by all CircleMarkers — avoids creating hundreds of
+  // SVG DOM elements and dramatically reduces paint time with large project sets.
+  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.5 }), []);
+
+  // Track live map viewport so we can cull off-screen markers before React touches them.
+  const [mapViewportBounds, setMapViewportBounds] = useState<L.LatLngBounds | null>(null);
   const [attrMappings, setAttrMappings] = useState<Record<string, Record<string, string>>>({});
 
   // Category toggle states — tracks per-attribute per-value visibility
@@ -548,7 +579,9 @@ export default function AttributeAnalysisMapView({
   // Active filters = the attributes selected via FilterPanel (passed as prop)
   const activeFilters = useMemo(() => selectedAttributes, [selectedAttributes]);
 
-  // Auto-focus the newest filter when one is added
+  // Auto-focus the newest filter when one is added; revert coloring when the focused
+  // filter is removed (otherwise primaryFocusAttribute goes stale and the map keeps
+  // coloring by a filter that is no longer active).
   const prevFiltersRef = useRef<string[]>([]);
   useEffect(() => {
     const prev = prevFiltersRef.current;
@@ -557,9 +590,19 @@ export default function AttributeAnalysisMapView({
       const idx = activeFilters.indexOf(added);
       setCategoryFilterAttributeIndex(idx);
       setPrimaryFocusAttribute(added);
+    } else if (
+      primaryFocusAttribute &&
+      primaryFocusAttribute !== "Project" &&
+      !activeFilters.includes(primaryFocusAttribute)
+    ) {
+      // The focused attribute was removed — fall back to the first remaining filter
+      // or project-colour mode if no filters are left.
+      const fallback = activeFilters[0] ?? "Project";
+      setCategoryFilterAttributeIndex(activeFilters.length > 0 ? 0 : -1);
+      setPrimaryFocusAttribute(fallback);
     }
     prevFiltersRef.current = activeFilters;
-  }, [activeFilters]);
+  }, [activeFilters, primaryFocusAttribute]);
 
   // Reset sidebar index if out of bounds (fall back to the Projects tab at -1)
   useEffect(() => {
@@ -649,8 +692,13 @@ export default function AttributeAnalysisMapView({
       }
     }
 
-    // Generic null/empty handling — map to "Not Present" if the attribute supports it
+    // Generic null/empty handling. The backend treats a missing attribute as its
+    // default code (backend/src/CycleRAP/defaults.json) rather than "unset", so we
+    // mirror those defaults here: adequacy attributes default to "Adequate" (1),
+    // and most presence attributes default to "Not Present" (2). Without this,
+    // default-valued segments are silently dropped from the map and filters.
     if (attrValue === null || attrValue === undefined || attrValue === "" || String(attrValue).toLowerCase() === "null") {
+      if (ADEQUACY_DEFAULT_ATTRS.has(attrName)) return "Adequate";
       const opts = ATTRIBUTE_OPTIONS[attrName];
       if (opts && opts.includes("Not Present")) return "Not Present";
       return ""; // no valid category — exclude this segment from toggle counts
@@ -1125,12 +1173,6 @@ export default function AttributeAnalysisMapView({
       return primaryFocusAttribute;
     }
 
-    // When multiple filters are active, preserve Level 2 coloring to avoid
-    // forcing Not Present rows into child-level "Not Selected" greys.
-    if (activeFilters.length > 1) {
-      return primaryFocusAttribute;
-    }
-
     const subcatConfig = SUBCATEGORY_MAP[primaryFocusAttribute];
     if (!subcatConfig || visibleSegments.length === 0) {
       return primaryFocusAttribute;
@@ -1172,7 +1214,7 @@ export default function AttributeAnalysisMapView({
     });
 
     return hasChildValues ? subcatConfig.childAttr : primaryFocusAttribute;
-  }, [activeFilters.length, categoryToggles, getFocusedAttributeValue, primaryFocusAttribute, visibleSegments]);
+  }, [categoryToggles, getFocusedAttributeValue, primaryFocusAttribute, visibleSegments]);
 
   // Generate colors for attribute categories based on the effective focus level.
   const attributeCategoryColors = useMemo(() => {
@@ -1328,9 +1370,15 @@ export default function AttributeAnalysisMapView({
 
     return visibleSegments.map((segment) => {
       const attributeValue = getFocusedAttributeValue(focusAttribute, segment);
-      const color = focusAttribute === "Project"
+      // Segments with no meaningful value for the focused attribute would otherwise
+      // resolve to the grey "unknown" fallback (#6B7280). This happens e.g. when
+      // focus drills to a child like "FO Type" but a segment has no coded type
+      // ("None"), leaving the map a sea of indistinguishable grey. Fall back to the
+      // project color so those segments stay visible and distinguishable.
+      const hasFocusValue = attributeValue && attributeValue !== "None" && attributeValue !== "Not Selected";
+      const color = focusAttribute === "Project" || !hasFocusValue
         ? segment.projectColor
-        : getCategoryColor(focusAttribute, attributeValue || "Not Selected");
+        : getCategoryColor(focusAttribute, attributeValue);
 
       return {
         idx: segment.idx,
@@ -1345,6 +1393,21 @@ export default function AttributeAnalysisMapView({
   }, [effectiveFocusAttribute, getFocusedAttributeValue, visibleSegments]);
 
   const allLatLngs = useMemo(() => allPoints.map(p => p.latlng), [allPoints]);
+
+  // Cull off-screen markers before React renders them. A 20% padding around the
+  // viewport keeps markers visible during small pans without mounting them all.
+  const viewportPoints = useMemo(() => {
+    if (!mapViewportBounds) return allPoints;
+    const sw = mapViewportBounds.getSouthWest();
+    const ne = mapViewportBounds.getNorthEast();
+    const latPad = (ne.lat - sw.lat) * 0.2;
+    const lngPad = (ne.lng - sw.lng) * 0.2;
+    return allPoints.filter(({ latlng }) => {
+      const [lat, lng] = latlng;
+      return lat >= sw.lat - latPad && lat <= ne.lat + latPad &&
+             lng >= sw.lng - lngPad && lng <= ne.lng + lngPad;
+    });
+  }, [allPoints, mapViewportBounds]);
 
   // Filter data with global search and per-column filters
   const filteredData = useMemo(() => {
@@ -2634,9 +2697,14 @@ export default function AttributeAnalysisMapView({
                   {/* Pan to specific project bounds when button clicked */}
                   {panToBounds && <PanToBounds bounds={panToBounds} />}
 
-                  {/* Render all points in a dedicated pane above any overlay layers */}
+                  {/* Track viewport for marker culling */}
+                  <ViewportWatcher onBoundsChange={setMapViewportBounds} />
+
+                  {/* Render visible points in a dedicated pane above any overlay layers.
+                      Uses a shared canvas renderer (vs. per-marker SVG) and viewport
+                      culling to stay fast with 15+ projects loaded. */}
                   <Pane name="segmentsPane" style={{ zIndex: 450 }}>
-                    {allPoints.map(({ idx, latlng, f, projectName, color, attributeValue }) => {
+                    {viewportPoints.map(({ idx, latlng, f, projectName, color, attributeValue }) => {
                       const radius = 5;
                       let label = `${projectName} - #${idx + 1}`;
                       if (f.properties?.["Image Reference"]) {
@@ -2653,6 +2721,7 @@ export default function AttributeAnalysisMapView({
                           radius={radius}
                           pathOptions={{ color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
                           pane="segmentsPane"
+                          renderer={canvasRenderer}
                           eventHandlers={{
                             click: (e) => {
                               // If in polygon mode, add this point to the polygon and stop propagation
