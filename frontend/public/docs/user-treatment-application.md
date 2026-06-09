@@ -1,4 +1,4 @@
-## 5. Treatment Application
+## 6. Treatment Application
 
 The Treatment Application page lets you test safety improvements on one or more cycling path projects. You can explore which interventions apply to each segment, preview how they would change risk scores, apply them, and compare before-and-after risk distributions — all without permanently altering the underlying survey data until you are ready.
 

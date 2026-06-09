@@ -5,20 +5,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const DOCS_LIST = [
-  { id: "getting-started",      title: "1. Getting Started",           path: "/docs/user-getting-started.md",        updatedDate: "Jun 2026" },
-  { id: "login",                title: "2. User Login",                path: "/docs/user-login.md",                  updatedDate: "Jun 2026" },
-  { id: "coding-page",          title: "3. Coding Page",               path: "/docs/user-coding-page.md",            updatedDate: "Jun 2026" },
-  { id: "hover-tips",           title: "↳ Hover Tips",                 path: "/docs/user-hover-tips.md",             updatedDate: "Jun 2026", isSubItem: true },
-  { id: "map-view",             title: "4. Map View & Analysis",       path: "/docs/user-map-view.md",               updatedDate: "Jun 2026" },
-  { id: "path-analysis",        title: "5. Path Analysis",             path: "/docs/user-path-analysis.md",          updatedDate: "Jun 2026" },
-  { id: "finer-filtering",      title: "↳ 5.3 Finer Filtering",       path: "/docs/user-finer-filtering.md",        updatedDate: "Jun 2026", isSubItem: true },
-  { id: "treatment-application",title: "6. Treatment Application",     path: "/docs/user-treatment-application.md",  updatedDate: "Jun 2026" },
-  { id: "treatment-ai",         title: "↳ Before & After AI",         path: "/docs/user-treatment-ai.md",           updatedDate: "Jun 2026", isSubItem: true },
-  { id: "report-generation",    title: "7. Report Generation",         path: "/docs/user-report-generation.md",      updatedDate: "Jun 2026" },
-  { id: "gis-management",       title: "8. GIS Layer Management",      path: "/docs/user-gis-management.md",         updatedDate: "Jun 2026" },
+  { id: "deployment",   title: "1. Deployment & Infrastructure",      path: "/docs/admin-deployment.md",          updatedDate: "Jun 2026" },
+  { id: "ml-models",    title: "2. Managing ML Models",               path: "/docs/admin-ml-models.md",           updatedDate: "Jun 2026" },
+  { id: "gis-layers",   title: "3. Managing GIS Data Layers",         path: "/docs/admin-gis-layers.md",          updatedDate: "Jun 2026" },
+  { id: "troubleshoot", title: "4. Troubleshooting & Health",         path: "/docs/admin-troubleshooting.md",     updatedDate: "Jun 2026" },
+  { id: "cyclerap",     title: "5. Updating CycleRAP Algorithm",      path: "/docs/admin-cyclerap-algorithm.md",  updatedDate: "Jun 2026" },
+  { id: "accounts",     title: "6. User Accounts & Sign-In",          path: "/docs/admin-user-accounts.md",       updatedDate: "Jun 2026" },
+  { id: "dashboard",    title: "7. Admin Dashboard — Usage Tracking", path: "/docs/admin-dashboard.md",           updatedDate: "Jun 2026" },
 ];
 
-export default function UserGuide() {
+export default function AdminGuide() {
   const [activeDoc, setActiveDoc] = useState(DOCS_LIST[0]);
   const [content, setContent] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -49,7 +45,6 @@ export default function UserGuide() {
                 w="100%"
                 textAlign="left"
                 px="2"
-                pl={doc.isSubItem ? "6" : "2"}
                 py="2"
                 borderRadius="md"
                 fontSize="sm"
@@ -111,37 +106,21 @@ function MarkdownContent({ content }: { content: string }) {
     fontWeight: "bold" as const,
   };
 
-  const toId = (children: any): string => {
+  const getHeadingId = (children: any): string => {
     const text = Array.isArray(children) ? children.join("") : String(children);
     return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
   };
 
   const components = {
-    h1: ({ children }: any) => <h1 id={toId(children)} style={{ ...headingStyle, fontSize: "1.4rem" }}>{children}</h1>,
-    h2: ({ children }: any) => <h2 id={toId(children)} style={{ ...headingStyle, fontSize: "1.2rem" }}>{children}</h2>,
-    h3: ({ children }: any) => <h3 id={toId(children)} style={{ ...headingStyle, fontSize: "1.05rem" }}>{children}</h3>,
+    h1: ({ children }: any) => <h1 id={getHeadingId(children)} style={{ ...headingStyle, fontSize: "1.4rem" }}>{children}</h1>,
+    h2: ({ children }: any) => <h2 id={getHeadingId(children)} style={{ ...headingStyle, fontSize: "1.2rem" }}>{children}</h2>,
+    h3: ({ children }: any) => <h3 id={getHeadingId(children)} style={{ ...headingStyle, fontSize: "1.05rem" }}>{children}</h3>,
     p: ({ children }: any) => <p style={{ marginBottom: "1rem", color: colors.fgMuted }}>{children}</p>,
     ul: ({ children }: any) => <ul style={{ paddingLeft: "1.5rem", marginBottom: "1rem", color: colors.fgMuted }}>{children}</ul>,
     ol: ({ children }: any) => <ol style={{ paddingLeft: "1.5rem", marginBottom: "1rem", color: colors.fgMuted }}>{children}</ol>,
     li: ({ children }: any) => <li style={{ marginBottom: "0.25rem" }}>{children}</li>,
     strong: ({ children }: any) => <strong style={{ color: colors.strongColor, fontWeight: 600 }}>{children}</strong>,
-    a: ({ href, children }: any) => {
-      if (href?.startsWith("#")) {
-        return (
-          <a
-            href={href}
-            style={{ color: colors.linkColor, textDecoration: "underline", cursor: "pointer" }}
-            onClick={(e) => {
-              e.preventDefault();
-              document.getElementById(href.slice(1))?.scrollIntoView({ behavior: "smooth" });
-            }}
-          >
-            {children}
-          </a>
-        );
-      }
-      return <a href={href} style={{ color: colors.linkColor, textDecoration: "underline" }}>{children}</a>;
-    },
+    a: ({ href, children }: any) => <a href={href} style={{ color: colors.linkColor, textDecoration: "underline" }}>{children}</a>,
     blockquote: ({ children }: any) => (
       <blockquote style={{ borderLeft: `4px solid ${colors.linkColor}`, paddingLeft: "1rem", fontStyle: "italic", margin: "1rem 0", color: colors.fgMuted }}>
         {children}

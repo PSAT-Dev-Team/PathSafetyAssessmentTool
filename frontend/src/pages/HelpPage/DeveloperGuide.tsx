@@ -5,16 +5,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const DOCS_LIST = [
-  { id: "readme",       title: "Overview (README)", path: "/README.md",                  updatedDate: "Jan 2025" },
-  { id: "installation", title: "Installation",       path: "/docs/installation.md",       updatedDate: "Jan 2025" },
-  { id: "architecture", title: "Architecture",       path: "/docs/architecture.md",       updatedDate: "Feb 2025" },
-  { id: "api",          title: "API Reference",      path: "/docs/api-reference.md",      updatedDate: "Mar 2025" },
-  { id: "cv",           title: "CV / ML Pipeline",   path: "/docs/cv-pipeline.md",        updatedDate: "Mar 2025" },
-  { id: "scoring",      title: "Scoring Logic",      path: "/docs/scoring.md",            updatedDate: "Apr 2025" },
-  { id: "frontend",     title: "Frontend",           path: "/docs/frontend.md",           updatedDate: "Apr 2025" },
-  { id: "issues",       title: "Common Issues",      path: "/docs/common-issues.md",      updatedDate: "May 2025" },
-  { id: "contributing", title: "Contributing",       path: "/docs/contributing.md",       updatedDate: "May 2025" },
-  { id: "jira",         title: "Jira Board",          path: "/docs/dev-jira.md",            updatedDate: "Jun 2026" },
+  { id: "readme",       title: "1. Overview (README)", path: "/README.md",                  updatedDate: "Jun 2026" },
+  { id: "installation", title: "2. Installation",       path: "/docs/installation.md",       updatedDate: "Jun 2026" },
+  { id: "architecture", title: "3. Architecture",       path: "/docs/architecture.md",       updatedDate: "Jun 2026" },
+  { id: "api",          title: "4. API Reference",      path: "/docs/api-reference.md",      updatedDate: "Jun 2026" },
+  { id: "cv",           title: "5. CV / ML Pipeline",   path: "/docs/cv-pipeline.md",        updatedDate: "Jun 2026" },
+  { id: "scoring",      title: "6. Scoring Logic",      path: "/docs/scoring.md",            updatedDate: "Jun 2026" },
+  { id: "frontend",     title: "7. Frontend",           path: "/docs/frontend.md",           updatedDate: "Jun 2026" },
+  { id: "issues",       title: "8. Common Issues",      path: "/docs/common-issues.md",      updatedDate: "Jun 2026" },
+  { id: "contributing", title: "9. Contributing",       path: "/docs/contributing.md",       updatedDate: "Jun 2026" },
+  { id: "jira",         title: "10. Jira Board",        path: "/docs/dev-jira.md",            updatedDate: "Jun 2026" },
 ];
 
 export default function DeveloperGuide() {

@@ -1,4 +1,4 @@
-# GIS Layer Management Guide
+# 8. GIS Layer Management
 
 PSAT uses external GIS shapefiles and GeoJSON layers to provide spatial context for path coding and risk analysis. Use the **GIS Layer Management** tool to keep these datasets up to date.
 
@@ -6,15 +6,15 @@ PSAT uses external GIS shapefiles and GeoJSON layers to provide spatial context 
 
 ## Table of Contents
 
-- [1. Viewing GIS Layers](#1-viewing-gis-layers)
-- [2. All GIS Layers in PSAT](#2-all-gis-layers-in-psat)
-- [3. Adding a New GIS Layer](#3-adding-a-new-gis-layer)
-- [4. Replacing an Existing GIS Layer](#4-replacing-an-existing-gis-layer)
-- [5. Updating GIS Layers](#5-updating-gis-layers)
+- [8.1 Viewing GIS Layers](#81-viewing-gis-layers)
+- [8.2 All GIS Layers in PSAT](#82-all-gis-layers-in-psat)
+- [8.3 Adding a New GIS Layer](#83-adding-a-new-gis-layer)
+- [8.4 Replacing an Existing GIS Layer](#84-replacing-an-existing-gis-layer)
+- [8.5 Updating GIS Layers](#85-updating-gis-layers)
 
 ---
 
-## 1. Viewing GIS Layers
+## 8.1 Viewing GIS Layers
 
 Click the **View GIS Layers** button in the sidebar to open the GIS Layers dashboard. Here you can:
 
@@ -23,7 +23,7 @@ Click the **View GIS Layers** button in the sidebar to open the GIS Layers dashb
 - **Required Columns**: Inspect the mandatory column names needed for PSAT to process the layer. The number in parentheses, e.g., `LU_DESC (1)`, indicates the expected column index in the source data
 - Preview any layer on an interactive map by clicking it
 
-## 2. All GIS Layers in PSAT
+## 8.2 All GIS Layers in PSAT
 
 The table below lists all GIS layers currently defined in PSAT, the PSAT attribute they affect, and the required columns:
 
@@ -56,7 +56,7 @@ The table below lists all GIS layers currently defined in PSAT, the PSAT attribu
 
 > **Column index numbers** in parentheses indicate the column position (1-based) expected in the source shapefile. These are used during validation when uploading replacement layers.
 
-## 3. Adding a New GIS Layer
+## 8.3 Adding a New GIS Layer
 
 Use the **Add GIS Layer** workflow to upload entirely new datasets.
 
@@ -64,7 +64,7 @@ Use the **Add GIS Layer** workflow to upload entirely new datasets.
 - **File Upload**: Drag and drop your GIS files. For shapefiles, ensure you upload all companion files together (`.shp`, `.shx`, `.dbf`, `.prj`).
 - **Preview**: Once uploaded, you can preview the geometry on the map before finalising.
 
-## 4. Replacing an Existing GIS Layer
+## 8.4 Replacing an Existing GIS Layer
 
 Use the **Replace GIS Layer** workflow when you have updated data for an existing layer.
 
@@ -72,7 +72,7 @@ Use the **Replace GIS Layer** workflow when you have updated data for an existin
 - **Safety Checks**: PSAT performs compatibility checks to ensure the new file has the same required columns as the original.
 - **Warnings**: If differences are found in the column structure, the system will warn you before overwriting the old data.
 
-## 5. Updating GIS Layers
+## 8.5 Updating GIS Layers
 
 GIS layers should be updated whenever:
 
