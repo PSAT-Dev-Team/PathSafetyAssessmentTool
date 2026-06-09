@@ -14,7 +14,8 @@ import "leaflet/dist/leaflet.css";
 import L, { divIcon } from "leaflet";
 import proj4 from "proj4";
 import type { Feature, LineString, Position } from "geojson";
-import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchProjectResults, downloadFilteredImages, exportShapefile, deleteSegment, deleteSegmentsBatch, type AttributeRow } from "../../../api";
+import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchProjectResults, downloadFilteredImages, exportShapefile, deleteSegment, deleteSegmentsBatch, type AttributeRow, type CodingFilterContext, type FilteredProjectData, CODING_FILTER_CONTEXT_KEY } from "../../../api";
+import { getSegmentRiskBandColor } from "../../../components/visualization/scoreband/colorConstants";
 
 const SAFETY_FOCUS_ATTRIBUTES = new Set(["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"]);
 
@@ -595,11 +596,12 @@ export default function AttributeAnalysisMapView({
       primaryFocusAttribute !== "Project" &&
       !activeFilters.includes(primaryFocusAttribute)
     ) {
-      // The focused attribute was removed — fall back to the first remaining filter
-      // or project-colour mode if no filters are left.
-      const fallback = activeFilters[0] ?? "Project";
-      setCategoryFilterAttributeIndex(activeFilters.length > 0 ? 0 : -1);
-      setPrimaryFocusAttribute(fallback);
+      // The focused attribute was removed — revert to project-colour mode so that
+      // the tab (-1) and primaryFocusAttribute ("Project") always agree. Jumping to
+      // the first remaining filter here races with the out-of-bounds reset below,
+      // which forces the index to -1 and leaves primaryFocusAttribute stale.
+      setCategoryFilterAttributeIndex(-1);
+      setPrimaryFocusAttribute("Project");
     }
     prevFiltersRef.current = activeFilters;
   }, [activeFilters, primaryFocusAttribute]);
@@ -2743,10 +2745,35 @@ export default function AttributeAnalysisMapView({
                                 return;
                               }
 
-                              // Navigate to coding page for this project and segment
+                              // Navigate to coding page for this project and segment.
+                              // When filters are active, pass filter context so the Coding
+                              // page map shows only filtered segments (+ the current segment).
                               const segmentIdx = idx + 1; // 1-based index for UI
+                              let filterContext: CodingFilterContext | null = null;
+                              if (activeFilters.length > 0) {
+                                // Group visible non-hidden segments by project
+                                const projectMap = new Map<string, FilteredProjectData>();
+                                visibleSegments
+                                  .filter(s => !hiddenProjects.includes(s.projectName))
+                                  .forEach(s => {
+                                    if (!projectMap.has(s.projectName)) {
+                                      projectMap.set(s.projectName, { projectName: s.projectName, filteredIndices: [], points: [] });
+                                    }
+                                    const entry = projectMap.get(s.projectName)!;
+                                    entry.filteredIndices.push(s.idx);
+                                    entry.points.push({
+                                      latlng: s.latlng,
+                                      color: getSegmentRiskBandColor(s.scores),
+                                      idx: s.idx,
+                                    });
+                                  });
+                                filterContext = { projects: Array.from(projectMap.values()) };
+                                sessionStorage.setItem(CODING_FILTER_CONTEXT_KEY, JSON.stringify(filterContext));
+                              } else {
+                                sessionStorage.removeItem(CODING_FILTER_CONTEXT_KEY);
+                              }
                               navigate(`/coding/${encodeURIComponent(projectName)}?segment=${segmentIdx}`, {
-                                state: { returnToAnalysis: true }
+                                state: { returnToAnalysis: true, filterContext }
                               });
                             }
                           }}

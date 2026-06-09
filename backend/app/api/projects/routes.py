@@ -1339,6 +1339,14 @@ def _migrate_legacy_images(pm, project_name: str, proj) -> bool:
             print(f"[migrate] '{project_name}': no source_folders in metadata — skipping", flush=True)
             return False
 
+        missing = [sf for sf in source_folders if not (pm.in_path / sf).is_dir()]
+        if missing:
+            print(
+                f"[migrate] '{project_name}': source folder(s) not present in in/ — skipping: {missing}",
+                flush=True,
+            )
+            return False
+
         geo_df = proj.geo_data.df
         if geo_df.empty or "Image Reference" not in geo_df.columns:
             print(f"[migrate] '{project_name}': geo_data missing Image Reference column — skipping", flush=True)
@@ -1348,23 +1356,37 @@ def _migrate_legacy_images(pm, project_name: str, proj) -> bool:
         ns_map = {make_image_namespace(sf): sf for sf in source_folders}
 
         def _strip_and_resolve(img_ref: str):
-            """Return (stripped_ref, in_path) or None."""
-            stripped = img_ref[len(prefix):] if img_ref.startswith(prefix) else img_ref
+            """Return (new_canonical_ref, in_path) or None.
+
+            Tries progressively more aggressive prefix stripping:
+            1. Strip project-name prefix (legacy copy convention)
+            2. Strip source-folder namespace prefix (derived from metadata, not project name)
+            For multi-folder projects the returned ref is in namespace__filename form.
+            """
+            working = img_ref[len(prefix):] if img_ref.startswith(prefix) else img_ref
+            # Build candidate bare names in priority order: with namespace, then without.
+            bare_candidates: list[str] = [working]
+            if "__" in working:
+                bare_candidates.append(working.split("__", 1)[1])
+
             if len(source_folders) == 1:
-                candidate = pm.in_path / source_folders[0] / stripped
-                if candidate.is_file():
-                    return stripped, candidate
-            else:
-                if "__" in stripped:
-                    ns, orig = stripped.split("__", 1)
-                    if ns in ns_map:
-                        candidate = pm.in_path / ns_map[ns] / orig
-                        if candidate.is_file():
-                            return stripped, candidate
-                for sf in source_folders:
-                    candidate = pm.in_path / sf / stripped
+                sf = source_folders[0]
+                for bare in bare_candidates:
+                    candidate = pm.in_path / sf / bare
                     if candidate.is_file():
-                        return stripped, candidate
+                        return bare, candidate
+            else:
+                for bare in bare_candidates:
+                    if "__" in bare:
+                        ns, orig = bare.split("__", 1)
+                        if ns in ns_map:
+                            candidate = pm.in_path / ns_map[ns] / orig
+                            if candidate.is_file():
+                                return f"{ns}__{orig}", candidate
+                    for sf in source_folders:
+                        candidate = pm.in_path / sf / bare
+                        if candidate.is_file():
+                            return f"{make_image_namespace(sf)}__{bare}", candidate
             return None
 
         img_refs = [
@@ -3964,6 +3986,59 @@ def roads_in_bounds():
         return ok({"roads": roads})
     except Exception as e:
         return fail(f"roads-in-bounds failed: {e}", 500)
+
+
+@bp.get("/roads-by-name")
+def roads_by_name():
+    """
+    Return all road line segments matching the given folder name.
+    The folder name may carry a quarter suffix (_1Q2026) and/or a segment
+    identifier (_NE1) separated by underscores. Singapore road names never
+    contain underscores, so the road name is everything before the first '_'.
+    Query params:
+      name (required) - folder name (raw, with any suffixes)
+    """
+    raw = request.args.get("name", "").strip()
+    if not raw:
+        return fail("Missing 'name' query param", 400)
+
+    # Extract road name: everything before the first underscore, case-normalised
+    road_name = raw.split("_")[0].strip().upper()
+    if not road_name:
+        return fail("Could not extract road name from folder name", 400)
+
+    try:
+        gdf = _get_road_sections_gdf()
+        road_name_col = next(
+            (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in gdf.columns),
+            None,
+        )
+        if road_name_col is None:
+            return ok({"roads": []})
+
+        matched = gdf[gdf[road_name_col].astype(str).str.strip().str.upper() == road_name]
+
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        in_path: Path = pm.in_path
+        exists = in_path.exists() and (in_path / raw).is_dir()
+
+        roads = []
+        for _, row in matched.iterrows():
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+            if geom.geom_type == "LineString":
+                coords = [[lat, lng] for lng, lat in list(geom.coords)]
+                roads.append({"name": road_name, "exists": exists, "coords": coords})
+            elif geom.geom_type == "MultiLineString":
+                for line in geom.geoms:
+                    coords = [[lat, lng] for lng, lat in list(line.coords)]
+                    roads.append({"name": road_name, "exists": exists, "coords": coords})
+
+        return ok({"roads": roads})
+    except Exception as e:
+        return fail(f"roads-by-name failed: {e}", 500)
 
 
 @bp.get("/planning-areas-in-bounds")

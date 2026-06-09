@@ -490,7 +490,7 @@ export default function LandingPage() {
                       type="text"
                       value={manageProfileName}
                       onChange={(event) => setManageProfileName(event.target.value)}
-                      placeholder="Profile name"
+                      placeholder="LTA Employee Email"
                       autoFocus
                     />
                     <input

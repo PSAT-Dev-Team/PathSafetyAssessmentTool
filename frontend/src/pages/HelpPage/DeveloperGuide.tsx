@@ -62,7 +62,7 @@ export default function DeveloperGuide() {
               >
                 <Text as="span" display="block">{doc.title}</Text>
                 {doc.updatedDate && (
-                  <Text as="span" display="block" fontSize="2xs" color="gray.400" _dark={{ color: "gray.500" }} mt="0.5">
+                  <Text as="span" display="block" fontSize="xs" color="gray.400" _dark={{ color: "gray.500" }} mt="0.5">
                     Updated {doc.updatedDate}
                   </Text>
                 )}
