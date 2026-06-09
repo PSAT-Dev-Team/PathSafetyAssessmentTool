@@ -380,46 +380,66 @@ def df_to_records(df) -> list:
     return sanitized
 
 # Process-level context (replaces Streamlit's session_state)
-_CTX = {"ready": False, "pm": None}
+_CTX = {"ready": False, "pm": None, "init_error": None}
+_CTX_LOCK = threading.Lock()
 
 
 def invalidate_ctx() -> None:
     """Reset the project context so the next request re-initialises for the active profile."""
-    _CTX["ready"] = False
-    _CTX["pm"] = None
+    with _CTX_LOCK:
+        _CTX["ready"] = False
+        _CTX["pm"] = None
+        _CTX["init_error"] = None
 
 
 def get_ctx():
     """Lazy init: prepare the old-code dependencies the first time and reuse thereafter."""
-    if _CTX["ready"]:
+    with _CTX_LOCK:
+        if _CTX["ready"]:
+            return _CTX
+
+        # Surface a previously memoised init failure immediately.
+        if _CTX["init_error"]:
+            raise RuntimeError(f"Project context failed to initialise: {_CTX['init_error']}")
+
+        print("[Context] Initialising project context...", flush=True)
+        try:
+            pm = project_manager()
+        except Exception as exc:
+            msg = f"project_manager() failed: {exc}\n{traceback.format_exc()}"
+            print(f"[Context] ERROR: {msg}", flush=True)
+            _CTX["init_error"] = msg
+            raise RuntimeError(f"Project context failed to initialise: {msg}") from exc
+
+        try:
+            serializer.data_loader.initialise()
+        except Exception:
+            pass
+
+        try:
+            CRI.cycleRAP_interface.initialise(pm.src_path / "CycleRAP")
+        except Exception as exc:
+            msg = f"cycleRAP_interface.initialise() failed: {exc}\n{traceback.format_exc()}"
+            print(f"[Context] ERROR: {msg}", flush=True)
+            _CTX["init_error"] = msg
+            raise RuntimeError(f"Project context failed to initialise: {msg}") from exc
+
+        # If a profile is active, redirect the project manager to that profile's project root
+        # instead of the legacy ../data directory from config.json.
+        try:
+            from app.services import profile_store as _ps
+            active_id = _ps.get_active_profile_id()
+            if active_id:
+                profile_projects_root = _ps.get_profile_projects_root(active_id)
+                if profile_projects_root.exists():
+                    pm.des_path = profile_projects_root
+                    pm._discover_projects()
+        except Exception as _exc:
+            print(f"[Context] Could not resolve profile projects root: {_exc}", flush=True)
+
+        _CTX.update({"pm": pm, "ready": True, "init_error": None})
+        print("[Context] Project context ready.", flush=True)
         return _CTX
-
-    # === Previously done manually in Streamlit; equivalent init moved to backend ===
-    pm = project_manager()                               # Load config and scan project list
-    # serializer's BaseTable/parse/serialize do not need extra init; if you have data_loader, try/except
-    try:
-        serializer.data_loader.initialise()
-    except Exception:
-        pass
-
-    # CycleRAP resource directory (same as your former src_path/CycleRAP)
-    CRI.cycleRAP_interface.initialise(pm.src_path / "CycleRAP")
-
-    # If a profile is active, redirect the project manager to that profile's project root
-    # instead of the legacy ../data directory from config.json.
-    try:
-        from app.services import profile_store as _ps
-        active_id = _ps.get_active_profile_id()
-        if active_id:
-            profile_projects_root = _ps.get_profile_projects_root(active_id)
-            if profile_projects_root.exists():
-                pm.des_path = profile_projects_root
-                pm._discover_projects()
-    except Exception as _exc:
-        print(f"[Context] Could not resolve profile projects root: {_exc}", flush=True)
-
-    _CTX.update({"pm": pm, "ready": True})
-    return _CTX
 
 _MODELS_READY = {"cv": False}
 
@@ -960,7 +980,10 @@ def _log_incoming():
 @bp.get("")
 def list_projects():
     """List projects with metadata including tags, date_created, last_updated, and verification segment counts."""
-    ctx = get_ctx()
+    try:
+        ctx = get_ctx()
+    except Exception as exc:
+        return jsonify({"error": f"Backend initialisation failed: {exc}"}), 500
     pm = ctx["pm"]
     names = pm.list_names()
 
