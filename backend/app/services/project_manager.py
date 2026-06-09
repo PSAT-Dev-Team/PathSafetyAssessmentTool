@@ -915,10 +915,17 @@ class project_manager:
         if not get_config_path().exists():
             self.save_config(self.DEFAULT_CONFIG)
 
-        with open(get_config_path(), 'r') as json_file:
-            data = json.load(json_file)
-        self.load_config(data)
+        try:
+            with open(get_config_path(), 'r') as json_file:
+                data = json.load(json_file)
+        except (json.JSONDecodeError, ValueError):
+            # Corrupted or empty config — recreate from defaults and retry once
+            print("[PM] WARNING: config.json is corrupted, recreating from defaults.", flush=True)
+            self.save_config(self.DEFAULT_CONFIG)
+            with open(get_config_path(), 'r') as json_file:
+                data = json.load(json_file)
 
+        self.load_config(data)
         self._discover_projects()
 
 

@@ -976,6 +976,10 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
 @bp.before_request
 def _log_incoming():
     print(f"[Flask] >>> {request.method} {request.path}", flush=True)
+    try:
+        get_ctx()
+    except Exception as exc:
+        return jsonify({"error": f"Backend initialisation failed: {exc}"}), 500
 
 @bp.get("")
 def list_projects():
@@ -3583,7 +3587,10 @@ def list_input_folders():
     GET /api/projects/folders
     Response: { items: [ "FolderA", "FolderB", ... ] }
     """
-    ctx = get_ctx()                 # ← Use your existing get_ctx()
+    try:
+        ctx = get_ctx()
+    except Exception as exc:
+        return jsonify({"error": f"Backend initialisation failed: {exc}"}), 500
     pm = ctx["pm"]
     in_path: Path = pm.in_path
 

@@ -5,6 +5,8 @@ import sqlite3
 
 from flask import jsonify, request
 
+from pathlib import Path
+
 from . import bp
 from app.services import profile_store, telemetry_store
 
@@ -12,6 +14,74 @@ from app.services import profile_store, telemetry_store
 def _today_utc() -> dt.datetime:
     now = dt.datetime.now(dt.timezone.utc)
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+@bp.get("/ctx-status")
+def ctx_status():
+    """Diagnostic: report the state of the project context and common data paths.
+
+    Hit GET /api/admin/ctx-status in the browser or curl to see exactly why
+    api/projects is failing without needing DevTools or a backend terminal.
+    """
+    try:
+        from app.api.projects.routes import _CTX, _CTX_LOCK, get_ctx
+    except Exception as exc:
+        return jsonify({"error": f"Cannot import project routes: {exc}"}), 500
+
+    result: dict = {}
+
+    with _CTX_LOCK:
+        result["ready"] = _CTX.get("ready", False)
+        result["init_error"] = _CTX.get("init_error")
+
+    if result["init_error"]:
+        result["status"] = "FAILED"
+        return jsonify(result), 500
+
+    if not result["ready"]:
+        result["status"] = "NOT_INITIALISED"
+        return jsonify(result), 200
+
+    # Context is ready — report path diagnostics
+    try:
+        with _CTX_LOCK:
+            pm = _CTX.get("pm")
+        if pm is None:
+            result["status"] = "READY_BUT_NO_PM"
+            return jsonify(result), 500
+
+        result["status"] = "OK"
+        result["des_path"] = str(pm.des_path)
+        result["des_path_exists"] = pm.des_path.exists() if pm.des_path else False
+        result["src_path"] = str(pm.src_path)
+        result["in_path"] = str(pm.in_path)
+        result["in_path_exists"] = pm.in_path.exists() if pm.in_path else False
+        result["project_count"] = len(pm.projects)
+
+        backend_root = Path(__file__).resolve().parents[3]
+        shp_dir = backend_root / "shapefiles"
+        result["shapefiles_dir"] = str(shp_dir)
+        result["shapefiles_exist"] = shp_dir.exists()
+        road_shp = shp_dir / "planningareas" / "ROADSECTIONLINE.shp"
+        result["road_shapefile_exists"] = road_shp.exists()
+        planning_shp = shp_dir / "planningareas" / "G_MP25_PLNG_AREA_NO_SEA_PL.shp"
+        result["planning_shapefile_exists"] = planning_shp.exists()
+
+        config_path = backend_root / "config.json"
+        result["config_json_exists"] = config_path.exists()
+
+        try:
+            active = profile_store.get_active_profile()
+            result["active_profile"] = active.get("name") if active else None
+        except Exception as pexc:
+            result["active_profile_error"] = str(pexc)
+
+    except Exception as exc:
+        result["status"] = "ERROR"
+        result["diagnostic_error"] = str(exc)
+        return jsonify(result), 500
+
+    return jsonify(result), 200
 
 
 @bp.get("/stats")
