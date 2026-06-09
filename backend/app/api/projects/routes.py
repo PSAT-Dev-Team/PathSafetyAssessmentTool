@@ -1348,23 +1348,37 @@ def _migrate_legacy_images(pm, project_name: str, proj) -> bool:
         ns_map = {make_image_namespace(sf): sf for sf in source_folders}
 
         def _strip_and_resolve(img_ref: str):
-            """Return (stripped_ref, in_path) or None."""
-            stripped = img_ref[len(prefix):] if img_ref.startswith(prefix) else img_ref
+            """Return (new_canonical_ref, in_path) or None.
+
+            Tries progressively more aggressive prefix stripping:
+            1. Strip project-name prefix (legacy copy convention)
+            2. Strip source-folder namespace prefix (derived from metadata, not project name)
+            For multi-folder projects the returned ref is in namespace__filename form.
+            """
+            working = img_ref[len(prefix):] if img_ref.startswith(prefix) else img_ref
+            # Build candidate bare names in priority order: with namespace, then without.
+            bare_candidates: list[str] = [working]
+            if "__" in working:
+                bare_candidates.append(working.split("__", 1)[1])
+
             if len(source_folders) == 1:
-                candidate = pm.in_path / source_folders[0] / stripped
-                if candidate.is_file():
-                    return stripped, candidate
-            else:
-                if "__" in stripped:
-                    ns, orig = stripped.split("__", 1)
-                    if ns in ns_map:
-                        candidate = pm.in_path / ns_map[ns] / orig
-                        if candidate.is_file():
-                            return stripped, candidate
-                for sf in source_folders:
-                    candidate = pm.in_path / sf / stripped
+                sf = source_folders[0]
+                for bare in bare_candidates:
+                    candidate = pm.in_path / sf / bare
                     if candidate.is_file():
-                        return stripped, candidate
+                        return bare, candidate
+            else:
+                for bare in bare_candidates:
+                    if "__" in bare:
+                        ns, orig = bare.split("__", 1)
+                        if ns in ns_map:
+                            candidate = pm.in_path / ns_map[ns] / orig
+                            if candidate.is_file():
+                                return f"{ns}__{orig}", candidate
+                    for sf in source_folders:
+                        candidate = pm.in_path / sf / bare
+                        if candidate.is_file():
+                            return f"{make_image_namespace(sf)}__{bare}", candidate
             return None
 
         img_refs = [
