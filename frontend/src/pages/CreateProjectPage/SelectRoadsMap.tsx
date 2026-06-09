@@ -23,6 +23,7 @@ import {
   previewUploadedShapefiles,
   queryPlanningAreasInBounds,
   queryRoadsInBounds,
+  queryRoadsByName,
   queryRoadsInSelection,
   type PlanningAreaInBounds,
   type ProjectSelectionGeometry,
@@ -337,9 +338,10 @@ interface SelectRoadsMapProps {
   onSelectionChange: (roads: SelectedRoad[]) => void;
   onSelectionGeometryChange: (selectionGeometry: ProjectSelectionGeometry | null) => void;
   refreshKey?: number;
+  focusRoadName?: string;
 }
 
-export default function SelectRoadsMap({ onSelectionChange, onSelectionGeometryChange, refreshKey = 0 }: SelectRoadsMapProps) {
+export default function SelectRoadsMap({ onSelectionChange, onSelectionGeometryChange, refreshKey = 0, focusRoadName }: SelectRoadsMapProps) {
   // Polygon state
   const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
   const [polygonSource, setPolygonSource] = useState<PolygonSource>(null);
@@ -367,6 +369,7 @@ export default function SelectRoadsMap({ onSelectionChange, onSelectionGeometryC
   const [planningAreaLoading, setPlanningAreaLoading] = useState(false);
   const [highlightPlanningAreaKey, setHighlightPlanningAreaKey] = useState<string | null>(null);
   const [selectedUploadedBoundary, setSelectedUploadedBoundary] = useState<UploadedBoundaryFeature | null>(null);
+  const [focusRoadSegments, setFocusRoadSegments] = useState<RoadInBounds[]>([]);
   const roadsRef = useRef<SelectedRoad[]>([]);
   const polygonSourceRef = useRef<PolygonSource>(null);
   // Memoize so the geometry keeps a stable identity across renders. Without this
@@ -384,6 +387,27 @@ export default function SelectRoadsMap({ onSelectionChange, onSelectionGeometryC
   useEffect(() => {
     polygonSourceRef.current = polygonSource;
   }, [polygonSource]);
+
+  useEffect(() => {
+    const name = (focusRoadName ?? "").trim();
+    if (!name) {
+      setFocusRoadSegments([]);
+      return;
+    }
+    let cancelled = false;
+    queryRoadsByName(name)
+      .then((segments) => {
+        if (cancelled) return;
+        setFocusRoadSegments(segments);
+        if (segments.length > 0) {
+          setMapFocusPoints(segments.flatMap((s) => s.coords));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFocusRoadSegments([]);
+      });
+    return () => { cancelled = true; };
+  }, [focusRoadName]);
 
   // ─ Handlers ─────────────────────────────────────────────────────
   const addPoint = useCallback((latlng: L.LatLng) => {
@@ -912,6 +936,14 @@ export default function SelectRoadsMap({ onSelectionChange, onSelectionGeometryC
                 </Text>
               </Popup>
             </LeafletPolyline>
+          ))}
+          {focusRoadSegments.map((seg, idx) => (
+            <LeafletPolyline
+              key={`focus-road-${idx}`}
+              positions={seg.coords}
+              pathOptions={{ color: "#F59E0B", weight: 5, opacity: 0.9 }}
+              interactive={false}
+            />
           ))}
           <PolygonOverlay
             points={polygonPoints}

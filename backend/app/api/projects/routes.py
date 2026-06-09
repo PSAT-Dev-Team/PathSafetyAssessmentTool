@@ -3988,6 +3988,59 @@ def roads_in_bounds():
         return fail(f"roads-in-bounds failed: {e}", 500)
 
 
+@bp.get("/roads-by-name")
+def roads_by_name():
+    """
+    Return all road line segments matching the given folder name.
+    The folder name may carry a quarter suffix (_1Q2026) and/or a segment
+    identifier (_NE1) separated by underscores. Singapore road names never
+    contain underscores, so the road name is everything before the first '_'.
+    Query params:
+      name (required) - folder name (raw, with any suffixes)
+    """
+    raw = request.args.get("name", "").strip()
+    if not raw:
+        return fail("Missing 'name' query param", 400)
+
+    # Extract road name: everything before the first underscore, case-normalised
+    road_name = raw.split("_")[0].strip().upper()
+    if not road_name:
+        return fail("Could not extract road name from folder name", 400)
+
+    try:
+        gdf = _get_road_sections_gdf()
+        road_name_col = next(
+            (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in gdf.columns),
+            None,
+        )
+        if road_name_col is None:
+            return ok({"roads": []})
+
+        matched = gdf[gdf[road_name_col].astype(str).str.strip().str.upper() == road_name]
+
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        in_path: Path = pm.in_path
+        exists = in_path.exists() and (in_path / raw).is_dir()
+
+        roads = []
+        for _, row in matched.iterrows():
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+            if geom.geom_type == "LineString":
+                coords = [[lat, lng] for lng, lat in list(geom.coords)]
+                roads.append({"name": road_name, "exists": exists, "coords": coords})
+            elif geom.geom_type == "MultiLineString":
+                for line in geom.geoms:
+                    coords = [[lat, lng] for lng, lat in list(line.coords)]
+                    roads.append({"name": road_name, "exists": exists, "coords": coords})
+
+        return ok({"roads": roads})
+    except Exception as e:
+        return fail(f"roads-by-name failed: {e}", 500)
+
+
 @bp.get("/planning-areas-in-bounds")
 def planning_areas_in_bounds():
     """

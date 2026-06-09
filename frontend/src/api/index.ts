@@ -416,6 +416,14 @@ export async function queryRoadsInBounds(
   return (data?.roads ?? []) as RoadInBounds[];
 }
 
+export async function queryRoadsByName(name: string): Promise<RoadInBounds[]> {
+  const params = new URLSearchParams({ name });
+  const res = await fetch(`/api/projects/roads-by-name?${params.toString()}`);
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return (data?.roads ?? []) as RoadInBounds[];
+}
+
 export async function queryPlanningAreasInBounds(
   bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number },
   limit = 500
