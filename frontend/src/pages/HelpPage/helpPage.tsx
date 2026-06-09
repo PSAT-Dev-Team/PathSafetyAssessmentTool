@@ -109,6 +109,7 @@ function AdminGuide() {
       {[
         {
           title: "1. Deployment & Infrastructure",
+          updatedDate: "Jan 2025",
           items: [
             { label: "Starting the App:", body: <>The application is typically orchestrated via Docker Compose. Run <Code>docker compose up --build</Code> to start both the Flask backend and the React frontend. For direct local launching, you can use the <Code>Run-PSAT.bat</Code> script.</> },
             { label: "Data Persistence:", body: <>User-created projects, images, and results are stored in the <Code>data/</Code> directory, which is bind-mounted to the backend. Backing up this folder will backup all user work across the system.</> },
@@ -116,6 +117,7 @@ function AdminGuide() {
         },
         {
           title: "2. Managing Machine Learning Models",
+          updatedDate: "Jan 2025",
           items: [
             { label: "YOLO Weights:", body: <>The computer-vision prediction models are stored in <Code>backend/models/</Code>. To deploy a newly trained model, replace the existing <Code>.pt</Code> files and restart the backend container.</> },
             { label: "Hardware Configuration:", body: "The backend loads PyTorch models into memory on initialization. Ensure the host machine has adequate RAM. For GPU acceleration, CUDA drivers must be properly configured." },
@@ -123,6 +125,7 @@ function AdminGuide() {
         },
         {
           title: "3. Managing GIS Data Layers",
+          updatedDate: "May 2025",
           items: [
             { label: "Storage Location:", body: <>The CycleRAP contextual GIS infrastructure shapefiles are stored under <Code>backend/shapefiles/</Code>.</> },
             { label: "Updating via UI:", body: "Administrators can now use the 'Update GIS Layer' button in the sidebar to add or replace layers. This UI handles file validation and ensures that all mandatory companion files (.shx, .dbf, etc.) are present." },
@@ -132,6 +135,7 @@ function AdminGuide() {
         },
         {
           title: "4. Troubleshooting & Health",
+          updatedDate: "Jan 2025",
           items: [
             { label: "Logs:", body: <>If auto-coding fails, check the server output via <Code>docker compose logs -f backend</Code> to view full Python stack traces.</> },
             { label: "Health Endpoints:", body: <>Query <Code>/api/health</Code> or <Code>/api/ping</Code> to verify the backend is responsive and CV models loaded correctly.</> },
@@ -139,6 +143,7 @@ function AdminGuide() {
         },
         {
           title: "5. Updating CycleRAP Algorithm",
+          updatedDate: "Jan 2025",
           items: [
             { label: "Algorithm Updates:", body: "Occasionally, CycleRAP may release an updated risk scoring model. Administrators should contact the development team to update the system to the latest algorithm version." },
             { label: "Implementation Details:", body: "The exact implementation details, required formula modifications, and testing procedures for algorithm updates can be found in the Developer Guide." },
@@ -146,6 +151,7 @@ function AdminGuide() {
         },
         {
           title: "6. User Accounts & Sign-In",
+          updatedDate: "Jun 2026",
           items: [
             {
               label: "Overview:",
@@ -185,6 +191,7 @@ function AdminGuide() {
         },
         {
           title: "7. Admin Dashboard — Usage Tracking",
+          updatedDate: "May 2025",
           items: [
             {
               label: "Overview:",
@@ -249,9 +256,16 @@ function AdminGuide() {
         },
       ].map((section) => (
         <Box key={section.title}>
-          <Text fontSize="lg" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.200" }} mt="6" mb="3">
-            {section.title}
-          </Text>
+          <Flex align="baseline" gap="3" mt="6" mb="3">
+            <Text fontSize="lg" fontWeight="semibold" color="gray.700" _dark={{ color: "gray.200" }}>
+              {section.title}
+            </Text>
+            {section.updatedDate && (
+              <Text fontSize="xs" color="gray.400" _dark={{ color: "gray.500" }} flexShrink={0}>
+                Updated {section.updatedDate}
+              </Text>
+            )}
+          </Flex>
           <Box as="ul" pl="6" color="gray.600" _dark={{ color: "gray.400" }} lineHeight="1.7">
             {section.items.map((item) => (
               <Box as="li" key={item.label} mb="2">

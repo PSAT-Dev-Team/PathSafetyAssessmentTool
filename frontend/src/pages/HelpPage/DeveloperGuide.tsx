@@ -5,15 +5,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const DOCS_LIST = [
-  { id: "readme", title: "Overview (README)", path: "/README.md" },
-  { id: "installation", title: "Installation", path: "/docs/installation.md" },
-  { id: "architecture", title: "Architecture", path: "/docs/architecture.md" },
-  { id: "api", title: "API Reference", path: "/docs/api-reference.md" },
-  { id: "cv", title: "CV / ML Pipeline", path: "/docs/cv-pipeline.md" },
-  { id: "scoring", title: "Scoring Logic", path: "/docs/scoring.md" },
-  { id: "frontend", title: "Frontend", path: "/docs/frontend.md" },
-  { id: "issues", title: "Common Issues", path: "/docs/common-issues.md" },
-  { id: "contributing", title: "Contributing", path: "/docs/contributing.md" },
+  { id: "readme",       title: "Overview (README)", path: "/README.md",                  updatedDate: "Jan 2025" },
+  { id: "installation", title: "Installation",       path: "/docs/installation.md",       updatedDate: "Jan 2025" },
+  { id: "architecture", title: "Architecture",       path: "/docs/architecture.md",       updatedDate: "Feb 2025" },
+  { id: "api",          title: "API Reference",      path: "/docs/api-reference.md",      updatedDate: "Mar 2025" },
+  { id: "cv",           title: "CV / ML Pipeline",   path: "/docs/cv-pipeline.md",        updatedDate: "Mar 2025" },
+  { id: "scoring",      title: "Scoring Logic",      path: "/docs/scoring.md",            updatedDate: "Apr 2025" },
+  { id: "frontend",     title: "Frontend",           path: "/docs/frontend.md",           updatedDate: "Apr 2025" },
+  { id: "issues",       title: "Common Issues",      path: "/docs/common-issues.md",      updatedDate: "May 2025" },
+  { id: "contributing", title: "Contributing",       path: "/docs/contributing.md",       updatedDate: "May 2025" },
+  { id: "jira",         title: "Jira Board",          path: "/docs/dev-jira.md",            updatedDate: "Jun 2026" },
 ];
 
 export default function DeveloperGuide() {
@@ -59,7 +60,12 @@ export default function DeveloperGuide() {
                 _hover={{ bg: "gray.100", color: "gray.700", _dark: { bg: "gray.700", color: "gray.200" } }}
                 onClick={() => setActiveDoc(doc)}
               >
-                {doc.title}
+                <Text as="span" display="block">{doc.title}</Text>
+                {doc.updatedDate && (
+                  <Text as="span" display="block" fontSize="2xs" color="gray.400" _dark={{ color: "gray.500" }} mt="0.5">
+                    Updated {doc.updatedDate}
+                  </Text>
+                )}
               </Box>
             </Box>
           ))}
