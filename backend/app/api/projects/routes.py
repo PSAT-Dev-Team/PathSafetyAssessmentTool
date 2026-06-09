@@ -1339,6 +1339,14 @@ def _migrate_legacy_images(pm, project_name: str, proj) -> bool:
             print(f"[migrate] '{project_name}': no source_folders in metadata — skipping", flush=True)
             return False
 
+        missing = [sf for sf in source_folders if not (pm.in_path / sf).is_dir()]
+        if missing:
+            print(
+                f"[migrate] '{project_name}': source folder(s) not present in in/ — skipping: {missing}",
+                flush=True,
+            )
+            return False
+
         geo_df = proj.geo_data.df
         if geo_df.empty or "Image Reference" not in geo_df.columns:
             print(f"[migrate] '{project_name}': geo_data missing Image Reference column — skipping", flush=True)
