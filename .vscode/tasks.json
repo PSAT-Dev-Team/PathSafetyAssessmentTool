@@ -1,0 +1,252 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run viable roads batch",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\find_viable_roads_20260528.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Probe LightHaus roads",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"-c",
+				"from pathlib import Path; import re, json; root=Path(r'D:\\LIGHTHAUS MAR 2026\\LIGHTHAUS MAR 2026'); targets=['DEFU AVENUE 1','HOUGANG AVENUE 1','HOUGANG AVENUE 10','BUANGKOK DRIVE','KIM CHUAN ROAD']; norm=lambda s: re.sub(r'[^A-Z0-9]+','',s.upper()); hits={t:[] for t in targets};\nfor p in root.rglob('*'):\n    if p.is_dir():\n        n=norm(p.name)\n        for t in targets:\n            if n==norm(t):\n                hits[t].append(str(p))\nprint(json.dumps(hits, indent=2))"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Probe requested road BUANGKOK DRIVE",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\assess_requested_roads_20260529.py",
+				"--road",
+				"BUANGKOK DRIVE"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Inspect BUANGKOK DRIVE temp project",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"-c",
+				"from pathlib import Path; import importlib.util, collections, geopandas as gpd; repo=Path(r'C:\\Users\\Alaster\\Documents\\GitHub\\PathSafetyAssessmentTool'); project_dir=repo/'tmp'/'requested_source_projects_20260529'/'BUANGKOK DRIVE'; gpkg=project_dir/'geo_data.gpkg'; gdf=gpd.read_file(gpkg); print('rows', len(gdf)); print('bounds', gdf.total_bounds.tolist()); print(gdf[['Image Reference','Road Name','Distance (Metres)']].head().to_string(index=False)); spec=importlib.util.spec_from_file_location('grad_builder', repo/'Gradient Calculation'/'build_path_gradient_profile.py'); mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); segments=mod.load_project_segments(project_dir); centerline=mod.stitch_path_line(segments); chainages, coords=mod.sample_line(centerline, mod.DEFAULT_SPACING_M, None); labels, dists=mod.nearest_road_labels(coords, mod._default_road_sections_shp()); print(collections.Counter(labels).most_common(10))"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Re-probe BUANGKOK DRIVE",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\assess_requested_roads_20260529.py",
+				"--road",
+				"BUANGKOK DRIVE"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Assess requested roads full batch",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\assess_requested_roads_20260529.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Probe two-road assessment",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\assess_requested_roads_20260529.py",
+				"--road",
+				"BUANGKOK DRIVE",
+				"--road",
+				"DEFU AVENUE 1"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Assess requested roads full batch retry",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\assess_requested_roads_20260529.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Validate per-road progress output",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\assess_requested_roads_20260529.py",
+				"--road",
+				"DEFU AVENUE 1"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Assess control roads",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\assess_requested_roads_20260529.py",
+				"--road",
+				"HOUGANG AVENUE 7",
+				"--road",
+				"AIRPORT ROAD",
+				"--road",
+				"BUANGKOK DRIVE"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Debug source candidates",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"-c",
+				"import json, sys; sys.path.append(r'c:\\Users\\Alaster\\Documents\\GitHub\\PathSafetyAssessmentTool\\tmp'); import assess_requested_roads_20260529 as m; in_map=m.build_in_alias_map(); arch_map=m.build_archive_alias_map(); payload={};\nfor road in ['HOUGANG AVENUE 7','AIRPORT ROAD','BUANGKOK DRIVE']:\n    payload[road]=[{'source_dir':str(c.source_dir),'status':c.image_source_status,'in':c.in_source_folder,'archive':c.archive_source_folder,'copied':c.copied_to_in,'note':c.note} for c in m.collect_source_candidates(road,in_map,arch_map)];\nprint(json.dumps(payload,indent=2))"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Write source candidate debug",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"-c",
+				"import json, sys; from pathlib import Path; sys.path.append(r'c:\\Users\\Alaster\\Documents\\GitHub\\PathSafetyAssessmentTool\\tmp'); import assess_requested_roads_20260529 as m; in_map=m.build_in_alias_map(); arch_map=m.build_archive_alias_map(); payload={};\nfor road in ['HOUGANG AVENUE 7','AIRPORT ROAD','BUANGKOK DRIVE']:\n    payload[road]=[{'source_dir':str(c.source_dir),'status':c.image_source_status,'in':c.in_source_folder,'archive':c.archive_source_folder,'copied':c.copied_to_in,'note':c.note} for c in m.collect_source_candidates(road,in_map,arch_map)];\nPath(r'c:\\Users\\Alaster\\Documents\\GitHub\\PathSafetyAssessmentTool\\tmp\\debug_source_candidates_20260529.json').write_text(json.dumps(payload,indent=2), encoding='utf-8')"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run priority control gradients",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\run_priority_control_gradients_20260529.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run priority control gradients v2",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\run_priority_control_gradients_20260529.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run priority control gradients v3",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\run_priority_control_gradients_20260529.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run one requested gradient HOUGANG AVENUE 8",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\run_one_requested_gradient_20260529.py",
+				"--road",
+				"HOUGANG AVENUE 8",
+				"--bundle",
+				"Hougang_02",
+				"--bundle",
+				"Sengkang",
+				"--bundle",
+				"D_Serangoon_LTA"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Inspect priority sources",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\inspect_priority_sources_20260529.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run priority control gradients v4",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\run_priority_control_gradients_20260529.py"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run BUANGKOK DRIVE targeted",
+			"type": "shell",
+			"command": "C:\\Users\\Alaster\\miniconda3\\envs\\psat\\python.exe",
+			"args": [
+				"tmp\\run_one_requested_gradient_20260529.py",
+				"--road",
+				"BUANGKOK DRIVE",
+				"--source-path",
+				"D:\\LIGHTHAUS MAR 2026\\LIGHTHAUS MAR 2026\\NE2\\BUANGKOK DRIVE",
+				"--bundle",
+				"Sengkang",
+				"--bundle",
+				"Hougang_02",
+				"--bundle",
+				"D_Serangoon_LTA"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

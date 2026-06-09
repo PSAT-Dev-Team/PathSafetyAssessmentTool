@@ -115,3 +115,15 @@ def test_migrate_skips_when_source_hash_differs(tmp_path):
     assert summary["relinked_files"] == 0
     assert any(item["reason"] == "source_hash_mismatch" for item in summary["skipped"])
     assert project_image.read_bytes() == b"old-copied-bytes"
+
+
+def test_bootstrap_profiles_storage_refuses_empty_registry_when_profile_dirs_exist(tmp_path):
+    repo_root = tmp_path / "repo"
+    profiles_root = repo_root / "profiles"
+    (profiles_root / "alaster" / "projects").mkdir(parents=True, exist_ok=True)
+
+    summary = legacy_project_migration.bootstrap_profiles_storage(repo_root=repo_root)
+
+    assert summary["created_registry"] is False
+    assert summary["blocked_registry_creation"] is True
+    assert not (profiles_root / "profiles.json").exists()

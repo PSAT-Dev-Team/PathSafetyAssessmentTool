@@ -37,9 +37,8 @@ import {
 import type { AttributeRow } from "../../api";
 import { autocodeImage, autocodeGIS, autocodeAllStream } from "../../api";
 
-
 import ImagePanel from "./components/ImagePanel";
-import AttributesPanel from "./components/AttributesPanel";
+import AttributesPanel, { resolveContributorTabGroup } from "./components/AttributesPanel";
 import AttributeOptionsDialog from "./components/AttributeOptionsDialog";
 import GeoDataPanel from "./components/GeoDataPanel";
 import { saveAttributes } from "../../api";
@@ -112,6 +111,134 @@ function getParentCategoryForSubcat(subCat: string | null | undefined): string |
     if (children.includes(subCat)) return parent;
   }
   return null;
+}
+
+type LogicCheckNotif = { description: string; isWarning: boolean };
+
+function applyLogicChecks(
+  field: string,
+  value: string | number | boolean | null,
+  currentRow: AttributeRow
+): { extraUpdates: Record<string, number>; notifications: LogicCheckNotif[] } {
+  const extraUpdates: Record<string, number> = {};
+  const notifications: LogicCheckNotif[] = [];
+  const projected = { ...currentRow, [field]: value };
+
+  const isPresent = (v: unknown) => Number(v) === 1;
+  const isZeroOrNull = (v: unknown) => {
+    if (v === null || v === undefined || v === "") return true;
+    const n = Number(v);
+    return isNaN(n) || n === 0;
+  };
+
+  const autoDisable = (target: string, msg: string) => {
+    if (isPresent(projected[target])) {
+      extraUpdates[target] = 2;
+      notifications.push({ description: msg, isWarning: false });
+    }
+  };
+
+  const autoEnable = (target: string, msg: string) => {
+    if (!isPresent(projected[target])) {
+      extraUpdates[target] = 1;
+      notifications.push({ description: msg, isWarning: false });
+    }
+  };
+
+  const warn = (msg: string) => notifications.push({ description: msg, isWarning: true });
+
+  // Rules 1-5: mutual exclusion between 0-1m and 1-3m adjacent fields
+  const mutualPairs: Array<[string, string, string]> = [
+    ["Adjacent Road Lane 0-1m", "Adjacent Road Lane 1-3m", "Adjacent Road Lane"],
+    ["Adjacent Vehicle Parking 0-1m", "Adjacent Vehicle Parking 1-3m", "Adjacent Vehicle Parking"],
+    ["Adjacent Severe Hazard 0-1m", "Adjacent Severe Hazard 1-3m", "Adjacent Severe Hazard"],
+    ["Adjacent object or level change 0-1m", "Adjacent object or level change 1-3m", "Adjacent object or level change"],
+    ["Adjacent Sidewalk 0-1m", "Adjacent Sidewalk 1-3m", "Adjacent Sidewalk"],
+  ];
+  for (const [near, far, label] of mutualPairs) {
+    if (field === near && isPresent(value)) {
+      autoDisable(far, `"${label} 1-3m" cleared (mutually exclusive with 0-1m)`);
+    } else if (field === far && isPresent(value)) {
+      autoDisable(near, `"${label} 0-1m" cleared (mutually exclusive with 1-3m)`);
+    }
+  }
+
+  // Rule 6: Facility Type = Sidewalk → Adjacent Sidewalk 0-1m = Not Present
+  if (field === "Facility Type" && Number(value) === 1) {
+    autoDisable("Adjacent Sidewalk 0-1m", '"Adjacent Sidewalk 0-1m" cleared (facility is already a Sidewalk)');
+  }
+
+  // Rule 7: Facility Type = Mixed Traffic Road Lane → Adjacent Road Lane 0-1m = Present, 1-3m = Not Present
+  if (field === "Facility Type" && Number(value) === 6) {
+    autoEnable("Adjacent Road Lane 0-1m", '"Adjacent Road Lane 0-1m" set to Present (Mixed Traffic Road Lane)');
+    autoDisable("Adjacent Road Lane 1-3m", '"Adjacent Road Lane 1-3m" cleared (Mixed Traffic Road Lane)');
+  }
+
+  // Rule 8: Facility Type = Sidewalk/Multi-use/Off-road → Adjacent object or level change 0-1m = Present
+  if (field === "Facility Type" && [1, 2, 3].includes(Number(value))) {
+    autoEnable("Adjacent object or level change 0-1m", '"Adjacent object or level change 0-1m" set to Present');
+  }
+
+  // Rule 9: Width Restriction = Present → FO or NFO must be Present (warning only)
+  if (field === "Width Restriction" && isPresent(value)) {
+    if (!isPresent(projected["Fixed Obstacle on Facility"]) && !isPresent(projected["Non-Fixed Obstacle on Facility"])) {
+      warn('"Width Restriction" is Present — set "Fixed Obstacle on Facility" or "Non-Fixed Obstacle on Facility" to Present');
+    }
+  }
+
+  // Rule 10: Facility Type = Sidewalk/Multi-use/Off-road → Light Segregation = Present
+  if (field === "Facility Type" && [1, 2, 3].includes(Number(value))) {
+    autoEnable("Light Segregation", '"Light Segregation" set to Present');
+  }
+
+  // Rule 11: Property Access = Present → Intersection or Road Crossing = Present
+  if (field === "Property Access" && isPresent(value)) {
+    autoEnable("Intersection or Road Crossing", '"Intersection or Road Crossing" set to Present (Property Access implies road crossing)');
+  }
+
+  // Rule 12: Facility Type = On-road Bicycle Lane → Adjacent Road Lane 0-1m = Present
+  if (field === "Facility Type" && Number(value) === 4) {
+    autoEnable("Adjacent Road Lane 0-1m", '"Adjacent Road Lane 0-1m" set to Present (On-road Bicycle Lane)');
+  }
+
+  // Rules 13-14: Adjacent Road Lane 0-1m = Present → AADT and speed non-zero
+  if (field === "Adjacent Road Lane 0-1m" && isPresent(value)) {
+    if (isZeroOrNull(projected["Road AADT"]))
+      warn('"Road AADT" should not be 0 when "Adjacent Road Lane 0-1m" is Present');
+    if (isZeroOrNull(projected["Road operating speed (mean)"]))
+      warn('"Road Operating Speed (mean)" should not be 0 when "Adjacent Road Lane 0-1m" is Present');
+  }
+
+  // Rules 15-16: Adjacent Road Lane 1-3m = Present → AADT and speed non-zero
+  if (field === "Adjacent Road Lane 1-3m" && isPresent(value)) {
+    if (isZeroOrNull(projected["Road AADT"]))
+      warn('"Road AADT" should not be 0 when "Adjacent Road Lane 1-3m" is Present');
+    if (isZeroOrNull(projected["Road operating speed (mean)"]))
+      warn('"Road Operating Speed (mean)" should not be 0 when "Adjacent Road Lane 1-3m" is Present');
+  }
+
+  // Rules 17-18: Intersection or Road Crossing = Present → AADT and speed non-zero
+  if (field === "Intersection or Road Crossing" && isPresent(value)) {
+    if (isZeroOrNull(projected["Road AADT"]))
+      warn('"Road AADT" should not be 0 when "Intersection or Road Crossing" is Present');
+    if (isZeroOrNull(projected["Road operating speed (mean)"]))
+      warn('"Road Operating Speed (mean)" should not be 0 when "Intersection or Road Crossing" is Present');
+  }
+
+  // Rules 19-20: Facility Type = Mixed Traffic Road Lane → AADT and speed non-zero
+  if (field === "Facility Type" && Number(value) === 6) {
+    if (isZeroOrNull(projected["Road AADT"]))
+      warn('"Road AADT" should not be 0 for Mixed Traffic Road Lane');
+    if (isZeroOrNull(projected["Road operating speed (mean)"]))
+      warn('"Road Operating Speed (mean)" should not be 0 for Mixed Traffic Road Lane');
+  }
+
+  // Rule 21: Facility Type = Road Shoulder → Adjacent Road Lane 0-1m = Present
+  if (field === "Facility Type" && Number(value) === 5) {
+    autoEnable("Adjacent Road Lane 0-1m", '"Adjacent Road Lane 0-1m" set to Present (Road Shoulder)');
+  }
+
+  return { extraUpdates, notifications };
 }
 
 function PresentMultiTagModal({
@@ -343,6 +470,7 @@ export default function CodingPage() {
     originalParentCode: string | number | null;
     originalSubCategory: string | null;
   } | null>(null);
+  const [activeAttributeGroupTab, setActiveAttributeGroupTab] = useState<string | null>(null);
 
   // Image preloading state
   const [imagesLoaded, setImagesLoaded] = useState(false);
@@ -373,6 +501,13 @@ export default function CodingPage() {
   const [curvError, setCurvError] = useState<string | null>(null);
   const [isAnalysisSidebarOpen, setIsAnalysisSidebarOpen] = useState(false);
   const [showCurvatureOverlay, setShowCurvatureOverlay] = useState(false);
+
+  const handleContributorClick = useCallback((name: string) => {
+    const targetGroup = resolveContributorTabGroup(name);
+    if (targetGroup) {
+      setActiveAttributeGroupTab(targetGroup);
+    }
+  }, []);
 
   useEffect(() => {
     if (!initialSegment || !currentProjectName || hasInitializedSegmentRef.current) return;
@@ -879,15 +1014,27 @@ export default function CodingPage() {
         try {
           const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
           if (rows) {
+            const prevChanged = projectDataCache[currentProjectName]?.changedFieldsByRow ?? {};
+            const prevSources = projectDataCache[currentProjectName]?.fieldSourcesByRow ?? {};
+            const mergedChanged: Record<number, string[]> = { ...prevChanged };
+            for (const [k, v] of Object.entries(allChangedFieldsByRow)) {
+              const n = Number(k);
+              mergedChanged[n] = [...new Set([...(mergedChanged[n] ?? []), ...(v as string[])])];
+            }
+            const mergedSources: Record<number, Record<string, string>> = { ...prevSources };
+            for (const [k, v] of Object.entries(allSourcesByRow)) {
+              const n = Number(k);
+              mergedSources[n] = { ...(mergedSources[n] ?? {}), ...(v as Record<string, string>) };
+            }
             updateProjectData(currentProjectName, {
               attrs: rows,
-              changedFieldsByRow: allChangedFieldsByRow,
-              fieldSourcesByRow: allSourcesByRow,
+              changedFieldsByRow: mergedChanged,
+              fieldSourcesByRow: mergedSources,
               isDirty: true,
             });
 
             // Save metadata
-            saveAutocodeMetadata(currentProjectName, allChangedFieldsByRow, allSourcesByRow);
+            saveAutocodeMetadata(currentProjectName, mergedChanged, mergedSources);
 
             // Update autocode baseline with new values from all segments
             updateAutocodeBaseline(rows);
@@ -986,14 +1133,26 @@ export default function CodingPage() {
           // Use updated_attributes returned by the batch call — avoids an extra fetchProjectAttributes round trip
           const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
           if (rows) {
+            const prevChanged = projectDataCache[currentProjectName]?.changedFieldsByRow ?? {};
+            const prevSources = projectDataCache[currentProjectName]?.fieldSourcesByRow ?? {};
+            const mergedChanged: Record<number, string[]> = { ...prevChanged };
+            for (const [k, v] of Object.entries(allChangedFieldsByRow)) {
+              const n = Number(k);
+              mergedChanged[n] = [...new Set([...(mergedChanged[n] ?? []), ...(v as string[])])];
+            }
+            const mergedSources: Record<number, Record<string, string>> = { ...prevSources };
+            for (const [k, v] of Object.entries(allSourcesByRow)) {
+              const n = Number(k);
+              mergedSources[n] = { ...(mergedSources[n] ?? {}), ...(v as Record<string, string>) };
+            }
             updateProjectData(currentProjectName, {
               attrs: rows,
-              changedFieldsByRow: allChangedFieldsByRow,
-              fieldSourcesByRow: allSourcesByRow,
+              changedFieldsByRow: mergedChanged,
+              fieldSourcesByRow: mergedSources,
               isDirty: true,
             });
 
-            saveAutocodeMetadata(currentProjectName, allChangedFieldsByRow, allSourcesByRow);
+            saveAutocodeMetadata(currentProjectName, mergedChanged, mergedSources);
             updateAutocodeBaseline(rows);
 
             const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/score`, {
@@ -1116,15 +1275,27 @@ export default function CodingPage() {
             try {
               const rows = ("updated_attributes" in r && r.updated_attributes) ? r.updated_attributes : null;
               if (rows) {
+                const prevChanged = projectDataCache[projectName]?.changedFieldsByRow ?? {};
+                const prevSources = projectDataCache[projectName]?.fieldSourcesByRow ?? {};
+                const mergedChanged: Record<number, string[]> = { ...prevChanged };
+                for (const [k, v] of Object.entries(projectChangedFieldsByRow)) {
+                  const n = Number(k);
+                  mergedChanged[n] = [...new Set([...(mergedChanged[n] ?? []), ...(v as string[])])];
+                }
+                const mergedSources: Record<number, Record<string, string>> = { ...prevSources };
+                for (const [k, v] of Object.entries(projectSourcesByRow)) {
+                  const n = Number(k);
+                  mergedSources[n] = { ...(mergedSources[n] ?? {}), ...(v as Record<string, string>) };
+                }
                 updateProjectData(projectName, {
                   attrs: rows,
-                  changedFieldsByRow: projectChangedFieldsByRow,
-                  fieldSourcesByRow: projectSourcesByRow,
+                  changedFieldsByRow: mergedChanged,
+                  fieldSourcesByRow: mergedSources,
                   isDirty: true,
                 });
 
                 // Save metadata
-                saveAutocodeMetadata(projectName, projectChangedFieldsByRow, projectSourcesByRow);
+                saveAutocodeMetadata(projectName, mergedChanged, mergedSources);
 
 
                 // Update autocode baseline for this project
@@ -1945,7 +2116,29 @@ export default function CodingPage() {
       }
     }
 
-    editCurrentAttr(field, value);
+    const row = attrs[currentIndex];
+    const { extraUpdates, notifications: logicNotifs } = applyLogicChecks(field, value, row ?? {});
+    if (Object.keys(extraUpdates).length > 0) {
+      editCurrentAttrMany({ [field]: value, ...extraUpdates });
+    } else {
+      editCurrentAttr(field, value);
+    }
+    const infoNotifs = logicNotifs.filter(n => !n.isWarning);
+    const warnNotifs = logicNotifs.filter(n => n.isWarning);
+    if (infoNotifs.length > 0) {
+      toaster.create({
+        title: "Logic check",
+        description: infoNotifs.map(n => n.description).join(" · "),
+        type: "info",
+      });
+    }
+    for (const w of warnNotifs) {
+      toaster.create({
+        title: "Logic check warning",
+        description: w.description,
+        type: "warning",
+      });
+    }
   }, [attrs, currentIndex, editCurrentAttr, editCurrentAttrMany, attrMappings, currentProjectName, updateProjectData]);
 
   // Pagination
@@ -1968,53 +2161,48 @@ export default function CodingPage() {
   }, [currentData.autocodedSegmentCount]);
 
   const commitPage = useCallback(
-    (valStr: string) => {
-      const raw = Number(valStr);
+    (valStr: string, isBlur = false) => {
+      if (valStr.trim() === "" && !isBlur) return;
+      const raw = valStr.trim() === "" ? 1 : Number(valStr);
       if (!Number.isFinite(raw)) return;
-      const clamped = Math.min(Math.max(1, len || 1), raw);
+      const clamped = Math.min(Math.max(1, raw), len || 1);
       gotoPage(clamped);
+      if (isBlur) setPageInput(String(clamped));
     },
     [gotoPage, len]
   );
 
   const commitSegment = useCallback(
-    (valStr: string) => {
-      const raw = Number(valStr);
+    (valStr: string, isBlur = false) => {
+      if (valStr.trim() === "" && !isBlur) return;
+      const raw = valStr.trim() === "" ? 0 : Number(valStr);
       if (!Number.isFinite(raw)) return;
       const clamped = Math.max(0, Math.min(len || 0, raw));
       // Guard against infinite loop if value hasn't changed
-      if (clamped === (currentData.verifiedSegmentCount ?? 0)) return;
+      if (clamped === (currentData.verifiedSegmentCount ?? 0)) {
+        if (isBlur) setSegmentInput(String(clamped));
+        return;
+      }
       updateVerifiedSegmentCount(currentProjectName!, clamped);
     },
     [currentProjectName, len, updateVerifiedSegmentCount, currentData.verifiedSegmentCount]
   );
 
   const commitAutocodedSegment = useCallback(
-    (valStr: string) => {
-      const raw = Number(valStr);
+    (valStr: string, isBlur = false) => {
+      if (valStr.trim() === "" && !isBlur) return;
+      const raw = valStr.trim() === "" ? 0 : Number(valStr);
       if (!Number.isFinite(raw)) return;
       const clamped = Math.max(0, Math.min(len || 0, raw));
       // Guard against infinite loop if value hasn't changed
-      if (clamped === (currentData.autocodedSegmentCount ?? 0)) return;
+      if (clamped === (currentData.autocodedSegmentCount ?? 0)) {
+        if (isBlur) setAutocodedSegmentInput(String(clamped));
+        return;
+      }
       updateAutocodedSegmentCount(currentProjectName!, clamped);
     },
     [currentProjectName, len, updateAutocodedSegmentCount, currentData.autocodedSegmentCount]
   );
-
-  useEffect(() => {
-    const t = setTimeout(() => commitPage(pageInput), 300);
-    return () => clearTimeout(t);
-  }, [pageInput, commitPage]);
-
-  useEffect(() => {
-    const t = setTimeout(() => commitSegment(segmentInput), 300);
-    return () => clearTimeout(t);
-  }, [segmentInput, commitSegment]);
-
-  useEffect(() => {
-    const t = setTimeout(() => commitAutocodedSegment(autocodedSegmentInput), 300);
-    return () => clearTimeout(t);
-  }, [autocodedSegmentInput, commitAutocodedSegment]);
 
   // Warn user before leaving the page (browser close, refresh, etc.)
   useEffect(() => {
@@ -2102,7 +2290,7 @@ export default function CodingPage() {
           h="calc(100vh - 150px)"
         >
           <iframe
-            src="/PSAT coding sheetMar25v2.pdf"
+            src="/PSAT coding sheetMay26.pdf"
             style={{
               width: "100%",
               height: "100%",
@@ -2272,7 +2460,7 @@ export default function CodingPage() {
               <NumberInput.Control />
               <NumberInput.Input
                 placeholder="0"
-                onBlur={() => commitSegment(segmentInput)}
+                onBlur={() => commitSegment(segmentInput, true)}
                 onKeyDown={(ev) => {
                   if (ev.key === "Enter") {
                     ev.currentTarget.blur();
@@ -2299,7 +2487,7 @@ export default function CodingPage() {
               <NumberInput.Control />
               <NumberInput.Input
                 placeholder="0"
-                onBlur={() => commitAutocodedSegment(autocodedSegmentInput)}
+                onBlur={() => commitAutocodedSegment(autocodedSegmentInput, true)}
                 onKeyDown={(ev) => {
                   if (ev.key === "Enter") {
                     ev.currentTarget.blur();
@@ -2324,13 +2512,15 @@ export default function CodingPage() {
             maxW="120px"
             min={1}
             max={len || 1}
-            defaultValue={String(currentPage)}
             value={pageInput}
-            onValueChange={(e) => setPageInput(e.value)}
+            onValueChange={(e) => {
+              const val = e.value.replace(/^0+/, "");
+              setPageInput(val);
+            }}
           >
             <NumberInput.Control />
             <NumberInput.Input
-              onBlur={() => commitPage(pageInput)}
+              onBlur={() => commitPage(pageInput, true)}
               onKeyDown={(ev) => {
                 if (ev.key === "Enter") {
                   ev.currentTarget.blur();
@@ -2363,6 +2553,7 @@ export default function CodingPage() {
             <SegmentScoresCard
               scores={scores[currentIndex] || null}
               projectContributors={projectContributors}
+              onContributorClick={handleContributorClick}
             />
           </Box>
 
@@ -2417,7 +2608,7 @@ export default function CodingPage() {
         >
           <Box flex="1" minH={0} display="flex" flexDirection="column">
             <AttributesPanel
-              row={editedRow}
+              row={currentAttr}
               originalRow={originalCurrentAttr}
               mappings={attrMappings}
               panelHeight={undefined} // Let it fill the parent
@@ -2427,6 +2618,7 @@ export default function CodingPage() {
               changedFields={changedFieldsByRow[currentIndex] || []}
               fieldSources={fieldSourcesByRow[currentIndex] || {}}
               highlightColor="yellow"
+              activeGroupTab={activeAttributeGroupTab}
               onEditOptions={(field) => {
                 const raw = currentAttr?.[field];
                 let currentValue = raw != null ? String(raw) : null;

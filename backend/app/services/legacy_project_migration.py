@@ -13,6 +13,7 @@ DEFAULT_CONFIG = {
     "destination_folder": "../data",
     "in_folder": "../in",
 }
+_REGISTRY_BACKUP_DIRNAME = "_registry_backups"
 _QUARTER_SUFFIX_RE = re.compile(r"(?:[_\-\s]*(?:[1-4]Q\d{2,4}|Q[1-4]\d{2,4}))$", re.IGNORECASE)
 
 
@@ -62,25 +63,53 @@ def bootstrap_profiles_storage(repo_root: Path | None = None, dry_run: bool = Fa
     root = Path(repo_root or _repo_root()).resolve()
     profiles_root = root / "profiles"
     registry_path = profiles_root / "profiles.json"
+    backup_root = profiles_root / _REGISTRY_BACKUP_DIRNAME
 
     created_root = False
     created_registry = False
+    blocked_registry_creation = False
+    blocked_reason = None
     if not profiles_root.exists():
         created_root = True
         if not dry_run:
             profiles_root.mkdir(parents=True, exist_ok=True)
 
     if not registry_path.exists():
-        created_registry = True
-        if not dry_run:
-            profiles_root.mkdir(parents=True, exist_ok=True)
-            registry_path.write_text(json.dumps({"version": 1, "profiles": []}, indent=2) + "\n", encoding="utf-8")
+        existing_profile_dirs = [
+            child.name
+            for child in profiles_root.iterdir()
+            if child.is_dir() and child.name not in {_REGISTRY_BACKUP_DIRNAME, "__pycache__"} and not child.name.startswith(".")
+        ] if profiles_root.exists() else []
+        has_backups = backup_root.exists() and any(candidate.suffix == ".json" for candidate in backup_root.iterdir())
+
+        if existing_profile_dirs or has_backups:
+            blocked_registry_creation = True
+            reason_parts = []
+            if existing_profile_dirs:
+                detail = ", ".join(existing_profile_dirs[:8])
+                if len(existing_profile_dirs) > 8:
+                    detail += ", ..."
+                reason_parts.append(f"existing profile directories: {detail}")
+            if has_backups:
+                reason_parts.append(f"existing registry backups under {backup_root}")
+            blocked_reason = (
+                "Refusing to bootstrap an empty profiles registry because local profile storage already exists ("
+                + "; ".join(reason_parts)
+                + ")."
+            )
+        else:
+            created_registry = True
+            if not dry_run:
+                profiles_root.mkdir(parents=True, exist_ok=True)
+                registry_path.write_text(json.dumps({"version": 1, "profiles": []}, indent=2) + "\n", encoding="utf-8")
 
     return {
         "profiles_root": str(profiles_root),
         "registry_path": str(registry_path),
         "created_root": created_root,
         "created_registry": created_registry,
+        "blocked_registry_creation": blocked_registry_creation,
+        "blocked_reason": blocked_reason,
     }
 
 

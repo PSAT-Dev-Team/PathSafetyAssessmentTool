@@ -18,15 +18,22 @@ export default function LandingPage() {
     error,
     createProfile,
     login,
+    resetProfilePin,
+    updateProfile,
   } = useProfile();
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [loginPin, setLoginPin] = useState("");
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [manageDialogOpen, setManageDialogOpen] = useState(false);
   const [newProfileName, setNewProfileName] = useState("");
   const [newProfileDivision, setNewProfileDivision] = useState("");
   const [newProfilePin, setNewProfilePin] = useState("");
-  const [busyAction, setBusyAction] = useState<"login" | "create" | null>(null);
+  const [manageProfileName, setManageProfileName] = useState("");
+  const [manageProfileDivision, setManageProfileDivision] = useState("");
+  const [manageCurrentPin, setManageCurrentPin] = useState("");
+  const [manageNewPin, setManageNewPin] = useState("");
+  const [busyAction, setBusyAction] = useState<"login" | "create" | "update" | "reset-pin" | null>(null);
 
   useEffect(() => {
     if (selectedProfileId && profiles.some((profile) => profile.id === selectedProfileId)) {
@@ -52,10 +59,16 @@ export default function LandingPage() {
     [profiles, selectedProfileId],
   );
 
+  const selectedProfileLastActive = useMemo(() => {
+    if (!selectedProfile?.last_active_at) {
+      return "No activity recorded yet.";
+    }
+    const parsed = new Date(selectedProfile.last_active_at);
+    return Number.isNaN(parsed.getTime()) ? selectedProfile.last_active_at : parsed.toLocaleString();
+  }, [selectedProfile]);
+
   const canOpenFirstProfileSetup = profiles.length === 0 && busyAction === null && !loading;
-  const canEnterSelectedProfile = Boolean(
-    selectedProfile && activeProfile && activeProfile.id === selectedProfile.id && busyAction === null && !loading,
-  );
+  const canManageSelectedProfile = Boolean(selectedProfile && busyAction === null && !loading);
   const canUseStartButton = Boolean((selectedProfile || canOpenFirstProfileSetup) && busyAction === null && !loading);
   const startButtonLabel = selectedProfile
     ? `START AS ${selectedProfile.name}`
@@ -87,12 +100,34 @@ export default function LandingPage() {
     setNewProfilePin("");
   };
 
-  const startPSAT = () => {
-    if (canEnterSelectedProfile) {
-      navigate("/home");
+  const resetManageDialog = () => {
+    setManageDialogOpen(false);
+    setManageProfileName("");
+    setManageProfileDivision("");
+    setManageCurrentPin("");
+    setManageNewPin("");
+  };
+
+  const openManageDialog = () => {
+    if (!selectedProfile) {
+      toaster.create({ description: "Select a profile first.", type: "warning" });
       return;
     }
+    setManageProfileName(selectedProfile.name);
+    setManageProfileDivision(selectedProfile.division);
+    setManageCurrentPin("");
+    setManageNewPin("");
+    setManageDialogOpen(true);
+  };
 
+  const closeManageDialog = () => {
+    if (busyAction === "update" || busyAction === "reset-pin") {
+      return;
+    }
+    resetManageDialog();
+  };
+
+  const startPSAT = () => {
     if (canOpenFirstProfileSetup) {
       openCreateDialog();
       return;
@@ -155,6 +190,63 @@ export default function LandingPage() {
     }
   };
 
+  const handleUpdateProfile = async () => {
+    if (!selectedProfile) {
+      toaster.create({ description: "Select a profile first.", type: "warning" });
+      return;
+    }
+    try {
+      setBusyAction("update");
+      const result = await updateProfile(
+        selectedProfile.id,
+        manageCurrentPin,
+        manageProfileName,
+        manageProfileDivision,
+      );
+      setSelectedProfileId(result.profile.id);
+      resetManageDialog();
+      toaster.create({
+        title: "Profile updated",
+        description: `${result.profile.name} has been updated.`,
+        type: "success",
+      });
+    } catch (nextError) {
+      toaster.create({
+        title: "Profile update failed",
+        description: nextError instanceof Error ? nextError.message : "Failed to update the profile.",
+        type: "error",
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleResetPin = async () => {
+    if (!selectedProfile) {
+      toaster.create({ description: "Select a profile first.", type: "warning" });
+      return;
+    }
+    try {
+      setBusyAction("reset-pin");
+      const result = await resetProfilePin(selectedProfile.id, manageCurrentPin, manageNewPin);
+      setSelectedProfileId(result.profile.id);
+      resetManageDialog();
+      toaster.create({
+        title: "PIN updated",
+        description: `PIN updated for ${result.profile.name}.`,
+        type: "success",
+      });
+    } catch (nextError) {
+      toaster.create({
+        title: "PIN reset failed",
+        description: nextError instanceof Error ? nextError.message : "Failed to update the PIN.",
+        type: "error",
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   return (
     <main className="landing-root" role="main">
       {/* 右侧品牌区：logo + 文字 */}
@@ -179,14 +271,24 @@ export default function LandingPage() {
               <p>Select a local profile on this device, then start the app.</p>
             </div>
 
-            <button
-              type="button"
-              className="profile-create-btn"
-              onClick={openCreateDialog}
-              disabled={busyAction !== null}
-            >
-              Create Profile
-            </button>
+            <div className="profile-panel-actions">
+              <button
+                type="button"
+                className="profile-manage-btn"
+                onClick={openManageDialog}
+                disabled={!canManageSelectedProfile}
+              >
+                Manage Selected
+              </button>
+              <button
+                type="button"
+                className="profile-create-btn"
+                onClick={openCreateDialog}
+                disabled={busyAction !== null}
+              >
+                Create Profile
+              </button>
+            </div>
           </div>
 
           {loading ? (
@@ -313,7 +415,7 @@ export default function LandingPage() {
                     type="text"
                     value={newProfileName}
                     onChange={(event) => setNewProfileName(event.target.value)}
-                    placeholder="Profile name"
+                    placeholder="LTA Employee Email"
                     autoFocus
                   />
                   <input
@@ -354,6 +456,114 @@ export default function LandingPage() {
                   disabled={busyAction === "create" || newProfileName.trim().length === 0 || newProfileDivision.trim().length === 0 || newProfilePin.trim().length === 0}
                 >
                   {busyAction === "create" ? "Creating..." : "Create Profile"}
+                </Button>
+              </Dialog.Footer>
+
+              <Dialog.CloseTrigger asChild>
+                <CloseButton size="sm" />
+              </Dialog.CloseTrigger>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={manageDialogOpen} onOpenChange={(details) => !details.open && closeManageDialog()} size="sm" unmountOnExit>
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Manage Profile</Dialog.Title>
+              </Dialog.Header>
+
+              <Dialog.Body>
+                <div className="landing-dialog-copy">
+                  Update the selected profile details or rotate the PIN. The current PIN is required for both actions.
+                </div>
+                <div className="landing-dialog-status">Last active: {selectedProfileLastActive}</div>
+                <div className="landing-dialog-form">
+                  <div className="landing-dialog-section">
+                    <div className="landing-dialog-section-title">Profile details</div>
+                    <input
+                      id="manageProfileName"
+                      className="landing-dialog-input"
+                      type="text"
+                      value={manageProfileName}
+                      onChange={(event) => setManageProfileName(event.target.value)}
+                      placeholder="Profile name"
+                      autoFocus
+                    />
+                    <input
+                      id="manageProfileDivision"
+                      className="landing-dialog-input"
+                      type="text"
+                      value={manageProfileDivision}
+                      onChange={(event) => setManageProfileDivision(event.target.value)}
+                      placeholder="Division"
+                    />
+                  </div>
+                  <div className="landing-dialog-section">
+                    <div className="landing-dialog-section-title">PIN confirmation</div>
+                    <input
+                      id="manageCurrentPin"
+                      className="landing-dialog-input"
+                      type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={manageCurrentPin}
+                      onChange={(event) => setManageCurrentPin(event.target.value)}
+                      placeholder="Current PIN"
+                    />
+                    <input
+                      id="manageNewPin"
+                      className="landing-dialog-input"
+                      type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={manageNewPin}
+                      onChange={(event) => setManageNewPin(event.target.value)}
+                      placeholder="New 4 to 12 digit PIN"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && manageNewPin.trim().length > 0) {
+                          event.preventDefault();
+                          void handleResetPin();
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              </Dialog.Body>
+
+              <Dialog.Footer className="landing-dialog-actions">
+                <Button variant="outline" onClick={closeManageDialog} disabled={busyAction === "update" || busyAction === "reset-pin"}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => void handleUpdateProfile()}
+                  loading={busyAction === "update"}
+                  disabled={
+                    busyAction === "update"
+                    || busyAction === "reset-pin"
+                    || manageProfileName.trim().length === 0
+                    || manageProfileDivision.trim().length === 0
+                    || manageCurrentPin.trim().length === 0
+                  }
+                >
+                  {busyAction === "update" ? "Saving..." : "Save Details"}
+                </Button>
+                <Button
+                  colorPalette="green"
+                  onClick={() => void handleResetPin()}
+                  loading={busyAction === "reset-pin"}
+                  disabled={
+                    busyAction === "update"
+                    || busyAction === "reset-pin"
+                    || manageCurrentPin.trim().length === 0
+                    || manageNewPin.trim().length === 0
+                  }
+                >
+                  {busyAction === "reset-pin" ? "Updating..." : "Reset PIN"}
                 </Button>
               </Dialog.Footer>
 

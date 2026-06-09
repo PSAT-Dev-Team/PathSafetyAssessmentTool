@@ -33,7 +33,7 @@ def generate_pptx():
             if report_config.get('showTitleText', True):
                 txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(1))
                 tf = txBox.text_frame
-                tf.text = "Path Analysis Executive Summary"
+                tf.text = "Path Safety Analysis Executive Summary"
                 tf.paragraphs[0].font.bold = True
                 tf.paragraphs[0].font.size = Pt(28)
                 
@@ -222,7 +222,8 @@ def segment_details():
 
                 row = attrs_df.iloc[seg_index]
 
-                image_ref = str(row.get("Image Reference", "") or "").strip()
+                # Try both capitalisation variants of the image reference column
+                image_ref = str(row.get("Image reference", "") or row.get("Image Reference", "") or "").strip()
                 image_url = f"/api/projects/{project_name}/images/{image_ref}" if image_ref else None
 
                 contributions = []

@@ -181,6 +181,21 @@ export interface LogoutProfileResult {
   overview: ProfilesOverview;
 }
 
+export interface UpdateProfileResult {
+  profile: ProfileSummary;
+  overview: ProfilesOverview;
+}
+
+export interface ResetProfilePinResult {
+  profile: ProfileSummary;
+  overview: ProfilesOverview;
+}
+
+export interface RecordProfileActivityResult {
+  ok: boolean;
+  recorded: boolean;
+}
+
 export interface MigrateLegacyProjectsResult {
   moved: string[];
   skipped: Array<{ name: string; reason: string }>;
@@ -222,6 +237,49 @@ export async function logoutProfile(): Promise<LogoutProfileResult> {
   });
   if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as LogoutProfileResult;
+}
+
+export async function updateProfile(
+  profileId: string,
+  currentPin: string,
+  name: string,
+  division: string,
+): Promise<UpdateProfileResult> {
+  const res = await fetch(`/api/profiles/${encodeURIComponent(profileId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_pin: currentPin, name, division }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as UpdateProfileResult;
+}
+
+export async function resetProfilePin(
+  profileId: string,
+  currentPin: string,
+  newPin: string,
+): Promise<ResetProfilePinResult> {
+  const res = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/reset-pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_pin: currentPin, new_pin: newPin }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as ResetProfilePinResult;
+}
+
+export async function recordProfileActivity(
+  eventType: string,
+  payload?: Record<string, unknown>,
+  projectName?: string,
+): Promise<RecordProfileActivityResult> {
+  const res = await fetch("/api/profiles/activity", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event_type: eventType, payload, project_name: projectName }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as RecordProfileActivityResult;
 }
 
 export async function migrateLegacyProjects(projectNames?: string[]): Promise<MigrateLegacyProjectsResult> {
@@ -698,6 +756,27 @@ export async function calculateScore(project: string): Promise<CalculateScoreRes
 }
 
 /**
+ * Fetch previously-calculated cycleRAP scores for the entire project.
+ *
+ * This is a read-only GET that returns the persisted results WITHOUT
+ * recomputing or writing to disk (unlike calculateScore's POST /score).
+ * Use this for read paths like Path Analysis; fall back to calculateScore
+ * only when no persisted results exist yet.
+ *
+ * @param project - Project name
+ * @returns Persisted score results (result_rows may be empty if never scored)
+ */
+export async function fetchProjectResults(project: string): Promise<CalculateScoreResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(project)}/results`, {
+    method: "GET",
+  });
+  if (!res.ok) {
+    throw new Error(await readError(res));
+  }
+  return (await res.json()) as CalculateScoreResult;
+}
+
+/**
  * Calculate cycleRAP scores for a single row
  *
  * @param project - Project name
@@ -1108,6 +1187,7 @@ export type TreatmentEffectivenessResult = {
   ok: boolean;
   total_segments: number;
   counts: Record<string, number>;
+  applicable_counts: Record<string, number>;
 };
 
 export async function getTreatmentEffectiveness(
@@ -1287,6 +1367,25 @@ export async function downloadFilteredImages(payload: { projects: Record<string,
   if (!res.ok) {
     const errorText = await readError(res);
     throw new Error(errorText || "Download failed");
+  }
+
+  return res.blob();
+}
+
+/**
+ * Export filtered segments as a zipped shapefile.
+ * @param payload - Map of project names to list of image references (current filtered view)
+ */
+export async function exportShapefile(payload: { projects: Record<string, string[]> }): Promise<Blob> {
+  const res = await fetch("/api/projects/export-shapefile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorText = await readError(res);
+    throw new Error(errorText || "Shapefile export failed");
   }
 
   return res.blob();

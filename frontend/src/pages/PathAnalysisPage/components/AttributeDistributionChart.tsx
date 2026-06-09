@@ -37,8 +37,6 @@ interface AttributeDistributionChartProps {
   categoryData: { category: string; count: number; color: string }[];
   selectedAttribute: string | null;
   categoryStatus?: AttributeStatus[];
-  showPieChart?: boolean;
-  showBarChart?: boolean;
   totalSegmentsLoaded?: number;
   totalSegmentsViewed?: number;
 }
@@ -47,20 +45,13 @@ export default function AttributeDistributionChart({
   categoryData,
   selectedAttribute,
   categoryStatus = [],
-  showPieChart = true,
-  showBarChart = true,
   totalSegmentsLoaded,
   totalSegmentsViewed,
 }: AttributeDistributionChartProps) {
   const [chartTypeState, setChartTypeState] = useState<"pie" | "bar">("pie");
 
-  const activeChartType = useMemo(() => {
-    if (showPieChart && !showBarChart) return "pie";
-    if (!showPieChart && showBarChart) return "bar";
-    return chartTypeState;
-  }, [showPieChart, showBarChart, chartTypeState]);
-
-  const showToggle = showPieChart && showBarChart;
+  const activeChartType = chartTypeState;
+  const showToggle = true;
 
   // Calculate total for percentage
   const total = useMemo(() => {

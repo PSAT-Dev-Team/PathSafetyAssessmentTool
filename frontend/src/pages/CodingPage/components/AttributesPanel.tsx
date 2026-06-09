@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { AttributeRow, AttrMappings } from "../../../api";
 import {
   Card,
@@ -11,9 +11,11 @@ import {
   Separator,
   Tabs,
   Button,
+  Flex,
 } from "@chakra-ui/react";
 import { FaSyncAlt } from "react-icons/fa";
-import { LuPencil } from "react-icons/lu";
+import { LuPencil, LuInfo } from "react-icons/lu";
+import { Tooltip } from "../../../components/ui/tooltip";
 import { useState } from "react";
 import { toaster } from "../../../components/ui/toaster";
 import "./AttributesPanel.css";
@@ -39,6 +41,64 @@ const CHILD_REQUIRES_PARENT_PRESENT: Record<string, string> = {
   "Crossing Type": "Crossing Facility",
 };
 
+/** Hover tooltips keyed by real row key (what `k` is in the render loop). */
+const ATTRIBUTE_TOOLTIPS: Record<string, string> = {
+  // Facility configuration
+  "Area type": "Classify the surrounding land use. Singapore paths are mostly Suburban (HDB/residential). Use Urban for city area and dense commercial zones, Industrial for business parks and logistics areas, Recreational for parks. Not scored directly but provides environmental context.",
+  "Facility Type": "The type of cycling facility at this segment. Off-Road Bicycle Path (dedicated red tarmac) carries the lowest risk; Mixed Traffic Road Lane the highest. Most Singapore cycling facility segments are Multi-Use Path or Off-Road Bicycle Path. Drives VB and BP scores significantly.",
+  "Adjacent Sidewalk 0-1m": "Is there a footpath or pedestrian walkway within arm's reach of the cycling path? Common in Singapore where footpath/ covered linkways run immediately beside cycling tracks. Increases BP (cyclist–pedestrian conflict) risk.",
+  "Adjacent Sidewalk 1-3m": "Pedestrian footpath further away but still within the risk zone. Contributes to BP score when pedestrians are likely to stray into the cycling lane at lower severity.",
+  "Adjacent Road Lane 0-1m": "Is there a motor vehicle lane essentially directly beside the path? Look for road surface, kerb edge, or live traffic in the image. A primary VB trigger. CV auto-codes this for most segments — verify when ambiguous.",
+  "Adjacent Road Lane 1-3m": "A motor vehicle lane nearby but separated by a small buffer. Still a VB risk factor. CV auto-codes; confirm when traffic is visible in the mid-ground of the image.",
+  "Adjacent Vehicle Parking 0-1m": "Is there a car park bay or on-street parking directly beside the path? Door-opening hazard and sight-line obstruction. Common along HDB estate perimeter roads and neighbourhood carparks.",
+  "Adjacent Vehicle Parking 1-3m": "Parked vehicles slightly further out from the cycling facility. Still contributes to SB departure risk at lower severity.",
+  "Adjacent object or level change 0-1m": "A non-vehicle edge hazard <= 60cm high immediately beside the path without safety barrier: concrete drain, kerb drop, retaining wall, or steep embankment. CV mirrors the Adjacent Road Lane 0–1m result. Affects SB score.",
+  "Adjacent object or level change 1-3m": "Same class of edge hazard at 1–3m distance. Contributes to SB departure risk at lower severity.",
+
+  // Facility clear width
+  "Facility access": "Can cyclists enter and exit this segment without obstruction? Code Inadequate if there are bollard gates, anti-cyclist/motorcycle chicanes, narrow entry posts, non barrier free access or raised kerb lips at the segment boundary.",
+  "Light Segregation": "Is there a physical separator between the cycling path and motor vehicle traffic? Covers kerbs, railings, and flexible post delineators. Default is Present when a path is detected. A protective factor — reduces VB risk when present.",
+  "Fixed Obstacle on Facility": "A permanent physical object on the cycling path: lamp post, utility pillar, bollard, fence, or large vegetation. Check the image carefully for anything cyclists must steer around. Use FO Type sub-field to record the type of fixed obstacle.",
+  "Non-Fixed Obstacle on Facility": "A movable or temporary object blocking or narrowing the path: litter bin, traffic cone, construction barrier, or parked bicycle/motorcycle. Use NFO Type sub-field to choose the type of non fixed obstacle.",
+  "Facility Width per Direction": "Usable cycling width in the direction of travel. Very Narrow paths carry the highest risk multiplier; Wide paths are neutral. GIS auto-codes from path width data based on Dec 2024 LIDAR survey. Use the Facility Width Sub-category to record the approximate width range.",
+  "Width Restriction": "Is there a local pinch point mid-segment that narrows the path below its general width by at least 20% — e.g. a signpost, tree stump, or irregular bollard arrangement? Adds risk even when the overall width is adequate.",
+  "Adjacent Severe Hazard 0-1m": "A high-consequence hazard immediately beside the path that would cause serious injury if struck: deep open drain, bridge parapet gap, or unguarded steep drop. Increases SB severity substantially. Common at elevated cycling facility sections and waterway paths.",
+  "Adjacent Severe Hazard 1-3m": "Same class of severe hazard at 1–3m distance. Still a significant SB severity factor but at lower severity.",
+  "Line of Sight": "Whether cyclists have clear forward visibility at curves or obstructions. Code if clearly observable; otherwise leave as-is.",
+
+  // Facility surface conditions
+  "Delineation": "Is there visible marking separating cycling space from pedestrian space or centreline separating the directions of cyclist travel? In Singapore: red tarmac, red-and-white painted lines, shared-path arrows, or \"Cyclists\" / \"Pedestrians\" signage. CV model auto-codes this — verify when markings are faded or absent.",
+  "Major Surface Deformation or Drain Opening": "Is there a significant structural surface defect: deep pothole, cracked and raised joint, exposed drain grating with a wheel-trapping gap, or severely buckled surface?",
+  "Loose or slippery surface": "Is there loose material, wet algae, fallen leaves, sand, or a slippery coating that makes the surface slippery? Use the Issue Type sub-field to specify the material.",
+  "Grade": "Is this segment on a slope steep enough to affect cycling control? Most Singapore paths are flat — flag ramp sections, hillside paths. Check the gradient profile in the GIS context panel if available.",
+  "Curvature": "Does this segment include a tight bend that forces sudden steering or cuts forward visibility? Use the Curvature Sub-category to record the approximate bend radius or path intersection.",
+  "Tram or Train Rails": "Are there rail tracks crossing or embedded in the cycling path at a shallow angle? Rail grooves are a well-known bicycle-wheel trap. Rare in Singapore, check near LRT or KTM level crossings.",
+  "Street Lighting": "Is the segment illuminated at night by street lamps or dedicated path lighting? Most Singapore urban and suburban paths have lighting. Default is Present.",
+
+  // Intersection
+  "Intersection Approach": "How is the cycling approach to a road crossing arranged? Shared means the cyclist merges with or crosses through motor vehicle flow without a dedicated cycling route. Separate/NA means a clearly marked dedicated cyclist approach exists, or there is no crossing at this segment. Most signalised Singapore crossings with a bicycle waiting box qualify as Separate.",
+  "Intersection or Road Crossing": "Is there a road junction or formal road crossing within this segment. GIS auto-codes from the road crossing layer.",
+  "Crossing Facility": "Is there a formal aid to help cyclists cross the road: zebra crossing, signalised pedestrian crossing, or a cycle-specific signal phase? Not Present raises VB risk. Use the Crossing Type sub-field to specify what is present.",
+  "Property Access": "Does a driveway, carpark entrance, or building service access cut across the cycling path within this segment? Reversing or turning vehicles create unpredictable conflicts. Very common at HDB multi-storey carparks, shopping centres, schools and industrial units.",
+  "Pedestrian Crossing": "Is there a potential pedestrian crossing across this segment that cyclists must also navigate through? Often co-located with MRT exits, bus stops, activity generating nodes, and near to formal crossings.",
+  "Intersecting Bicycle Facility": "Does another cycling path or PCN route cross or join the current segment? Look for bicycle route merge points and junctions visible on the map.",
+  "Number of lanes – adjacent road": "How many lanes in each direction does the road running beside this segment have? Multi-lane roads increase VB risk. GIS auto-codes from the kerb layer; manually verify for complex or split-road arrangements.",
+  "Number of lanes – intersecting road": "How many lanes does the road being crossed at this segment's intersection have? More lanes mean a longer, more exposed crossing. Increases VB risk. At development accesses and crossings.",
+
+  // Flow & Speed
+  "Flow Direction": "Is cycling occurring or permitted in both directions on this path? Two-way flow introduces head-on conflict risk. Most Singapore off road cycling facility are bi-directional by convention even where no physical barrier exists. Check for directional arrow markings on cycling facilities.",
+  "Peak pedestrian flow along or across facility": "How busy is this path or crossing with pedestrians at peak hours? GIS auto-codes from sensor and count data where available. Higher pedestrian activity directly increases BP (cyclist–pedestrian) risk.",
+  "Peak bicycle/LV traffic flow": "How busy is the cycling path at peak hour? GIS auto-codes from count sensors. Consider paths near MRT stations, schools, or cycling rental hubs.",
+  "Observed proportion of cargo bikes and mopeds": "What proportion of cyclists use cargo bikes, delivery e-bikes, or large LPMs? Low is the default. Moderate-to-high increases BB (cyclist–cyclist) severity. Consider proximity to delivery hubs, industrial clusters, or food court corridors.",
+  "Heavy vehicle flow": "How much heavy vehicle traffic (lorries, buses, prime movers) uses the adjacent road? Moderate-to-high increases VB risk. GIS auto-codes using bus lane proximity as a proxy.",
+  "Bicycle/LV speed – average": "Estimated average cycling speed on this segment. Higher speed increases severity for fall, speed-related, and vehicle-conflict scenarios. Most Singapore shared paths are designed for lower speeds; flag where e-bikes are common or where path geometry encourages faster riding.",
+  "Bicycle/LV speed differential": "How much does cycling speed vary between faster and slower users on this path? High differential (e.g. speed e-bikes overtaking pedestrian-pace cyclists) increases BB severity. Common on wide shared paths near rental bike stations.",
+  "Road AADT": "Annual Average Daily Traffic: total vehicles using the adjacent road per day. Obtained from LTA ERP2 data. Higher AADT increases VB score via a stepped lookup.",
+  "Road operating speed (mean)": "Observed average vehicle speed on the adjacent road. GIS auto-codes from the ERP2 LinkID layer. Higher speed increases multiplier for vehicle-bicycle conflict severity.",
+  "Road operating speed (unit)": "Select the unit for Road Operating Speed (mean). Singapore roads use km/h.",
+  "Road speed limit": "The posted legal speed limit of the adjacent road. GIS auto-codes from the speed limit layer. Displayed for context only, does not feed directly into CycleRAP scoring formulas.",
+};
+
 /** ====== Props ====== */
 type Props = {
   row: AttributeRow | null;
@@ -55,6 +115,7 @@ type Props = {
   highlightColor?: "green" | "yellow";
   flex?: number | string;
   onEditOptions?: (fieldName: string) => void;
+  activeGroupTab?: string | null;
 };
 
 /** ====== Group ordering (tab order) ====== */
@@ -67,6 +128,12 @@ const GROUP_ORDER = [
 ] as const;
 
 const OPTIONAL_FIELDS_HIDE_WHEN_EMPTY = new Set(["Gradient Status"]);
+
+const normalizeLookupToken = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 
 /** ====== Display fields under each group (keep your original order) ====== */
 const GROUP_RULES: Record<(typeof GROUP_ORDER)[number], string[]> = {
@@ -187,6 +254,40 @@ const KEY_ALIASES: Record<string, string> = {
   "Number of lanes – intersecting road": "Number of lanes – intersecting road",
 };
 
+const CONTRIBUTOR_GROUP_INDEX: Record<string, (typeof GROUP_ORDER)[number]> = (() => {
+  const index: Record<string, (typeof GROUP_ORDER)[number]> = {};
+  for (const group of GROUP_ORDER) {
+    for (const displayName of GROUP_RULES[group]) {
+      const realKey = KEY_ALIASES[displayName] ?? displayName;
+      index[normalizeLookupToken(displayName)] = group;
+      index[normalizeLookupToken(realKey)] = group;
+    }
+  }
+  return index;
+})();
+
+export function resolveContributorTabGroup(contributorName: string): string | null {
+  const normalized = normalizeLookupToken(String(contributorName || ""));
+  if (!normalized) {
+    return null;
+  }
+
+  const direct = CONTRIBUTOR_GROUP_INDEX[normalized];
+  if (direct) {
+    return direct;
+  }
+
+  let bestMatch: { group: (typeof GROUP_ORDER)[number]; tokenLength: number } | null = null;
+  for (const [token, group] of Object.entries(CONTRIBUTOR_GROUP_INDEX)) {
+    if (normalized.includes(token) || token.includes(normalized)) {
+      if (!bestMatch || token.length > bestMatch.tokenLength) {
+        bestMatch = { group, tokenLength: token.length };
+      }
+    }
+  }
+  return bestMatch?.group ?? null;
+}
+
 /** ====== Utils ====== */
 function groupEntries(row: AttributeRow) {
   // Build a copy of the row that includes any missing fields defined in GROUP_RULES
@@ -260,6 +361,7 @@ export default function AttributesPanel({
   highlightMessage = "*Highlighted attributes have been modified from the original values",
   highlightColor = "green",
   flex,
+  activeGroupTab,
   projectName, // Passed from parent
   onEditOptions,
 }: Props & { projectName?: string }) {
@@ -321,6 +423,28 @@ export default function AttributesPanel({
   }, [grouped]);
 
   const defaultTab = groupsWithFields[0] ?? "Facility configuration";
+  const [selectedTab, setSelectedTab] = useState(defaultTab);
+
+  useEffect(() => {
+    if (groupsWithFields.length === 0) {
+      return;
+    }
+    if (!groupsWithFields.includes(selectedTab as any)) {
+      setSelectedTab(defaultTab);
+    }
+  }, [groupsWithFields, selectedTab, defaultTab]);
+
+  // Keep a ref so the effect below can read the latest groupsWithFields without
+  // making it a trigger — otherwise every row change (new object reference) would
+  // re-apply activeGroupTab and jump the tab on every attribute edit.
+  const groupsWithFieldsRef = useRef(groupsWithFields);
+  groupsWithFieldsRef.current = groupsWithFields;
+
+  useEffect(() => {
+    if (activeGroupTab && groupsWithFieldsRef.current.includes(activeGroupTab as any)) {
+      setSelectedTab(activeGroupTab as any);
+    }
+  }, [activeGroupTab]);
 
   // Check if any fields have been changed (for showing the info text)
   const hasChangedFields = changedFieldsSet.size > 0;
@@ -400,7 +524,7 @@ export default function AttributesPanel({
 
       {/* Tabs occupy the body; content area scrolls independently */}
       <Card.Body display="flex" flexDir="column" minH={0} p="0">
-        <Tabs.Root defaultValue={defaultTab}>
+        <Tabs.Root value={selectedTab} onValueChange={(e) => setSelectedTab(e.value as any)}>
           <Tabs.List
             px="2"
             py="2"
@@ -453,19 +577,41 @@ export default function AttributesPanel({
                           transition="all 0.2s"
                         >
                           <Box display="flex" alignItems="center" justifyContent="space-between" gap="1">
-                            <Text
-                              fontSize="xs"
-                              color={isEdited ? "red.800" : isChanged ? changedText : "gray.600"}
-                              fontWeight={isEdited || isChanged ? "bold" : "semibold"}
-                            >
-                              {k}
-                              {isChanged && source && ` ✨ (${source})`}
-                              {isEdited && (
-                                <Text as="span" color="red.600" fontWeight="bold" ml="1">
-                                  (Manual Edit Done)
-                                </Text>
+                            <Flex align="center" gap={1}>
+                              <Text
+                                fontSize="xs"
+                                color={isEdited ? "red.800" : isChanged ? changedText : "gray.600"}
+                                fontWeight={isEdited || isChanged ? "bold" : "semibold"}
+                              >
+                                {k}
+                                {isChanged && source && ` ✨ (${source})`}
+                                {isEdited && (
+                                  <Text as="span" color="red.600" fontWeight="bold" ml="1">
+                                    (Manual Edit Done)
+                                  </Text>
+                                )}
+                              </Text>
+                              {ATTRIBUTE_TOOLTIPS[k] && (
+                                <Tooltip
+                                  content={ATTRIBUTE_TOOLTIPS[k]}
+                                  showArrow
+                                  portalled
+                                  openDelay={100}
+                                  closeOnClick={false}
+                                  contentProps={{ maxW: "280px", fontSize: "xs" }}
+                                >
+                                  <Box
+                                    as="span"
+                                    color="gray.400"
+                                    cursor="default"
+                                    lineHeight={1}
+                                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                  >
+                                    <LuInfo size={12} />
+                                  </Box>
+                                </Tooltip>
                               )}
-                            </Text>
+                            </Flex>
                             {PARENT_TO_CHILD_FIELD[k] && onEditOptions && (() => {
                               const childField = PARENT_TO_CHILD_FIELD[k];
                               const parentKey = CHILD_REQUIRES_PARENT_PRESENT[childField];

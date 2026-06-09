@@ -17,6 +17,9 @@ _STATE_LOCK = threading.RLock()
 _ACTIVE_PROFILE_ID: str | None = None
 _PIN_RE = re.compile(r"^\d{4,12}$")
 _LEGACY_DIVISION = "Unassigned"
+_REGISTRY_BACKUP_DIRNAME = "_registry_backups"
+_LATEST_REGISTRY_BACKUP_FILENAME = "profiles.latest.json"
+_PROFILE_SUPPORT_DIRS = {_REGISTRY_BACKUP_DIRNAME, "__pycache__"}
 
 
 def _repo_root() -> Path:
@@ -29,6 +32,10 @@ def _profiles_root() -> Path:
 
 def _registry_path() -> Path:
     return _profiles_root() / "profiles.json"
+
+
+def _registry_backups_root() -> Path:
+    return _profiles_root() / _REGISTRY_BACKUP_DIRNAME
 
 
 def _legacy_projects_root() -> Path:
@@ -48,30 +55,7 @@ def _default_state() -> dict:
     return {"version": 1, "profiles": []}
 
 
-def _clean_division(division: str | None, *, allow_default: bool = False) -> str:
-    clean_division = " ".join(str(division or "").split())
-    if clean_division:
-        return clean_division
-    if allow_default:
-        return _LEGACY_DIVISION
-    raise ValueError("Division is required")
-
-
-def _ensure_root() -> None:
-    _profiles_root().mkdir(parents=True, exist_ok=True)
-
-
-def _load_state() -> dict:
-    _ensure_root()
-    registry_path = _registry_path()
-    if not registry_path.exists():
-        state = _default_state()
-        _save_state(state)
-        return state
-
-    with open(registry_path, "r", encoding="utf-8") as handle:
-        state = json.load(handle)
-
+def _normalize_state(state: dict) -> dict:
     if not isinstance(state, dict):
         raise ValueError("Profile registry is invalid")
 
@@ -83,13 +67,171 @@ def _load_state() -> dict:
     return state
 
 
-def _save_state(state: dict) -> None:
-    _ensure_root()
-    registry_path = _registry_path()
-    temp_path = registry_path.with_suffix(".tmp")
+def _profile_storage_dirs() -> list[Path]:
+    root = _profiles_root()
+    if not root.exists():
+        return []
+
+    result: list[Path] = []
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        if child.name.startswith(".") or child.name in _PROFILE_SUPPORT_DIRS:
+            continue
+        result.append(child)
+    return sorted(result, key=lambda item: item.name.lower())
+
+
+def _read_state_file(file_path: Path) -> dict:
+    with open(file_path, "r", encoding="utf-8") as handle:
+        state = json.load(handle)
+    return _normalize_state(state)
+
+
+def _write_state_file(file_path: Path, state: dict) -> None:
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = Path(str(file_path) + ".tmp")
     with open(temp_path, "w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2)
-    temp_path.replace(registry_path)
+    temp_path.replace(file_path)
+
+
+def _registry_backup_candidates() -> list[Path]:
+    backups_root = _registry_backups_root()
+    if not backups_root.exists():
+        return []
+
+    latest_path = backups_root / _LATEST_REGISTRY_BACKUP_FILENAME
+    timestamped = sorted(
+        [
+            candidate
+            for candidate in backups_root.glob("profiles.*.json")
+            if candidate.name != _LATEST_REGISTRY_BACKUP_FILENAME
+        ],
+        reverse=True,
+    )
+
+    candidates: list[Path] = []
+    if latest_path.exists():
+        candidates.append(latest_path)
+    candidates.extend(timestamped)
+    return candidates
+
+
+def _load_backup_state(*, require_profiles: bool = False) -> tuple[dict | None, Path | None]:
+    for candidate in _registry_backup_candidates():
+        try:
+            state = _read_state_file(candidate)
+        except Exception:
+            continue
+        if require_profiles and not state.get("profiles"):
+            continue
+        return state, candidate
+    return None, None
+
+
+def _profile_registry_guard_message(reason: str, profile_dirs: list[Path]) -> str:
+    detail = ", ".join(path.name for path in profile_dirs[:8])
+    if len(profile_dirs) > 8:
+        detail += ", ..."
+    locations = [str(_registry_path())]
+    latest_backup = _registry_backups_root() / _LATEST_REGISTRY_BACKUP_FILENAME
+    locations.append(str(latest_backup))
+    return (
+        f"Profile registry {reason} while local profile directories still exist"
+        + (f": {detail}" if detail else "")
+        + ". Refusing to initialize empty local state. Inspect or restore one of: "
+        + ", ".join(locations)
+    )
+
+
+def _restore_registry_from_backup(state: dict, backup_path: Path, reason: str) -> dict:
+    print(f"[Profiles] Restoring registry from backup '{backup_path}' ({reason}).", flush=True)
+    _write_state_file(_registry_path(), state)
+    _write_state_file(_registry_backups_root() / _LATEST_REGISTRY_BACKUP_FILENAME, state)
+    return state
+
+
+def _clean_division(division: str | None, *, allow_default: bool = False) -> str:
+    clean_division = " ".join(str(division or "").split())
+    if clean_division:
+        return clean_division
+    if allow_default:
+        return _LEGACY_DIVISION
+    raise ValueError("Division is required")
+
+
+def _clean_profile_name(name: str | None) -> str:
+    clean_name = " ".join(str(name or "").split())
+    if clean_name:
+        return clean_name
+    raise ValueError("Profile name is required")
+
+
+def _ensure_unique_profile_name(
+    profiles: list[dict],
+    name: str,
+    *,
+    exclude_profile_id: str | None = None,
+) -> None:
+    normalized_name = name.casefold()
+    for profile in profiles:
+        if exclude_profile_id and str(profile.get("id") or "") == exclude_profile_id:
+            continue
+        if str(profile.get("name") or "").casefold() == normalized_name:
+            raise ValueError("A profile with that name already exists")
+
+
+def _ensure_root() -> None:
+    _profiles_root().mkdir(parents=True, exist_ok=True)
+
+
+def _load_state() -> dict:
+    _ensure_root()
+    registry_path = _registry_path()
+    profile_dirs = _profile_storage_dirs()
+
+    if not registry_path.exists():
+        backup_state, backup_path = _load_backup_state(require_profiles=bool(profile_dirs))
+        if backup_state is not None and backup_path is not None:
+            return _restore_registry_from_backup(backup_state, backup_path, "registry file missing")
+        if profile_dirs:
+            raise RuntimeError(_profile_registry_guard_message("is missing", profile_dirs))
+        state = _default_state()
+        _save_state(state)
+        return state
+
+    try:
+        state = _read_state_file(registry_path)
+    except Exception as exc:
+        backup_state, backup_path = _load_backup_state(require_profiles=bool(profile_dirs))
+        if backup_state is not None and backup_path is not None:
+            return _restore_registry_from_backup(backup_state, backup_path, "registry file invalid")
+        raise ValueError("Profile registry is invalid") from exc
+
+    if not state.get("profiles") and profile_dirs:
+        backup_state, backup_path = _load_backup_state(require_profiles=True)
+        if backup_state is not None and backup_path is not None:
+            return _restore_registry_from_backup(backup_state, backup_path, "registry file empty")
+        raise RuntimeError(_profile_registry_guard_message("is empty", profile_dirs))
+
+    return state
+
+
+def _save_state(state: dict) -> None:
+    _ensure_root()
+    state = _normalize_state(state)
+    registry_path = _registry_path()
+    backups_root = _registry_backups_root()
+    backups_root.mkdir(parents=True, exist_ok=True)
+
+    if registry_path.exists():
+        timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        archive_path = backups_root / f"profiles.{timestamp}.json"
+        shutil.copy2(registry_path, archive_path)
+
+    _write_state_file(registry_path, state)
+    _write_state_file(backups_root / _LATEST_REGISTRY_BACKUP_FILENAME, state)
 
 
 def _slugify(name: str) -> str:
@@ -184,18 +326,14 @@ def list_legacy_projects() -> list[str]:
 
 
 def create_profile(name: str, pin: str, division: str) -> dict:
-    clean_name = str(name or "").strip()
-    if not clean_name:
-        raise ValueError("Profile name is required")
+    clean_name = _clean_profile_name(name)
     if not _PIN_RE.fullmatch(str(pin or "")):
         raise ValueError("PIN must be 4 to 12 digits")
     clean_division = _clean_division(division)
 
     with _STATE_LOCK:
         state = _load_state()
-        existing_names = {str(profile.get("name") or "").casefold() for profile in state.get("profiles", [])}
-        if clean_name.casefold() in existing_names:
-            raise ValueError("A profile with that name already exists")
+        _ensure_unique_profile_name(state.get("profiles", []), clean_name)
 
         pin_hash, pin_salt = _hash_pin(pin)
         profile = {
@@ -271,6 +409,44 @@ def touch_profile_activity(profile_id: str, when: dt.datetime | str | None = Non
         else:
             timestamp = str(when)
         profile["last_active_at"] = timestamp
+        _save_state(state)
+        return _serialize_profile(profile)
+
+
+def update_profile(profile_id: str, current_pin: str, name: str, division: str) -> dict:
+    clean_name = _clean_profile_name(name)
+    clean_division = _clean_division(division)
+
+    with _STATE_LOCK:
+        state = _load_state()
+        profile = _require_profile(state, str(profile_id or ""))
+        if not _verify_pin(profile, current_pin):
+            raise PermissionError("Invalid current PIN")
+
+        _ensure_unique_profile_name(
+            state.get("profiles", []),
+            clean_name,
+            exclude_profile_id=str(profile.get("id") or ""),
+        )
+        profile["name"] = clean_name
+        profile["division"] = clean_division
+        _save_state(state)
+        return _serialize_profile(profile)
+
+
+def reset_profile_pin(profile_id: str, current_pin: str, new_pin: str) -> dict:
+    if not _PIN_RE.fullmatch(str(new_pin or "")):
+        raise ValueError("PIN must be 4 to 12 digits")
+
+    with _STATE_LOCK:
+        state = _load_state()
+        profile = _require_profile(state, str(profile_id or ""))
+        if not _verify_pin(profile, current_pin):
+            raise PermissionError("Invalid current PIN")
+
+        pin_hash, pin_salt = _hash_pin(new_pin)
+        profile["pin_hash"] = pin_hash
+        profile["pin_salt"] = pin_salt
         _save_state(state)
         return _serialize_profile(profile)
 
