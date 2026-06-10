@@ -37,6 +37,7 @@ yck_obstacles/
 obstacles/
 backend/scripts/
 tmp/
+temp/
 Gradient Calculation/
 profiles/
 .Rhistory

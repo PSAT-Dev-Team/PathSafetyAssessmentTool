@@ -764,6 +764,31 @@ export default function CodingPage() {
     return (fromAttr ?? fromFeature) || undefined;
   }, [attrs, currentIndex, currentFeature]);
 
+  // Per-segment verification for the Path Analysis review flow. Held in memory only
+  // (deliberately NOT persisted to the backend) and keyed by project name → segment
+  // index. A single shared store means verified state survives switching between the
+  // open projects, and resets when the reviewer leaves and re-enters the page. Only
+  // surfaced when entered from Path Analysis (i.e. a filter context is present).
+  const cameFromPathAnalysis = filterContext != null;
+  const [verifiedByProject, setVerifiedByProject] = useState<Record<string, number[]>>({});
+
+  const currentSegmentVerified = useMemo(
+    () => !!currentProjectName && (verifiedByProject[currentProjectName] ?? []).includes(currentIndex),
+    [verifiedByProject, currentProjectName, currentIndex]
+  );
+
+  const toggleCurrentSegmentVerified = useCallback(() => {
+    if (!currentProjectName) return;
+    setVerifiedByProject(prev => {
+      const existing = prev[currentProjectName] ?? [];
+      const isVerified = existing.includes(currentIndex);
+      const next = isVerified
+        ? existing.filter(i => i !== currentIndex)
+        : [...existing, currentIndex];
+      return { ...prev, [currentProjectName]: next };
+    });
+  }, [currentProjectName, currentIndex]);
+
   // Preload next images to improve user experience
   useEffect(() => {
     if (!currentProjectName || !attrs.length) return;
@@ -2648,6 +2673,20 @@ export default function CodingPage() {
               Previous
             </Button>
 
+            {cameFromPathAnalysis && (
+              <Button
+                flex="1"
+                minW={0}
+                size="sm"
+                colorPalette="green"
+                variant={currentSegmentVerified ? "solid" : "outline"}
+                onClick={toggleCurrentSegmentVerified}
+                title={currentSegmentVerified ? "Click to unmark this segment" : "Mark this segment as reviewed"}
+              >
+                {currentSegmentVerified ? "✓ Verified" : "Mark Verified"}
+              </Button>
+            )}
+
             <Button
               flex="1"
               minW={0}
@@ -2706,6 +2745,7 @@ export default function CodingPage() {
             onJump={(i) => gotoPage(i + 1)}
             scores={scores}
             filterContext={filterContext}
+            verifiedByProject={cameFromPathAnalysis ? verifiedByProject : undefined}
             onDataChange={refreshCurrentProject}
             curvData={curvData}
             widthM={widthData?.width ?? null}
