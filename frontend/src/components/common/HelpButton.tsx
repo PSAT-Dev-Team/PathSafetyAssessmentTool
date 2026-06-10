@@ -1,7 +1,12 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 export default function HelpButton() {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  if (location.pathname === "/help") {
+    return null;
+  }
 
   return (
     <button
