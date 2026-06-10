@@ -1676,8 +1676,18 @@ export default function TreatmentDetailPage() {
                 displayTreatments = getApplicableTreatments(currentAttr)
                   .sort((a, b) => (segmentScoreDrops[b.id] ?? 0) - (segmentScoreDrops[a.id] ?? 0));
               } else {
+                if (effectivenessLoading) {
+                  return (
+                    <Flex direction="column" align="center" justify="center" gap="3" py="8">
+                      <Spinner size="sm" color="blue.500" />
+                      <Text fontSize="xs" color="gray.500" _dark={{ color: "gray.400" }}>
+                        Ranking Treatment Options...
+                      </Text>
+                    </Flex>
+                  );
+                }
                 displayTreatments = allApplicableTreatments.filter(t =>
-                  effectivenessLoading || (effectivenessCounts[t.id] ?? 0) > 0
+                  (effectivenessCounts[t.id] ?? 0) > 0
                 );
               }
 
@@ -1765,17 +1775,15 @@ export default function TreatmentDetailPage() {
                           </Text>
                           {accordionView === "treatment" && (
                             <Text fontSize="2xs" color="blue.600" _dark={{ color: "blue.300" }} mt="1" fontWeight="semibold">
-                              {effectivenessLoading && effectivenessCounts[t.id] === undefined
-                                ? "Improves …%"
-                                : (() => {
-                                    const count = effectivenessCounts[t.id] ?? 0;
-                                    const applicable = applicableCounts[t.id] ?? 0;
-                                    const denominator = applicable > 0 ? applicable : attrs.length;
-                                    const pct = (denominator > 0 && count > 0) ? count / denominator * 100 : 0;
-                                    const display = count > 0 ? Math.max(0.1, pct).toFixed(1) : "0.0";
-                                    const scope = applicable > 0 ? "applicable segments" : "segments";
-                                    return `Improves ${display}% of ${scope}`;
-                                  })()}
+                              {(() => {
+                                const count = effectivenessCounts[t.id] ?? 0;
+                                const applicable = applicableCounts[t.id] ?? 0;
+                                const denominator = applicable > 0 ? applicable : attrs.length;
+                                const pct = (denominator > 0 && count > 0) ? count / denominator * 100 : 0;
+                                const display = count > 0 ? Math.max(0.1, pct).toFixed(1) : "0.0";
+                                const scope = applicable > 0 ? "applicable segments" : "segments";
+                                return `Improves ${display}% of ${scope}`;
+                              })()}
                             </Text>
                           )}
                           {accordionView === "segment" && segmentScoreDrops[t.id] !== undefined && (
