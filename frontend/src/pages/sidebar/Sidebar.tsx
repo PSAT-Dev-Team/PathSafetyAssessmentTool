@@ -474,9 +474,6 @@ export default function Sidebar() {
           <Button onClick={() => navigateSidebar("/gis-layers")} colorPalette="teal" variant="surface" size="sm" width="100%">
             View GIS Layers
           </Button>
-          <Button onClick={() => navigate("/admin")} colorPalette="purple" variant="surface" size="sm" width="100%">
-            Admin Dashboard
-          </Button>
         </div>
       )}
 
