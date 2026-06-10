@@ -10,7 +10,7 @@ import { AddSegmentsDialog } from "../../PathAnalysisPage/components/AddSegments
 import { MapCursorController } from "../../../components/common/MapCursorController";
 // import { copySegments } from "../../../api"; // Removed unused import
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
 import type { CodingFilterContext } from "../../../api";
 import { CODING_FILTER_CONTEXT_KEY } from "../../../api";
@@ -37,6 +37,7 @@ type Props = {
   startIndex?: number;                       // Start index in global segments array (used with geoFeatures for multi-project)
   onDataChange?: () => void;                 // Callback when data is modified (e.g. deleted)
   filterContext?: CodingFilterContext | null; // From Path Analysis: restricts which segments appear on the map
+  verifiedByProject?: Record<string, number[]>; // project name → verified segment indices (in-memory review state)
   panToBounds?: L.LatLngBounds | null;       // When set, immediately flies map to these bounds (e.g. on project tab switch)
   panKey?: number;                           // Monotonic counter to force PanToBounds effect re-fire
   curvData?: CurvatureVisualizationResponse | null;
@@ -50,6 +51,10 @@ type Props = {
 };
 
 type GJ = FeatureCollection<LineString, any>;
+
+// Deep emerald used for the "verified" dot halo. Deliberately distinct from the
+// yellow-green LOW risk-band colour (#87C424) so verified state stays legible.
+const VERIFIED_HALO_COLOR = "#16A34A";
 
 type ScoreRow = {
   "Overall Risk Level": number;
@@ -315,7 +320,7 @@ function StatPill({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, filterContext, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct, gradientStatus }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, filterContext, verifiedByProject, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct, gradientStatus }: Props) {
   const navigate = useNavigate();
 
   const decodedName = useMemo(() => {
@@ -576,6 +581,12 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
   const filterIndexSet = useMemo(
     () => currentProjectFilterData ? new Set(currentProjectFilterData.filteredIndices) : null,
     [currentProjectFilterData]
+  );
+
+  // Verified segment indices for the current project — drives the "checked" dot treatment.
+  const verifiedSet = useMemo(
+    () => new Set((decodedName && verifiedByProject?.[decodedName]) || []),
+    [verifiedByProject, decodedName]
   );
 
   // 当前高亮点 - use globalIdx to match the index prop (global index)
@@ -1630,17 +1641,30 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                   const color = isActive ? "#1E63D8" : baseColor;
                   const radius = isActive ? 9 : 5;
                   // Handle both new and old column names for backward compatibility
+                  const imgRef = f.properties?.["Image Reference"];
+                  const isVerified = verifiedSet.has(localIdx);
                   const scoreValue = activeScores[globalIdx]?.["Overall Risk Level"] ?? activeScores[globalIdx]?.["CycleRAP score"];
-                  const label = `#${globalIdx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
-                  // Include score in key to force re-render when score changes
-                  const keyWithScore = `${globalIdx}-${scoreValue?.toFixed(2) ?? "loading"}`;
+                  const label = `#${globalIdx + 1} ${imgRef ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}${isVerified ? " ✓ Verified" : ""}`;
+                  // Include score + verified state in key to force re-render when either changes
+                  const keyWithScore = `${globalIdx}-${scoreValue?.toFixed(2) ?? "loading"}-${isVerified ? "v" : "u"}`;
 
                   return (
+                    <Fragment key={keyWithScore}>
+                    {/* Verified halo — deep-emerald ring behind the dot, distinct from the
+                        yellow-green LOW risk colour so it reads clearly at a glance. */}
+                    {isVerified && (
+                      <CircleMarker
+                        center={latlng}
+                        radius={radius + 5}
+                        pathOptions={{ color: VERIFIED_HALO_COLOR, weight: 3, opacity: 0.95, fillColor: VERIFIED_HALO_COLOR, fillOpacity: 0.25 }}
+                        pane="segmentsPane"
+                        interactive={false}
+                      />
+                    )}
                     <CircleMarker
-                      key={keyWithScore}
                       center={latlng}
                       radius={radius}
-                      pathOptions={{ color, weight: isActive ? 4 : 1, opacity: 0.9, fillOpacity: isActive ? 0.95 : 0.8 }}
+                      pathOptions={{ color, weight: isActive ? 4 : 1, opacity: 0.9, fillOpacity: isVerified ? 0.55 : (isActive ? 0.95 : 0.8) }}
                       pane="segmentsPane"
                       eventHandlers={{
                         click: (e) => {
@@ -1677,6 +1701,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     >
                       <Tooltip>{isDeleteMode ? "Click to Delete" : (isPointAddMode ? "Click to Copy" : label)}</Tooltip>
                     </CircleMarker>
+                    </Fragment>
                   );
                 })}
               </Pane>
@@ -1684,29 +1709,43 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
               {/* Cross-project filtered segments from Path Analysis */}
               {otherProjectsFilterData.length > 0 && (
                 <Pane name="crossProjectPane" style={{ zIndex: 609 }}>
-                  {otherProjectsFilterData.flatMap(proj =>
-                    proj.points.map((pt, i) => (
-                      <CircleMarker
-                        key={`xp-${proj.projectName}-${i}`}
-                        center={pt.latlng}
-                        radius={5}
-                        pathOptions={{ color: pt.color, weight: 1, opacity: 0.9, fillOpacity: 0.8 }}
-                        pane="crossProjectPane"
-                        eventHandlers={{
-                          click: () => {
-                            // Navigate to the other project, preserving the full filter context
-                            sessionStorage.setItem(CODING_FILTER_CONTEXT_KEY, JSON.stringify(filterContext));
-                            navigate(
-                              `/coding/${encodeURIComponent(proj.projectName)}?segment=${pt.idx + 1}`,
-                              { state: { returnToAnalysis: true, filterContext } }
-                            );
-                          },
-                        }}
-                      >
-                        <Tooltip>#{pt.idx + 1} — {proj.projectName}</Tooltip>
-                      </CircleMarker>
-                    ))
-                  )}
+                  {otherProjectsFilterData.flatMap(proj => {
+                    const projVerified = new Set(verifiedByProject?.[proj.projectName] ?? []);
+                    return proj.points.map((pt, i) => {
+                      const isVerified = projVerified.has(pt.idx);
+                      return (
+                        <Fragment key={`xp-${proj.projectName}-${i}`}>
+                          {isVerified && (
+                            <CircleMarker
+                              center={pt.latlng}
+                              radius={9}
+                              pathOptions={{ color: VERIFIED_HALO_COLOR, weight: 3, opacity: 0.95, fillColor: VERIFIED_HALO_COLOR, fillOpacity: 0.25 }}
+                              pane="crossProjectPane"
+                              interactive={false}
+                            />
+                          )}
+                          <CircleMarker
+                            center={pt.latlng}
+                            radius={5}
+                            pathOptions={{ color: pt.color, weight: 1, opacity: 0.9, fillOpacity: isVerified ? 0.55 : 0.8 }}
+                            pane="crossProjectPane"
+                            eventHandlers={{
+                              click: () => {
+                                // Navigate to the other project, preserving the full filter context
+                                sessionStorage.setItem(CODING_FILTER_CONTEXT_KEY, JSON.stringify(filterContext));
+                                navigate(
+                                  `/coding/${encodeURIComponent(proj.projectName)}?segment=${pt.idx + 1}`,
+                                  { state: { returnToAnalysis: true, filterContext } }
+                                );
+                              },
+                            }}
+                          >
+                            <Tooltip>#{pt.idx + 1} — {proj.projectName}{isVerified ? " ✓ Verified" : ""}</Tooltip>
+                          </CircleMarker>
+                        </Fragment>
+                      );
+                    });
+                  })}
                 </Pane>
               )}
 
