@@ -176,11 +176,6 @@ function applyLogicChecks(
     autoDisable("Adjacent Road Lane 1-3m", '"Adjacent Road Lane 1-3m" cleared (Mixed Traffic Road Lane)');
   }
 
-  // Rule 8: Facility Type = Sidewalk/Multi-use/Off-road → Adjacent object or level change 0-1m = Present
-  if (field === "Facility Type" && [1, 2, 3].includes(Number(value))) {
-    autoEnable("Adjacent object or level change 0-1m", '"Adjacent object or level change 0-1m" set to Present');
-  }
-
   // Rule 9: Width Restriction = Present → FO or NFO must be Present (warning only)
   if (field === "Width Restriction" && isPresent(value)) {
     if (!isPresent(projected["Fixed Obstacle on Facility"]) && !isPresent(projected["Non-Fixed Obstacle on Facility"])) {
