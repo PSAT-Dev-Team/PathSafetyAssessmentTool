@@ -367,14 +367,19 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Deep Pink
   const [showBicycleCrossing, setShowBicycleCrossing] = useState(cachedLayers.showBicycleCrossing ?? false); // Orange
   const [showPathDefects, setShowPathDefects] = useState(cachedLayers.showPathDefects ?? false); // Red
+  const [showStateLand, setShowStateLand] = useState(cachedLayers.showStateLand ?? false);
+  const [showStatBoard, setShowStatBoard] = useState(cachedLayers.showStatBoard ?? false);
+  const [showLandPrivate, setShowLandPrivate] = useState(cachedLayers.showLandPrivate ?? false);
+  const [showLandMinistry, setShowLandMinistry] = useState(cachedLayers.showLandMinistry ?? false);
 
   // Update localStorage whenever these toggles change
   useEffect(() => {
     if (!projectName) return;
     localStorage.setItem(`gisLayerToggles_${projectName}`, JSON.stringify({
-      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects
+      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects,
+      showStateLand, showStatBoard, showLandPrivate, showLandMinistry,
     }));
-  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects, projectName]);
+  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects, showStateLand, showStatBoard, showLandPrivate, showLandMinistry, projectName]);
 
   // Auto-enable path layers when Analysis Overlay is turned on; never auto-disable them
   useEffect(() => {
@@ -662,7 +667,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
 
     if (!decodedName || activeGisLat === null || activeGisLon === null) return;
 
-    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing;
+    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing || showStateLand || showStatBoard || showLandPrivate || showLandMinistry;
     if (!anyLayerEnabled) {
       setGisLayers(null);
       return;
@@ -685,6 +690,10 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
         if (showBusLane) layers.push('bus_lane');
         if (showParkingLot) layers.push('parking_lot');
         if (showKerbLine) layers.push('kerb_line');
+        if (showStateLand) layers.push('state_land');
+        if (showStatBoard) layers.push('stat_board');
+        if (showLandPrivate) layers.push('land_private');
+        if (showLandMinistry) layers.push('land_ministry');
 
         // Fetch GIS layers near the active query point
         const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/gis/layers`, {
@@ -712,7 +721,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
     })();
 
     return () => { controller.abort(); };
-  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, hasExternalGeoFeatures]);
+  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showStateLand, showStatBoard, showLandPrivate, showLandMinistry, hasExternalGeoFeatures]);
 
   // Fetch Path Defects within the search radius around the active query point.
   // Kept separate from the GIS layers fetch so toggling defects doesn't refetch
@@ -761,6 +770,10 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
     bus_lane: "#EAB308",    // Yellow
     parking_lot: "#D97706", // Amber/Gold
     kerb_line: "#D946EF",   // Fuchsia
+    state_land: "#14B8A6",  // Teal
+    stat_board: "#F59E0B",  // Amber
+    land_private: "#6366F1", // Indigo
+    land_ministry: "#EC4899", // Pink
   };
 
   // Get segment color based on the crash type with the highest score
@@ -1440,6 +1453,55 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 ))
               )}
 
+              {/* Land Ownership - Polygon layers */}
+              {gisLayers && showStateLand && gisLayers.state_land && (
+                gisLayers.state_land.map((feature, i) => (
+                  <Polygon
+                    key={`state_land-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color: layerColors.state_land, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
+                  >
+                    <Tooltip>{feature.properties?.OWNRSHP_CL ?? "State Land"}</Tooltip>
+                  </Polygon>
+                ))
+              )}
+
+              {gisLayers && showStatBoard && gisLayers.stat_board && (
+                gisLayers.stat_board.map((feature, i) => (
+                  <Polygon
+                    key={`stat_board-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color: layerColors.stat_board, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
+                  >
+                    <Tooltip>{feature.properties?.OWNRSHP_CL ?? "Stat Board"}</Tooltip>
+                  </Polygon>
+                ))
+              )}
+
+              {gisLayers && showLandPrivate && gisLayers.land_private && (
+                gisLayers.land_private.map((feature, i) => (
+                  <Polygon
+                    key={`land_private-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color: layerColors.land_private, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
+                  >
+                    <Tooltip>{feature.properties?.OWNRSHP_CL ?? "Private Land"}</Tooltip>
+                  </Polygon>
+                ))
+              )}
+
+              {gisLayers && showLandMinistry && gisLayers.land_ministry && (
+                gisLayers.land_ministry.map((feature, i) => (
+                  <Polygon
+                    key={`land_ministry-${i}`}
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color: layerColors.land_ministry, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
+                  >
+                    <Tooltip>{feature.properties?.OWNRSHP_CL ?? "Ministry Land"}</Tooltip>
+                  </Polygon>
+                ))
+              )}
+
               {/* Path Defects - ⚠️ markers within the 200m search radius */}
               {showPathDefects && pathDefects?.map((d, i) => (
                 <Marker
@@ -1656,6 +1718,14 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
           setShowBicycleCrossing={setShowBicycleCrossing}
           showPathDefects={showPathDefects}
           setShowPathDefects={setShowPathDefects}
+          showStateLand={showStateLand}
+          setShowStateLand={setShowStateLand}
+          showStatBoard={showStatBoard}
+          setShowStatBoard={setShowStatBoard}
+          showLandPrivate={showLandPrivate}
+          setShowLandPrivate={setShowLandPrivate}
+          showLandMinistry={showLandMinistry}
+          setShowLandMinistry={setShowLandMinistry}
         />
       </CardBody>
 

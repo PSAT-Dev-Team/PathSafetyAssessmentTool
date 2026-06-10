@@ -37,6 +37,14 @@ interface AnalysisSidebarProps {
   setShowBicycleCrossing: (v: boolean) => void;
   showPathDefects: boolean;
   setShowPathDefects: (v: boolean) => void;
+  showStateLand: boolean;
+  setShowStateLand: (v: boolean) => void;
+  showStatBoard: boolean;
+  setShowStatBoard: (v: boolean) => void;
+  showLandPrivate: boolean;
+  setShowLandPrivate: (v: boolean) => void;
+  showLandMinistry: boolean;
+  setShowLandMinistry: (v: boolean) => void;
 }
 
 export function AnalysisSidebar({
@@ -53,6 +61,10 @@ export function AnalysisSidebar({
   showKerbLine, setShowKerbLine,
   showBicycleCrossing, setShowBicycleCrossing,
   showPathDefects, setShowPathDefects,
+  showStateLand, setShowStateLand,
+  showStatBoard, setShowStatBoard,
+  showLandPrivate, setShowLandPrivate,
+  showLandMinistry, setShowLandMinistry,
 }: AnalysisSidebarProps) {
   const layers: GISLayerToggle[] = [
     { key: 'footpath',          label: 'Footpath',          color: '#1E90FF', colorPalette: 'blue',   value: showFootpath,          onChange: setShowFootpath },
@@ -66,6 +78,10 @@ export function AnalysisSidebar({
     { key: 'parking_lot',       label: 'Parking Lot',       color: '#D97706', colorPalette: 'orange', value: showParkingLot,        onChange: setShowParkingLot },
     { key: 'kerb_line',         label: 'Kerb Line',         color: '#D946EF', colorPalette: 'pink',   value: showKerbLine,          onChange: setShowKerbLine },
     { key: 'path_defects',      label: 'Path Defects',      color: '#EF4444', colorPalette: 'red',    value: showPathDefects,       onChange: setShowPathDefects },
+    { key: 'state_land',        label: 'State Land',         color: '#14B8A6', colorPalette: 'teal',   value: showStateLand,         onChange: setShowStateLand },
+    { key: 'stat_board',        label: 'Stat Board',         color: '#F59E0B', colorPalette: 'yellow', value: showStatBoard,         onChange: setShowStatBoard },
+    { key: 'land_private',      label: 'Private Land',       color: '#6366F1', colorPalette: 'purple', value: showLandPrivate,       onChange: setShowLandPrivate },
+    { key: 'land_ministry',     label: 'Ministry Land',      color: '#EC4899', colorPalette: 'pink',   value: showLandMinistry,      onChange: setShowLandMinistry },
   ];
 
   return (

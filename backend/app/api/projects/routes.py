@@ -5048,7 +5048,11 @@ def get_gis_layers(project_name: str):
             "bus_lane": "bus_lane",
             "parking_lot": "parking",
             "kerb_line": "kerb_line",
-            "bicycle_crossing": "bicycle_crossing"
+            "bicycle_crossing": "bicycle_crossing",
+            "state_land": "land_state_land",
+            "stat_board": "land_stat_board",
+            "land_private": "land_private",
+            "land_ministry": "land_ministry",
         }
 
         result_layers = {}
