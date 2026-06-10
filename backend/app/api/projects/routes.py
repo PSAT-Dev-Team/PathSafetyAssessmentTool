@@ -1582,7 +1582,7 @@ def get_post_treatment_image(project_name: str, segment_index: int):
     file_path = post_treatment_dir / f"{segment_index}.png"
     
     if not file_path.exists() or not file_path.is_file():
-        abort(404, description="Image not found")
+        return jsonify({"exists": False, "message": "Image not found"}), 200
         
     resp = send_from_directory(post_treatment_dir, file_path.name, conditional=True)
     resp.headers["Cache-Control"] = "public, max-age=86400"

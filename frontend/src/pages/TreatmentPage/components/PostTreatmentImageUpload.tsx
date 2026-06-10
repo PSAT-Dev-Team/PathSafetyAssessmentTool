@@ -21,8 +21,13 @@ export default function PostTreatmentImageUpload({ projectName, segmentIndex }: 
       const url = `/api/projects/${encodeURIComponent(projectName)}/segments/${segmentIndex}/post-treatment-image`;
       const res = await fetch(url);
       if (res.ok) {
-        // Append a timestamp to avoid caching issues when replacing
-        setImageUrl(`${url}?t=${new Date().getTime()}`);
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          setImageUrl(null);
+        } else {
+          // Append a timestamp to avoid caching issues when replacing
+          setImageUrl(`${url}?t=${new Date().getTime()}`);
+        }
       } else {
         setImageUrl(null);
       }

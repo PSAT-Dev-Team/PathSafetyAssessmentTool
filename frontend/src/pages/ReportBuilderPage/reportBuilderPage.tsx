@@ -8,7 +8,8 @@ import {
   sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
+import { GripVertical, Loader2 } from "lucide-react";
+import { PieChart, Pie, Cell, Tooltip as RechartTooltip } from "recharts";
 import SectionErrorBoundary from "./SectionErrorBoundary";
 // html2canvas-pro is a maintained drop-in fork of html2canvas (^1.4.1) that fixes
 // the text-baseline bug which rendered text shifted *down* (form-control values,
@@ -552,6 +553,7 @@ export default function ReportBuilderPage() {
   const [allScoreRows, setAllScoreRows] = useState<TopRiskRow[]>([]);
   const [allBandMap, setAllBandMap] = useState<Map<string, number>>(new Map());
   const [enrichedMap, setEnrichedMap] = useState<Map<string, EnrichedDetail>>(new Map());
+  const [isLoadingScores, setIsLoadingScores] = useState(false);
 
   // ── Treatment data ────────────────────────────────────────────────────────
   const [treatmentSummaries, setTreatmentSummaries] = useState<ProjectTreatmentSummary[]>([]);
@@ -645,51 +647,56 @@ export default function ReportBuilderPage() {
   useEffect(() => {
     if (loadedProjects.length === 0) return;
     const fetchAll = async () => {
-      const results = await Promise.all(
-        loadedProjects.map(async (name) => {
-          try {
-            const res = await fetch(`/api/projects/${encodeURIComponent(name)}/results`);
-            const data = await res.json();
-            if (!data.ok || !Array.isArray(data.result_rows)) return { name, rows: [] };
-            return { name, rows: data.result_rows.map((row: Record<string, unknown>, i: number) => ({ ...row, _project: name, _segIndex: i + 1 })) };
-          } catch { return { name, rows: [] as unknown[] }; }
-        })
-      );
-      const counts: Record<string, number> = {};
-      const allRows: TopRiskRow[] = [];
-      results.forEach(({ name, rows }) => { counts[name] = (rows as TopRiskRow[]).length; allRows.push(...(rows as TopRiskRow[])); });
-      setProjectSegmentCounts(counts);
-      setTotalSegments(allRows.length);
-      if (allRows.length === 0) return;
+      setIsLoadingScores(true);
+      try {
+        const results = await Promise.all(
+          loadedProjects.map(async (name) => {
+            try {
+              const res = await fetch(`/api/projects/${encodeURIComponent(name)}/results`);
+              const data = await res.json();
+              if (!data.ok || !Array.isArray(data.result_rows)) return { name, rows: [] };
+              return { name, rows: data.result_rows.map((row: Record<string, unknown>, i: number) => ({ ...row, _project: name, _segIndex: i + 1 })) };
+            } catch { return { name, rows: [] as unknown[] }; }
+          })
+        );
+        const counts: Record<string, number> = {};
+        const allRows: TopRiskRow[] = [];
+        results.forEach(({ name, rows }) => { counts[name] = (rows as TopRiskRow[]).length; allRows.push(...(rows as TopRiskRow[])); });
+        setProjectSegmentCounts(counts);
+        setTotalSegments(allRows.length);
+        if (allRows.length === 0) return;
 
-      const dist: Distributions = {
-        VB: { 1: 0, 2: 0, 3: 0, 4: 0 }, BB: { 1: 0, 2: 0, 3: 0, 4: 0 },
-        SB: { 1: 0, 2: 0, 3: 0, 4: 0 }, BP: { 1: 0, 2: 0, 3: 0, 4: 0 },
-        Overall: { 1: 0, 2: 0, 3: 0, 4: 0 },
-      };
-      const bMap = new Map<string, number>();
-      allRows.forEach((row) => {
-        if (row["VB Band"] >= 1 && row["VB Band"] <= 4) dist.VB[row["VB Band"]]++;
-        if (row["BB Band"] >= 1 && row["BB Band"] <= 4) dist.BB[row["BB Band"]]++;
-        if (row["SB Band"] >= 1 && row["SB Band"] <= 4) dist.SB[row["SB Band"]]++;
-        if (row["BP Band"] >= 1 && row["BP Band"] <= 4) dist.BP[row["BP Band"]]++;
-        // Overall band = max of the four individual bands (matches backend logic)
-        const overall = row["Overall Risk Level Band"] ??
-          Math.max(row["VB Band"] || 0, row["BB Band"] || 0, row["SB Band"] || 0, row["BP Band"] || 0);
-        if (overall >= 1 && overall <= 4) { dist.Overall[overall]++; bMap.set(`${row._project}_${row._segIndex}`, overall); }
-      });
-      setDistributions(dist);
-      setAllBandMap(bMap);
+        const dist: Distributions = {
+          VB: { 1: 0, 2: 0, 3: 0, 4: 0 }, BB: { 1: 0, 2: 0, 3: 0, 4: 0 },
+          SB: { 1: 0, 2: 0, 3: 0, 4: 0 }, BP: { 1: 0, 2: 0, 3: 0, 4: 0 },
+          Overall: { 1: 0, 2: 0, 3: 0, 4: 0 },
+        };
+        const bMap = new Map<string, number>();
+        allRows.forEach((row) => {
+          if (row["VB Band"] >= 1 && row["VB Band"] <= 4) dist.VB[row["VB Band"]]++;
+          if (row["BB Band"] >= 1 && row["BB Band"] <= 4) dist.BB[row["BB Band"]]++;
+          if (row["SB Band"] >= 1 && row["SB Band"] <= 4) dist.SB[row["SB Band"]]++;
+          if (row["BP Band"] >= 1 && row["BP Band"] <= 4) dist.BP[row["BP Band"]]++;
+          // Overall band = max of the four individual bands (matches backend logic)
+          const overall = row["Overall Risk Level Band"] ??
+            Math.max(row["VB Band"] || 0, row["BB Band"] || 0, row["SB Band"] || 0, row["BP Band"] || 0);
+          if (overall >= 1 && overall <= 4) { dist.Overall[overall]++; bMap.set(`${row._project}_${row._segIndex}`, overall); }
+        });
+        setDistributions(dist);
+        setAllBandMap(bMap);
 
-      const withSum = allRows.map((row) => {
-        const sumScore = (row["VB"] || 0) + (row["BB"] || 0) + (row["SB"] || 0) + (row["BP"] || 0);
-        const maxBand = row["Overall Risk Level Band"] ??
-          Math.max(row["VB Band"] || 0, row["BB Band"] || 0, row["SB Band"] || 0, row["BP Band"] || 0);
-        return { ...row, _sumScore: sumScore, _maxBand: maxBand };
-      }).sort((a, b) => b._sumScore - a._sumScore);
+        const withSum = allRows.map((row) => {
+          const sumScore = (row["VB"] || 0) + (row["BB"] || 0) + (row["SB"] || 0) + (row["BP"] || 0);
+          const maxBand = row["Overall Risk Level Band"] ??
+            Math.max(row["VB Band"] || 0, row["BB Band"] || 0, row["SB Band"] || 0, row["BP Band"] || 0);
+          return { ...row, _sumScore: sumScore, _maxBand: maxBand };
+        }).sort((a, b) => b._sumScore - a._sumScore);
 
-      setAllScoreRows(withSum);
-      setTopRiskRows(withSum.slice(0, 10));
+        setAllScoreRows(withSum);
+        setTopRiskRows(withSum.slice(0, 10));
+      } finally {
+        setIsLoadingScores(false);
+      }
     };
     fetchAll();
   }, [loadedProjects]);
@@ -1737,7 +1744,13 @@ export default function ReportBuilderPage() {
             </div>
 
             {!distributions ? (
-              <div style={{ color: "#888", fontSize: 12 }}>No score data — run scoring first.</div>
+              isLoadingScores ? (
+                <div style={{ color: "#888", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                  <Loader2 size={14} className="rb-spinner" /> Loading score data...
+                </div>
+              ) : (
+                <div style={{ color: "#888", fontSize: 12 }}>No score data — run scoring first.</div>
+              )
             ) : (
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
                 <thead>
@@ -1826,7 +1839,13 @@ export default function ReportBuilderPage() {
                     <EditableText value={secTitle(el.id, "Top Risk Stretches")} onChange={(t) => setSecTitle(el.id, t)} style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e" }} />
                     <div style={{ fontSize: 10, color: "#999" }}>Ranked highest to lowest · Before risk factors & after treatments applied</div>
                   </div>
-                  <div style={{ padding: 14, color: "#888", fontSize: 12 }}>No score data. Run scoring first.</div>
+                  {isLoadingScores ? (
+                    <div style={{ padding: 14, color: "#888", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                      <Loader2 size={14} className="rb-spinner" /> Loading score data...
+                    </div>
+                  ) : (
+                    <div style={{ padding: 14, color: "#888", fontSize: 12 }}>No score data. Run scoring first.</div>
+                  )}
                 </>
               ) : (
                 renderTopRiskFullPage(displayRows, el.id)
@@ -1842,7 +1861,13 @@ export default function ReportBuilderPage() {
               <div style={{ fontSize: 10, color: "#999" }}>Ranked highest to lowest · Before risk factors & after treatments applied</div>
             </div>
             {displayRows.length === 0
-              ? <div style={{ padding: 14, color: "#888", fontSize: 12 }}>No score data. Run scoring first.</div>
+              ? isLoadingScores ? (
+                  <div style={{ padding: 14, color: "#888", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                    <Loader2 size={14} className="rb-spinner" /> Loading score data...
+                  </div>
+                ) : (
+                  <div style={{ padding: 14, color: "#888", fontSize: 12 }}>No score data. Run scoring first.</div>
+                )
               : viewMode === "grid" ? renderTopRiskGrid(displayRows)
                 : renderTopRiskTabular(displayRows)}
           </div>
@@ -2011,7 +2036,13 @@ export default function ReportBuilderPage() {
             <SectionHeader title={secTitle(el.id, "Risk Score Statistics")} onTitleChange={(t) => setSecTitle(el.id, t)} subtitle="Score range and average across all segments per crash type" />
             <div style={{ flex: 1, overflow: "visible", padding: "8px 14px" }}>
               {!scoreStats
-                ? <div style={{ color: "#888", fontSize: 12, padding: 8 }}>No score data available.</div>
+                ? isLoadingScores ? (
+                    <div style={{ color: "#888", fontSize: 12, padding: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                      <Loader2 size={14} className="rb-spinner" /> Loading score data...
+                    </div>
+                  ) : (
+                    <div style={{ color: "#888", fontSize: 12, padding: 8 }}>No score data available.</div>
+                  )
                 : (["Overall", "VB", "BB", "SB", "BP"] as const).map((ct, i) => {
                   const { min, max, avg } = scoreStats[ct];
                   const scale = SCALE_MAX[ct] || 100;
