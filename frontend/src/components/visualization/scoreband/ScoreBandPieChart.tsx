@@ -62,22 +62,28 @@ export default function ScoreBandPieChart({
   // Custom label showing percentages inside pie slices
   const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
     const RADIAN = Math.PI / 180;
-    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+
+    // Hide only truly tiny slices where even the smallest text won't fit
+    if (percent < 0.02) return null;
+
+    // For small slices, shift toward the outer edge (more arc space there)
+    // and scale font down so it fits within the narrower wedge
+    const radiusFactor = percent < 0.08 ? 0.72 : 0.5;
+    const fontSize = percent < 0.05 ? 9 : percent < 0.10 ? 11 : 13;
+
+    const radius = innerRadius + (outerRadius - innerRadius) * radiusFactor;
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-    // Don't show label for extremely small slices (less than 1%)
-    if (percent < 0.01) return null;
 
     return (
       <text
         x={x}
         y={y}
         fill="black"
-        textAnchor={x > cx ? "start" : "end"}
+        textAnchor="middle"
         dominantBaseline="central"
-        fontSize="16"
-        fontWeight="900"
+        fontSize={fontSize}
+        fontWeight="700"
       >
         {`${(percent * 100).toFixed(0)}%`}
       </text>

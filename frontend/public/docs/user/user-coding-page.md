@@ -17,7 +17,7 @@ The Coding page is the main review workspace. It can open one or more selected p
 - [3.6 Details and GIS Context](#36-details-and-gis-context)
 - [3.7 Save and Progress Tracking](#37-save-and-progress-tracking)
 - [3.8 CycleRAP Reference](#38-cyclerap-reference)
-- [3.9 Hover Tips](#39-hover-tips)
+- [3.9 Hover Tips — Safety Scores & Attributes](#39-hover-tips--safety-scores--attributes)
 
 ---
 
@@ -92,7 +92,7 @@ When a segment is first created and no auto-code has been run, PSAT assigns the 
 
 ### 3.4 Auto-Code Options
 
-PSAT supports three auto-code methods that can be run individually or in combination:
+PSAT supports five auto-code methods that can be run individually or in combination:
 
 - **CV auto-code** — reads the segment image using computer vision models
 - **GIS auto-code** — reads GIS shapefiles for the segment location
@@ -231,15 +231,15 @@ Once the page opens, you will find four downloadable or interactive resources:
 
 ---
 
-### 3.9 Hover Tips
+### 3.9 Hover Tips — Safety Scores & Attributes
 
 PSAT surfaces contextual help through hover tooltips throughout the interface.
 
 #### Crash Type Score Tooltips
 
-On any page that shows the **Crash Type Scores** panel (Coding Page, Path Analysis, Treatment Page), you can hover over any of the five score cards to see the risk banding thresholds for that crash type.
+On any page that shows the **Crash Type Scores** panel (Coding Page, Path Analysis, Treatment Page), hover over any of the five score cards to see the risk banding thresholds for that crash type.
 
-##### BB / BP / SB (Bicycle-Bicycle, Bicycle-Pedestrian, Single-Bicycle)
+**BB / BP / SB (Bicycle-Bicycle, Bicycle-Pedestrian, Single-Bicycle)**
 
 | Band | Score Range |
 |---|---|
@@ -248,7 +248,7 @@ On any page that shows the **Crash Type Scores** panel (Coding Page, Path Analys
 | High | 10 – 20 |
 | Extreme | > 20 |
 
-##### VB (Vehicle-Bicycle)
+**VB (Vehicle-Bicycle)**
 
 | Band | Score Range |
 |---|---|
@@ -257,13 +257,9 @@ On any page that shows the **Crash Type Scores** panel (Coding Page, Path Analys
 | High | 25 – 60 |
 | Extreme | > 60 |
 
-##### Risk Score
+The **Risk Score** is the sum of all four crash type scores. Its banding colour reflects the **worst-case** band across all crash types. Hovering the **Risk Score** card shows a compact summary of all banding thresholds for reference.
 
-The **Risk Score** is the sum of all four crash type scores. Its banding colour reflects the **worst-case** band across all crash types — for example, if VB is High and all others are Low, the Risk Score card shows High.
-
-Hovering the **Risk Score** card shows a compact summary of all banding thresholds for reference.
-
-> **Tip:** The tooltips appear instantly on hover and stay visible even if you accidentally click the card. Move the cursor away to dismiss.
+> **Tip:** Tooltips appear instantly on hover and stay visible even if you accidentally click the card. Move the cursor away to dismiss.
 
 #### Attribute Info Tooltips
 
@@ -276,8 +272,6 @@ On the **Coding Page**, every coding attribute that has a description shows a sm
 **Example:**
 
 > **Area type** — *"Classify the surrounding land use. Singapore paths are mostly Suburban (HDB/residential). Use Urban for city area and dense commercial zones, Industrial for business parks and logistics areas, Recreational for parks."*
-
-The tooltip stays open even if you accidentally click the icon — just move your cursor away to close it.
 
 #### Where Tooltips Appear
 

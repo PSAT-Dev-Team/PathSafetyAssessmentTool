@@ -121,8 +121,8 @@ export default function AdminDashboard() {
                   />
                   <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#666" }} />
                   <Tooltip
-                    formatter={(v: number) => [`${v} login${v === 1 ? "" : "s"}`, "Logins"]}
-                    labelFormatter={(l: string) => fmtDay(l)}
+                    formatter={(v: any) => [`${v} login${v === 1 ? "" : "s"}`, "Logins"]}
+                    labelFormatter={(l: any) => fmtDay(l)}
                     contentStyle={{ fontSize: 12 }}
                   />
                   <Bar dataKey="count" fill="#8b22cf" radius={[4, 4, 0, 0]} maxBarSize={32} />

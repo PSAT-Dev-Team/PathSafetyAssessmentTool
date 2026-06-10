@@ -21,10 +21,6 @@ import { MapContainer, TileLayer, CircleMarker, useMap } from "react-leaflet";
 import L from "leaflet";
 import proj4 from "proj4";
 import type { FeatureCollection, Position } from "geojson";
-import {
-  PieChart, Pie, Cell, Tooltip as RechartTooltip, Legend,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
-} from "recharts";
 import "leaflet/dist/leaflet.css";
 import "./reportBuilderPage.css";
 
@@ -1719,7 +1715,7 @@ export default function ReportBuilderPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {crashRows.map(({ key, label, short }, ri) => {
+                  {crashRows.map(({ key, label }, ri) => {
                     const dist = distributions[key];
                     const total = Object.values(dist).reduce((a, b) => a + b, 0) || 1;
                     const isOverall = key === "Overall";
@@ -2191,12 +2187,7 @@ export default function ReportBuilderPage() {
     return Math.max(1200, layout.bottom + 80);
   }, [visibleElements, layout]);
 
-  const pageBreaks = useMemo(() => {
-    const breaks: number[] = [];
-    let y = PAGE_H;
-    while (y < canvasH) { breaks.push(y); y += PAGE_H; }
-    return breaks;
-  }, [canvasH]);
+
 
   // Gap-constrained page separators: each band is clipped to the actual whitespace
   // We no longer manually calculate page breaks.

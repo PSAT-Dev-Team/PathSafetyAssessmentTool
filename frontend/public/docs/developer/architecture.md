@@ -1,4 +1,4 @@
-# Architecture Overview
+# 3. Architecture Overview
 
 PSAT is a two-container application orchestrated by Docker Compose. The frontend is a React SPA served by nginx, and the backend is a Flask API that owns project storage, GIS lookups, CV inference, scoring, and treatment logic. There is no database; the file system under `data/`, `in/`, and `backend/shapefiles/` is the source of truth.
 

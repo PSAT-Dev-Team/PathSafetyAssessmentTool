@@ -5,13 +5,13 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const DOCS_LIST = [
-  { id: "deployment",   title: "1. Deployment & Infrastructure",      path: "/docs/admin-deployment.md",          updatedDate: "Jun 2026" },
-  { id: "ml-models",    title: "2. Managing ML Models",               path: "/docs/admin-ml-models.md",           updatedDate: "Jun 2026" },
-  { id: "gis-layers",   title: "3. Managing GIS Data Layers",         path: "/docs/admin-gis-layers.md",          updatedDate: "Jun 2026" },
-  { id: "troubleshoot", title: "4. Troubleshooting & Health",         path: "/docs/admin-troubleshooting.md",     updatedDate: "Jun 2026" },
-  { id: "cyclerap",     title: "5. Updating CycleRAP Algorithm",      path: "/docs/admin-cyclerap-algorithm.md",  updatedDate: "Jun 2026" },
-  { id: "accounts",     title: "6. User Accounts & Sign-In",          path: "/docs/admin-user-accounts.md",       updatedDate: "Jun 2026" },
-  { id: "dashboard",    title: "7. Admin Dashboard — Usage Tracking", path: "/docs/admin-dashboard.md",           updatedDate: "Jun 2026" },
+  { id: "deployment",   title: "1. Deployment & Infrastructure",      path: "/docs/admin/admin-deployment.md",          updatedDate: "Jun 2026" },
+  { id: "ml-models",    title: "2. Managing ML Models",               path: "/docs/admin/admin-ml-models.md",           updatedDate: "Jun 2026" },
+  { id: "gis-layers",   title: "3. Managing GIS Data Layers",         path: "/docs/admin/admin-gis-layers.md",          updatedDate: "Jun 2026" },
+  { id: "troubleshoot", title: "4. Troubleshooting & Health",         path: "/docs/admin/admin-troubleshooting.md",     updatedDate: "Jun 2026" },
+  { id: "cyclerap",     title: "5. Updating CycleRAP Algorithm",      path: "/docs/admin/admin-cyclerap-algorithm.md",  updatedDate: "Jun 2026" },
+  { id: "accounts",     title: "6. User Accounts & Sign-In",          path: "/docs/admin/admin-user-accounts.md",       updatedDate: "Jun 2026" },
+  { id: "dashboard",    title: "7. Admin Dashboard — Usage Tracking", path: "/docs/admin/admin-dashboard.md",           updatedDate: "Jun 2026" },
 ];
 
 export default function AdminGuide() {

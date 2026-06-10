@@ -16,6 +16,7 @@ The Treatment Application page lets you test safety improvements on one or more 
 - [Step 8: Generate AI visualisations of proposed improvements](#step-8-generate-ai-visualisations-of-proposed-improvements)
 - [Step 9: Review the Overall Treatment Analysis](#step-9-review-the-overall-treatment-analysis)
 - [Tips and common workflows](#tips-and-common-workflows)
+- [6.10 AI Score Preview — Before & After Treatment](#610-ai-score-preview--before--after-treatment)
 
 ---
 
@@ -26,6 +27,8 @@ Project selection is done from the **Projects page**. Select one or more project
 - Click a row (or tick its checkbox) to select it. Use the **Select All** row to select all visible projects at once.
 - Use the **Search** box or **Filter by tag** dropdown to find projects more quickly.
 - You can load multiple projects together to compare or apply treatments across them in one session.
+- The **Verification Status** column shows ✅ for fully verified projects and ⏳ for projects still in progress.
+- Click the **pencil icon** in the Actions column to rename a project or change its tags before loading.
 
 ---
 
@@ -135,34 +138,48 @@ Use these charts to get a quick sense of whether the treatments you have applied
 
 ---
 
-## Before & After Treatment — AI Score Preview
 
-When you apply treatments to a path, PSAT calculates a **predicted score** for each segment after the treatment is applied. This before/after comparison lets you evaluate the safety impact before committing.
 
-### How the Before / After Comparison Works
+---
+
+### 6.10 AI Score Preview — Before & After Treatment
+
+When you select treatments in the Treatment Options panel, PSAT calculates a **predicted score** for the current segment in real time. This before/after comparison lets you evaluate the safety impact of a treatment before committing to it.
+
+#### How the Before / After Comparison Works
 
 1. **Before score** — the original crash type scores (BB, BP, SB, VB, Risk Score) computed from the coded attributes.
-2. **Treatment applied** — selected treatments modify one or more attribute values on the relevant segments (e.g., installing a safety barrier changes *Adjacent Severe Hazard*).
+2. **Treatment selected** — ticking a treatment checkbox immediately previews the effect on the current segment's scores.
 3. **After score** — PSAT re-runs the CycleRAP scoring formula with the updated attribute values to produce a predicted post-treatment score.
 
 The difference (reduction) is shown as a **↓ value** beneath each crash type score card. A green indicator confirms improvement; no arrow means the treatment did not affect that crash type.
 
-### Reading the Score Cards
+#### Reading the Score Cards
 
-When a treated version is displayed:
+When treatments are selected:
 
 - Each card shows the **post-treatment score** in large text.
 - A **↓ X.XX** delta beneath it shows how much the score decreased.
-- The card background colour reflects the **post-treatment band** — if a treatment moved a segment from High to Medium, the card will now show the Medium colour.
+- The card background colour reflects the **post-treatment band** — if a treatment moved a segment from High to Medium, the card will show the Medium (yellow/orange) colour.
 
-### AI-Assisted Treatment Description
+#### Previewing Before You Apply
 
-On the **Treatment Detail Page**, an AI-generated narrative summarises the expected safety improvement. It describes:
+Tick any treatment checkbox to see the **live score preview** for the current segment. The scores update automatically as you change your selection — you do not need to click Apply.
 
-- Which attributes are being modified by the treatment.
-- Which crash types are most affected and why.
-- The magnitude of the predicted score reduction.
+Toggle **Show Post-Treatment** in the Attributes panel to see exactly which attribute values would change.
 
-This text is generated automatically based on the treatment definition and the attribute changes — no manual input is required.
+> **Note:** Selecting treatments only previews the effect — nothing is saved until you click **Apply**.
 
-> **Note:** Previewing a treatment does not modify the project. You can preview multiple treatment combinations before deciding which to apply.
+#### AI-Assisted Visualisation (Prompt & Image Copy)
+
+Two clipboard buttons help you create visual representations of proposed improvements:
+
+- **Copy prompt** — copies a ready-to-use text prompt describing the selected or applied treatments. Use the dropdown to choose:
+  - **Copy Applied** — prompt based on treatments already **applied and saved** for this segment.
+  - **Copy Selected** — prompt based on treatments currently **ticked/selected** in the panel.
+
+  Paste the prompt into an AI image generation tool (such as ChatGPT or DALL·E) to generate a mock-up of what the improved path might look like.
+
+- **Copy image** — copies the current segment photograph directly to your clipboard. Paste it alongside the prompt so the AI tool has the actual scene to work from.
+
+Use **Copy Selected** when exploring options before committing. Use **Copy Applied** when generating the final before-and-after visualisation.

@@ -18,8 +18,8 @@ PSAT uses external GIS shapefiles and GeoJSON layers to provide spatial context 
 
 Click the **View GIS Layers** button in the sidebar to open the GIS Layers dashboard. Here you can:
 
-- Browse all current layers grouped by category (e.g., `area_type`, `bus_lane`)
-- View metadata for each layer, including geometry type and feature count
+- Browse all current GIS layers (sorted in alphabetical order)
+- View last updated date, required columns, and metadata for each layer
 - **Required Columns**: Inspect the mandatory column names needed for PSAT to process the layer. The number in parentheses, e.g., `LU_DESC (1)`, indicates the expected column index in the source data
 - Preview any layer on an interactive map by clicking it
 

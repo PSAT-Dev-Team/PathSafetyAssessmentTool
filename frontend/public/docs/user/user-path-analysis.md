@@ -13,7 +13,7 @@ The Path Analysis page is the multi-project analysis workspace.
   - [5.3.2 Finer Filtering — Sub-category Options](#532-finer-filtering--sub-category-options)
 - [5.4 Export](#54-export)
 - [5.5 Session Continuity](#55-session-continuity)
-- [5.6 Finer Filtering — Reference](#56-finer-filtering--reference)
+- [5.6 Finer Filtering Reference](#56-finer-filtering-reference)
 
 ---
 
@@ -126,7 +126,7 @@ Your selections and filters are kept for the browser session, so navigating away
 
 ---
 
-### 5.6 Finer Filtering — Reference
+### 5.6 Finer Filtering Reference
 
 Finer filtering lets you narrow a segment filter down to a specific **sub-type** within a parent category. When an attribute supports it, selecting a top-level value reveals a second dropdown — and the map immediately updates to colour only the segments that match your exact sub-type.
 
@@ -144,6 +144,16 @@ Attributes that support finer filtering are marked **❖** in the filter panel.
 | **Crossing Facility** ❖ | Present; Not Present | 5 crossing types |
 
 All other attributes use standard single-level filtering.
+
+#### How to Use Finer Filtering
+
+1. Open Path Analysis and load one or more projects.
+2. In the **Filter Segment** panel, select an attribute marked **❖** from the dropdown.
+3. Choose a top-level value (e.g. *Present* for Crossing Facility).
+4. A **sub-category dropdown** appears immediately below — select the specific sub-type you want (e.g. *Zebra Crossing*).
+5. The map updates to colour only segments with that sub-type. Segments with other values are shown in grey.
+6. To **change** the sub-category, open the second dropdown and choose a different option.
+7. To **clear** finer filtering, click the **×** on the active filter chip, or reset the top-level value to *Not Selected*.
 
 #### Sub-category Reference Table
 

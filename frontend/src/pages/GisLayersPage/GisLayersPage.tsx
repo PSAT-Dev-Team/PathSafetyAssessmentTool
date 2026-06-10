@@ -1,6 +1,6 @@
 import ThemeAwareTileLayer from "../../components/common/ThemeAwareTileLayer";
 import { useEffect, useState, useMemo, useRef } from "react";
-import { listShapefiles, type ShapefileInfo } from "../../api";
+import { listShapefiles, deleteShapefile, renameShapefile, revertShapefile, type ShapefileInfo } from "../../api";
 import { Spinner, Text, Badge, Box, Flex, HStack, Button } from "@chakra-ui/react";
 import ShapefileModal from "../sidebar/components/ShapefileModal";
 import { MapContainer, Polyline, CircleMarker, Polygon as LeafletPolygon, Tooltip, useMap } from "react-leaflet";
@@ -70,7 +70,14 @@ export default function GisLayersPage() {
   const [mapError, setMapError] = useState<string | null>(null);
   
   const [shapefileModalOpen, setShapefileModalOpen] = useState(false);
-  
+
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [confirmDeletePath, setConfirmDeletePath] = useState<string | null>(null);
+  const [confirmRevertPath, setConfirmRevertPath] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const initialCenter = useRef<[number, number]>([1.3521, 103.8198]);
 
   // Color Mode Values
@@ -113,6 +120,95 @@ export default function GisLayersPage() {
   useEffect(() => {
     loadLayers();
   }, []);
+
+  const handleStartEdit = (file: ShapefileInfo) => {
+    setEditingPath(file.path);
+    setEditName(file.name);
+    setConfirmDeletePath(null);
+    setConfirmRevertPath(null);
+    setActionError(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingPath(null);
+    setEditName("");
+    setActionError(null);
+  };
+
+  const handleSaveEdit = async (file: ShapefileInfo) => {
+    if (!editName.trim()) {
+      handleCancelEdit();
+      return;
+    }
+    try {
+      setActionLoading(true);
+      setActionError(null);
+      await renameShapefile(file.path, editName.trim());
+      setEditingPath(null);
+      setEditName("");
+      await loadLayers();
+    } catch (err: any) {
+      setActionError(err.message || "Rename failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteClick = (file: ShapefileInfo) => {
+    setConfirmDeletePath(file.path);
+    setEditingPath(null);
+    setEditName("");
+    setConfirmRevertPath(null);
+    setActionError(null);
+  };
+
+  const handleRevertClick = (file: ShapefileInfo) => {
+    setConfirmRevertPath(file.path);
+    setEditingPath(null);
+    setEditName("");
+    setConfirmDeletePath(null);
+    setActionError(null);
+  };
+
+  const handleCancelRevert = () => {
+    setConfirmRevertPath(null);
+    setActionError(null);
+  };
+
+  const handleConfirmRevert = async (file: ShapefileInfo) => {
+    try {
+      setActionLoading(true);
+      setActionError(null);
+      await revertShapefile(file.path);
+      setConfirmRevertPath(null);
+      if (selectedLayer?.path === file.path) setSelectedLayer(null);
+      await loadLayers();
+    } catch (err: any) {
+      setActionError(err.message || "Revert failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setConfirmDeletePath(null);
+    setActionError(null);
+  };
+
+  const handleConfirmDelete = async (file: ShapefileInfo) => {
+    try {
+      setActionLoading(true);
+      setActionError(null);
+      await deleteShapefile(file.path);
+      setConfirmDeletePath(null);
+      if (selectedLayer?.path === file.path) setSelectedLayer(null);
+      await loadLayers();
+    } catch (err: any) {
+      setActionError(err.message || "Delete failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // Fetch GeoJSON when a layer is selected
   useEffect(() => {
@@ -277,6 +373,14 @@ export default function GisLayersPage() {
           <Box p={4} borderBottom="1px solid" borderColor={panelHeaderBorder} bg={panelHeaderBg}>
             <Text fontWeight="600" color={titleColor}>Available Shapefiles</Text>
           </Box>
+          {actionError && (
+            <Box px={3} py={2} bg="red.50" _dark={{ bg: "red.950", borderColor: "red.700" }} borderBottom="1px solid" borderColor="red.200">
+              <Flex align="center" justify="space-between" gap="2">
+                <Text fontSize="xs" color="red.700" _dark={{ color: "red.300" }}>{actionError}</Text>
+                <Button size="xs" variant="ghost" colorPalette="red" onClick={() => setActionError(null)}>✕</Button>
+              </Flex>
+            </Box>
+          )}
           
           <Box flex="1" overflowY="auto">
             {loading ? (
@@ -292,10 +396,10 @@ export default function GisLayersPage() {
                 {shapefiles.map(file => {
                   const isSelected = selectedLayer?.path === file.path;
                   return (
-                    <Box 
-                      key={file.path} 
-                      p={3} 
-                      borderBottom="1px solid" 
+                    <Box
+                      key={file.path}
+                      p={3}
+                      borderBottom="1px solid"
                       borderColor={itemBorderColor}
                       cursor="pointer"
                       bg={isSelected ? selectedItemBg : itemBg}
@@ -303,9 +407,113 @@ export default function GisLayersPage() {
                       onClick={() => setSelectedLayer(isSelected ? null : file)}
                       transition="background-color 0.2s"
                     >
-                      <Text fontWeight="600" fontSize="sm" truncate title={file.name} color={titleColor}>
-                        {file.name}
-                      </Text>
+                      {/* Name row with Edit / Delete buttons */}
+                      <Flex align="center" justify="space-between" gap="2">
+                        {editingPath === file.path ? (
+                          <Flex align="center" gap="1" flex="1" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveEdit(file);
+                                if (e.key === "Escape") handleCancelEdit();
+                              }}
+                              style={{
+                                flex: 1,
+                                fontSize: "0.8rem",
+                                fontWeight: 600,
+                                border: "1px solid #3182ce",
+                                borderRadius: "4px",
+                                padding: "2px 6px",
+                                outline: "none",
+                                background: "transparent",
+                                color: "inherit",
+                              }}
+                              autoFocus
+                            />
+                            <Button size="xs" colorPalette="blue" variant="solid" onClick={() => handleSaveEdit(file)} disabled={actionLoading}>Save</Button>
+                            <Button size="xs" variant="ghost" onClick={handleCancelEdit} disabled={actionLoading}>Cancel</Button>
+                          </Flex>
+                        ) : (
+                          <>
+                            <Text fontWeight="600" fontSize="sm" truncate title={file.name} color={titleColor} flex="1">
+                              {file.name}
+                            </Text>
+                            <HStack gap="1" flexShrink={0} onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                colorPalette="blue"
+                                onClick={(e) => { e.stopPropagation(); handleStartEdit(file); }}
+                                title="Rename shapefile"
+                              >
+                                Edit
+                              </Button>
+                              {file.is_renamed && (
+                                <Button
+                                  size="xs"
+                                  variant={confirmRevertPath === file.path ? "solid" : "ghost"}
+                                  colorPalette="purple"
+                                  onClick={(e) => { e.stopPropagation(); handleRevertClick(file); }}
+                                  title="Revert to original name"
+                                >
+                                  Revert
+                                </Button>
+                              )}
+                              <Button
+                                size="xs"
+                                variant={confirmDeletePath === file.path ? "solid" : "ghost"}
+                                colorPalette="red"
+                                onClick={(e) => { e.stopPropagation(); handleDeleteClick(file); }}
+                                title="Delete shapefile"
+                              >
+                                Delete
+                              </Button>
+                            </HStack>
+                          </>
+                        )}
+                      </Flex>
+
+                      {/* Inline delete confirmation */}
+                      {confirmDeletePath === file.path && (
+                        <Flex
+                          align="center"
+                          gap="2"
+                          mt="2"
+                          p="2"
+                          bg="red.50"
+                          _dark={{ bg: "red.950" }}
+                          borderRadius="md"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Text fontSize="xs" color="red.700" _dark={{ color: "red.300" }} flex="1">
+                            Delete "{file.name}"? This cannot be undone.
+                          </Text>
+                          <Button size="xs" colorPalette="red" variant="solid" onClick={() => handleConfirmDelete(file)} disabled={actionLoading}>Confirm</Button>
+                          <Button size="xs" variant="ghost" onClick={handleCancelDelete} disabled={actionLoading}>Cancel</Button>
+                        </Flex>
+                      )}
+
+                      {/* Inline revert confirmation */}
+                      {confirmRevertPath === file.path && (
+                        <Flex
+                          align="center"
+                          gap="2"
+                          mt="2"
+                          p="2"
+                          bg="purple.50"
+                          _dark={{ bg: "purple.950" }}
+                          borderRadius="md"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Text fontSize="xs" color="purple.700" _dark={{ color: "purple.300" }} flex="1">
+                            Revert "{file.name}" back to its original name "{file.original_name}"?
+                          </Text>
+                          <Button size="xs" colorPalette="purple" variant="solid" onClick={() => handleConfirmRevert(file)} disabled={actionLoading}>Confirm</Button>
+                          <Button size="xs" variant="ghost" onClick={handleCancelRevert} disabled={actionLoading}>Cancel</Button>
+                        </Flex>
+                      )}
+
                       <HStack mt={1} fontSize="xs" color={mutedTextColor} justify="space-between">
                         <HStack gap="2">
                           <Badge colorPalette="blue" variant="subtle" size="sm">{file.category}</Badge>

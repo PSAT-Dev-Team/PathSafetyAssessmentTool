@@ -5,16 +5,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const DOCS_LIST = [
-  { id: "readme",       title: "1. Overview (README)", path: "/README.md",                  updatedDate: "Jun 2026" },
-  { id: "installation", title: "2. Installation",       path: "/docs/installation.md",       updatedDate: "Jun 2026" },
-  { id: "architecture", title: "3. Architecture",       path: "/docs/architecture.md",       updatedDate: "Jun 2026" },
-  { id: "api",          title: "4. API Reference",      path: "/docs/api-reference.md",      updatedDate: "Jun 2026" },
-  { id: "cv",           title: "5. CV / ML Pipeline",   path: "/docs/cv-pipeline.md",        updatedDate: "Jun 2026" },
-  { id: "scoring",      title: "6. Scoring Logic",      path: "/docs/scoring.md",            updatedDate: "Jun 2026" },
-  { id: "frontend",     title: "7. Frontend",           path: "/docs/frontend.md",           updatedDate: "Jun 2026" },
-  { id: "issues",       title: "8. Common Issues",      path: "/docs/common-issues.md",      updatedDate: "Jun 2026" },
-  { id: "contributing", title: "9. Contributing",       path: "/docs/contributing.md",       updatedDate: "Jun 2026" },
-  { id: "jira",         title: "10. Jira Board",        path: "/docs/dev-jira.md",            updatedDate: "Jun 2026" },
+  { id: "readme",       title: "1. Overview (README)", path: "/README.md",                             updatedDate: "Jun 2026" },
+  { id: "installation", title: "2. Installation",       path: "/docs/developer/installation.md",       updatedDate: "Jun 2026" },
+  { id: "architecture", title: "3. Architecture",       path: "/docs/developer/architecture.md",       updatedDate: "Jun 2026" },
+  { id: "api",          title: "4. API Reference",      path: "/docs/developer/api-reference.md",      updatedDate: "Jun 2026" },
+  { id: "cv",           title: "5. CV / ML Pipeline",   path: "/docs/developer/cv-pipeline.md",        updatedDate: "Jun 2026" },
+  { id: "scoring",      title: "6. Scoring Logic",      path: "/docs/developer/scoring.md",            updatedDate: "Jun 2026" },
+  { id: "frontend",     title: "7. Frontend",           path: "/docs/developer/frontend.md",           updatedDate: "Jun 2026" },
+  { id: "issues",       title: "8. Common Issues",      path: "/docs/developer/common-issues.md",      updatedDate: "Jun 2026" },
+  { id: "contributing", title: "9. Contributing",       path: "/docs/developer/contributing.md",       updatedDate: "Jun 2026" },
+  { id: "jira",         title: "10. Jira Board",        path: "/docs/developer/dev-jira.md",           updatedDate: "Jun 2026" },
 ];
 
 export default function DeveloperGuide() {
@@ -48,6 +48,7 @@ export default function DeveloperGuide() {
                 w="100%"
                 textAlign="left"
                 px="2"
+                pl="2"
                 py="2"
                 borderRadius="md"
                 fontSize="sm"

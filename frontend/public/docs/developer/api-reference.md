@@ -1,4 +1,4 @@
-# API Reference
+# 4. API Reference
 
 All endpoints are prefixed with `/api/`.
 
@@ -21,7 +21,11 @@ All endpoints are prefixed with `/api/`.
 - [4.4 Segment Management & Exports](#4-4-segment-management-exports)
 - [4.5 Treatment Endpoints](#4-5-treatment-endpoints)
 - [4.6 Shapefile Management Endpoints](#4-6-shapefile-management-endpoints)
-- [4.7 Common Status Codes](#4-7-common-status-codes)
+- [4.7 User Profile Endpoints](#4-7-user-profile-endpoints)
+- [4.8 Admin & Telemetry Endpoints](#4-8-admin--telemetry-endpoints)
+- [4.9 Report Builder Endpoints](#4-9-report-builder-endpoints)
+- [4.10 Defects Summary Endpoints](#4-10-defects-summary-endpoints)
+- [4.11 Common Status Codes](#4-11-common-status-codes)
 
 ## 4.1 Health Endpoints
 
@@ -65,8 +69,14 @@ Project list responses include: `dataset`, `source_folders`, `verified_segment_c
 | `GET` | `/api/projects/folders` | List source folders under `in/` |
 | `POST` | `/api/projects/folders` | Create a project (single or multi-folder) |
 | `POST` | `/api/projects/folders/upload-images` | Upload images into a source folder |
+| `GET` | `/api/projects/folders/preview` | Preview folder details before create |
+| `GET` | `/api/projects/folders/image` | Get first image thumbnail from folder |
+| `GET` | `/api/projects/folders/suggestions` | Get name suggestions for project |
+| `POST` | `/api/projects/folders/pick-local` | Select local directory directly |
+| `POST` | `/api/projects/folders/copy-local` | Copy local directory files to `in/` |
 | `POST` | `/api/projects/roads-in-polygon` | Roads intersecting a drawn polygon |
 | `GET` | `/api/projects/roads-in-bounds` | Road polylines for the current viewport |
+| `GET` | `/api/projects/roads-by-name` | Find road coordinates by name |
 | `GET` | `/api/projects/planning-areas-in-bounds` | Planning-area polygons for the viewport |
 
 `POST /api/projects/folders` supports:
@@ -115,6 +125,9 @@ Project list responses include: `dataset`, `source_folders`, `verified_segment_c
 | `POST` | `/api/projects/check-collisions` | Check image collisions before copy |
 | `POST` | `/api/projects/copy-segments` | Copy segments into another project |
 | `POST` | `/api/projects/download-images` | ZIP download of filtered images |
+| `POST` | `/api/projects/export-shapefile` | Generate ZIP shapefile download |
+| `GET` | `/api/projects/custom-attribute-options` | Fetch custom defined enums |
+| `PUT` | `/api/projects/custom-attribute-options` | Save/modify custom enums |
 
 ---
 
@@ -150,10 +163,62 @@ All under `/api/shapefiles/`:
 | `POST` | `/api/shapefiles/validate-replacement` | Check column compatibility of replacement |
 | `PUT` | `/api/shapefiles/replace` | Overwrite existing shapefile (creates `.bak` backup) |
 | `DELETE` | `/api/shapefiles/<path>` | Delete shapefile and companion files |
+| `POST` | `/api/shapefiles/rename` | Rename shapefile + companion files |
+| `POST` | `/api/shapefiles/revert` | Revert renamed shapefile back to original stem |
 
 ---
 
-## 4.7 Common Status Codes
+## 4.7 User Profile Endpoints
+
+All under `/api/profiles`:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/profiles` | List all profiles (overview of names, divisions, and legacy projects) |
+| `POST` | `/api/profiles` | Create a new profile (name, division, PIN) |
+| `POST` | `/api/profiles/login` | Login to profile (profile ID, PIN) |
+| `POST` | `/api/profiles/logout` | Logout of active profile |
+| `POST` | `/api/profiles/activity` | Record profile telemetry client event (e.g. `page_view`) |
+| `PATCH` | `/api/profiles/<profile_id>` | Update profile metadata (requires current PIN) |
+| `POST` | `/api/profiles/<profile_id>/reset-pin` | Reset profile PIN (requires current PIN and new PIN) |
+| `POST` | `/api/profiles/migrate-legacy-projects` | Move unassigned projects from `data/` to profile |
+
+---
+
+## 4.8 Admin & Telemetry Endpoints
+
+All under `/api/admin`:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/admin/ctx-status` | Diagnostic endpoint checking configuration, directories, and database status |
+| `GET` | `/api/admin/stats` | Retrieve logins summary, date breakdown (7d-90d), and active profiles data |
+
+---
+
+## 4.9 Report Builder Endpoints
+
+All under `/api/report`:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/report/generate-pptx` | Export PowerPoint (.pptx) summary slides |
+| `POST` | `/api/report/generate-docx` | Export fully detailed Word document (.docx) based on layout canvas |
+| `POST` | `/api/report/segment-details` | Fetch images and top 3 risk factors for listed segment references |
+
+---
+
+## 4.10 Defects Summary Endpoints
+
+All under `/api/defects`:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/defects/nearby` | Query Daily Defect summaries within search radius around point |
+
+---
+
+## 4.11 Common Status Codes
 
 | Code | Meaning |
 |---|---|
