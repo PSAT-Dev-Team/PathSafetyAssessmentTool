@@ -17,6 +17,7 @@ import {
 import { LuCheck, LuCopy, LuImage, LuChevronDown } from "react-icons/lu";
 import { Switch } from "../../components/ui/switch";
 import { toaster } from "../../components/ui/toaster";
+import { Tooltip } from "../../components/ui/tooltip";
 
 import type { Feature, FeatureCollection, LineString } from "geojson";
 
@@ -37,6 +38,7 @@ import {
 
 import type { AttributeRow } from "../../api";
 import ImagePanel from "../CodingPage/components/ImagePanel";
+import PostTreatmentImageUpload from "./components/PostTreatmentImageUpload";
 import AttributesPanel, { resolveContributorTabGroup } from "../CodingPage/components/AttributesPanel";
 import GeoDataPanel from "../CodingPage/components/GeoDataPanel";
 import SegmentScoresCard from "../../components/visualization/scoreband/SegmentScoresCard";
@@ -302,6 +304,18 @@ const TREATMENT_COPY_LINES: Partial<Record<number, string>> = {
   20: "* Improve crossing facility - Upgrade the provision for cyclists or pedestrians to cross a road or junction. In the Singapore context, this includes adding or improving toucan crossings, extending crossing times at signalised junctions, adding kerb ramps, or introducing a dedicated cycling crossing box at signalised intersections.",
   21: "* Evaluate grade separation - Assess the feasibility of introducing an overpass or underpass to eliminate at-grade conflicts between cyclists/pedestrians and motor vehicles. Reference existing Singapore examples such as PCN underpasses, overhead bridges, and cycling tunnels.",
   22: "* Reconfigure/remove parking - Remove or relocate on-street parking lots, motorcycle bays, or loading/unloading zones that encroach on or are adjacent to the cycling or pedestrian facility. This includes HDB estate carpark aprons, street-side parking lots marked with yellow kerb lines, and illegally parked vehicles.",
+};
+
+const getTreatmentDescription = (t: Treatment): string => {
+  if (t.description) return t.description;
+  const copyLine = TREATMENT_COPY_LINES[t.id];
+  if (copyLine) {
+    const parts = copyLine.split(' - ');
+    if (parts.length > 1) {
+      return parts.slice(1).join(' - ');
+    }
+  }
+  return `Apply this intervention in a way that improves the safety and usability of the cycling or pedestrian facility shown.`;
 };
 
 const buildTreatmentCopyMessage = (treatmentIds: number[]): string => {
@@ -1536,29 +1550,46 @@ export default function TreatmentDetailPage() {
             <Text fontSize="sm" fontWeight="bold" color="gray.700" _dark={{ color: "gray.200" }}>
               Treatment Options
             </Text>
-            <Box mt="2">
-              <select
-                value={accordionView}
-                onChange={(e) => {
-                  setAccordionView(e.target.value as "segment" | "treatment");
-                  setSelectedTreatments(new Set());
-                }}
-                style={{
-                  width: "100%",
-                  padding: "6px",
-                  borderRadius: "6px",
-                  border: "1px solid var(--chakra-colors-gray-300)",
-                  backgroundColor: "white",
-                  color: "inherit",
-                  fontSize: "14px",
-                  cursor: "pointer",
-                }}
-                className="theme-select"
-              >
-                <option value="segment">By Segment</option>
-                <option value="treatment">By Treatment</option>
-              </select>
-            </Box>
+            <Tooltip
+              content={
+                accordionView === "segment" ? (
+                  <Text>
+                    <b>By Segment:</b> View and apply treatments for the current segment only.
+                  </Text>
+                ) : (
+                  <Text>
+                    <b>By Treatment:</b> View and apply a single treatment across all applicable segments.
+                  </Text>
+                )
+              }
+              showArrow
+              openDelay={400}
+              contentProps={{ maxW: "250px" }}
+            >
+              <Box mt="2">
+                <select
+                  value={accordionView}
+                  onChange={(e) => {
+                    setAccordionView(e.target.value as "segment" | "treatment");
+                    setSelectedTreatments(new Set());
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "6px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--chakra-colors-gray-300)",
+                    backgroundColor: "white",
+                    color: "inherit",
+                    fontSize: "14px",
+                    cursor: "pointer",
+                  }}
+                  className="theme-select"
+                >
+                  <option value="segment">By Segment</option>
+                  <option value="treatment">By Treatment</option>
+                </select>
+              </Box>
+            </Tooltip>
           </Box>
 
           <Box flex="1" overflowY="auto" p="3">
@@ -1868,11 +1899,19 @@ export default function TreatmentDetailPage() {
             </Button>
           </Flex>
 
-          <Box flex="1 1 auto" minH={0}>
-            <ImagePanel
-              projectName={currentCtx?.name}
-              imageRef={imgRef}
-            />
+          <Box flex="1 1 auto" minH={0} display="flex" flexDirection="column">
+            <Box flex="1 1 50%" minH={0} display="flex" flexDirection="column">
+              <ImagePanel
+                projectName={currentCtx?.name}
+                imageRef={imgRef}
+              />
+            </Box>
+            <Box flex="1 1 50%" minH={0} display="flex" flexDirection="column">
+              <PostTreatmentImageUpload
+                projectName={currentCtx?.name || ""}
+                segmentIndex={currentIndex + 1}
+              />
+            </Box>
           </Box>
         </GridItem>
 

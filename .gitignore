@@ -64,6 +64,11 @@ completed.csv
 .DS_Store
 **/.DS_Store
 
+# Scratch / test artifacts
+test.jpg
+frontend/test_puppeteer.js
+generate-summary-*.xlsx
+
 # Documentation and explanations
 *.md
 !README.md

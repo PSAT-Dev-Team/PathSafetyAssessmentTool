@@ -94,6 +94,9 @@ const defaultProjectData: ProjectDataState = {
 // Global cache for project data to prevent reloading when navigating away and back (e.g. to Help page)
 const projectDataCache: Record<string, ProjectDataState> = {};
 
+// Snapshot of attrs as last loaded/saved from backend — used to detect real changes vs. isDirty flag
+const savedAttrsSnapshot: Record<string, AttributeRow[]> = {};
+
 const DELINEATION_PRESENT_SUGGESTIONS = ["Cycling Path", "Red Stripe", "Signalised Crossing", "Traffic Crossing", "Zebra Crossing"];
 const FO_TYPE_SUGGESTIONS = ["Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation"];
 const NFO_TYPE_SUGGESTIONS = ["Barrier", "Bins", "Bicycle", "Cone"];
@@ -574,6 +577,7 @@ export default function CodingPage() {
 
       const attributes = a?.rows ?? [];
 
+      savedAttrsSnapshot[currentProjectName] = attributes;
       updateProjectData(currentProjectName, {
         detail: d ?? null,
         attrs: attributes,
@@ -833,19 +837,39 @@ export default function CodingPage() {
     });
   };
 
-  // Update the autocode baseline after autocode runs
+  // Update the autocode baseline after autocode runs.
+  // Pass fieldsToUpdate to do a selective column-only merge (preserves manual edits
+  // to previously-autocoded attributes). Omit it for a full baseline replacement
+  // (e.g. "autocode all" where every field is overwritten).
   const updateAutocodeBaseline = useCallback(
-    (updatedAttrs: AttributeRow[]) => {
+    (updatedAttrs: AttributeRow[], fieldsToUpdate?: string[]) => {
       if (!currentProjectName) return;
       try {
-        const normalized = normalizeAttributeValues(updatedAttrs);
-        // Save updated baseline to server
+        let rowsToSave: AttributeRow[];
+        if (fieldsToUpdate && fieldsToUpdate.length > 0 && baselineRowsRef.current.length > 0) {
+          // Only patch the autocoded columns into the existing baseline so that
+          // manual edits to other attributes are not baked into the reference values.
+          rowsToSave = baselineRowsRef.current.map((baselineRow, i) => {
+            const updatedRow = updatedAttrs[i];
+            if (!updatedRow) return baselineRow;
+            const patch: Record<string, unknown> = {};
+            for (const field of fieldsToUpdate) {
+              if (field in updatedRow) patch[field] = updatedRow[field];
+              // Mirror alias pairs that the patchedAttrs builder also applies
+              if (field === "Grade" && "Gradient %" in updatedRow) patch["Gradient %"] = updatedRow["Gradient %"];
+              if (field === "Delineation" && "Delineation Type" in updatedRow) patch["Delineation Type"] = updatedRow["Delineation Type"];
+            }
+            return { ...baselineRow, ...patch };
+          });
+        } else {
+          rowsToSave = updatedAttrs;
+        }
+        const normalized = normalizeAttributeValues(rowsToSave);
         fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/baseline`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rows: normalized })
         }).then(() => {
-          // Dispatch event to notify AutocodeValidation to refetch baseline
           window.dispatchEvent(new CustomEvent("psat:baseline:updated", {
             detail: { projectName: currentProjectName }
           }));
@@ -1145,20 +1169,36 @@ export default function CodingPage() {
               const n = Number(k);
               mergedSources[n] = { ...(mergedSources[n] ?? {}), ...(v as Record<string, string>) };
             }
+            // Selective patch: only overwrite the requested fields so that a
+            // previous by-attribute run's un-saved changes are not clobbered.
+            const currentAttrs = projectDataCache[currentProjectName]?.attrs ?? attrs;
+            const patchedAttrs = currentAttrs.map((oldRow, idx) => {
+              const newRow = rows[idx];
+              if (!newRow) return oldRow;
+              const patch: Record<string, unknown> = {};
+              for (const field of fields) {
+                if (field in newRow) patch[field] = newRow[field];
+                // Mirror the alias pairs the backend's _bulk_gen filter uses
+                if (field === "Grade" && "Gradient %" in newRow) patch["Gradient %"] = newRow["Gradient %"];
+                if (field === "Delineation" && "Delineation Type" in newRow) patch["Delineation Type"] = newRow["Delineation Type"];
+              }
+              return { ...oldRow, ...patch };
+            });
+
             updateProjectData(currentProjectName, {
-              attrs: rows,
+              attrs: patchedAttrs,
               changedFieldsByRow: mergedChanged,
               fieldSourcesByRow: mergedSources,
               isDirty: true,
             });
 
             saveAutocodeMetadata(currentProjectName, mergedChanged, mergedSources);
-            updateAutocodeBaseline(rows);
+            updateAutocodeBaseline(patchedAttrs, fields);
 
             const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectName)}/score`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ attributes: rows }),
+              body: JSON.stringify({ attributes: patchedAttrs }),
             });
 
             if (res.ok) {
@@ -1482,6 +1522,7 @@ export default function CodingPage() {
           });
         }
 
+        savedAttrsSnapshot[currentProjectName] = attributes;
         updateProjectData(currentProjectName, {
           detail: d ?? null,
           attrs: attributes,
@@ -1510,6 +1551,7 @@ export default function CodingPage() {
 
   // Store baseline rows fetched from server
   const [baselineRows, setBaselineRows] = useState<AttributeRow[]>([]);
+  const baselineRowsRef = useRef<AttributeRow[]>([]);
 
   // Fetch baseline from server when project changes
   useEffect(() => {
@@ -1535,6 +1577,11 @@ export default function CodingPage() {
 
     return () => { cancelled = true; };
   }, [currentProjectName]);
+
+  // Keep ref in sync so async handlers can read the current baseline without stale closures
+  useEffect(() => {
+    baselineRowsRef.current = baselineRows;
+  }, [baselineRows]);
 
   // Listen for baseline updates from autocode operations and refetch
   useEffect(() => {
@@ -1782,13 +1829,16 @@ export default function CodingPage() {
           const projData = projectData[projName];
           if (!projData?.attrs) return Promise.resolve();
 
+          const attrsAtSaveTime = projData.attrs;
           return Promise.all([
-            saveAttributes(projName, projData.attrs),
+            saveAttributes(projName, attrsAtSaveTime),
             updateProject(projName, {
               autocoded_segment_count: projData.autocodedSegmentCount ?? 0,
               verified_segment_count: projData.verifiedSegmentCount ?? 0
             })
-          ]);
+          ]).then(() => {
+            savedAttrsSnapshot[projName] = attrsAtSaveTime;
+          });
         });
 
         await Promise.all(savePromises);
@@ -2412,8 +2462,18 @@ export default function CodingPage() {
             colorPalette="blue"
             size="sm"
             onClick={() => {
-              // Open save confirmation dialog instead of navigating immediately
-              setIsSaveDialogOpen(true);
+              const anyChanges = projectList.some(projName => {
+                const current = projectData[projName]?.attrs;
+                const snapshot = savedAttrsSnapshot[projName];
+                if (!current || !snapshot) return false;
+                return JSON.stringify(current) !== JSON.stringify(snapshot);
+              });
+              if (anyChanges) {
+                setIsSaveDialogOpen(true);
+              } else {
+                toaster.create({ title: "No changes to save.", type: "info" });
+                window.history.back();
+              }
             }}
           >
             ← Back to Path Analysis
@@ -2425,6 +2485,15 @@ export default function CodingPage() {
           onCancel={() => setIsSaveDialogOpen(false)}
           onDiscardAndExit={() => {
             setIsSaveDialogOpen(false);
+            // Revert each project's attrs back to the last-saved snapshot so that
+            // if the user navigates back to CodingPage the stale edits are gone.
+            projectList.forEach(projName => {
+              const snapshot = savedAttrsSnapshot[projName];
+              if (snapshot) {
+                updateProjectData(projName, { attrs: snapshot, isDirty: false });
+              }
+            });
+            toaster.create({ title: "Changes discarded.", type: "info" });
             window.history.back();
           }}
           onSaveAndExit={async () => {
