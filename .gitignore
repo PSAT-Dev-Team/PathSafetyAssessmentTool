@@ -60,3 +60,4 @@ completed.csv
 !README.md
 *.lnk
 CycleRAP_User_Guide.pdf
+!frontend/public/docs/**
