@@ -96,7 +96,7 @@ const projectDataCache: Record<string, ProjectDataState> = {};
 // Snapshot of attrs as last loaded/saved from backend — used to detect real changes vs. isDirty flag
 const savedAttrsSnapshot: Record<string, AttributeRow[]> = {};
 
-const DELINEATION_PRESENT_SUGGESTIONS = ["Cycling Path", "Red Stripe", "Signalised Crossing", "Traffic Crossing", "Zebra Crossing"];
+const DELINEATION_PRESENT_SUGGESTIONS = ["Cycling Path", "Red Stripe", "Signalised Crossing", "Zebra Crossing"];
 const FO_TYPE_SUGGESTIONS = ["Lamp Post", "Traffic Light", "Pillar", "Bollards", "Fence", "Vegetation"];
 const NFO_TYPE_SUGGESTIONS = ["Barrier", "Bins", "Bicycle", "Cone"];
 const SLIPPERY_ISSUE_TYPE_SUGGESTIONS = ["Algae", "Leaves", "Soil", "Sand"];

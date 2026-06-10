@@ -1566,7 +1566,6 @@ export default function AttributeAnalysisMapView({
         "Cycling Path": "#2563EB",
         "Red Stripe": "#DC2626",
         "Signalised Crossing": "#EA580C",
-        "Traffic Crossing": "#0891B2",
         "Zebra Crossing": "#CA8A04",
       },
       "Facility Type": {
