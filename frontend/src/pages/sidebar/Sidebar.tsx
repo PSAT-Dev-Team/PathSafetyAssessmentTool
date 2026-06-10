@@ -84,12 +84,17 @@ export default function Sidebar() {
     navigate(nextPath);
   }, [completeLogout, consumePendingLogout, consumePendingNavigation, navigate]);
 
-  // Navigate with exit prompt for coding page
+  // Navigate with exit prompt for coding page (skip dialog if no real changes)
   const navigateSidebar = useCallback((to: string) => {
     if (inCoding) {
-      // Always show exit dialog when navigating away from coding page
-      (window as any).psat_pendingNavigation = to;
-      setExitDialogOpen(true);
+      const hasChanges = (window as any).psat_hasUnsavedChanges ?? true;
+      if (hasChanges) {
+        (window as any).psat_pendingNavigation = to;
+        setExitDialogOpen(true);
+      } else {
+        toaster.create({ title: "No changes to save.", type: "info" });
+        navigate(to);
+      }
     } else {
       navigate(to);
     }
@@ -219,14 +224,26 @@ export default function Sidebar() {
   };
 
   const onExit = useCallback(() => {
-    setExitDialogOpen(true);
-  }, []);
+    const hasChanges = (window as any).psat_hasUnsavedChanges ?? true;
+    if (hasChanges) {
+      setExitDialogOpen(true);
+    } else {
+      toaster.create({ title: "No changes to save.", type: "info" });
+      void completeExitAction("/home");
+    }
+  }, [completeExitAction]);
 
   const onLogout = useCallback(() => {
     if (inCoding) {
-      (window as any).psat_pendingNavigation = "/";
-      (window as any).psat_pendingLogout = true;
-      setExitDialogOpen(true);
+      const hasChanges = (window as any).psat_hasUnsavedChanges ?? true;
+      if (hasChanges) {
+        (window as any).psat_pendingNavigation = "/";
+        (window as any).psat_pendingLogout = true;
+        setExitDialogOpen(true);
+      } else {
+        toaster.create({ title: "No changes to save.", type: "info" });
+        void completeLogout();
+      }
       return;
     }
 
@@ -256,7 +273,8 @@ export default function Sidebar() {
 
   const handleDiscardAndExit = useCallback(() => {
     setExitDialogOpen(false);
-
+    window.dispatchEvent(new CustomEvent("psat:discard"));
+    toaster.create({ title: "Changes discarded.", type: "info" });
     void completeExitAction("/home");
   }, [completeExitAction]);
 

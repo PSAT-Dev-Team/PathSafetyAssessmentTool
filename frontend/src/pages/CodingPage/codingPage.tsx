@@ -1940,6 +1940,28 @@ export default function CodingPage() {
     return () => window.removeEventListener("psat:save", handleSaveEvent);
   }, [saveAllProjects]);
 
+  // Keep window.psat_hasUnsavedChanges in sync so Sidebar can skip the dialog when there are no real changes
+  useEffect(() => {
+    (window as any).psat_hasUnsavedChanges = projectList.some(projName => {
+      const current = projectData[projName]?.attrs;
+      const snapshot = savedAttrsSnapshot[projName];
+      if (!current || !snapshot) return false;
+      return JSON.stringify(current) !== JSON.stringify(snapshot);
+    });
+  }, [projectData, projectList]);
+
+  // Revert all projects to their last-saved snapshot when the sidebar dispatches psat:discard
+  useEffect(() => {
+    function handleDiscard() {
+      projectList.forEach(projName => {
+        const snapshot = savedAttrsSnapshot[projName];
+        if (snapshot) updateProjectData(projName, { attrs: snapshot, isDirty: false });
+      });
+    }
+    window.addEventListener("psat:discard", handleDiscard);
+    return () => window.removeEventListener("psat:discard", handleDiscard);
+  }, [projectList]);
+
   // Update edited row when current row changes
   useEffect(() => {
     if (!currentProjectName) return;
