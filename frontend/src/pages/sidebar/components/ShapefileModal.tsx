@@ -266,14 +266,9 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
   }
 
   async function handleAddUpload() {
-    const categoryToUse = selectedCategory === "__new__" ? newCategoryName : selectedCategory;
-
-    if (!categoryToUse) {
-      toaster.create({
-        description: "Please select or enter a category",
-        type: "warning",
-      });
-      return;
+    let categoryToUse = selectedCategory === "__new__" ? newCategoryName : selectedCategory;
+    if (!categoryToUse || categoryToUse.trim() === "") {
+      categoryToUse = "uncategorised";
     }
 
     if (uploadFiles.length === 0) {
@@ -952,7 +947,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                     <Button
                       colorPalette="blue"
                       onClick={handleAddUpload}
-                      disabled={uploadFiles.length === 0 || uploading || !selectedCategory || (selectedCategory === "__new__" && !newCategoryName)}
+                      disabled={uploadFiles.length === 0 || uploading}
                     >
                       Upload {uploadFiles.length > 0 && `(${uploadFiles.length})`}
                     </Button>

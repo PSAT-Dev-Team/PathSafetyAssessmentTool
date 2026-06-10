@@ -528,7 +528,7 @@ def upload_shapefiles():
             else:
                 dest = dest_dir / f.filename
                 shutil.copy2(str(tmp_path), str(dest))
-                if tmp_path.suffix.lower() == ".shp":
+                if tmp_path.suffix.lower() in [".shp", ".geojson", ".kml", ".kmz", ".gml", ".gpx", ".json"]:
                     uploaded.append({"name": tmp_path.stem, "category": category, "path": (category + "/" + f.filename)})
     finally:
         shutil.rmtree(str(tmp_dir), ignore_errors=True)
