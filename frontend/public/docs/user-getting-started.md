@@ -6,8 +6,7 @@ Welcome to PSAT. The tool helps you create projects from geotagged survey images
 
 ## Table of Contents
 
-- [1. Getting Started](#1-getting-started)
-  - [1.1 Open the Project List](#11-open-the-project-list)
+- [1.1 Open the Project List](#11-open-the-project-list)
   - [1.2 Create a Project](#12-create-a-project)
   - [1.3 Navigate Between Workflows](#13-navigate-between-workflows)
   - [1.4 Using the Help Guide](#14-using-the-help-guide)

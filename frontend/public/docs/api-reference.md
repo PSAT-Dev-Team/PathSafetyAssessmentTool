@@ -9,23 +9,21 @@ All endpoints are prefixed with `/api/`.
 
 ## Table of Contents
 
-- [1. Health Endpoints](#1-health-endpoints)
-- [2. Project Endpoints](#2-project-endpoints)
-  - [2.1 Project Listing & Metadata](#21-project-listing--metadata)
-  - [2.2 Project Data](#22-project-data)
-  - [2.3 Project Creation & Road Selection](#23-project-creation--road-selection)
-- [3. Coding & Autocode Endpoints](#3-coding--autocode-endpoints)
-  - [3.1 Autocode](#31-autocode)
-  - [3.2 Baseline & Validation](#32-baseline--validation)
-  - [3.3 Visualisation & GIS Context](#33-visualisation--gis-context)
-- [4. Segment Management & Exports](#4-segment-management--exports)
-- [5. Treatment Endpoints](#5-treatment-endpoints)
-- [6. Shapefile Management Endpoints](#6-shapefile-management-endpoints)
-- [7. Common Status Codes](#7-common-status-codes)
+- [4.1 Health Endpoints](#4-1-health-endpoints)
+- [4.2 Project Endpoints](#4-2-project-endpoints)
+  - [4.21 Project Listing & Metadata](#4-21-project-listing-metadata)
+  - [4.22 Project Data](#4-22-project-data)
+  - [4.23 Project Creation & Road Selection](#4-23-project-creation-road-selection)
+- [4.3 Coding & Autocode Endpoints](#4-3-coding-autocode-endpoints)
+  - [4.31 Autocode](#4-31-autocode)
+  - [4.32 Baseline & Validation](#4-32-baseline-validation)
+  - [4.33 Visualisation & GIS Context](#4-33-visualisation-gis-context)
+- [4.4 Segment Management & Exports](#4-4-segment-management-exports)
+- [4.5 Treatment Endpoints](#4-5-treatment-endpoints)
+- [4.6 Shapefile Management Endpoints](#4-6-shapefile-management-endpoints)
+- [4.7 Common Status Codes](#4-7-common-status-codes)
 
----
-
-## 1. Health Endpoints
+## 4.1 Health Endpoints
 
 | Method | Endpoint | Response |
 |---|---|---|
@@ -34,9 +32,9 @@ All endpoints are prefixed with `/api/`.
 
 ---
 
-## 2. Project Endpoints
+## 4.2 Project Endpoints
 
-### 2.1 Project Listing & Metadata
+### 4.21 Project Listing & Metadata
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -48,7 +46,7 @@ All endpoints are prefixed with `/api/`.
 
 Project list responses include: `dataset`, `source_folders`, `verified_segment_count`, `autocoded_segment_count`, `total_segments`.
 
-### 2.2 Project Data
+### 4.22 Project Data
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -60,7 +58,7 @@ Project list responses include: `dataset`, `source_folders`, `verified_segment_c
 | `GET` | `/api/projects/<name>/images/<filename>` | Serve a project image |
 | `GET` | `/api/projects/attribute-mappings` | Label mappings for discrete fields |
 
-### 2.3 Project Creation & Road Selection
+### 4.23 Project Creation & Road Selection
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -77,9 +75,9 @@ Project list responses include: `dataset`, `source_folders`, `verified_segment_c
 
 ---
 
-## 3. Coding & Autocode Endpoints
+## 4.3 Coding & Autocode Endpoints
 
-### 3.1 Autocode
+### 4.31 Autocode
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -89,7 +87,7 @@ Project list responses include: `dataset`, `source_folders`, `verified_segment_c
 | `GET` | `/api/projects/<name>/autocode-metadata` | Read saved autocode provenance |
 | `POST` | `/api/projects/<name>/autocode-metadata` | Write autocode provenance metadata |
 
-### 3.2 Baseline & Validation
+### 4.32 Baseline & Validation
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -97,7 +95,7 @@ Project list responses include: `dataset`, `source_folders`, `verified_segment_c
 | `GET` | `/api/projects/<name>/baseline` | Get baseline attribute rows |
 | `POST` | `/api/projects/<name>/baseline` | Save a baseline |
 
-### 3.3 Visualisation & GIS Context
+### 4.33 Visualisation & GIS Context
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -108,7 +106,7 @@ Project list responses include: `dataset`, `source_folders`, `verified_segment_c
 
 ---
 
-## 4. Segment Management & Exports
+## 4.4 Segment Management & Exports
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -120,7 +118,7 @@ Project list responses include: `dataset`, `source_folders`, `verified_segment_c
 
 ---
 
-## 5. Treatment Endpoints
+## 4.5 Treatment Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -137,7 +135,7 @@ Project list responses include: `dataset`, `source_folders`, `verified_segment_c
 
 ---
 
-## 6. Shapefile Management Endpoints
+## 4.6 Shapefile Management Endpoints
 
 All under `/api/shapefiles/`:
 
@@ -155,7 +153,7 @@ All under `/api/shapefiles/`:
 
 ---
 
-## 7. Common Status Codes
+## 4.7 Common Status Codes
 
 | Code | Meaning |
 |---|---|
@@ -166,4 +164,4 @@ All under `/api/shapefiles/`:
 | `500` | Unexpected backend error |
 | `503` | Service unavailable — CV models missing or failed to load |
 
-*Layman's explanation: These numbers are like secret codes the computer uses to tell the website if a request was successful or if something went wrong.*
+*Layman's explanation: These numbers are like secret codes the computer uses to tell the website if a request was successful or if something went wrong.*

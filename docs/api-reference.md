@@ -10,80 +10,79 @@ This reference covers the current API surface that backs project creation, codin
 
 ## Table of Contents
 
-- [Health](#health)
-  - [`GET /api/ping`](#get-api-ping)
-  - [`GET /api/health`](#get-api-health)
-- [Project listing and metadata](#project-listing-and-metadata)
-  - [`GET /api/projects`](#get-api-projects)
-  - [`GET /api/projects/<project_name>`](#get-api-projects-project-name)
-  - [`GET /api/projects/<project_name>/metadata`](#get-api-projects-project-name-metadata)
-  - [`PATCH /api/projects/<project_name>`](#patch-api-projects-project-name)
-  - [`DELETE /api/projects/<project_name>`](#delete-api-projects-project-name)
-- [Project data](#project-data)
-  - [`GET /api/projects/<project_name>/versions/latest/attributes`](#get-api-projects-project-name-versions-latest-attributes)
-  - [`PUT /api/projects/<project_name>/attributes`](#put-api-projects-project-name-attributes)
-  - [`GET /api/projects/<project_name>/geodata`](#get-api-projects-project-name-geodata)
-  - [`GET /api/projects/<project_name>/results`](#get-api-projects-project-name-results)
-  - [`POST /api/projects/<project_name>/score`](#post-api-projects-project-name-score)
-  - [`GET /api/projects/<project_name>/images/<path:filename>`](#get-api-projects-project-name-images-path-filename)
-- [Attribute mappings](#attribute-mappings)
-  - [`GET /api/projects/attribute-mappings`](#get-api-projects-attribute-mappings)
-- [Project creation and source discovery](#project-creation-and-source-discovery)
-  - [`GET /api/projects/folders`](#get-api-projects-folders)
-  - [`POST /api/projects/folders`](#post-api-projects-folders)
-  - [`POST /api/projects/folders/upload-images`](#post-api-projects-folders-upload-images)
-  - [`POST /api/projects/roads-in-polygon`](#post-api-projects-roads-in-polygon)
-  - [`GET /api/projects/roads-in-bounds`](#get-api-projects-roads-in-bounds)
-  - [`GET /api/projects/planning-areas-in-bounds`](#get-api-projects-planning-areas-in-bounds)
-- [Segment management and copying](#segment-management-and-copying)
-  - [`DELETE /api/projects/<project_name>/segments/<segment_index>`](#delete-api-projects-project-name-segments-segment-index)
-  - [`POST /api/projects/<project_name>/segments/delete-batch`](#post-api-projects-project-name-segments-delete-batch)
-  - [`POST /api/projects/check-collisions`](#post-api-projects-check-collisions)
-  - [`POST /api/projects/copy-segments`](#post-api-projects-copy-segments)
-- [Autocode endpoints](#autocode-endpoints)
-  - [`POST /api/projects/<project_name>/autocode/image`](#post-api-projects-project-name-autocode-image)
-  - [`POST /api/projects/<project_name>/autocode/gis`](#post-api-projects-project-name-autocode-gis)
-  - [`POST /api/projects/<project_name>/autocode/all`](#post-api-projects-project-name-autocode-all)
-  - [`GET /api/projects/<project_name>/autocode-metadata`](#get-api-projects-project-name-autocode-metadata)
-  - [`POST /api/projects/<project_name>/autocode-metadata`](#post-api-projects-project-name-autocode-metadata)
-- [Baseline endpoints](#baseline-endpoints)
-  - [`GET /api/projects/<project_name>/baseline/exists`](#get-api-projects-project-name-baseline-exists)
-  - [`GET /api/projects/<project_name>/baseline`](#get-api-projects-project-name-baseline)
-  - [`POST /api/projects/<project_name>/baseline`](#post-api-projects-project-name-baseline)
-- [Visualization and GIS-context endpoints](#visualization-and-gis-context-endpoints)
-  - [`POST /api/projects/<project_name>/curvature/visualize`](#post-api-projects-project-name-curvature-visualize)
-  - [`POST /api/projects/<project_name>/width/visualize`](#post-api-projects-project-name-width-visualize)
-  - [`POST /api/projects/<project_name>/gis/layers`](#post-api-projects-project-name-gis-layers)
-  - [`POST /api/projects/<projectName>/gis/detect`](#post-api-projects-projectname-gis-detect)
-- [Treatment endpoints](#treatment-endpoints)
-  - [`POST /api/projects/<project_name>/treatments/preview`](#post-api-projects-project-name-treatments-preview)
-  - [`POST /api/projects/<project_name>/treatments/apply`](#post-api-projects-project-name-treatments-apply)
-  - [`GET /api/projects/<project_name>/treatments/segment/<segment_index>`](#get-api-projects-project-name-treatments-segment-segment-index)
-  - [`GET /api/projects/<project_name>/treatments/all`](#get-api-projects-project-name-treatments-all)
-  - [`POST /api/projects/<project_name>/treatments/apply-all`](#post-api-projects-project-name-treatments-apply-all)
-  - [`POST /api/projects/<project_name>/treatments/apply-specific`](#post-api-projects-project-name-treatments-apply-specific)
-  - [`POST /api/projects/<project_name>/treatments/reset-all`](#post-api-projects-project-name-treatments-reset-all)
-  - [`POST /api/projects/<project_name>/treatments/save`](#post-api-projects-project-name-treatments-save)
-  - [`POST /api/projects/<project_name>/treatments/effectiveness`](#post-api-projects-project-name-treatments-effectiveness)
-  - [`GET /api/projects/<project_name>/treatments/effectiveness/segment/<segment_index>`](#get-api-projects-project-name-treatments-effectiveness-segment-segment-index)
-- [Image export](#image-export)
-  - [`POST /api/projects/download-images`](#post-api-projects-download-images)
-- [Shapefile management API](#shapefile-management-api)
-  - [`GET /api/shapefiles`](#get-api-shapefiles)
-  - [`GET /api/shapefiles/categories`](#get-api-shapefiles-categories)
-  - [`POST /api/shapefiles/geojson`](#post-api-shapefiles-geojson)
-  - [`POST /api/shapefiles/validate`](#post-api-shapefiles-validate)
-  - [`POST /api/shapefiles/preview-upload`](#post-api-shapefiles-preview-upload)
-  - [`POST /api/shapefiles/upload`](#post-api-shapefiles-upload)
-  - [`POST /api/shapefiles/validate-replacement`](#post-api-shapefiles-validate-replacement)
-  - [`PUT /api/shapefiles/replace`](#put-api-shapefiles-replace)
-  - [`DELETE /api/shapefiles/<path:shapefile_path>`](#delete-api-shapefiles-path-shapefile-path)
-- [Common status codes](#common-status-codes)
+- [4.1 Health](#4-1-health)
+  - [4.11 `GET /api/ping`](#4-11-get-api-ping)
+  - [4.12 `GET /api/health`](#4-12-get-api-health)
+- [4.2 Project listing and metadata](#4-2-project-listing-and-metadata)
+  - [4.21 `GET /api/projects`](#4-21-get-api-projects)
+  - [4.22 `GET /api/projects/<project_name>`](#4-22-get-api-projects-project-name)
+  - [4.23 `GET /api/projects/<project_name>/metadata`](#4-23-get-api-projects-project-name-metadata)
+  - [4.24 `PATCH /api/projects/<project_name>`](#4-24-patch-api-projects-project-name)
+  - [4.25 `DELETE /api/projects/<project_name>`](#4-25-delete-api-projects-project-name)
+- [4.3 Project data](#4-3-project-data)
+  - [4.31 `GET /api/projects/<project_name>/versions/latest/attributes`](#4-31-get-api-projects-project-name-versions-latest-attributes)
+  - [4.32 `PUT /api/projects/<project_name>/attributes`](#4-32-put-api-projects-project-name-attributes)
+  - [4.33 `GET /api/projects/<project_name>/geodata`](#4-33-get-api-projects-project-name-geodata)
+  - [4.34 `GET /api/projects/<project_name>/results`](#4-34-get-api-projects-project-name-results)
+  - [4.35 `POST /api/projects/<project_name>/score`](#4-35-post-api-projects-project-name-score)
+  - [4.36 `GET /api/projects/<project_name>/images/<path:filename>`](#4-36-get-api-projects-project-name-images-path-filename)
+- [4.4 Attribute mappings](#4-4-attribute-mappings)
+  - [4.41 `GET /api/projects/attribute-mappings`](#4-41-get-api-projects-attribute-mappings)
+- [4.5 Project creation and source discovery](#4-5-project-creation-and-source-discovery)
+  - [4.51 `GET /api/projects/folders`](#4-51-get-api-projects-folders)
+  - [4.52 `POST /api/projects/folders`](#4-52-post-api-projects-folders)
+  - [4.53 `POST /api/projects/folders/upload-images`](#4-53-post-api-projects-folders-upload-images)
+  - [4.54 `POST /api/projects/roads-in-polygon`](#4-54-post-api-projects-roads-in-polygon)
+  - [4.55 `GET /api/projects/roads-in-bounds`](#4-55-get-api-projects-roads-in-bounds)
+  - [4.56 `GET /api/projects/planning-areas-in-bounds`](#4-56-get-api-projects-planning-areas-in-bounds)
+- [4.6 Segment management and copying](#4-6-segment-management-and-copying)
+  - [4.61 `DELETE /api/projects/<project_name>/segments/<segment_index>`](#4-61-delete-api-projects-project-name-segments-segment-index)
+  - [4.62 `POST /api/projects/<project_name>/segments/delete-batch`](#4-62-post-api-projects-project-name-segments-delete-batch)
+  - [4.63 `POST /api/projects/check-collisions`](#4-63-post-api-projects-check-collisions)
+  - [4.64 `POST /api/projects/copy-segments`](#4-64-post-api-projects-copy-segments)
+- [4.7 Autocode endpoints](#4-7-autocode-endpoints)
+  - [4.71 `POST /api/projects/<project_name>/autocode/image`](#4-71-post-api-projects-project-name-autocode-image)
+  - [4.72 `POST /api/projects/<project_name>/autocode/gis`](#4-72-post-api-projects-project-name-autocode-gis)
+  - [4.73 `POST /api/projects/<project_name>/autocode/all`](#4-73-post-api-projects-project-name-autocode-all)
+  - [4.74 `GET /api/projects/<project_name>/autocode-metadata`](#4-74-get-api-projects-project-name-autocode-metadata)
+  - [4.75 `POST /api/projects/<project_name>/autocode-metadata`](#4-75-post-api-projects-project-name-autocode-metadata)
+- [4.8 Baseline endpoints](#4-8-baseline-endpoints)
+  - [4.81 `GET /api/projects/<project_name>/baseline/exists`](#4-81-get-api-projects-project-name-baseline-exists)
+  - [4.82 `GET /api/projects/<project_name>/baseline`](#4-82-get-api-projects-project-name-baseline)
+  - [4.83 `POST /api/projects/<project_name>/baseline`](#4-83-post-api-projects-project-name-baseline)
+- [4.9 Visualization and GIS-context endpoints](#4-9-visualization-and-gis-context-endpoints)
+  - [4.91 `POST /api/projects/<project_name>/curvature/visualize`](#4-91-post-api-projects-project-name-curvature-visualize)
+  - [4.92 `POST /api/projects/<project_name>/width/visualize`](#4-92-post-api-projects-project-name-width-visualize)
+  - [4.93 `POST /api/projects/<project_name>/gis/layers`](#4-93-post-api-projects-project-name-gis-layers)
+  - [4.94 `POST /api/projects/<projectName>/gis/detect`](#4-94-post-api-projects-projectname-gis-detect)
+- [4.10 Treatment endpoints](#4-10-treatment-endpoints)
+  - [4.101 `POST /api/projects/<project_name>/treatments/preview`](#4-101-post-api-projects-project-name-treatments-preview)
+  - [4.102 `POST /api/projects/<project_name>/treatments/apply`](#4-102-post-api-projects-project-name-treatments-apply)
+  - [4.103 `GET /api/projects/<project_name>/treatments/segment/<segment_index>`](#4-103-get-api-projects-project-name-treatments-segment-segment-index)
+  - [4.104 `GET /api/projects/<project_name>/treatments/all`](#4-104-get-api-projects-project-name-treatments-all)
+  - [4.105 `POST /api/projects/<project_name>/treatments/apply-all`](#4-105-post-api-projects-project-name-treatments-apply-all)
+  - [4.106 `POST /api/projects/<project_name>/treatments/apply-specific`](#4-106-post-api-projects-project-name-treatments-apply-specific)
+  - [4.107 `POST /api/projects/<project_name>/treatments/reset-all`](#4-107-post-api-projects-project-name-treatments-reset-all)
+  - [4.108 `POST /api/projects/<project_name>/treatments/save`](#4-108-post-api-projects-project-name-treatments-save)
+  - [4.109 `POST /api/projects/<project_name>/treatments/effectiveness`](#4-109-post-api-projects-project-name-treatments-effectiveness)
+  - [4.1010 `GET /api/projects/<project_name>/treatments/effectiveness/segment/<segment_index>`](#4-1010-get-api-projects-project-name-treatments-effectiveness-segment-segment-index)
+- [4.11 Image export](#4-11-image-export)
+  - [4.111 `POST /api/projects/download-images`](#4-111-post-api-projects-download-images)
+- [4.12 Shapefile management API](#4-12-shapefile-management-api)
+  - [4.121 `GET /api/shapefiles`](#4-121-get-api-shapefiles)
+  - [4.122 `GET /api/shapefiles/categories`](#4-122-get-api-shapefiles-categories)
+  - [4.123 `POST /api/shapefiles/geojson`](#4-123-post-api-shapefiles-geojson)
+  - [4.124 `POST /api/shapefiles/validate`](#4-124-post-api-shapefiles-validate)
+  - [4.125 `POST /api/shapefiles/preview-upload`](#4-125-post-api-shapefiles-preview-upload)
+  - [4.126 `POST /api/shapefiles/upload`](#4-126-post-api-shapefiles-upload)
+  - [4.127 `POST /api/shapefiles/validate-replacement`](#4-127-post-api-shapefiles-validate-replacement)
+  - [4.128 `PUT /api/shapefiles/replace`](#4-128-put-api-shapefiles-replace)
+  - [4.129 `DELETE /api/shapefiles/<path:shapefile_path>`](#4-129-delete-api-shapefiles-path-shapefile-path)
+- [4.13 Common status codes](#4-13-common-status-codes)
 
+## 4.1 Health
 
-## Health
-
-### `GET /api/ping`
+### 4.11 `GET /api/ping`
 
 Liveness check.
 
@@ -91,7 +90,7 @@ Liveness check.
 { "status": "ok" }
 ```
 
-### `GET /api/health`
+### 4.12 `GET /api/health`
 
 Equivalent liveness check registered directly on the Flask app.
 
@@ -99,9 +98,9 @@ Equivalent liveness check registered directly on the Flask app.
 { "status": "ok" }
 ```
 
-## Project listing and metadata
+## 4.2 Project listing and metadata
 
-### `GET /api/projects`
+### 4.21 `GET /api/projects`
 
 Returns the project list used by the Projects, Treatment, and Path Analysis pages.
 
@@ -129,7 +128,7 @@ Notes:
 - `dataset` is the legacy single-source field and is still returned.
 - `source_folders` is the durable provenance list used by project-or-road fuzzy search.
 
-### `GET /api/projects/<project_name>`
+### 4.22 `GET /api/projects/<project_name>`
 
 Returns the available version folders and the current latest snapshot.
 
@@ -141,7 +140,7 @@ Returns the available version folders and the current latest snapshot.
 }
 ```
 
-### `GET /api/projects/<project_name>/metadata`
+### 4.23 `GET /api/projects/<project_name>/metadata`
 
 Returns the detailed metadata object for one project.
 
@@ -160,7 +159,7 @@ Returns the detailed metadata object for one project.
 }
 ```
 
-### `PATCH /api/projects/<project_name>`
+### 4.24 `PATCH /api/projects/<project_name>`
 
 Updates project metadata and optionally renames the project.
 
@@ -190,7 +189,7 @@ Response:
 }
 ```
 
-### `DELETE /api/projects/<project_name>`
+### 4.25 `DELETE /api/projects/<project_name>`
 
 Deletes the entire project directory.
 
@@ -198,9 +197,9 @@ Deletes the entire project directory.
 { "ok": true, "name": "AMK Analysis Batch" }
 ```
 
-## Project data
+## 4.3 Project data
 
-### `GET /api/projects/<project_name>/versions/latest/attributes`
+### 4.31 `GET /api/projects/<project_name>/versions/latest/attributes`
 
 Returns the latest attribute rows. If results exist, score-band columns are merged into the row payload.
 
@@ -218,7 +217,7 @@ Returns the latest attribute rows. If results exist, score-band columns are merg
 }
 ```
 
-### `PUT /api/projects/<project_name>/attributes`
+### 4.32 `PUT /api/projects/<project_name>/attributes`
 
 Persists the latest attributes table and recalculates results.
 
@@ -236,11 +235,11 @@ Typical response:
 { "ok": true }
 ```
 
-### `GET /api/projects/<project_name>/geodata`
+### 4.33 `GET /api/projects/<project_name>/geodata`
 
 Returns project geometry as GeoJSON `FeatureCollection`.
 
-### `GET /api/projects/<project_name>/results`
+### 4.34 `GET /api/projects/<project_name>/results`
 
 Returns saved results rows.
 
@@ -258,7 +257,7 @@ Returns saved results rows.
 }
 ```
 
-### `POST /api/projects/<project_name>/score`
+### 4.35 `POST /api/projects/<project_name>/score`
 
 Runs native CycleRAP scoring.
 
@@ -274,13 +273,13 @@ Optional body:
 
 If a single row is posted, the result is typically used as an in-memory preview and not persisted.
 
-### `GET /api/projects/<project_name>/images/<path:filename>`
+### 4.36 `GET /api/projects/<project_name>/images/<path:filename>`
 
 Serves a project image file with path-traversal protection.
 
-## Attribute mappings
+## 4.4 Attribute mappings
 
-### `GET /api/projects/attribute-mappings`
+### 4.41 `GET /api/projects/attribute-mappings`
 
 Returns label mappings for discrete coding fields.
 
@@ -293,9 +292,9 @@ Returns label mappings for discrete coding fields.
 }
 ```
 
-## Project creation and source discovery
+## 4.5 Project creation and source discovery
 
-### `GET /api/projects/folders`
+### 4.51 `GET /api/projects/folders`
 
 Lists subfolders under `in/`.
 
@@ -303,7 +302,7 @@ Lists subfolders under `in/`.
 { "items": ["ANG MO KIO AVENUE 1", "ANG MO KIO AVENUE 8"] }
 ```
 
-### `POST /api/projects/folders`
+### 4.52 `POST /api/projects/folders`
 
 Creates a project from one or more input folders.
 
@@ -359,7 +358,7 @@ Common errors:
 - `404` one or more folders not found
 - `409` project already exists
 
-### `POST /api/projects/folders/upload-images`
+### 4.53 `POST /api/projects/folders/upload-images`
 
 Multipart upload into a source folder under `in/`.
 
@@ -378,7 +377,7 @@ Response:
 }
 ```
 
-### `POST /api/projects/roads-in-polygon`
+### 4.54 `POST /api/projects/roads-in-polygon`
 
 Returns road candidates intersecting a user-drawn polygon.
 
@@ -408,7 +407,7 @@ Response:
 
 If the backend can only return planning-area fallback results, `fallback` is `true` and items will not be preselected by the frontend.
 
-### `GET /api/projects/roads-in-bounds`
+### 4.55 `GET /api/projects/roads-in-bounds`
 
 Returns road polylines for the current viewport.
 
@@ -434,7 +433,7 @@ Response:
 }
 ```
 
-### `GET /api/projects/planning-areas-in-bounds`
+### 4.56 `GET /api/projects/planning-areas-in-bounds`
 
 Returns planning-area polygon parts for the viewport.
 
@@ -451,13 +450,13 @@ Returns planning-area polygon parts for the viewport.
 }
 ```
 
-## Segment management and copying
+## 4.6 Segment management and copying
 
-### `DELETE /api/projects/<project_name>/segments/<segment_index>`
+### 4.61 `DELETE /api/projects/<project_name>/segments/<segment_index>`
 
 Deletes a single segment and its associated image reference where applicable.
 
-### `POST /api/projects/<project_name>/segments/delete-batch`
+### 4.62 `POST /api/projects/<project_name>/segments/delete-batch`
 
 Deletes multiple segments.
 
@@ -465,7 +464,7 @@ Deletes multiple segments.
 { "indices": [0, 3, 7] }
 ```
 
-### `POST /api/projects/check-collisions`
+### 4.63 `POST /api/projects/check-collisions`
 
 Checks image-reference collisions before copying segments between projects.
 
@@ -481,7 +480,7 @@ Checks image-reference collisions before copying segments between projects.
 { "ok": true, "collisions": [] }
 ```
 
-### `POST /api/projects/copy-segments`
+### 4.64 `POST /api/projects/copy-segments`
 
 Copies selected segments into another project.
 
@@ -496,9 +495,9 @@ Copies selected segments into another project.
 }
 ```
 
-## Autocode endpoints
+## 4.7 Autocode endpoints
 
-### `POST /api/projects/<project_name>/autocode/image`
+### 4.71 `POST /api/projects/<project_name>/autocode/image`
 
 CV auto-code for one image.
 
@@ -508,7 +507,7 @@ CV auto-code for one image.
 
 Response includes at least `updates` and `changed_fields`, and may also include `gradient_pct` when LAZ-derived grade data is available.
 
-### `POST /api/projects/<project_name>/autocode/gis`
+### 4.72 `POST /api/projects/<project_name>/autocode/gis`
 
 GIS auto-code for one segment.
 
@@ -518,7 +517,7 @@ GIS auto-code for one segment.
 
 Optional field filtering is supported through a `fields` array in the request body.
 
-### `POST /api/projects/<project_name>/autocode/all`
+### 4.73 `POST /api/projects/<project_name>/autocode/all`
 
 Supports three shapes:
 
@@ -549,7 +548,7 @@ Bulk response shape:
 }
 ```
 
-### `GET /api/projects/<project_name>/autocode-metadata`
+### 4.74 `GET /api/projects/<project_name>/autocode-metadata`
 
 Reads saved autocode provenance metadata.
 
@@ -560,23 +559,23 @@ Reads saved autocode provenance metadata.
 }
 ```
 
-### `POST /api/projects/<project_name>/autocode-metadata`
+### 4.75 `POST /api/projects/<project_name>/autocode-metadata`
 
 Writes the autocode metadata JSON used by the coding page.
 
-## Baseline endpoints
+## 4.8 Baseline endpoints
 
-### `GET /api/projects/<project_name>/baseline/exists`
+### 4.81 `GET /api/projects/<project_name>/baseline/exists`
 
 ```json
 { "exists": true }
 ```
 
-### `GET /api/projects/<project_name>/baseline`
+### 4.82 `GET /api/projects/<project_name>/baseline`
 
 Returns baseline attribute rows, or `rows: []` if none exist yet.
 
-### `POST /api/projects/<project_name>/baseline`
+### 4.83 `POST /api/projects/<project_name>/baseline`
 
 Persists a baseline attribute table.
 
@@ -588,31 +587,31 @@ Persists a baseline attribute table.
 }
 ```
 
-## Visualization and GIS-context endpoints
+## 4.9 Visualization and GIS-context endpoints
 
-### `POST /api/projects/<project_name>/curvature/visualize`
+### 4.91 `POST /api/projects/<project_name>/curvature/visualize`
 
 Returns geometry and numeric context for the curvature visualization panel.
 
-### `POST /api/projects/<project_name>/width/visualize`
+### 4.92 `POST /api/projects/<project_name>/width/visualize`
 
 Returns geometry and search-ring context for the width visualization panel.
 
-### `POST /api/projects/<project_name>/gis/layers`
+### 4.93 `POST /api/projects/<project_name>/gis/layers`
 
 Returns nearby GIS features around a point for the coding map overlay.
 
-### `POST /api/projects/<projectName>/gis/detect`
+### 4.94 `POST /api/projects/<projectName>/gis/detect`
 
 Diagnostic endpoint used to inspect nearby GIS features such as bus stops and bus lanes.
 
-## Treatment endpoints
+## 4.10 Treatment endpoints
 
-### `POST /api/projects/<project_name>/treatments/preview`
+### 4.101 `POST /api/projects/<project_name>/treatments/preview`
 
 Preview one or more treatments for a segment without persisting.
 
-### `POST /api/projects/<project_name>/treatments/apply`
+### 4.102 `POST /api/projects/<project_name>/treatments/apply`
 
 Apply one or more treatments to a segment and persist the treatment state.
 
@@ -633,19 +632,19 @@ Response includes:
 - `before_scores`
 - `after_scores`
 
-### `GET /api/projects/<project_name>/treatments/segment/<segment_index>`
+### 4.103 `GET /api/projects/<project_name>/treatments/segment/<segment_index>`
 
 Returns the current treatment state for a specific segment.
 
-### `GET /api/projects/<project_name>/treatments/all`
+### 4.104 `GET /api/projects/<project_name>/treatments/all`
 
 Returns all stored treatment states in one call. Only segments with treatments are included.
 
-### `POST /api/projects/<project_name>/treatments/apply-all`
+### 4.105 `POST /api/projects/<project_name>/treatments/apply-all`
 
 Applies all applicable treatments across the project.
 
-### `POST /api/projects/<project_name>/treatments/apply-specific`
+### 4.106 `POST /api/projects/<project_name>/treatments/apply-specific`
 
 Applies one specific treatment ID across all applicable segments.
 
@@ -653,15 +652,15 @@ Applies one specific treatment ID across all applicable segments.
 { "treatment_id": 7 }
 ```
 
-### `POST /api/projects/<project_name>/treatments/reset-all`
+### 4.107 `POST /api/projects/<project_name>/treatments/reset-all`
 
 Clears pending treatment state.
 
-### `POST /api/projects/<project_name>/treatments/save`
+### 4.108 `POST /api/projects/<project_name>/treatments/save`
 
 Persists pending treatment edits.
 
-### `POST /api/projects/<project_name>/treatments/effectiveness`
+### 4.109 `POST /api/projects/<project_name>/treatments/effectiveness`
 
 Ranks treatments by the number of segments whose overall risk band improves when the treatment is applied in isolation.
 
@@ -681,7 +680,7 @@ Response:
 }
 ```
 
-### `GET /api/projects/<project_name>/treatments/effectiveness/segment/<segment_index>`
+### 4.1010 `GET /api/projects/<project_name>/treatments/effectiveness/segment/<segment_index>`
 
 Returns per-treatment score drops for one segment.
 
@@ -692,9 +691,9 @@ Returns per-treatment score drops for one segment.
 }
 ```
 
-## Image export
+## 4.11 Image export
 
-### `POST /api/projects/download-images`
+### 4.111 `POST /api/projects/download-images`
 
 Returns a ZIP blob containing filtered images grouped by project.
 
@@ -707,19 +706,19 @@ Returns a ZIP blob containing filtered images grouped by project.
 }
 ```
 
-## Shapefile management API
+## 4.12 Shapefile management API
 
 These endpoints are served from the `gis_layers` blueprint under `/api/shapefiles`.
 
-### `GET /api/shapefiles`
+### 4.121 `GET /api/shapefiles`
 
 Lists discovered shapefiles with metadata such as category, year, source, and relative path.
 
-### `GET /api/shapefiles/categories`
+### 4.122 `GET /api/shapefiles/categories`
 
 Lists immediate shapefile categories (subdirectories).
 
-### `POST /api/shapefiles/geojson`
+### 4.123 `POST /api/shapefiles/geojson`
 
 Reads one shapefile and returns WGS84 GeoJSON.
 
@@ -727,15 +726,15 @@ Reads one shapefile and returns WGS84 GeoJSON.
 { "path": "Road_name/ROADSECTIONLINE.shp", "max_features": 10000 }
 ```
 
-### `POST /api/shapefiles/validate`
+### 4.124 `POST /api/shapefiles/validate`
 
 Validates an uploaded ZIP before import.
 
-### `POST /api/shapefiles/preview-upload`
+### 4.125 `POST /api/shapefiles/preview-upload`
 
 Returns temporary GeoJSON preview data for uploaded shapefile files without saving them.
 
-### `POST /api/shapefiles/upload`
+### 4.126 `POST /api/shapefiles/upload`
 
 Uploads one or more shapefile assets or ZIPs into a category.
 
@@ -744,7 +743,7 @@ Multipart fields:
 - `files`
 - optional `category`
 
-### `POST /api/shapefiles/validate-replacement`
+### 4.127 `POST /api/shapefiles/validate-replacement`
 
 Checks whether an uploaded replacement is compatible with an existing layer.
 
@@ -756,7 +755,7 @@ Checks whether an uploaded replacement is compatible with an existing layer.
 }
 ```
 
-### `PUT /api/shapefiles/replace`
+### 4.128 `PUT /api/shapefiles/replace`
 
 Copies uploaded files over target shapefiles and writes `.bak` backups where applicable.
 
@@ -768,11 +767,11 @@ Copies uploaded files over target shapefiles and writes `.bak` backups where app
 }
 ```
 
-### `DELETE /api/shapefiles/<path:shapefile_path>`
+### 4.129 `DELETE /api/shapefiles/<path:shapefile_path>`
 
 Deletes a shapefile and its companion files.
 
-## Common status codes
+## 4.13 Common status codes
 
 | Code | Meaning |
 |---|---|

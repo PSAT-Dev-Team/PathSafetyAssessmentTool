@@ -2,9 +2,9 @@
 
 This guide covers local setup for PSAT on Windows. Docker is the standard path, but a non-Docker developer workflow is also supported.
 
-## Prerequisites
+## 2.1 Prerequisites
 
-### Required software
+### 2.11 Required software
 
 | Tool | Purpose | Download |
 |---|---|---|
@@ -14,7 +14,7 @@ This guide covers local setup for PSAT on Windows. Docker is the standard path, 
 
 Docker Desktop must be running before you start the stack.
 
-### Required assets
+### 2.12 Required assets
 
 Two external asset folders must be copied into `backend/` before CV and GIS-assisted coding will work:
 
@@ -25,15 +25,15 @@ Two external asset folders must be copied into `backend/` before CV and GIS-assi
 
 If these folders are missing, the app can still boot, but GIS and/or CV features will fail at runtime.
 
-## Step 1 - Clone the repository
+## 2.2 Step 1 - Clone the repository
 
-### Option A: GitHub Desktop
+### 2.21 Option A: GitHub Desktop
 
 1. Open GitHub Desktop.
 2. Use **File -> Clone Repository**.
 3. Clone `LinXH8/PathSafetyAssessmentTool` to a local folder.
 
-### Option B: command line
+### 2.22 Option B: command line
 
 ```bash
 git clone https://github.com/LinXH8/PathSafetyAssessmentTool.git
@@ -46,7 +46,7 @@ If you are cloning on Windows, set Git to preserve LF endings before cloning:
 git config --global core.autocrlf false
 ```
 
-## Step 2 - Prepare the working folders
+## 2.3 Step 2 - Prepare the working folders
 
 Expected root structure:
 
@@ -60,7 +60,7 @@ PathSafetyAssessmentTool/
 └── docker-compose.yml
 ```
 
-### Create `in/` yourself
+### 2.31 Create `in/` yourself
 
 Create `in/` manually before starting Docker so Docker does not create it with the wrong ownership.
 
@@ -87,7 +87,7 @@ in/
     └── ...
 ```
 
-### Copy models and shapefiles
+### 2.32 Copy models and shapefiles
 
 Populate:
 
@@ -105,7 +105,7 @@ backend/
     └── <GIS layer files>
 ```
 
-### Optional but recommended: build `road_reference.csv`
+### 2.33 Optional but recommended: build `road_reference.csv`
 
 After you have populated `in/`, generate the road-reference CSV used by the polygon road-selection tool:
 
@@ -117,7 +117,7 @@ cd ..
 
 This writes `backend/shapefiles/road_reference.csv`. The map-based road selector can still work without it, but the CSV improves matching between the selection polygon and locally available road folders.
 
-## Step 3 - Start PSAT with Docker
+## 2.4 Step 3 - Start PSAT with Docker
 
 From the repository root:
 
@@ -148,7 +148,7 @@ To stop the stack:
 docker compose down
 ```
 
-## First-run checklist inside the app
+## 2.5 First-run checklist inside the app
 
 After the stack is up:
 
@@ -158,7 +158,7 @@ After the stack is up:
 4. If using polygon selection, verify the selected roads are marked as available.
 5. Create the project and confirm the app navigates to the coding page.
 
-## Persistence
+## 2.6 Persistence
 
 These bind mounts preserve local state:
 
@@ -169,7 +169,7 @@ These bind mounts preserve local state:
 
 Do not delete or move these directories while containers are running.
 
-## Ports
+## 2.7 Ports
 
 | Service | Host port | Container port |
 |---|---|---|
@@ -178,7 +178,7 @@ Do not delete or move these directories while containers are running.
 
 If either port is already in use, change the mapping in `docker-compose.yml` or stop the conflicting service.
 
-## Updating the stack
+## 2.8 Updating the stack
 
 ```bash
 git pull
@@ -187,16 +187,16 @@ docker compose up --build
 
 Rebuilds do not erase `data/` or `in/`.
 
-## Running without Docker
+## 2.9 Running without Docker
 
 This mode is useful for faster frontend/backend iteration during development.
 
-### Requirements
+### 2.91 Requirements
 
 - Python 3.11
 - Node.js 20
 
-### Backend
+### 2.92 Backend
 
 ```bash
 cd backend
@@ -204,7 +204,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-### Frontend
+### 2.93 Frontend
 
 In a separate terminal:
 

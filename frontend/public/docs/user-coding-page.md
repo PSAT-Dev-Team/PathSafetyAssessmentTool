@@ -1,4 +1,4 @@
-## 2. Coding Page
+## 3. Coding Page
 
 The Coding page is the main review workspace. It can open one or more selected projects in a combined session.
 
@@ -6,21 +6,22 @@ The Coding page is the main review workspace. It can open one or more selected p
 
 ## Table of Contents
 
-- [2.1 Main Layout](#21-main-layout)
-- [2.2 Navigating Segments](#22-navigating-segments)
-- [2.3 Attribute Default Values](#23-attribute-default-values)
-- [2.4 Auto-Code Options](#24-auto-code-options)
-  - [2.4.1 Attributes Coded by CV (Image Analysis)](#241-attributes-coded-by-cv-image-analysis)
-  - [2.4.2 Attributes Coded by GIS Layer Mapping](#242-attributes-coded-by-gis-layer-mapping)
-  - [2.4.3 Attributes Coded by Logic Rules](#243-attributes-coded-by-logic-rules)
-- [2.5 Manual Review](#25-manual-review)
-- [2.6 Details and GIS Context](#26-details-and-gis-context)
-- [2.7 Save and Progress Tracking](#27-save-and-progress-tracking)
-- [2.8 CycleRAP Reference](#28-cyclerap-reference)
+- [3.1 Main Layout](#31-main-layout)
+- [3.2 Navigating Segments](#32-navigating-segments)
+- [3.3 Attribute Default Values](#33-attribute-default-values)
+- [3.4 Auto-Code Options](#34-auto-code-options)
+  - [3.4.1 Attributes Coded by CV (Image Analysis)](#341-attributes-coded-by-cv-image-analysis)
+  - [3.4.2 Attributes Coded by GIS Layer Mapping](#342-attributes-coded-by-gis-layer-mapping)
+  - [3.4.3 Attributes Coded by Logic Rules](#343-attributes-coded-by-logic-rules)
+- [3.5 Manual Review](#35-manual-review)
+- [3.6 Details and GIS Context](#36-details-and-gis-context)
+- [3.7 Save and Progress Tracking](#37-save-and-progress-tracking)
+- [3.8 CycleRAP Reference](#38-cyclerap-reference)
+- [3.9 Hover Tips](#39-hover-tips)
 
 ---
 
-### 2.1 Main Layout
+### 3.1 Main Layout
 
 The page keeps three views in sync:
 
@@ -30,7 +31,7 @@ The page keeps three views in sync:
 
 Selecting a segment in one area automatically updates the others.
 
-### 2.2 Navigating Segments
+### 3.2 Navigating Segments
 
 You can navigate through segments in three ways:
 
@@ -38,7 +39,7 @@ You can navigate through segments in three ways:
 - Click **Next** or **Back** to move one segment at a time
 - Click a point on the segment map to select it
 
-### 2.3 Attribute Default Values
+### 3.3 Attribute Default Values
 
 When a segment is first created and no auto-code has been run, PSAT assigns the following default values. These represent the most common parameters for paths in Singapore.
 
@@ -89,7 +90,7 @@ When a segment is first created and no auto-code has been run, PSAT assigns the 
 | 43 | Road Operating Speed (mean) | — | GIS-derived from LinkID layer |
 | 44 | Road Speed Limit | — | GIS-derived from speed limit layer |
 
-### 2.4 Auto-Code Options
+### 3.4 Auto-Code Options
 
 PSAT supports three auto-code methods that can be run individually or in combination:
 
@@ -101,7 +102,7 @@ PSAT supports three auto-code methods that can be run individually or in combina
 
 Autocode progress is tracked in the project listing as **Percentage Segments Autocoded**.
 
-#### 2.4.1 Attributes Coded by CV (Image Analysis)
+#### 3.4.1 Attributes Coded by CV (Image Analysis)
 
 The following attributes are automatically inferred from street-level photographs using YOLO computer vision models:
 
@@ -118,7 +119,7 @@ The following attributes are automatically inferred from street-level photograph
 | Non-Fixed Obstacle on Facility | Fixed obstacle segmentation (label 9 = non-fixed) |
 | Delineation | Delineation classifier model |
 
-#### 2.4.2 Attributes Coded by GIS Layer Mapping
+#### 3.4.2 Attributes Coded by GIS Layer Mapping
 
 The following attributes are automatically derived from the GIS shapefiles stored in the system:
 
@@ -143,7 +144,7 @@ The following attributes are automatically derived from the GIS shapefiles store
 
 > **Note:** Road AADT has no GIS auto-coding path — it must be coded manually.
 
-#### 2.4.3 Attributes Coded by Logic Rules
+#### 3.4.3 Attributes Coded by Logic Rules
 
 Logic rules apply a **cascade system** based on what surface types the CV model detects in the image. Each step overrides the previous if its trigger condition is met:
 
@@ -156,7 +157,7 @@ Logic rules apply a **cascade system** based on what surface types the CV model 
 | **Step 5 — Zebra Crossing** | Zebra crossing ≥ 80% of bottom 10% | Same as Step 4, but Lanes on Intersecting Road = 1 |
 | **Step 6 — Road Surface** | Road pixels ≥ 80% of bottom 10% | Facility Type = Mixed Traffic, Light Seg. = Not Present, Adj. Road 0–1m = Present |
 
-### 2.5 Manual Review
+### 3.5 Manual Review
 
 You can override any coded value directly in the table. The page also shows:
 
@@ -165,7 +166,7 @@ You can override any coded value directly in the table. The page also shows:
 - a **validation summary table** comparing the percentage of attributes overwritten against the stored autocoded baseline
 - **field-source provenance** showing whether each value came from CV, GIS, logic rules, or manual entry
 
-### 2.6 Details and GIS Context
+### 3.6 Details and GIS Context
 
 For supported attributes, the page can show extra spatial detail within a **5m radius** of the current segment:
 
@@ -182,13 +183,106 @@ When you turn on the **Analysis Overlay** toggle on the coding page map, PSAT au
 
 If you navigate to the Coding page directly from Path Analysis (by clicking a segment on the Path Analysis map), the coding page map will show **only the segments that were visible in your active filter**. The currently selected segment is always shown regardless of the filter. This makes it easier to focus on a specific subset while coding without losing your analysis context.
 
-### 2.7 Save and Progress Tracking
+### 3.7 Save and Progress Tracking
 
 After review:
 
 - save your attribute edits to persist them and recalculate risk scores
 - update the **Segments Verified Percentage** counter as you complete manual checks
 
-### 2.8 CycleRAP Reference
+### 3.8 CycleRAP Reference
 
-The **CycleRAP** button (next to Coding Guide in the top tab bar) opens the official iRAP CycleRAP methodology page at [irap.org/cyclerap](https://irap.org/cyclerap/) in a new browser tab. Use it to look up attribute definitions, scoring rationale, or the full CycleRAP methodology while you are coding.
+The **CycleRAP** button (next to Coding Guide in the top tab bar) opens the official iRAP CycleRAP page at [irap.org/cyclerap](https://irap.org/cyclerap/) in a new browser tab. Use it to look up attribute definitions, scoring rationale, or the full CycleRAP methodology while you are coding.
+
+#### What is CycleRAP?
+
+CycleRAP is the international standard for evaluating road and cycling infrastructure safety. It assesses risk for bicyclists and other light mobility users across all facility types — on-road or off-road — without requiring crash data. PSAT's scoring engine is built on the CycleRAP methodology.
+
+#### Resources available on the CycleRAP page
+
+Once the page opens, you will find four downloadable or interactive resources:
+
+| Resource | What it contains |
+|---|---|
+| **Download CycleRAP Methodology** | The full technical specification — all attributes, scoring multipliers, crash type formulas, and risk band thresholds used in PSAT |
+| **Download CycleRAP User Guide** | A practical step-by-step guide for surveyors and coders on how to apply CycleRAP in the field |
+| **Explore the CycleRAP Demonstrator Tool** | An interactive online tool showing sample assessments and how scores are calculated |
+| **Where is CycleRAP being used?** | A map and list of countries and organisations currently using CycleRAP |
+
+#### How to download the CycleRAP Methodology
+
+1. Click the **CycleRAP** button on the Coding page — the iRAP CycleRAP page opens in a new tab.
+2. Scroll down until you see the green **"Download CycleRAP Methodology here ↗"** button.
+3. Click it. The PDF downloads to your default Downloads folder.
+4. Open the PDF to find the full attribute list, scoring multipliers, and risk band definitions that match PSAT's coding attributes.
+
+#### How to download the CycleRAP User Guide
+
+1. On the same CycleRAP page, click the green **"Download CycleRAP User Guide here ↗"** button (next to the Methodology button).
+2. The User Guide PDF downloads immediately.
+3. This guide explains field-coding procedures and attribute definitions in plain language — useful as a reference while reviewing segments.
+
+#### Other resources
+
+- **Explore the CycleRAP Demonstrator Tool** — click this button to open an interactive tool that walks through a sample assessment and shows how risk scores are calculated from attribute values.
+- **Where is CycleRAP being used?** — shows a global map of deployments; useful context for understanding the methodology's scope and adoption.
+
+> **Tip:** The attribute names in PSAT map directly to the CycleRAP Methodology. If you are unsure what value to assign to an attribute (e.g. *Facility Width per Direction* or *Peak Pedestrian Flow*), the Methodology PDF contains the exact definitions and example photographs for each option.
+
+---
+
+### 3.9 Hover Tips
+
+PSAT surfaces contextual help through hover tooltips throughout the interface.
+
+#### Crash Type Score Tooltips
+
+On any page that shows the **Crash Type Scores** panel (Coding Page, Path Analysis, Treatment Page), you can hover over any of the five score cards to see the risk banding thresholds for that crash type.
+
+##### BB / BP / SB (Bicycle-Bicycle, Bicycle-Pedestrian, Single-Bicycle)
+
+| Band | Score Range |
+|---|---|
+| Low | < 5 |
+| Medium | 5 – 10 |
+| High | 10 – 20 |
+| Extreme | > 20 |
+
+##### VB (Vehicle-Bicycle)
+
+| Band | Score Range |
+|---|---|
+| Low | < 10 |
+| Medium | 10 – 25 |
+| High | 25 – 60 |
+| Extreme | > 60 |
+
+##### Risk Score
+
+The **Risk Score** is the sum of all four crash type scores. Its banding colour reflects the **worst-case** band across all crash types — for example, if VB is High and all others are Low, the Risk Score card shows High.
+
+Hovering the **Risk Score** card shows a compact summary of all banding thresholds for reference.
+
+> **Tip:** The tooltips appear instantly on hover and stay visible even if you accidentally click the card. Move the cursor away to dismiss.
+
+#### Attribute Info Tooltips
+
+On the **Coding Page**, every coding attribute that has a description shows a small **ⓘ info icon** next to its label. Hover the icon to read a plain-English explanation of:
+
+- What the attribute measures.
+- How it is typically coded in a Singapore context.
+- How it contributes to the CycleRAP risk score.
+
+**Example:**
+
+> **Area type** — *"Classify the surrounding land use. Singapore paths are mostly Suburban (HDB/residential). Use Urban for city area and dense commercial zones, Industrial for business parks and logistics areas, Recreational for parks."*
+
+The tooltip stays open even if you accidentally click the icon — just move your cursor away to close it.
+
+#### Where Tooltips Appear
+
+| Location | What is shown |
+|---|---|
+| Crash Type Score cards (BB/BP/SB/VB) | Risk banding thresholds for that crash type |
+| Risk Score card | Full banding summary for all crash types |
+| Attribute ⓘ icons (Coding Page) | Plain-English description of the attribute and scoring impact |

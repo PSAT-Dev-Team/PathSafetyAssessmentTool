@@ -5,28 +5,27 @@ PSAT is a two-container application orchestrated by Docker Compose. The frontend
 
 ## Table of Contents
 
-- [System diagram](#system-diagram)
-- [High-level flow](#high-level-flow)
-- [Backend structure](#backend-structure)
-  - [Registered blueprints](#registered-blueprints)
-  - [Lazy initialization](#lazy-initialization)
-  - [GIS caches and helper assets](#gis-caches-and-helper-assets)
-- [Frontend structure](#frontend-structure)
-- [Project storage model](#project-storage-model)
-  - [`project_metadata.json`](#project-metadata-json)
-  - [Snapshot behavior](#snapshot-behavior)
-  - [Sidecar directories](#sidecar-directories)
-- [Project creation pipeline](#project-creation-pipeline)
-- [Multi-project aggregation pattern](#multi-project-aggregation-pattern)
-- [Shapefile management architecture](#shapefile-management-architecture)
-- [Key design choices](#key-design-choices)
-  - [API-only frontend communication](#api-only-frontend-communication)
-  - [Native scoring path](#native-scoring-path)
-  - [CRS handling](#crs-handling)
-  - [Thread safety](#thread-safety)
+- [3.1 System diagram](#3-1-system-diagram)
+- [3.2 High-level flow](#3-2-high-level-flow)
+- [3.3 Backend structure](#3-3-backend-structure)
+  - [3.31 Registered blueprints](#3-31-registered-blueprints)
+  - [3.32 Lazy initialization](#3-32-lazy-initialization)
+  - [3.33 GIS caches and helper assets](#3-33-gis-caches-and-helper-assets)
+- [3.4 Frontend structure](#3-4-frontend-structure)
+- [3.5 Project storage model](#3-5-project-storage-model)
+  - [3.51 `project_metadata.json`](#3-51-project-metadata-json)
+  - [3.52 Snapshot behavior](#3-52-snapshot-behavior)
+  - [3.53 Sidecar directories](#3-53-sidecar-directories)
+- [3.6 Project creation pipeline](#3-6-project-creation-pipeline)
+- [3.7 Multi-project aggregation pattern](#3-7-multi-project-aggregation-pattern)
+- [3.8 Shapefile management architecture](#3-8-shapefile-management-architecture)
+- [3.9 Key design choices](#3-9-key-design-choices)
+  - [3.91 API-only frontend communication](#3-91-api-only-frontend-communication)
+  - [3.92 Native scoring path](#3-92-native-scoring-path)
+  - [3.93 CRS handling](#3-93-crs-handling)
+  - [3.94 Thread safety](#3-94-thread-safety)
 
-
-## System diagram
+## 3.1 System diagram
 
 ```text
 Browser
@@ -56,7 +55,7 @@ Browser
 
 Docker bind-mounts `./data/` and `./in/`, so project data and source image folders survive rebuilds and restarts.
 
-## High-level flow
+## 3.2 High-level flow
 
 1. The user creates or selects a project in the frontend.
 2. The frontend calls `/api/projects/*` and `/api/shapefiles/*` as needed.
@@ -64,7 +63,7 @@ Docker bind-mounts `./data/` and `./in/`, so project data and source image folde
 4. Coding, analysis, and treatment flows mutate the latest snapshot and persist derived artifacts such as scores, baselines, and autocode metadata.
 5. The frontend rehydrates the updated data through normal REST reads.
 
-## Backend structure
+## 3.3 Backend structure
 
 ```text
 backend/
@@ -90,13 +89,13 @@ backend/
 └── shapefiles/
 ```
 
-### Registered blueprints
+### 3.31 Registered blueprints
 
 - `health.py` exposes the liveness checks
 - `projects/routes.py` owns project lifecycle, coding, scoring, treatment, baseline, and project-discovery endpoints
 - `gis_layers/routes.py` exposes shapefile inventory, preview, upload, replace, and delete operations under `/api/shapefiles`
 
-### Lazy initialization
+### 3.32 Lazy initialization
 
 `get_ctx()` in `projects/routes.py` lazily initializes and caches:
 
@@ -106,7 +105,7 @@ backend/
 
 CV models are loaded separately by `_ensure_models_ready()`. Initialization failures are memoized so repeated requests fail fast with HTTP 503 rather than repeatedly blocking on model load.
 
-### GIS caches and helper assets
+### 3.33 GIS caches and helper assets
 
 The backend also caches GIS layers and project-level gradient/profile lookups. One new helper asset is:
 
@@ -114,7 +113,7 @@ The backend also caches GIS layers and project-level gradient/profile lookups. O
 
 That CSV is optional, but when present it lets the create-project map show which intersecting roads actually have local image folders.
 
-## Frontend structure
+## 3.4 Frontend structure
 
 ```text
 frontend/
@@ -142,7 +141,7 @@ Two frontend details are easy to miss but now matter architecturally:
 - `frontend/public/docs/` contains the markdown actually served in the Help page
 - `utils/projectSearch.ts` centralizes the project-or-road fuzzy matching used across multiple pages
 
-## Project storage model
+## 3.5 Project storage model
 
 Each project lives under `data/<ProjectName>/`.
 
@@ -164,7 +163,7 @@ data/
             └── treatment.csv
 ```
 
-### `project_metadata.json`
+### 3.51 `project_metadata.json`
 
 > **Recent Addition:** Persisted project provenance via `dataset` and `source_folders`.
 
@@ -183,11 +182,11 @@ The metadata model now carries more than name and tags. Relevant fields include:
 
 `dataset` is a single source-folder name for legacy / single-folder projects, or `MULTI_FOLDER_SELECTION` for projects created from multiple folders. `source_folders` is the durable provenance field used by fuzzy search and by newer UI flows.
 
-### Snapshot behavior
+### 3.52 Snapshot behavior
 
 Version folders are date-based (`YYYYMMDD`). Multiple saves on the same day update the same dated snapshot rather than creating many sub-daily versions.
 
-### Sidecar directories
+### 3.53 Sidecar directories
 
 > **Recent Addition:** Baseline and autocode-metadata storage used by validation workflows.
 
@@ -196,7 +195,7 @@ Two newer sidecar directories support analysis workflows:
 - `baseline/` stores the attribute baseline used by autocode validation comparisons
 - `autocode/` stores changed-field and field-source metadata for the coding UI
 
-## Project creation pipeline
+## 3.6 Project creation pipeline
 
 Project creation still starts from geotagged source images in `in/`, but it now supports both single-folder and multi-folder/polygon flows.
 
@@ -212,7 +211,7 @@ Backend steps:
 
 When multiple source folders are merged, copied image names are namespaced so duplicate filenames do not collide.
 
-## Multi-project aggregation pattern
+## 3.7 Multi-project aggregation pattern
 
 Several frontend pages load multiple projects into one combined view. The usual pattern is:
 
@@ -222,7 +221,7 @@ Several frontend pages load multiple projects into one combined view. The usual 
 
 This pattern is especially important in coding, treatment, and path-analysis views.
 
-## Shapefile management architecture
+## 3.8 Shapefile management architecture
 
 The GIS Layers page is backed by the `gis_layers` blueprint. That blueprint:
 
@@ -237,20 +236,20 @@ This means the same layer inventory drives both:
 - the GIS Layers admin page
 - the backend GIS mapping logic used during coding
 
-## Key design choices
+## 3.9 Key design choices
 
-### API-only frontend communication
+### 3.91 API-only frontend communication
 
 The frontend never reads the filesystem directly. Every read/write goes through REST endpoints, which keeps all storage rules and migration logic on the backend.
 
-### Native scoring path
+### 3.92 Native scoring path
 
 The current score endpoint uses `calculate_cyclerap_score_native()` instead of Excel COM. Legacy Excel helpers still exist, but native Python scoring is the main path.
 
-### CRS handling
+### 3.93 CRS handling
 
 Source image GPS is read in WGS84 (`EPSG:4326`). Stored project geodata is written in Singapore SVY21 (`EPSG:3414`) so geometric distance and width/curvature operations behave sensibly.
 
-### Thread safety
+### 3.94 Thread safety
 
 Model loading is protected by a lock and cached error state, which avoids repeated slow failures under concurrent requests.

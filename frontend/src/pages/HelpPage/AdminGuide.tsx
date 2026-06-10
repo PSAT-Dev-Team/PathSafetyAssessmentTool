@@ -5,19 +5,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const DOCS_LIST = [
-  { id: "readme",       title: "1. Overview (README)", path: "/README.md",                  updatedDate: "Jun 2026" },
-  { id: "installation", title: "2. Installation",       path: "/docs/installation.md",       updatedDate: "Jun 2026" },
-  { id: "architecture", title: "3. Architecture",       path: "/docs/architecture.md",       updatedDate: "Jun 2026" },
-  { id: "api",          title: "4. API Reference",      path: "/docs/api-reference.md",      updatedDate: "Jun 2026" },
-  { id: "cv",           title: "5. CV / ML Pipeline",   path: "/docs/cv-pipeline.md",        updatedDate: "Jun 2026" },
-  { id: "scoring",      title: "6. Scoring Logic",      path: "/docs/scoring.md",            updatedDate: "Jun 2026" },
-  { id: "frontend",     title: "7. Frontend",           path: "/docs/frontend.md",           updatedDate: "Jun 2026" },
-  { id: "issues",       title: "8. Common Issues",      path: "/docs/common-issues.md",      updatedDate: "Jun 2026" },
-  { id: "contributing", title: "9. Contributing",       path: "/docs/contributing.md",       updatedDate: "Jun 2026" },
-  { id: "jira",         title: "10. Jira Board",        path: "/docs/dev-jira.md",            updatedDate: "Jun 2026" },
+  { id: "deployment",   title: "1. Deployment & Infrastructure",      path: "/docs/admin-deployment.md",          updatedDate: "Jun 2026" },
+  { id: "ml-models",    title: "2. Managing ML Models",               path: "/docs/admin-ml-models.md",           updatedDate: "Jun 2026" },
+  { id: "gis-layers",   title: "3. Managing GIS Data Layers",         path: "/docs/admin-gis-layers.md",          updatedDate: "Jun 2026" },
+  { id: "troubleshoot", title: "4. Troubleshooting & Health",         path: "/docs/admin-troubleshooting.md",     updatedDate: "Jun 2026" },
+  { id: "cyclerap",     title: "5. Updating CycleRAP Algorithm",      path: "/docs/admin-cyclerap-algorithm.md",  updatedDate: "Jun 2026" },
+  { id: "accounts",     title: "6. User Accounts & Sign-In",          path: "/docs/admin-user-accounts.md",       updatedDate: "Jun 2026" },
+  { id: "dashboard",    title: "7. Admin Dashboard — Usage Tracking", path: "/docs/admin-dashboard.md",           updatedDate: "Jun 2026" },
 ];
 
-export default function DeveloperGuide() {
+export default function AdminGuide() {
   const [activeDoc, setActiveDoc] = useState(DOCS_LIST[0]);
   const [content, setContent] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -111,7 +108,7 @@ function MarkdownContent({ content }: { content: string }) {
 
   const getHeadingId = (children: any): string => {
     const text = Array.isArray(children) ? children.join("") : String(children);
-    return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
   };
 
   const components = {

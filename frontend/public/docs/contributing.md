@@ -2,14 +2,14 @@
 
 These notes are intentionally practical rather than process-heavy. The codebase is large, stateful, and file-backed, so the safest contributions are small, explicit, and well-validated.
 
-## Working style
+## 9.1 Working style
 
 - keep changes focused on one behavior or one documentation topic at a time
 - avoid mixing unrelated cleanup into feature or bug-fix work
 - prefer fixes at the owning layer instead of UI-only or data-only workarounds
 - preserve existing file formats and naming conventions unless the task requires a migration
 
-## Validation expectations
+## 9.2 Validation expectations
 
 Run the narrowest useful validation for the area you changed.
 
@@ -19,16 +19,16 @@ Typical checks:
 - **frontend code changes:** TypeScript build or targeted page validation
 - **documentation changes:** sync both `docs/` and `frontend/public/docs/`, then do a stale-content sweep
 
-## Documentation rule
+## 9.3 Documentation rule
 
 If you update repository docs in `docs/`, update the mirrored Help-page copies in `frontend/public/docs/` as part of the same change.
 
-## Project-data safety
+## 9.4 Project-data safety
 
 - do not hand-edit project directories in `data/` unless the task explicitly requires it
 - be careful with destructive project actions because delete operations remove project folders recursively
 - treat generated helper assets such as `backend/shapefiles/road_reference.csv` as environment-dependent outputs
 
-## Local development
+## 9.5 Local development
 
 For local setup, see [installation.md](installation.md).

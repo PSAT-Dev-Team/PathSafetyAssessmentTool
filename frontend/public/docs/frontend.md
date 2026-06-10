@@ -7,7 +7,7 @@ The PSAT frontend is a React + TypeScript SPA built with Vite and served by ngin
 **Maps:** Leaflet via react-leaflet  
 **Docs renderer:** React Markdown + mirrored files in `frontend/public/docs`
 
-## Route map
+## 7.1 Route map
 
 | URL pattern | Component | Purpose |
 |---|---|---|
@@ -24,13 +24,13 @@ The PSAT frontend is a React + TypeScript SPA built with Vite and served by ngin
 
 `HelpButton` is rendered globally, so the help entry point is available from anywhere in the app.
 
-## Page behavior
+## 7.2 Page behavior
 
-### Landing page
+### 7.21 Landing page
 
 `LandingPage` is a lightweight entry screen with no backend dependency beyond navigation.
 
-### Help page
+### 7.22 Help page
 
 `HelpPage` renders two doc collections:
 
@@ -39,7 +39,7 @@ The PSAT frontend is a React + TypeScript SPA built with Vite and served by ngin
 
 This is why documentation changes must be mirrored into `frontend/public/docs/`, not just `docs/`.
 
-### Projects page
+### 7.23 Projects page
 
 > **Recent Addition:** Fuzzy project search that also matches source road names.
 
@@ -63,7 +63,7 @@ The fuzzy search logic lives in `src/utils/projectSearch.ts` and matches against
 - tags
 - `source_folders`
 
-### Create Project page
+### 7.24 Create Project page
 
 > **Recent Addition:** Multi-road project creation from a drawn polygon or selected planning area.
 
@@ -83,7 +83,7 @@ The map workflow adds several behaviors that were not in the earlier implementat
 
 If multiple source folders are selected, the backend namespaces copied image filenames to avoid collisions and stores the original list in `source_folders`.
 
-### Coding page
+### 7.25 Coding page
 
 `CodingPage` is the primary work area and supports one or more projects in a single session through the comma-separated `:projectNames` route param.
 
@@ -108,7 +108,7 @@ Key current behaviors:
 
 Multi-project coding/treatment views aggregate segment arrays and keep a project index map in the page state so UI actions can still resolve back to the owning project and local row.
 
-### Path Analysis page
+### 7.26 Path Analysis page
 
 `PathAnalysisPage` is now a full **multi-project analysis workspace**, not just an autocode review screen.
 
@@ -126,7 +126,7 @@ It currently supports:
 
 The page also stores filter and selection state in `sessionStorage`, so analysts can navigate away and return without losing the active analysis setup.
 
-### Treatment pages
+### 7.27 Treatment pages
 
 > **Recent Addition:** Treatment-effectiveness ranking for both project-wide and per-segment views.
 
@@ -141,7 +141,7 @@ The page also stores filter and selection state in `sessionStorage`, so analysts
 - applying a treatment to one segment, all applicable segments, or one specific treatment across the loaded set
 - saving or resetting pending treatment state
 
-### GIS Layers page
+### 7.28 GIS Layers page
 
 > **Recent Addition:** Dedicated GIS Layers page with upload, preview, replace, and delete flows.
 
@@ -154,7 +154,7 @@ It currently supports:
 - opening `ShapefileModal` to upload, validate, replace, or delete layers
 - surfacing metadata such as source, year, category, and file size
 
-## API client highlights
+## 7.3 API client highlights
 
 All client-side fetch wrappers live in `src/api/index.ts`.
 
@@ -168,21 +168,21 @@ Notable newer exports include:
 - `getTreatmentSegmentEffectiveness()`
 - shapefile-management helpers such as `listShapefiles()`, `uploadShapefiles()`, and `replaceShapefiles()`
 
-## Visual analysis components
+## 7.4 Visual analysis components
 
-### CurvatureVisualizationPanel
+### 7.41 CurvatureVisualizationPanel
 
 Calls `POST /api/projects/<name>/curvature/visualize` and renders the local path geometry, 5 m analysis window, derived radius, and curvature classification.
 
-### WidthVisualizationPanel
+### 7.42 WidthVisualizationPanel
 
 Calls `POST /api/projects/<name>/width/visualize` and renders the expanding search rings, candidate paths, and derived width category.
 
-### GeoDataPanel GIS overlays
+### 7.43 GeoDataPanel GIS overlays
 
 When a single project is active, the coding map can request nearby GIS layers from `POST /api/projects/<name>/gis/layers` to show map context around the active segment.
 
-## State management
+## 7.5 State management
 
 PSAT still relies on page-local React state rather than a global state library. The main shared patterns are:
 
@@ -191,7 +191,7 @@ PSAT still relies on page-local React state rather than a global state library. 
 - browser storage for selected Path Analysis filters
 - custom browser events to push metadata changes back to listing pages
 
-## nginx behavior
+## 7.6 nginx behavior
 
 The frontend container:
 
@@ -210,7 +210,7 @@ location /api/ {
 ```
 *Layman's explanation: This configuration tells the system how to correctly route messages between the website interface and the background system.*
 
-## Supporting implementation details
+## 7.7 Supporting implementation details
 
 - the Help page reads markdown from `frontend/public/docs/`
 - shared fuzzy matching lives in `src/utils/projectSearch.ts`
