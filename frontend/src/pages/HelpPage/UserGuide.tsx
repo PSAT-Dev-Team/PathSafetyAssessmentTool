@@ -8,12 +8,9 @@ const DOCS_LIST = [
   { id: "getting-started",      title: "1. Getting Started",           path: "/docs/user-getting-started.md",        updatedDate: "Jun 2026" },
   { id: "login",                title: "2. User Login",                path: "/docs/user-login.md",                  updatedDate: "Jun 2026" },
   { id: "coding-page",          title: "3. Coding Page",               path: "/docs/user-coding-page.md",            updatedDate: "Jun 2026" },
-  { id: "hover-tips",           title: "↳ Hover Tips",                 path: "/docs/user-hover-tips.md",             updatedDate: "Jun 2026", isSubItem: true },
   { id: "map-view",             title: "4. Map View & Analysis",       path: "/docs/user-map-view.md",               updatedDate: "Jun 2026" },
   { id: "path-analysis",        title: "5. Path Analysis",             path: "/docs/user-path-analysis.md",          updatedDate: "Jun 2026" },
-  { id: "finer-filtering",      title: "↳ 5.3 Finer Filtering",       path: "/docs/user-finer-filtering.md",        updatedDate: "Jun 2026", isSubItem: true },
   { id: "treatment-application",title: "6. Treatment Application",     path: "/docs/user-treatment-application.md",  updatedDate: "Jun 2026" },
-  { id: "treatment-ai",         title: "↳ Before & After AI",         path: "/docs/user-treatment-ai.md",           updatedDate: "Jun 2026", isSubItem: true },
   { id: "report-generation",    title: "7. Report Generation",         path: "/docs/user-report-generation.md",      updatedDate: "Jun 2026" },
   { id: "gis-management",       title: "8. GIS Layer Management",      path: "/docs/user-gis-management.md",         updatedDate: "Jun 2026" },
 ];

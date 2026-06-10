@@ -13,6 +13,7 @@ The Path Analysis page is the multi-project analysis workspace.
   - [5.3.2 Finer Filtering — Sub-category Options](#532-finer-filtering--sub-category-options)
 - [5.4 Export](#54-export)
 - [5.5 Session Continuity](#55-session-continuity)
+- [5.6 Finer Filtering — Reference](#56-finer-filtering--reference)
 
 ---
 
@@ -122,3 +123,52 @@ The page supports three exports:
 ### 5.5 Session Continuity
 
 Your selections and filters are kept for the browser session, so navigating away (e.g. to edit a segment in Coding) and returning does not immediately clear the analysis setup.
+
+---
+
+### 5.6 Finer Filtering — Reference
+
+Finer filtering lets you narrow a segment filter down to a specific **sub-type** within a parent category. When an attribute supports it, selecting a top-level value reveals a second dropdown — and the map immediately updates to colour only the segments that match your exact sub-type.
+
+Attributes that support finer filtering are marked **❖** in the filter panel.
+
+#### Which Attributes Support Finer Filtering
+
+| Attribute | Top-level Values | Sub-category Count |
+|---|---|---|
+| **Facility Width per Direction** ❖ | Very Narrow; Narrow; Wide | 6 width ranges |
+| **Curvature** ❖ | Sharp Turn Present; No Sharp Turn Present | 5 radius ranges |
+| **Fixed Obstacle on Facility** ❖ | Present; Not Present | 7 obstacle types |
+| **Non-Fixed Obstacle on Facility** ❖ | Present; Not Present | 5 obstacle types |
+| **Delineation** ❖ | Present; Not Present | 5 delineation types |
+| **Crossing Facility** ❖ | Present; Not Present | 5 crossing types |
+
+All other attributes use standard single-level filtering.
+
+#### Sub-category Reference Table
+
+| Attribute | Trigger Value | Sub-category Options | Map Colour Logic |
+|---|---|---|---|
+| Facility Width per Direction | Very Narrow | ≤1.5 m · >1.5–1.8 m · >1.8–<2 m | Red → Orange → Amber (narrower = more risk) |
+| Facility Width per Direction | Narrow | 2–<3.5 m · 3.5–4 m | Green shades |
+| Facility Width per Direction | Wide | >4 m | Blue |
+| Curvature | Sharp Turn Present | <6.5 m (footpath threshold) · 6.5–<10 m · Path Junction | Red · Orange · Purple |
+| Curvature | No Sharp Turn Present | 10–18 m · >18 m (cycling path threshold ≥18 m) | Green · Blue |
+| Fixed Obstacle on Facility | Present | Lamp Post · Traffic Light · Pillar · Bollards · Fence · Vegetation · Others | Unique colour per type |
+| Non-Fixed Obstacle on Facility | Present | Barrier · Bins · Bicycle · Cone · Others | Unique colour per type |
+| Delineation | Present | Cycling Path · Red Stripe · Signalised Crossing · Traffic Crossing · Zebra Crossing | Unique colour per type |
+| Crossing Facility | Present | Zebra Crossing · Signalised PC · Bicycle Crossing · Unsignalised Junction · Development Access | Unique colour per type |
+
+#### Correcting Wrong Sub-category Colours
+
+If the map shows unexpected colours when a sub-category filter is active, this usually means the source attribute was coded with an incorrect or missing sub-type value.
+
+1. Click the affected segment on the map to select it.
+2. Click **Open in Coding** (or navigate to the Coding page from the sidebar).
+3. In the attribute table, find the relevant attribute (e.g. *Fixed Obstacle Type* for Fixed Obstacle on Facility).
+4. Correct the value to the appropriate sub-type from the dropdown.
+5. Click **Save** to persist the change and recalculate risk scores.
+6. Click **Back to Analysis** in the sidebar to return to Path Analysis.
+7. Re-apply the same filter — the corrected colour will now appear on the map.
+
+> This also applies when the CV auto-coder assigns a sub-type incorrectly. The Coding page lets you override any auto-coded value and is the authoritative source for what appears in the filters.

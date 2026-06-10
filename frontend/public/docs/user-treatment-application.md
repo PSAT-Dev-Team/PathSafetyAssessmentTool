@@ -132,3 +132,37 @@ Use these charts to get a quick sense of whether the treatments you have applied
 - **Applying a single improvement across a whole project** — switch to **By Treatment** view, find the treatment you want, tick it, then click Apply. The confirmation dialog will list all eligible segments; confirm to apply in bulk.
 - **Undoing all changes** — if you want to start fresh, navigate to each segment that has been treated and click Reset to remove treatments one segment at a time.
 - **Checking what was already applied** — treatments that have already been saved for the current segment are shown with a **green background** in the Treatment Options panel, so you can see at a glance what is already in place.
+
+---
+
+## Before & After Treatment — AI Score Preview
+
+When you apply treatments to a path, PSAT calculates a **predicted score** for each segment after the treatment is applied. This before/after comparison lets you evaluate the safety impact before committing.
+
+### How the Before / After Comparison Works
+
+1. **Before score** — the original crash type scores (BB, BP, SB, VB, Risk Score) computed from the coded attributes.
+2. **Treatment applied** — selected treatments modify one or more attribute values on the relevant segments (e.g., installing a safety barrier changes *Adjacent Severe Hazard*).
+3. **After score** — PSAT re-runs the CycleRAP scoring formula with the updated attribute values to produce a predicted post-treatment score.
+
+The difference (reduction) is shown as a **↓ value** beneath each crash type score card. A green indicator confirms improvement; no arrow means the treatment did not affect that crash type.
+
+### Reading the Score Cards
+
+When a treated version is displayed:
+
+- Each card shows the **post-treatment score** in large text.
+- A **↓ X.XX** delta beneath it shows how much the score decreased.
+- The card background colour reflects the **post-treatment band** — if a treatment moved a segment from High to Medium, the card will now show the Medium colour.
+
+### AI-Assisted Treatment Description
+
+On the **Treatment Detail Page**, an AI-generated narrative summarises the expected safety improvement. It describes:
+
+- Which attributes are being modified by the treatment.
+- Which crash types are most affected and why.
+- The magnitude of the predicted score reduction.
+
+This text is generated automatically based on the treatment definition and the attribute changes — no manual input is required.
+
+> **Note:** Previewing a treatment does not modify the project. You can preview multiple treatment combinations before deciding which to apply.
