@@ -418,9 +418,9 @@ function ReportSection({
 // sections without dragging the full (map/chart-heavy) canvas section. Shares
 // the same `elements` array order, so reordering here reorders the report.
 function SortableSectionRow({
-  id, label, visible, onToggle, children
+  id, label, visible, onToggle, onSelect, children
 }: {
-  id: string; label: string; visible: boolean; onToggle: () => void; children?: React.ReactNode;
+  id: string; label: string; visible: boolean; onToggle: () => void; onSelect?: () => void; children?: React.ReactNode;
 }) {
   const {
     attributes, listeners, setNodeRef, setActivatorNodeRef,
@@ -455,7 +455,12 @@ function SortableSectionRow({
             style={{ accentColor: "#a020d0", cursor: "pointer", flexShrink: 0 }}
             title={visible ? "Hide section" : "Show section"}
           />
-          <span className="rb-reorder-label" style={{ opacity: visible ? 1 : 0.45 }}>{label}</span>
+          <span
+            className="rb-reorder-label"
+            style={{ opacity: visible ? 1 : 0.45, cursor: onSelect && visible ? "pointer" : "default" }}
+            onClick={onSelect && visible ? onSelect : undefined}
+            title={onSelect && visible ? "Scroll to this section" : undefined}
+          >{label}</span>
         </div>
         <div style={{ width: "100%", boxSizing: "border-box" }}>
           {children}
@@ -485,7 +490,12 @@ function SortableSectionRow({
         style={{ accentColor: "#a020d0", cursor: "pointer", flexShrink: 0 }}
         title={visible ? "Hide section" : "Show section"}
       />
-      <span className="rb-reorder-label" style={{ opacity: visible ? 1 : 0.45 }}>{label}</span>
+      <span
+        className="rb-reorder-label"
+        style={{ opacity: visible ? 1 : 0.45, cursor: onSelect && visible ? "pointer" : "default" }}
+        onClick={onSelect && visible ? onSelect : undefined}
+        title={onSelect && visible ? "Scroll to this section" : undefined}
+      >{label}</span>
     </div>
   );
 }
@@ -1016,6 +1026,19 @@ export default function ReportBuilderPage() {
     canvasContainerRef.current.scrollTo({ top: canvasTop + page * PAGE_H, behavior: "smooth" });
   }, []);
 
+  // Scroll the canvas so the start of the given section is brought into view.
+  const scrollToSection = useCallback((id: string) => {
+    const container = canvasContainerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
+    const el = canvas.querySelector(`[data-element-id="${id}"]`) as HTMLElement | null;
+    if (!el) return;
+    const elRect = el.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const top = container.scrollTop + (elRect.top - containerRect.top) - 16;
+    container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }, []);
+
   const handleCanvasScroll = useCallback(() => {
     if (!canvasContainerRef.current || !canvasRef.current) return;
     const scrolled = canvasContainerRef.current.scrollTop;
@@ -1069,6 +1092,15 @@ export default function ReportBuilderPage() {
       const liveFields = Array.from(
         canvas.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea"),
       ).filter((f) => !(f instanceof HTMLInputElement && (f.type === "checkbox" || f.type === "radio")));
+
+      // Ensure every <img> (segment photos, etc.) has finished decoding before
+      // capture — html2canvas draws whatever is loaded at call time, so an export
+      // fired right after the page loads could otherwise capture blank images.
+      await Promise.all(
+        Array.from(canvas.querySelectorAll("img"))
+          .filter((img) => !img.complete)
+          .map((img) => img.decode().catch(() => undefined)),
+      );
 
       const captured = await html2canvas(canvas, {
         scale: 2, useCORS: true, logging: false, backgroundColor: "#ffffff",
@@ -2371,6 +2403,7 @@ export default function ReportBuilderPage() {
                       label={sec.label}
                       visible={sec.visible}
                       onToggle={() => (sec.visible ? hideElement(sec.id) : showElement(sec.id))}
+                      onSelect={() => scrollToSection(sec.id)}
                     >
                       {sec.id === "topRisk" && elState && sec.visible ? renderViewToggle(elState) : null}
                     </SortableSectionRow>
