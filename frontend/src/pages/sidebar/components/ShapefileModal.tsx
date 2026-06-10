@@ -99,11 +99,9 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     setUploadFiles([]);
     setReplaceFiles([]);
     setSelectedCategory("__new__");
-    setSelectedReplaceCategory("");
     setSelectedTargetShapefile("");
     setDragActive(false);
     resetPreviewState();
-    setReplaceCategorySearch("");
     setTargetShapefileSearch("");
   }
 
@@ -156,39 +154,29 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     // Clear state
     setUploadFiles([]);
     setReplaceFiles([]);
-    setSelectedReplaceCategory("");
     setSelectedTargetShapefile("");
-    setReplaceCategorySearch("");
     setTargetShapefileSearch("");
     resetPreviewState();
   }
 
-  // === Search & Filter Logic ===
-  const filteredCategories = useMemo(() => {
-    if (!replaceCategorySearch) return categories;
-    const query = replaceCategorySearch.toLowerCase();
-    return categories.filter(cat => cat.name.toLowerCase().includes(query));
-  }, [categories, replaceCategorySearch]);
-
   const filteredTargetShapefiles = useMemo(() => {
     const gisLayerExtensions = ['.shp', '.geojson', '.kml', '.kmz', '.gml', '.gpx', '.json'];
     const baseList = allShapefiles.filter(shp => {
-      if (shp.category !== selectedReplaceCategory) return false;
-      const fileName = shp.name.toLowerCase();
+      const fileName = (shp.filename || "").toLowerCase();
       return gisLayerExtensions.some(ext => fileName.endsWith(ext));
     });
 
     if (!targetShapefileSearch) return baseList;
     const query = targetShapefileSearch.toLowerCase();
-    return baseList.filter(shp => shp.name.toLowerCase().includes(query));
-  }, [allShapefiles, selectedReplaceCategory, targetShapefileSearch]);
+    return baseList.filter(shp => 
+      shp.name.toLowerCase().includes(query) || 
+      shp.category.toLowerCase().includes(query)
+    );
+  }, [allShapefiles, targetShapefileSearch]);
 
   // Close dropdowns on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (categorySearchRef.current && !categorySearchRef.current.contains(event.target as Node)) {
-        setIsCategoryDropdownOpen(false);
-      }
       if (targetSearchRef.current && !targetSearchRef.current.contains(event.target as Node)) {
         setIsTargetDropdownOpen(false);
       }
@@ -383,14 +371,6 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     if (replaceFiles.length === 0) {
       toaster.create({
         description: "Please select file(s) to upload",
-        type: "warning",
-      });
-      return;
-    }
-
-    if (!selectedReplaceCategory) {
-      toaster.create({
-        description: "Please select a category",
         type: "warning",
       });
       return;
@@ -769,74 +749,11 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                     </div>
                   )}
 
-                  {/* Select Folder (Searchable) */}
-                  <Box mb={4} mt={6} position="relative" ref={categorySearchRef}>
-                    <Text fontWeight="600" mb={2}>Select Folder</Text>
+                  {/* Select Target Shapefile (Searchable) */}
+                  <Box mb={4} mt={6} position="relative" ref={targetSearchRef}>
+                    <Text fontWeight="600" mb={2}>Select GIS Layer to Replace</Text>
                     <Input
-                      placeholder="Type to filter folders (e.g., bus, area)..."
-                      value={replaceCategorySearch}
-                      onChange={(e) => {
-                        setReplaceCategorySearch(e.target.value);
-                        setIsCategoryDropdownOpen(true);
-                      }}
-                      onFocus={() => setIsCategoryDropdownOpen(true)}
-                    />
-                    {isCategoryDropdownOpen && (
-                      <Box
-                        position="absolute"
-                        top="100%"
-                        left={0}
-                        right={0}
-                        zIndex={1000}
-                        bg="white"
-                        boxShadow="lg"
-                        borderRadius="md"
-                        mt={1}
-                        maxH="200px"
-                        overflowY="auto"
-                        border="1px solid"
-                        borderColor="gray.200"
-                      >
-                        {filteredCategories.length > 0 ? (
-                          filteredCategories.map((cat) => (
-                            <Box
-                              key={cat.name}
-                              px={3}
-                              py={2}
-                              cursor="pointer"
-                              _hover={{ bg: "gray.100" }}
-                              onClick={() => {
-                                setSelectedReplaceCategory(cat.name);
-                                setReplaceCategorySearch(cat.name);
-                                setIsCategoryDropdownOpen(false);
-                                setSelectedTargetShapefile("");
-                                setTargetShapefileSearch("");
-                              }}
-                              display="flex"
-                              alignItems="center"
-                              justifyContent="space-between"
-                            >
-                              <Text fontSize="sm">{cat.name}</Text>
-                              {selectedReplaceCategory === cat.name && (
-                                <Box color="blue.500"><LuCheck /></Box>
-                              )}
-                            </Box>
-                          ))
-                        ) : (
-                          <Box px={3} py={2} color="fg.muted" fontSize="sm">
-                            No folders match your search
-                          </Box>
-                        )}
-                      </Box>
-                    )}
-                  </Box>
-
-                  {/* Select Target Shapefile (Searchable) - only show if category is selected */}
-                  {selectedReplaceCategory && (
-                    <Box mb={4} position="relative" ref={targetSearchRef}>
-                      <Text fontWeight="600" mb={2}>Select GIS Layer to Replace</Text>
-                      <Input
-                        placeholder="Type to filter layers..."
+                      placeholder="Type to filter layers by folder or name..."
                         value={targetShapefileSearch}
                         onChange={(e) => {
                           setTargetShapefileSearch(e.target.value);
@@ -870,14 +787,14 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                                 _hover={{ bg: "gray.100" }}
                                 onClick={() => {
                                   setSelectedTargetShapefile(shp.path);
-                                  setTargetShapefileSearch(shp.name);
+                                  setTargetShapefileSearch(`${shp.category} / ${shp.name}`);
                                   setIsTargetDropdownOpen(false);
                                 }}
                                 display="flex"
                                 alignItems="center"
                                 justifyContent="space-between"
                               >
-                                <Text fontSize="sm">{shp.name}</Text>
+                                <Text fontSize="sm">{shp.category} / {shp.name}</Text>
                                 {selectedTargetShapefile === shp.path && (
                                   <Box color="blue.500"><LuCheck /></Box>
                                 )}
@@ -891,7 +808,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                         </Box>
                       )}
                     </Box>
-                  )}
+
 
                   {replacing && (
                     <Box mt={4}>

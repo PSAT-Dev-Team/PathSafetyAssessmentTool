@@ -131,7 +131,7 @@ def _safe_relative(rel: str) -> Path | None:
 def _companion_extensions() -> List[str]:
     return [".shp", ".shx", ".dbf", ".prj", ".cpg", ".sbn", ".sbx",
             ".fbn", ".fbx", ".ain", ".aih", ".ixs", ".mxs", ".atx",
-            ".xml", ".qmd"]
+            ".xml", ".qmd", ".geojson", ".json", ".kml", ".kmz", ".gml", ".gpx"]
 
 
 def _originals_path() -> Path:
@@ -151,16 +151,20 @@ def _save_originals(data: dict) -> None:
 
 
 def _file_info(shp_path: Path, root: Path) -> dict:
-    """Build a ShapefileInfo dict for one .shp file."""
+    """Build a ShapefileInfo dict for one GIS file."""
     rel = shp_path.relative_to(root)
     category = rel.parts[0] if len(rel.parts) > 1 else "uncategorised"
     stat = shp_path.stat()
-    # Sum size of all companion files
-    total_size = sum(
-        shp_path.with_suffix(ext).stat().st_size
-        for ext in _companion_extensions()
-        if shp_path.with_suffix(ext).exists()
-    )
+
+    # For shapefiles (.shp) sum all companion files; for others just use file size
+    if shp_path.suffix.lower() == ".shp":
+        total_size = sum(
+            shp_path.with_suffix(ext).stat().st_size
+            for ext in _companion_extensions()
+            if shp_path.with_suffix(ext).exists()
+        )
+    else:
+        total_size = stat.st_size
     
     # Grab metadata fallbacks from predefined mappings based on category
     layer_meta = LAYER_METADATA.get(category, {})
@@ -200,14 +204,17 @@ def _file_info(shp_path: Path, root: Path) -> dict:
     if ld and ld.geometry_types:
         geom_type_str = ", ".join(ld.geometry_types)
 
+    # Use stem for display name, replacing underscores with spaces
+    display_name = shp_path.stem.replace("_", " ").title()
+
     return {
-        "name": shp_path.stem.replace("_", " ").title(),
+        "name": display_name,
         "filename": shp_path.name,
         "base_name": shp_path.stem,
         "path": rel.as_posix(),
         "category": category,
         "size": total_size,
-        "type": "Shapefile",
+        "type": "Shapefile" if shp_path.suffix.lower() == ".shp" else shp_path.suffix.lstrip(".").upper(),
         "geom_type": geom_type_str,
         "year": year,
         "source": fallback_source,
@@ -231,11 +238,17 @@ def list_shapefiles():
     changed = False
     results = []
 
-    for p in sorted(root.rglob("*.shp")):
+    gis_exts = [".shp", ".geojson", ".kml", ".kmz", ".gml", ".gpx", ".json"]
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in gis_exts:
+            continue
         if any(part.startswith("temp") for part in p.parts):
             continue
         if p.name.startswith("._"):
             continue
+        
         info = _file_info(p, root)
         rel_posix = info["path"]
         if rel_posix not in originals:
@@ -660,14 +673,23 @@ def rename_shapefile():
 
     parent = abs_path.parent
     renamed = []
-    for ext in _companion_extensions():
-        companion = abs_path.with_suffix(ext)
-        if companion.exists():
-            new_file = parent / (safe_name + ext)
-            companion.rename(new_file)
-            renamed.append(new_file.name)
+    file_suffix = abs_path.suffix.lower()
 
-    new_rel = (parent / (safe_name + ".shp")).relative_to(_shp_root()).as_posix()
+    if file_suffix == ".shp":
+        # For shapefiles, rename all companion files together
+        for ext in _companion_extensions():
+            companion = abs_path.with_suffix(ext)
+            if companion.exists():
+                new_file = parent / (safe_name + ext)
+                companion.rename(new_file)
+                renamed.append(new_file.name)
+        new_rel = (parent / (safe_name + ".shp")).relative_to(_shp_root()).as_posix()
+    else:
+        # For single GIS files (.geojson, .kml, etc.), just rename the one file
+        new_file = parent / (safe_name + file_suffix)
+        abs_path.rename(new_file)
+        renamed.append(new_file.name)
+        new_rel = new_file.relative_to(_shp_root()).as_posix()
 
     # Update originals registry: remap old path -> new path, keep original stem
     originals.pop(shapefile_path, None)
