@@ -42,6 +42,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showUploadConfirm, setShowUploadConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Replace Shapefile State
@@ -501,6 +502,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
   }
   return (
+    <>
     <Dialog.Root open={open} onOpenChange={(e) => !e.open && handleClose()} size="xl">
       <Portal>
         <Dialog.Backdrop />
@@ -863,7 +865,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                   {step === "add" && (
                     <Button
                       colorPalette="blue"
-                      onClick={handleAddUpload}
+                      onClick={() => setShowUploadConfirm(true)}
                       disabled={uploadFiles.length === 0 || uploading}
                     >
                       Upload {uploadFiles.length > 0 && `(${uploadFiles.length})`}
@@ -885,5 +887,74 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
         </Dialog.Positioner>
       </Portal>
     </Dialog.Root>
+
+      {/* Upload Confirmation Dialog */}
+      <Dialog.Root
+        open={showUploadConfirm}
+        onOpenChange={(e) => !e.open && setShowUploadConfirm(false)}
+        size="md"
+      >
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Before You Upload</Dialog.Title>
+                <Dialog.CloseTrigger />
+              </Dialog.Header>
+              <Dialog.Body>
+                <Text mb={3} color="fg.muted">
+                  Please confirm that the shapefile you are about to upload meets <strong>all</strong> of the following requirements:
+                </Text>
+                <Box as="ul" pl={5} mb={4} style={{ listStyleType: "disc" }}>
+                  <Box as="li" mb={2}>
+                    <Text fontSize="sm">
+                      <strong>Exact file name</strong> — The file name must exactly match what the system expects.
+                    </Text>
+                  </Box>
+                  <Box as="li" mb={2}>
+                    <Text fontSize="sm">
+                      <strong>Exact columns and numbers</strong> — The shapefile must contain the correct number of columns, with no extras or omissions.
+                    </Text>
+                  </Box>
+                  <Box as="li" mb={2}>
+                    <Text fontSize="sm">
+                      <strong>Exact attribute names</strong> — Every column/attribute name must match exactly, including capitalisation.
+                    </Text>
+                  </Box>
+                  <Box as="li" mb={2}>
+                    <Text fontSize="sm">
+                      <strong>Exact sequence</strong> — The columns must appear in exactly the same order as specified.
+                    </Text>
+                  </Box>
+                </Box>
+                <Text fontSize="sm" color="orange.600" fontWeight="500">
+                  Uploading an incompatible shapefile may cause system errors or incorrect data rendering.
+                </Text>
+                <Text fontSize="sm" color="fg.muted" mt={3}>
+                  If you are unsure of the expected format, refer to the existing shapefiles in the GIS Layers list as a reference.
+                </Text>
+              </Dialog.Body>
+              <Dialog.Footer>
+                <Box display="flex" gap={3} width="100%" justifyContent="flex-end">
+                  <Button variant="outline" onClick={() => setShowUploadConfirm(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    colorPalette="blue"
+                    onClick={() => {
+                      setShowUploadConfirm(false);
+                      handleAddUpload();
+                    }}
+                  >
+                    Confirm &amp; Upload
+                  </Button>
+                </Box>
+              </Dialog.Footer>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+    </>
   );
 }
