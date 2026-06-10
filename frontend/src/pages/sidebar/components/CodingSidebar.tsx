@@ -45,9 +45,7 @@ export default function CodingSidebar({
 }: CodingSidebarProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(
-    new Set(ALL_ITEMS.map((i) => i.displayName))
-  );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 
