@@ -1,5 +1,6 @@
 import { useLocation, useNavigate, useMatch } from "react-router-dom";
-import { Button, Separator } from "@chakra-ui/react";
+import { Box, Button, Separator, Text } from "@chakra-ui/react";
+import { Tooltip } from "../../components/ui/tooltip";
 import { useMemo, useCallback, useState } from "react";
 import { toaster } from "../../components/ui/toaster";
 import { applyAllTreatments, resetAllTreatments, saveTreatments } from "../../api";
@@ -9,7 +10,7 @@ import CodingSidebar from "./components/CodingSidebar";
 import TreatmentSidebar from "./components/TreatmentSidebar";
 import ResetConfirmationDialog from "./components/ResetConfirmationDialog";
 import ExitConfirmationDialog from "./components/ExitConfirmationDialog";
-import psatLogo from "../LandingPage/assets/PSAT Logo 2.png";
+import psatLogo from "../LandingPage/assets/PSAT Logo (Black).png";
 import "./sidebar.css";
 
 const LINKS = [
@@ -344,7 +345,21 @@ export default function Sidebar() {
     <aside className="psat-sidebar" aria-label="PSAT sidebar">
       {/* Top: PSAT + buttons */}
       <div className="psat-side-top">
-        <img src={psatLogo} alt="PSAT" className="psat-brand-logo" />
+        <Tooltip
+          content={
+            <Box fontSize="xs" lineHeight="1.6" maxW="320px">
+              <Text mb="2">As an acronym for the Path Safety Assessment Tool, PSAT places safety at the heart of its mission. The logo reflects this through the elongated "S," which visually suggests a path being carefully reviewed and assessed, while the spectrum of risk-assessment colours inspired by CycleRAP conveys the variety and severity of hazards along the route.</Text>
+              <Text>The bold black letters give the logo a strong, authoritative presence, reinforcing trust and clarity in a safety-focused tool. The Josefin Sans Bold typeface was used as a geometric, clean typeface designed for legibility at larger display sizes, making it well-suited to branding and logo use.</Text>
+            </Box>
+          }
+          showArrow
+          portalled
+          openDelay={0}
+          closeOnClick={false}
+          contentProps={{ maxW: "340px" }}
+        >
+          <img src={psatLogo} alt="PSAT" className="psat-brand-logo" style={{ cursor: "default" }} />
+        </Tooltip>
         <h1 className="psat-sidebar-title">Path Safety Assessment Tool</h1>
 
         {activeProfile && (
@@ -453,11 +468,14 @@ export default function Sidebar() {
       )}
 
 
-      {/* Projects Page - Show GIS layer management button */}
+      {/* Projects Page - Show GIS layer management + Admin buttons */}
       {pathname === "/home" && (
         <div className="psat-side-bottom" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <Button onClick={() => navigateSidebar("/gis-layers")} colorPalette="teal" variant="surface" size="sm" width="100%">
             View GIS Layers
+          </Button>
+          <Button onClick={() => navigate("/admin")} colorPalette="purple" variant="surface" size="sm" width="100%">
+            Admin Dashboard
           </Button>
         </div>
       )}

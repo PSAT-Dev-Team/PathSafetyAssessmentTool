@@ -55,6 +55,27 @@ export async function fetchProjectMetadata(projectName: string): Promise<Project
 export type AttributeRow = Record<string, string | number | boolean | null>;
 export type AttributesResponse = { rows: AttributeRow[] };
 
+// Filter context passed from Path Analysis → Coding page
+export type FilteredSegmentPoint = {
+  latlng: [number, number];
+  color: string; // risk-band hex color (per-crash-type thresholds)
+  idx: number;   // 0-based segment index within the project
+};
+
+export type FilteredProjectData = {
+  projectName: string;
+  filteredIndices: number[];       // 0-based indices used to gate the current-project map
+  points: FilteredSegmentPoint[];  // one entry per filtered segment (for map rendering + click nav)
+};
+
+// All filtered projects share the same context object so navigating across projects
+// preserves the full filter picture without re-deriving it.
+export type CodingFilterContext = {
+  projects: FilteredProjectData[];
+};
+
+export const CODING_FILTER_CONTEXT_KEY = 'codingFilterContext';
+
 export async function fetchProjectAttributes(projectName: string): Promise<AttributesResponse> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/versions/latest/attributes`)
 
@@ -390,6 +411,14 @@ export async function queryRoadsInBounds(
     limit: String(limit),
   });
   const res = await fetch(`/api/projects/roads-in-bounds?${params.toString()}`);
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  const data = await res.json();
+  return (data?.roads ?? []) as RoadInBounds[];
+}
+
+export async function queryRoadsByName(name: string): Promise<RoadInBounds[]> {
+  const params = new URLSearchParams({ name });
+  const res = await fetch(`/api/projects/roads-by-name?${params.toString()}`);
   if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
   const data = await res.json();
   return (data?.roads ?? []) as RoadInBounds[];
@@ -828,6 +857,8 @@ export type ShapefileInfo = {
   required_columns?: string;
   affects?: string;
   geom_type?: string;
+  original_name?: string;
+  is_renamed?: boolean;
 };
 
 export type ShapefileCategoryInfo = {
@@ -940,8 +971,34 @@ export async function replaceShapefiles(
  * @param shapefilePath - Relative path to shapefile (e.g., "area_type/Central.shp")
  */
 export async function deleteShapefile(shapefilePath: string): Promise<{ message: string; deleted_files: string[] }> {
-  const res = await fetch(`/api/shapefiles/${encodeURIComponent(shapefilePath)}`, {
+  const res = await fetch(`/api/shapefiles/${shapefilePath}`, {
     method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Rename a shapefile and all companion files to a new stem
+ */
+export async function renameShapefile(shapefilePath: string, newName: string): Promise<{ message: string; new_path: string }> {
+  const res = await fetch(`/api/shapefiles/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: shapefilePath, new_name: newName }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Revert a renamed shapefile back to its original name
+ */
+export async function revertShapefile(shapefilePath: string): Promise<{ message: string; new_path: string }> {
+  const res = await fetch(`/api/shapefiles/revert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: shapefilePath }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

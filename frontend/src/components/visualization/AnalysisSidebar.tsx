@@ -1,132 +1,103 @@
-import { useState } from 'react';
-import { Box, IconButton } from '@chakra-ui/react';
+import { useRef } from 'react';
+import { Box, Button, IconButton, Text, Flex } from '@chakra-ui/react';
 import { FiChevronsLeft, FiChevronsRight } from 'react-icons/fi';
-import { CurvatureDiagnostics } from './curvature/CurvatureDiagnostics';
-import { WidthSearchDiagnostics } from './width/WidthSearchDiagnostics';
-import type { WidthVisualizationResponse } from '../../api/widthVisualization';
-import type { CurvatureVisualizationResponse } from '../../api/curvatureVisualization';
-import { getGradientDisplayColor, getGradientDisplayState } from '../../utils/gradientDisplay';
-import './AnalysisPanel.css'; // Reusing styles
+import { FaFileImport, FaTrash } from 'react-icons/fa';
+import { Switch } from '../ui/switch';
+import './AnalysisPanel.css';
+
+interface GISLayerToggle {
+  key: string;
+  label: string;
+  color: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+  colorPalette: string;
+}
 
 interface AnalysisSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
-  widthData: WidthVisualizationResponse | null;
-  widthLoading: boolean;
-  widthError: string | null;
-  curvData: CurvatureVisualizationResponse | null;
-  curvLoading: boolean;
-  curvError: string | null;
-  grade?: number | string | null;
-  gradientPct?: number | string | null;
-  gradientStatus?: string | null;
-}
-
-function getWidthCategoryColor(category: number): string {
-  switch (category) {
-    case 1: return '#E74C3C';
-    case 2: return '#F39C12';
-    case 3: return '#27AE60';
-    default: return '#95A5A6';
-  }
-}
-
-function getWidthCategoryIcon(category: number): string {
-  switch (category) {
-    case 1: return '⚠️';
-    case 2: return '⚡';
-    case 3: return '✓';
-    default: return '?';
-  }
-}
-
-function getLayerColor(layer: string): string {
-  const colors: Record<string, string> = {
-    cycling: '#00B400',
-    shared:  '#E68C00',
-    footpath:'#1E90FF',
-  };
-  return colors[layer] || '#888';
-}
-
-function LayerDot({ layer }: { layer: string }) {
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        width: 10,
-        height: 10,
-        borderRadius: '50%',
-        background: getLayerColor(layer),
-        marginLeft: 6,
-        verticalAlign: 'middle',
-      }}
-    />
-  );
-}
-
-function getCurvatureAccent(data: CurvatureVisualizationResponse | null): string | undefined {
-  if (!data) return undefined;
-  if (data.curvature !== 1) return '#27AE60';
-  if (data.curvature_subcategory === '<6.5m') return '#DC2626';
-  if (data.curvature_subcategory === '<10m') return '#EA580C';
-  if (data.curvature_subcategory === 'Path Junction') return '#9333EA';
-  if (data.curvature_subcategory === 'Both') return '#9333EA';
-  return '#E74C3C';
-}
-
-function getCurvatureLabel(data: CurvatureVisualizationResponse | null): string | null {
-  if (!data) return null;
-  if (data.curvature !== 1) return '✓ No Sharp Turn';
-  if (data.curvature_subcategory === '<6.5m') return '⚠️ <6.5m Radius';
-  if (data.curvature_subcategory === '<10m') return '⚠️ <10m Radius';
-  if (data.curvature_subcategory === 'Path Junction') return '⚠️ Path Junction';
-  if (data.curvature_subcategory === 'Both') return '⚠️ Sharp Bend + Junction';
-  return '⚠️ Sharp Bend';
-}
-
-function DataCard({ label, value, loading, error, accent }: { label: string; value: React.ReactNode; loading?: boolean; error?: boolean; accent?: string }) {
-  return (
-    <div className="analysis-card">
-      <span className="analysis-card-label">{label}</span>
-      <span
-        className="analysis-card-value"
-        style={accent ? { color: accent } : undefined}
-      >
-        {loading ? <span className="analysis-card-loading">…</span>
-          : error  ? <span className="analysis-card-na">—</span>
-          : value}
-      </span>
-    </div>
-  );
+  showFootpath: boolean;
+  setShowFootpath: (v: boolean) => void;
+  showCycling: boolean;
+  setShowCycling: (v: boolean) => void;
+  showShared: boolean;
+  setShowShared: (v: boolean) => void;
+  showRoadcrossing: boolean;
+  setShowRoadcrossing: (v: boolean) => void;
+  showMrtExit: boolean;
+  setShowMrtExit: (v: boolean) => void;
+  showBusStop: boolean;
+  setShowBusStop: (v: boolean) => void;
+  showBusLane: boolean;
+  setShowBusLane: (v: boolean) => void;
+  showParkingLot: boolean;
+  setShowParkingLot: (v: boolean) => void;
+  showKerbLine: boolean;
+  setShowKerbLine: (v: boolean) => void;
+  showBicycleCrossing: boolean;
+  setShowBicycleCrossing: (v: boolean) => void;
+  showPathDefects: boolean;
+  setShowPathDefects: (v: boolean) => void;
+  showStateLand: boolean;
+  setShowStateLand: (v: boolean) => void;
+  showStatBoard: boolean;
+  setShowStatBoard: (v: boolean) => void;
+  showLandPrivate: boolean;
+  setShowLandPrivate: (v: boolean) => void;
+  showLandMinistry: boolean;
+  setShowLandMinistry: (v: boolean) => void;
+  onFilesSelected: (files: File[]) => void;
+  importedShapefileHasData: boolean;
+  importedShapefileLoading: boolean;
+  importedShapefileError: string | null;
+  importedShapefileName: string | null;
+  onClearImportedShapefile: () => void;
 }
 
 export function AnalysisSidebar({
   isOpen,
   onToggle,
-  widthData,
-  widthLoading,
-  widthError,
-  curvData,
-  curvLoading,
-  curvError,
-  grade,
-  gradientPct,
-  gradientStatus,
+  showFootpath, setShowFootpath,
+  showCycling, setShowCycling,
+  showShared, setShowShared,
+  showRoadcrossing, setShowRoadcrossing,
+  showMrtExit, setShowMrtExit,
+  showBusStop, setShowBusStop,
+  showBusLane, setShowBusLane,
+  showParkingLot, setShowParkingLot,
+  showKerbLine, setShowKerbLine,
+  showBicycleCrossing, setShowBicycleCrossing,
+  showPathDefects, setShowPathDefects,
+  showStateLand, setShowStateLand,
+  showStatBoard, setShowStatBoard,
+  showLandPrivate, setShowLandPrivate,
+  showLandMinistry, setShowLandMinistry,
+  onFilesSelected,
+  importedShapefileHasData,
+  importedShapefileLoading,
+  importedShapefileError,
+  importedShapefileName,
+  onClearImportedShapefile,
 }: AnalysisSidebarProps) {
-  const [showDiag, setShowDiag] = useState(false);
-
-  const gradientState = getGradientDisplayState({ grade, gradientPct, gradientStatus });
-  const gradientColor = getGradientDisplayColor(gradientState.kind);
-  const gradientValue = gradientState.mode === 'percent' ? (
-    <span style={{ color: gradientColor, fontWeight: 600 }}>{gradientState.text}</span>
-  ) : gradientState.mode === 'grade' && gradientState.kind === 'ok' ? (
-    <span style={{ color: gradientColor }}>✓ {gradientState.text}</span>
-  ) : gradientState.mode === 'grade' ? (
-    <span style={{ color: gradientColor }}>⚠️ {gradientState.text}</span>
-  ) : (
-    <span style={{ color: gradientColor }}>{gradientState.text}</span>
-  );
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const layers: GISLayerToggle[] = [
+    { key: 'footpath',          label: 'Footpath',          color: '#1E90FF', colorPalette: 'blue',   value: showFootpath,          onChange: setShowFootpath },
+    { key: 'cycling',           label: 'Cycling Path',      color: '#B91C1C', colorPalette: 'red',    value: showCycling,           onChange: setShowCycling },
+    { key: 'shared',            label: 'Shared Path',       color: '#A855F7', colorPalette: 'purple', value: showShared,            onChange: setShowShared },
+    { key: 'roadcrossing',      label: 'Road Crossing',     color: '#10B981', colorPalette: 'green',  value: showRoadcrossing,      onChange: setShowRoadcrossing },
+    { key: 'bicycle_crossing',  label: 'Bicycle Crossing',  color: '#F97316', colorPalette: 'orange', value: showBicycleCrossing,   onChange: setShowBicycleCrossing },
+    { key: 'mrt_exit',          label: 'MRT Exit',          color: '#06B6D4', colorPalette: 'cyan',   value: showMrtExit,           onChange: setShowMrtExit },
+    { key: 'bus_stop',          label: 'Bus Stop',          color: '#8B5CF6', colorPalette: 'purple', value: showBusStop,           onChange: setShowBusStop },
+    { key: 'bus_lane',          label: 'Bus Lane',          color: '#EAB308', colorPalette: 'yellow', value: showBusLane,           onChange: setShowBusLane },
+    { key: 'parking_lot',       label: 'Parking Lot',       color: '#D97706', colorPalette: 'orange', value: showParkingLot,        onChange: setShowParkingLot },
+    { key: 'kerb_line',         label: 'Kerb Line',         color: '#D946EF', colorPalette: 'pink',   value: showKerbLine,          onChange: setShowKerbLine },
+    { key: 'path_defects',      label: 'Path Defects',      color: '#EF4444', colorPalette: 'red',    value: showPathDefects,       onChange: setShowPathDefects },
+    { key: 'state_land',        label: 'State Land',         color: '#14B8A6', colorPalette: 'teal',   value: showStateLand,         onChange: setShowStateLand },
+    { key: 'stat_board',        label: 'Stat Board',         color: '#F59E0B', colorPalette: 'yellow', value: showStatBoard,         onChange: setShowStatBoard },
+    { key: 'land_private',      label: 'Private Land',       color: '#6366F1', colorPalette: 'purple', value: showLandPrivate,       onChange: setShowLandPrivate },
+    { key: 'land_ministry',     label: 'Ministry Land',      color: '#EC4899', colorPalette: 'pink',   value: showLandMinistry,      onChange: setShowLandMinistry },
+  ];
 
   return (
     <>
@@ -136,7 +107,7 @@ export function AnalysisSidebar({
         top="0"
         left="0"
         bottom="0"
-        w={isOpen ? "420px" : "0"}
+        w={isOpen ? "220px" : "0"}
         overflow="hidden"
         transition="width 0.25s ease"
         zIndex={1000}
@@ -146,95 +117,118 @@ export function AnalysisSidebar({
         borderColor="gray.200"
         boxShadow={isOpen ? "lg" : "none"}
       >
-        <Box w="420px" h="100%" overflowY="auto" p="4">
-          <Box mb={6}>
-            <Box fontWeight="semibold" mb={3} fontSize="sm" color="gray.500" _dark={{ color: "gray.400" }} textTransform="uppercase" letterSpacing="wider">Width Analysis</Box>
-            <div className="analysis-grid" style={{ gridTemplateColumns: '1fr' }}>
-              <DataCard
-                label="Facility Width"
-                loading={widthLoading}
-                error={!!widthError}
-                value={widthData?.width != null ? `${widthData.width.toFixed(2)} m` : <span className="analysis-card-na">Not Found</span>}
+        <Box w="220px" h="100%" overflowY="auto" p="3">
+          <Text
+            fontWeight="semibold"
+            mb={3}
+            fontSize="xs"
+            color="gray.500"
+            _dark={{ color: "gray.400" }}
+            textTransform="uppercase"
+            letterSpacing="wider"
+          >
+            GIS Layers
+          </Text>
+          <Box borderBottom="1px solid" borderColor="gray.100" _dark={{ borderColor: "gray.700" }} mb={3} />
+          {layers.map((layer) => (
+            <Flex
+              key={layer.key}
+              align="center"
+              justify="space-between"
+              py="1.5"
+              px="1"
+              borderRadius="md"
+              _hover={{ bg: "gray.50", _dark: { bg: "gray.750" } }}
+            >
+              <Flex align="center" gap="2" flex="1" minW="0">
+                <Box
+                  w="10px"
+                  h="10px"
+                  borderRadius="full"
+                  bg={layer.color}
+                  flexShrink={0}
+                />
+                <Text
+                  fontSize="sm"
+                  fontWeight="medium"
+                  color={layer.value ? "gray.800" : "gray.500"}
+                  _dark={{ color: layer.value ? "gray.100" : "gray.500" }}
+                  truncate
+                >
+                  {layer.label}
+                </Text>
+              </Flex>
+              <Switch
+                colorPalette={layer.colorPalette}
+                size="sm"
+                checked={layer.value}
+                onCheckedChange={(e) => layer.onChange(e.checked)}
+                flexShrink={0}
               />
-              <DataCard
-                label="Width Category"
-                loading={widthLoading}
-                error={!!widthError}
-                accent={widthData ? getWidthCategoryColor(widthData.width_category) : undefined}
-                value={widthData ? `${getWidthCategoryIcon(widthData.width_category)} ${widthData.category_labels[widthData.width_category as 1|2|3]}` : undefined}
-              />
-              <DataCard
-                label="Width Source Layer"
-                loading={widthLoading}
-                error={!!widthError}
-                value={widthData?.search_info?.layer_used ? <>{widthData.search_info.layer_used}<LayerDot layer={widthData.search_info.layer_used} /></> : <span className="analysis-card-na">—</span>}
-              />
-            </div>
-          </Box>
+            </Flex>
+          ))}
 
-          <Box mb={6}>
-            <Box fontWeight="semibold" mb={3} fontSize="sm" color="gray.500" _dark={{ color: "gray.400" }} textTransform="uppercase" letterSpacing="wider">Curvature Analysis</Box>
-            <div className="analysis-grid" style={{ gridTemplateColumns: '1fr' }}>
-              <DataCard
-                label="Curvature Radius"
-                loading={curvLoading}
-                error={!!curvError}
-                value={curvData?.radius != null ? `${curvData.radius.toFixed(1)} m` : curvData?.layer_used ? <span style={{ color: '#27AE60' }}>∞ (Straight)</span> : <span className="analysis-card-na">N/A</span>}
-              />
-              <DataCard
-                label="Curvature Class"
-                loading={curvLoading}
-                error={!!curvError}
-                accent={getCurvatureAccent(curvData)}
-                value={getCurvatureLabel(curvData) ?? undefined}
-              />
-              <DataCard
-                label="Curvature Layer"
-                loading={curvLoading}
-                error={!!curvError}
-                value={curvData?.layer_used ? <>{curvData.layer_used}<LayerDot layer={curvData.layer_used} /></> : <span className="analysis-card-na">—</span>}
-              />
-            </div>
-          </Box>
-
-          <Box mb={6}>
-            <Box fontWeight="semibold" mb={3} fontSize="sm" color="gray.500" _dark={{ color: "gray.400" }} textTransform="uppercase" letterSpacing="wider">Gradient Analysis</Box>
-            <div className="analysis-grid" style={{ gridTemplateColumns: '1fr' }}>
-              <DataCard label="Gradient" value={gradientValue} />
-            </div>
-          </Box>
-
-          <div className="analysis-diagnostics-section" style={{ marginTop: '16px' }}>
-            <button className="analysis-diagnostics-toggle" onClick={() => setShowDiag(v => !v)}>
-              {showDiag ? '▼' : '▶'} Show Diagnostics
-            </button>
-            {showDiag && (
-              <div className="analysis-diagnostics-content">
-                {widthData && (
-                  <div className="analysis-diag-group">
-                    <h4>Width Search Diagnostics</h4>
-                    <WidthSearchDiagnostics searchInfo={widthData.search_info} searchRings={widthData.search_rings} widthDistribution={widthData.width_distribution} />
-                  </div>
-                )}
-                {curvData && (
-                  <div className="analysis-diag-group">
-                    <h4>Curvature Diagnostics</h4>
-                    <CurvatureDiagnostics diagnostics={curvData.diagnostics || null} curvature={curvData.curvature} />
-                  </div>
-                )}
-              </div>
+          {/* Import Shapefile */}
+          <Box mt={3}>
+            <Box borderBottom="1px solid" borderColor="gray.100" _dark={{ borderColor: "gray.700" }} mb={3} />
+            <Text
+              fontWeight="semibold"
+              mb={2}
+              fontSize="xs"
+              color="gray.500"
+              _dark={{ color: "gray.400" }}
+              textTransform="uppercase"
+              letterSpacing="wider"
+            >
+              Import
+            </Text>
+            <Button
+              size="xs"
+              variant={importedShapefileHasData ? "solid" : "outline"}
+              colorPalette={importedShapefileHasData ? "orange" : "gray"}
+              loading={importedShapefileLoading}
+              w="full"
+              mb={importedShapefileHasData ? 1 : 0}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <FaFileImport />
+              <Text ml={1}>{importedShapefileHasData ? "Replace Shapefile" : "Import Shapefile"}</Text>
+            </Button>
+            {importedShapefileHasData && (
+              <Button size="xs" variant="outline" colorPalette="orange" w="full" mb={2} onClick={onClearImportedShapefile}>
+                <FaTrash />
+                <Text ml={1}>Clear Imported</Text>
+              </Button>
             )}
-          </div>
+            {!importedShapefileLoading && importedShapefileError && (
+              <Text fontSize="xs" color="red.500" mt={1}>{importedShapefileError}</Text>
+            )}
+            {!importedShapefileLoading && !importedShapefileError && importedShapefileName && (
+              <Text fontSize="xs" color="blue.600" mt={1} truncate>Imported: {importedShapefileName}</Text>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".zip,.shp,.shx,.dbf,.prj,.cpg,.sbn,.sbx"
+              multiple
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                if (files.length > 0) onFilesSelected(files);
+              }}
+              style={{ display: "none" }}
+            />
+          </Box>
         </Box>
       </Box>
 
       {/* Toggle button — always visible at the left edge of the map */}
       <IconButton
-        aria-label="Toggle Analysis Panel"
+        aria-label="Toggle GIS Layers Panel"
         size="xs"
         position="absolute"
         top="50%"
-        left={isOpen ? "420px" : "0"}
+        left={isOpen ? "220px" : "0"}
         transform="translateY(-50%)"
         transition="left 0.25s ease"
         zIndex={1001}

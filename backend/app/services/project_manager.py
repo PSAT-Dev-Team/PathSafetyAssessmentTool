@@ -1,5 +1,4 @@
 from __future__ import annotations
-import streamlit as st
 import re
 import os
 import json
@@ -916,10 +915,17 @@ class project_manager:
         if not get_config_path().exists():
             self.save_config(self.DEFAULT_CONFIG)
 
-        with open(get_config_path(), 'r') as json_file:
-            data = json.load(json_file)
-        self.load_config(data)
+        try:
+            with open(get_config_path(), 'r') as json_file:
+                data = json.load(json_file)
+        except (json.JSONDecodeError, ValueError):
+            # Corrupted or empty config — recreate from defaults and retry once
+            print("[PM] WARNING: config.json is corrupted, recreating from defaults.", flush=True)
+            self.save_config(self.DEFAULT_CONFIG)
+            with open(get_config_path(), 'r') as json_file:
+                data = json.load(json_file)
 
+        self.load_config(data)
         self._discover_projects()
 
 
@@ -965,11 +971,9 @@ class project_manager:
     def create_project(self, project_title, geo_data : gpd.geodataframe, dataset_name, tags=None, source_folders=None):
         proj_root = self.des_path / project_title
 
-        prefix = str(project_title) + "_"
-        rename_files_with_prefix(proj_root / global_var.PROJECT_IMAGES_FOLDER, prefix)
-
-        # Get image reference
-        image_ref = load_images_from_folder_cv(proj_root / global_var.PROJECT_IMAGES_FOLDER)
+        # Image references come directly from geo_data FILENAME — no copying or renaming.
+        # Images remain in in/ and are resolved at serve time.
+        image_ref = list(geo_data["FILENAME"]) if "FILENAME" in geo_data.columns else []
         size = len(image_ref)
 
         # Craft project metadata

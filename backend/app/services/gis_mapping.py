@@ -169,6 +169,11 @@ class LayerStore:
         store.add_path("roadcrossing", base / "roadcrossinglayer" / "ROADCROSSING.shp")
         # Added for Bicycle Crossing Facility (AMG BC 2025)
         store.add_path("bicycle_crossing", base / "AMG_BC2025_shp" / "AMG_BC2025_shp.shp")
+        # Land Ownership layers
+        store.add_path("land_state_land", base / "Land Ownership" / "LandOwnership_StateLand.shp")
+        store.add_path("land_stat_board", base / "Land Ownership" / "LandOwnership_StatBoard.shp")
+        store.add_path("land_private",    base / "Land Ownership" / "LandOwnership_Private.shp")
+        store.add_path("land_ministry",   base / "Land Ownership" / "LandOwnership_Ministry.shp")
 
         # Load speed CSV if it exists
         speed_csv_path = base / "LinkID_Shape_File" / "TSE_AdHocReq_ERP2AverageSpeedData_250425.csv"

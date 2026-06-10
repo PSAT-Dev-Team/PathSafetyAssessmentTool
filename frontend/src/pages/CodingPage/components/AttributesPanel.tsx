@@ -597,6 +597,7 @@ export default function AttributesPanel({
                                   showArrow
                                   portalled
                                   openDelay={100}
+                                  closeOnClick={false}
                                   contentProps={{ maxW: "280px", fontSize: "xs" }}
                                 >
                                   <Box

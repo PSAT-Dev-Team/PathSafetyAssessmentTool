@@ -5,13 +5,14 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const DOCS_LIST = [
-  { id: "getting-started",      title: "1. Getting Started",           path: "/docs/user-getting-started.md" },
-  { id: "coding-page",          title: "2. Coding Page",               path: "/docs/user-coding-page.md" },
-  { id: "map-view",             title: "3. Map View & Analysis",       path: "/docs/user-map-view.md" },
-  { id: "path-analysis",        title: "4. Path Analysis",             path: "/docs/user-path-analysis.md" },
-  { id: "finer-filtering",      title: "  ↳ 4.3 Finer Filtering",     path: "/docs/user-finer-filtering.md" },
-  { id: "treatment-application",title: "5. Treatment Application",     path: "/docs/user-treatment-application.md" },
-  { id: "gis-management",       title: "6. GIS Layer Management",      path: "/docs/user-gis-management.md" },
+  { id: "getting-started",      title: "1. Getting Started",           path: "/docs/user/user-getting-started.md",        updatedDate: "Jun 2026" },
+  { id: "login",                title: "2. User Login",                path: "/docs/user/user-login.md",                  updatedDate: "Jun 2026" },
+  { id: "coding-page",          title: "3. Coding Page",               path: "/docs/user/user-coding-page.md",            updatedDate: "Jun 2026" },
+  { id: "map-view",             title: "4. Map View & Analysis",       path: "/docs/user/user-map-view.md",               updatedDate: "Jun 2026" },
+  { id: "path-analysis",        title: "5. Path Analysis",             path: "/docs/user/user-path-analysis.md",          updatedDate: "Jun 2026" },
+  { id: "treatment-application",title: "6. Treatment Application",     path: "/docs/user/user-treatment-application.md",  updatedDate: "Jun 2026" },
+  { id: "report-generation",    title: "7. Report Generation",         path: "/docs/user/user-report-generation.md",      updatedDate: "Jun 2026" },
+  { id: "gis-management",       title: "8. GIS Layer Management",      path: "/docs/user/user-gis-management.md",         updatedDate: "Jun 2026" },
 ];
 
 export default function UserGuide() {
@@ -45,6 +46,7 @@ export default function UserGuide() {
                 w="100%"
                 textAlign="left"
                 px="2"
+                pl="2"
                 py="2"
                 borderRadius="md"
                 fontSize="sm"
@@ -57,7 +59,12 @@ export default function UserGuide() {
                 _hover={{ bg: "gray.100", color: "gray.700", _dark: { bg: "gray.700", color: "gray.200" } }}
                 onClick={() => setActiveDoc(doc)}
               >
-                {doc.title}
+                <Text as="span" display="block">{doc.title}</Text>
+                {doc.updatedDate && (
+                  <Text as="span" display="block" fontSize="xs" color="gray.400" _dark={{ color: "gray.500" }} mt="0.5">
+                    Updated {doc.updatedDate}
+                  </Text>
+                )}
               </Box>
             </Box>
           ))}

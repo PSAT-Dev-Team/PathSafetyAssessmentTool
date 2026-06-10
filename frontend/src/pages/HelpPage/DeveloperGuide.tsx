@@ -5,15 +5,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const DOCS_LIST = [
-  { id: "readme", title: "Overview (README)", path: "/README.md" },
-  { id: "installation", title: "Installation", path: "/docs/installation.md" },
-  { id: "architecture", title: "Architecture", path: "/docs/architecture.md" },
-  { id: "api", title: "API Reference", path: "/docs/api-reference.md" },
-  { id: "cv", title: "CV / ML Pipeline", path: "/docs/cv-pipeline.md" },
-  { id: "scoring", title: "Scoring Logic", path: "/docs/scoring.md" },
-  { id: "frontend", title: "Frontend", path: "/docs/frontend.md" },
-  { id: "issues", title: "Common Issues", path: "/docs/common-issues.md" },
-  { id: "contributing", title: "Contributing", path: "/docs/contributing.md" },
+  { id: "readme",       title: "1. Overview (README)", path: "/README.md",                             updatedDate: "Jun 2026" },
+  { id: "installation", title: "2. Installation",       path: "/docs/developer/installation.md",       updatedDate: "Jun 2026" },
+  { id: "architecture", title: "3. Architecture",       path: "/docs/developer/architecture.md",       updatedDate: "Jun 2026" },
+  { id: "api",          title: "4. API Reference",      path: "/docs/developer/api-reference.md",      updatedDate: "Jun 2026" },
+  { id: "cv",           title: "5. CV / ML Pipeline",   path: "/docs/developer/cv-pipeline.md",        updatedDate: "Jun 2026" },
+  { id: "scoring",      title: "6. Scoring Logic",      path: "/docs/developer/scoring.md",            updatedDate: "Jun 2026" },
+  { id: "frontend",     title: "7. Frontend",           path: "/docs/developer/frontend.md",           updatedDate: "Jun 2026" },
+  { id: "issues",       title: "8. Common Issues",      path: "/docs/developer/common-issues.md",      updatedDate: "Jun 2026" },
+  { id: "contributing", title: "9. Contributing",       path: "/docs/developer/contributing.md",       updatedDate: "Jun 2026" },
+  { id: "jira",         title: "10. Jira Board",        path: "/docs/developer/dev-jira.md",           updatedDate: "Jun 2026" },
 ];
 
 export default function DeveloperGuide() {
@@ -47,6 +48,7 @@ export default function DeveloperGuide() {
                 w="100%"
                 textAlign="left"
                 px="2"
+                pl="2"
                 py="2"
                 borderRadius="md"
                 fontSize="sm"
@@ -59,7 +61,12 @@ export default function DeveloperGuide() {
                 _hover={{ bg: "gray.100", color: "gray.700", _dark: { bg: "gray.700", color: "gray.200" } }}
                 onClick={() => setActiveDoc(doc)}
               >
-                {doc.title}
+                <Text as="span" display="block">{doc.title}</Text>
+                {doc.updatedDate && (
+                  <Text as="span" display="block" fontSize="xs" color="gray.400" _dark={{ color: "gray.500" }} mt="0.5">
+                    Updated {doc.updatedDate}
+                  </Text>
+                )}
               </Box>
             </Box>
           ))}

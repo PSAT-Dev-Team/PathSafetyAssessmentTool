@@ -34,15 +34,14 @@ import {
   updateProject,
 } from "../../api";
 
-import type { AttributeRow } from "../../api";
-import { autocodeImage, autocodeGIS, autocodeAllStream } from "../../api";
+import type { AttributeRow, CodingFilterContext } from "../../api";
+import { autocodeImage, autocodeGIS, autocodeAllStream, CODING_FILTER_CONTEXT_KEY } from "../../api";
 
 import ImagePanel from "./components/ImagePanel";
 import AttributesPanel, { resolveContributorTabGroup } from "./components/AttributesPanel";
 import AttributeOptionsDialog from "./components/AttributeOptionsDialog";
 import GeoDataPanel from "./components/GeoDataPanel";
 import { saveAttributes } from "../../api";
-import { AnalysisSidebar } from "../../components/visualization/AnalysisSidebar";
 import "../../components/visualization/AnalysisPanel.css";
 import { fetchWidthVisualization } from "../../api/widthVisualization";
 import type { WidthVisualizationResponse } from "../../api/widthVisualization";
@@ -430,6 +429,16 @@ export default function CodingPage() {
     }
   }, [projectNames]);
 
+  // When the URL params change (e.g. cross-project navigation from GeoDataPanel),
+  // sync activeTab to the first project in the new list if the current tab is gone.
+  useEffect(() => {
+    if (projectList.length > 0 && !projectList.includes(activeTab) && activeTab !== "coding-guide") {
+      setActiveTab(projectList[0]);
+    }
+  // activeTab intentionally excluded — we only want to react to projectList changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectList]);
+
   // Current active tab (project name or "coding-guide")
   const [activeTab, setActiveTab] = useState<string>(() => {
     if (projectNames) {
@@ -491,18 +500,40 @@ export default function CodingPage() {
   const initialSegment = queryParams.get("segment");
   const hasInitializedSegmentRef = useRef(false);
 
+  // Filter context from Path Analysis — persisted in sessionStorage for reload survival.
+  // Uses useState+useEffect so it re-evaluates on every in-app navigation (no remount).
+  const resolveFilterContext = (state: unknown): CodingFilterContext | null => {
+    const fromState = (state as any)?.filterContext as CodingFilterContext | null | undefined;
+    if (fromState !== undefined) {
+      if (fromState) sessionStorage.setItem(CODING_FILTER_CONTEXT_KEY, JSON.stringify(fromState));
+      else sessionStorage.removeItem(CODING_FILTER_CONTEXT_KEY);
+      return fromState ?? null;
+    }
+    try {
+      const stored = sessionStorage.getItem(CODING_FILTER_CONTEXT_KEY);
+      return stored ? (JSON.parse(stored) as CodingFilterContext) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const [filterContext, setFilterContext] = useState<CodingFilterContext | null>(() =>
+    resolveFilterContext(location.state)
+  );
+
+  useEffect(() => {
+    setFilterContext(resolveFilterContext(location.state));
+  // location.state reference changes on each navigation, which is exactly when we want to re-run
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
   // Save confirmation dialog state
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   // Analysis sidebar state (lifted from AnalysisPanel)
   const [widthData, setWidthData] = useState<WidthVisualizationResponse | null>(null);
-  const [widthLoading, setWidthLoading] = useState(false);
-  const [widthError, setWidthError] = useState<string | null>(null);
   const [curvData, setCurvData] = useState<CurvatureVisualizationResponse | null>(null);
-  const [curvLoading, setCurvLoading] = useState(false);
-  const [curvError, setCurvError] = useState<string | null>(null);
-  const [isAnalysisSidebarOpen, setIsAnalysisSidebarOpen] = useState(false);
   const [showCurvatureOverlay, setShowCurvatureOverlay] = useState(false);
 
   const handleContributorClick = useCallback((name: string) => {
@@ -511,6 +542,13 @@ export default function CodingPage() {
       setActiveAttributeGroupTab(targetGroup);
     }
   }, []);
+
+  // Reset the segment-init guard whenever the active project changes so that
+  // cross-project navigation (which reuses the same component instance) can
+  // apply the new ?segment= query param for the incoming project.
+  useEffect(() => {
+    hasInitializedSegmentRef.current = false;
+  }, [currentProjectName]);
 
   useEffect(() => {
     if (!initialSegment || !currentProjectName || hasInitializedSegmentRef.current) return;
@@ -723,6 +761,31 @@ export default function CodingPage() {
 
     return (fromAttr ?? fromFeature) || undefined;
   }, [attrs, currentIndex, currentFeature]);
+
+  // Per-segment verification for the Path Analysis review flow. Held in memory only
+  // (deliberately NOT persisted to the backend) and keyed by project name → segment
+  // index. A single shared store means verified state survives switching between the
+  // open projects, and resets when the reviewer leaves and re-enters the page. Only
+  // surfaced when entered from Path Analysis (i.e. a filter context is present).
+  const cameFromPathAnalysis = filterContext != null;
+  const [verifiedByProject, setVerifiedByProject] = useState<Record<string, number[]>>({});
+
+  const currentSegmentVerified = useMemo(
+    () => !!currentProjectName && (verifiedByProject[currentProjectName] ?? []).includes(currentIndex),
+    [verifiedByProject, currentProjectName, currentIndex]
+  );
+
+  const toggleCurrentSegmentVerified = useCallback(() => {
+    if (!currentProjectName) return;
+    setVerifiedByProject(prev => {
+      const existing = prev[currentProjectName] ?? [];
+      const isVerified = existing.includes(currentIndex);
+      const next = isVerified
+        ? existing.filter(i => i !== currentIndex)
+        : [...existing, currentIndex];
+      return { ...prev, [currentProjectName]: next };
+    });
+  }, [currentProjectName, currentIndex]);
 
   // Preload next images to improve user experience
   useEffect(() => {
@@ -1676,44 +1739,20 @@ export default function CodingPage() {
     setWidthData(null);
     setCurvData(null);
 
-    setWidthLoading(true);
-    setWidthError(null);
     fetchWidthVisualization(currentProjectName, coords, currentIndex, widthController.signal)
       .then((data) => {
-        if (!widthController.signal.aborted) {
-          setWidthData(data);
-        }
+        if (!widthController.signal.aborted) setWidthData(data);
       })
       .catch((e) => {
-        if (widthController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
-          return;
-        }
-        setWidthError(e instanceof Error ? e.message : 'Failed');
-      })
-      .finally(() => {
-        if (!widthController.signal.aborted) {
-          setWidthLoading(false);
-        }
+        if (widthController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) return;
       });
 
-    setCurvLoading(true);
-    setCurvError(null);
     fetchCurvatureVisualization(currentProjectName, coords, currentIndex, curvController.signal)
       .then((data) => {
-        if (!curvController.signal.aborted) {
-          setCurvData(data);
-        }
+        if (!curvController.signal.aborted) setCurvData(data);
       })
       .catch((e) => {
-        if (curvController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
-          return;
-        }
-        setCurvError(e instanceof Error ? e.message : 'Failed');
-      })
-      .finally(() => {
-        if (!curvController.signal.aborted) {
-          setCurvLoading(false);
-        }
+        if (curvController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) return;
       });
 
     return () => {
@@ -2331,6 +2370,14 @@ export default function CodingPage() {
           >
             Coding Guide
           </Button>
+          <Button
+            onClick={() => window.open("https://irap.org/cyclerap/", "_blank", "noopener,noreferrer")}
+            variant="outline"
+            colorPalette="gray"
+            size="md"
+          >
+            CycleRAP
+          </Button>
         </Flex>
         <Box
           borderWidth="1px"
@@ -2453,6 +2500,14 @@ export default function CodingPage() {
           size="md"
         >
           Coding Guide
+        </Button>
+        <Button
+          onClick={() => window.open("https://irap.org/cyclerap/", "_blank", "noopener,noreferrer")}
+          variant="outline"
+          colorPalette="gray"
+          size="md"
+        >
+          CycleRAP
         </Button>
 
         {location.state?.returnToAnalysis && (
@@ -2657,6 +2712,20 @@ export default function CodingPage() {
               Previous
             </Button>
 
+            {cameFromPathAnalysis && (
+              <Button
+                flex="1"
+                minW={0}
+                size="sm"
+                colorPalette="green"
+                variant={currentSegmentVerified ? "solid" : "outline"}
+                onClick={toggleCurrentSegmentVerified}
+                title={currentSegmentVerified ? "Click to unmark this segment" : "Mark this segment as reviewed"}
+              >
+                {currentSegmentVerified ? "✓ Verified" : "Mark Verified"}
+              </Button>
+            )}
+
             <Button
               flex="1"
               minW={0}
@@ -2714,6 +2783,8 @@ export default function CodingPage() {
             index={currentIndex}
             onJump={(i) => gotoPage(i + 1)}
             scores={scores}
+            filterContext={filterContext}
+            verifiedByProject={cameFromPathAnalysis ? verifiedByProject : undefined}
             onDataChange={refreshCurrentProject}
             curvData={curvData}
             widthM={widthData?.width ?? null}
@@ -2722,21 +2793,6 @@ export default function CodingPage() {
             gradientStatus={(currentAttr?.["Gradient Status"] as string | null) ?? null}
             showCurvatureOverlay={showCurvatureOverlay}
             onToggleCurvatureOverlay={() => setShowCurvatureOverlay(v => !v)}
-            overlayContent={
-              <AnalysisSidebar
-                isOpen={isAnalysisSidebarOpen}
-                onToggle={() => setIsAnalysisSidebarOpen(v => !v)}
-                widthData={widthData}
-                widthLoading={widthLoading}
-                widthError={widthError}
-                curvData={curvData}
-                curvLoading={curvLoading}
-                curvError={curvError}
-                grade={currentAttr?.["Grade"] as number | null}
-                gradientPct={currentAttr?.["Gradient %"] as number | null}
-                gradientStatus={(currentAttr?.["Gradient Status"] as string | null) ?? null}
-              />
-            }
           />
         </GridItem>
 

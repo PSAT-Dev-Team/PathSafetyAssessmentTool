@@ -37,6 +37,7 @@ yck_obstacles/
 obstacles/
 backend/scripts/
 tmp/
+temp/
 Gradient Calculation/
 profiles/
 .Rhistory
@@ -74,3 +75,4 @@ generate-summary-*.xlsx
 !README.md
 *.lnk
 CycleRAP_User_Guide.pdf
+!frontend/public/docs/**

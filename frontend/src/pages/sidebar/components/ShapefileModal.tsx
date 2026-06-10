@@ -33,7 +33,6 @@ type WorkflowStep = "choice" | "add" | "replace" | "success";
 
 export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
   const [step, setStep] = useState<WorkflowStep>("choice");
-  const [categories, setCategories] = useState<api.ShapefileCategoryInfo[]>([]);
   const [allShapefiles, setAllShapefiles] = useState<api.ShapefileInfo[]>([]);
 
   // Add Shapefile State
@@ -42,20 +41,17 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showUploadConfirm, setShowUploadConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Replace Shapefile State
   const [replaceFiles, setReplaceFiles] = useState<File[]>([]);
-  const [selectedReplaceCategory, setSelectedReplaceCategory] = useState<string>("");
   const [selectedTargetShapefile, setSelectedTargetShapefile] = useState<string>("");
   const [replacing, setReplacing] = useState(false);
   const [replaceDragActive, setReplaceDragActive] = useState(false);
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
-  const [replaceCategorySearch, setReplaceCategorySearch] = useState("");
   const [targetShapefileSearch, setTargetShapefileSearch] = useState("");
-  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const [isTargetDropdownOpen, setIsTargetDropdownOpen] = useState(false);
-  const categorySearchRef = useRef<HTMLDivElement>(null);
   const targetSearchRef = useRef<HTMLDivElement>(null);
   const previewRequestIdRef = useRef(0);
 
@@ -73,18 +69,9 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
 
   useEffect(() => {
     if (open) {
-      loadCategories();
       loadAllShapefiles();
     }
   }, [open]);
-
-  async function loadCategories() {
-    try {
-      const data = await api.listShapefileCategories();
-      setCategories(data);
-    } catch (error) {
-    }
-  }
 
   async function loadAllShapefiles() {
     try {
@@ -99,11 +86,9 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     setUploadFiles([]);
     setReplaceFiles([]);
     setSelectedCategory("__new__");
-    setSelectedReplaceCategory("");
     setSelectedTargetShapefile("");
     setDragActive(false);
     resetPreviewState();
-    setReplaceCategorySearch("");
     setTargetShapefileSearch("");
   }
 
@@ -156,39 +141,29 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     // Clear state
     setUploadFiles([]);
     setReplaceFiles([]);
-    setSelectedReplaceCategory("");
     setSelectedTargetShapefile("");
-    setReplaceCategorySearch("");
     setTargetShapefileSearch("");
     resetPreviewState();
   }
 
-  // === Search & Filter Logic ===
-  const filteredCategories = useMemo(() => {
-    if (!replaceCategorySearch) return categories;
-    const query = replaceCategorySearch.toLowerCase();
-    return categories.filter(cat => cat.name.toLowerCase().includes(query));
-  }, [categories, replaceCategorySearch]);
-
   const filteredTargetShapefiles = useMemo(() => {
     const gisLayerExtensions = ['.shp', '.geojson', '.kml', '.kmz', '.gml', '.gpx', '.json'];
     const baseList = allShapefiles.filter(shp => {
-      if (shp.category !== selectedReplaceCategory) return false;
-      const fileName = shp.name.toLowerCase();
+      const fileName = (shp.filename || "").toLowerCase();
       return gisLayerExtensions.some(ext => fileName.endsWith(ext));
     });
 
     if (!targetShapefileSearch) return baseList;
     const query = targetShapefileSearch.toLowerCase();
-    return baseList.filter(shp => shp.name.toLowerCase().includes(query));
-  }, [allShapefiles, selectedReplaceCategory, targetShapefileSearch]);
+    return baseList.filter(shp => 
+      shp.name.toLowerCase().includes(query) || 
+      shp.category.toLowerCase().includes(query)
+    );
+  }, [allShapefiles, targetShapefileSearch]);
 
   // Close dropdowns on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (categorySearchRef.current && !categorySearchRef.current.contains(event.target as Node)) {
-        setIsCategoryDropdownOpen(false);
-      }
       if (targetSearchRef.current && !targetSearchRef.current.contains(event.target as Node)) {
         setIsTargetDropdownOpen(false);
       }
@@ -266,14 +241,9 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
   }
 
   async function handleAddUpload() {
-    const categoryToUse = selectedCategory === "__new__" ? newCategoryName : selectedCategory;
-
-    if (!categoryToUse) {
-      toaster.create({
-        description: "Please select or enter a category",
-        type: "warning",
-      });
-      return;
+    let categoryToUse = selectedCategory === "__new__" ? newCategoryName : selectedCategory;
+    if (!categoryToUse || categoryToUse.trim() === "") {
+      categoryToUse = "uncategorised";
     }
 
     if (uploadFiles.length === 0) {
@@ -303,7 +273,6 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
       // Clear files and reload data
       setUploadFiles([]);
   resetPreviewState();
-      await loadCategories();
       await loadAllShapefiles();
       setStep("success");
     } catch (error) {
@@ -388,14 +357,6 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     if (replaceFiles.length === 0) {
       toaster.create({
         description: "Please select file(s) to upload",
-        type: "warning",
-      });
-      return;
-    }
-
-    if (!selectedReplaceCategory) {
-      toaster.create({
-        description: "Please select a category",
         type: "warning",
       });
       return;
@@ -526,6 +487,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
     return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
   }
   return (
+    <>
     <Dialog.Root open={open} onOpenChange={(e) => !e.open && handleClose()} size="xl">
       <Portal>
         <Dialog.Backdrop />
@@ -679,8 +641,16 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                           <Text fontSize="xs" color="red.600">{previewError}</Text>
                         </Box>
                       )}
-                      <MapContainer center={[1.3521, 103.8198]} zoom={11}
-                        style={{ width: "100%", height: "100%" }} scrollWheelZoom>
+                      <MapContainer
+                        center={[1.3521, 103.8198]}
+                        zoom={11}
+                        minZoom={10}
+                        maxZoom={18}
+                        maxBounds={[[1.05, 103.49], [1.57, 104.21]]}
+                        maxBoundsViscosity={1.0}
+                        style={{ width: "100%", height: "100%" }}
+                        scrollWheelZoom
+                      >
                         <ThemeAwareTileLayer />
                         {previewGeoJSON && !previewLoading && (
                           <>
@@ -774,74 +744,11 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                     </div>
                   )}
 
-                  {/* Select Folder (Searchable) */}
-                  <Box mb={4} mt={6} position="relative" ref={categorySearchRef}>
-                    <Text fontWeight="600" mb={2}>Select Folder</Text>
+                  {/* Select Target Shapefile (Searchable) */}
+                  <Box mb={4} mt={6} position="relative" ref={targetSearchRef}>
+                    <Text fontWeight="600" mb={2}>Select GIS Layer to Replace</Text>
                     <Input
-                      placeholder="Type to filter folders (e.g., bus, area)..."
-                      value={replaceCategorySearch}
-                      onChange={(e) => {
-                        setReplaceCategorySearch(e.target.value);
-                        setIsCategoryDropdownOpen(true);
-                      }}
-                      onFocus={() => setIsCategoryDropdownOpen(true)}
-                    />
-                    {isCategoryDropdownOpen && (
-                      <Box
-                        position="absolute"
-                        top="100%"
-                        left={0}
-                        right={0}
-                        zIndex={1000}
-                        bg="white"
-                        boxShadow="lg"
-                        borderRadius="md"
-                        mt={1}
-                        maxH="200px"
-                        overflowY="auto"
-                        border="1px solid"
-                        borderColor="gray.200"
-                      >
-                        {filteredCategories.length > 0 ? (
-                          filteredCategories.map((cat) => (
-                            <Box
-                              key={cat.name}
-                              px={3}
-                              py={2}
-                              cursor="pointer"
-                              _hover={{ bg: "gray.100" }}
-                              onClick={() => {
-                                setSelectedReplaceCategory(cat.name);
-                                setReplaceCategorySearch(cat.name);
-                                setIsCategoryDropdownOpen(false);
-                                setSelectedTargetShapefile("");
-                                setTargetShapefileSearch("");
-                              }}
-                              display="flex"
-                              alignItems="center"
-                              justifyContent="space-between"
-                            >
-                              <Text fontSize="sm">{cat.name}</Text>
-                              {selectedReplaceCategory === cat.name && (
-                                <Box color="blue.500"><LuCheck /></Box>
-                              )}
-                            </Box>
-                          ))
-                        ) : (
-                          <Box px={3} py={2} color="fg.muted" fontSize="sm">
-                            No folders match your search
-                          </Box>
-                        )}
-                      </Box>
-                    )}
-                  </Box>
-
-                  {/* Select Target Shapefile (Searchable) - only show if category is selected */}
-                  {selectedReplaceCategory && (
-                    <Box mb={4} position="relative" ref={targetSearchRef}>
-                      <Text fontWeight="600" mb={2}>Select GIS Layer to Replace</Text>
-                      <Input
-                        placeholder="Type to filter layers..."
+                      placeholder="Type to filter layers by folder or name..."
                         value={targetShapefileSearch}
                         onChange={(e) => {
                           setTargetShapefileSearch(e.target.value);
@@ -875,14 +782,14 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                                 _hover={{ bg: "gray.100" }}
                                 onClick={() => {
                                   setSelectedTargetShapefile(shp.path);
-                                  setTargetShapefileSearch(shp.name);
+                                  setTargetShapefileSearch(`${shp.category} / ${shp.name}`);
                                   setIsTargetDropdownOpen(false);
                                 }}
                                 display="flex"
                                 alignItems="center"
                                 justifyContent="space-between"
                               >
-                                <Text fontSize="sm">{shp.name}</Text>
+                                <Text fontSize="sm">{shp.category} / {shp.name}</Text>
                                 {selectedTargetShapefile === shp.path && (
                                   <Box color="blue.500"><LuCheck /></Box>
                                 )}
@@ -896,7 +803,7 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                         </Box>
                       )}
                     </Box>
-                  )}
+
 
                   {replacing && (
                     <Box mt={4}>
@@ -951,8 +858,8 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                   {step === "add" && (
                     <Button
                       colorPalette="blue"
-                      onClick={handleAddUpload}
-                      disabled={uploadFiles.length === 0 || uploading || !selectedCategory || (selectedCategory === "__new__" && !newCategoryName)}
+                      onClick={() => setShowUploadConfirm(true)}
+                      disabled={uploadFiles.length === 0 || uploading}
                     >
                       Upload {uploadFiles.length > 0 && `(${uploadFiles.length})`}
                     </Button>
@@ -973,5 +880,74 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
         </Dialog.Positioner>
       </Portal>
     </Dialog.Root>
+
+      {/* Upload Confirmation Dialog */}
+      <Dialog.Root
+        open={showUploadConfirm}
+        onOpenChange={(e) => !e.open && setShowUploadConfirm(false)}
+        size="md"
+      >
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Before You Upload</Dialog.Title>
+                <Dialog.CloseTrigger />
+              </Dialog.Header>
+              <Dialog.Body>
+                <Text mb={3} color="fg.muted">
+                  Please confirm that the shapefile you are about to upload meets <strong>all</strong> of the following requirements:
+                </Text>
+                <Box as="ul" pl={5} mb={4} style={{ listStyleType: "disc" }}>
+                  <Box as="li" mb={2}>
+                    <Text fontSize="sm">
+                      <strong>Exact file name</strong> — The file name must exactly match what the system expects.
+                    </Text>
+                  </Box>
+                  <Box as="li" mb={2}>
+                    <Text fontSize="sm">
+                      <strong>Exact columns and numbers</strong> — The shapefile must contain the correct number of columns, with no extras or omissions.
+                    </Text>
+                  </Box>
+                  <Box as="li" mb={2}>
+                    <Text fontSize="sm">
+                      <strong>Exact attribute names</strong> — Every column/attribute name must match exactly, including capitalisation.
+                    </Text>
+                  </Box>
+                  <Box as="li" mb={2}>
+                    <Text fontSize="sm">
+                      <strong>Exact sequence</strong> — The columns must appear in exactly the same order as specified.
+                    </Text>
+                  </Box>
+                </Box>
+                <Text fontSize="sm" color="orange.600" fontWeight="500">
+                  Uploading an incompatible shapefile may cause system errors or incorrect data rendering.
+                </Text>
+                <Text fontSize="sm" color="fg.muted" mt={3}>
+                  If you are unsure of the expected format, refer to the existing shapefiles in the GIS Layers list as a reference.
+                </Text>
+              </Dialog.Body>
+              <Dialog.Footer>
+                <Box display="flex" gap={3} width="100%" justifyContent="flex-end">
+                  <Button variant="outline" onClick={() => setShowUploadConfirm(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    colorPalette="blue"
+                    onClick={() => {
+                      setShowUploadConfirm(false);
+                      handleAddUpload();
+                    }}
+                  >
+                    Confirm &amp; Upload
+                  </Button>
+                </Box>
+              </Dialog.Footer>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+    </>
   );
 }

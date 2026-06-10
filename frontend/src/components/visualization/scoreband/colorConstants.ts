@@ -53,3 +53,39 @@ export function getRiskBandIndex(score: number): 1 | 2 | 3 | 4 {
   if (score <= 60) return 3;   // High: 25-60
   return 4;                     // Extreme: >60
 }
+
+/**
+ * Get segment risk band color using per-crash-type thresholds.
+ * Mirrors GeoDataPanel.getSegmentColor:
+ *   BB/BP/SB: Extreme>20, High>10, Medium≥5
+ *   VB:       Extreme>60, High>25, Medium≥10
+ * Returns the colour of the worst crash type.
+ */
+export function getSegmentRiskBandColor(scores: Record<string, any> | null | undefined): string {
+  if (!scores) return RISK_BAND_COLORS.LOW;
+
+  let maxLevel = 0;
+  const crashTypes = ['BB', 'BP', 'SB', 'VB'];
+
+  for (const ct of crashTypes) {
+    const score = Number(scores[ct]) || 0;
+    let level = 0;
+    if (['BB', 'BP', 'SB'].includes(ct)) {
+      if (score > 20) level = 3;
+      else if (score > 10) level = 2;
+      else if (score >= 5) level = 1;
+    } else {
+      if (score > 60) level = 3;
+      else if (score > 25) level = 2;
+      else if (score >= 10) level = 1;
+    }
+    if (level > maxLevel) maxLevel = level;
+  }
+
+  switch (maxLevel) {
+    case 3: return RISK_BAND_COLORS.EXTREME;
+    case 2: return RISK_BAND_COLORS.HIGH;
+    case 1: return RISK_BAND_COLORS.MEDIUM;
+    default: return RISK_BAND_COLORS.LOW;
+  }
+}

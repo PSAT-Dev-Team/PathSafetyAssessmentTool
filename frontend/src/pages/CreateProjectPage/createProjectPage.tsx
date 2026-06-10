@@ -534,6 +534,7 @@ export default function CreateProjectPage() {
               onSelectionChange={handleRoadSelectionChange}
               onSelectionGeometryChange={handleSelectionGeometryChange}
               refreshKey={roadAvailabilityVersion}
+              focusRoadName={selectedFolderExists ? folder.trim() : ""}
             />
 
             {usingRoadSelection && unavailableSelectedRoads.length > 0 && (

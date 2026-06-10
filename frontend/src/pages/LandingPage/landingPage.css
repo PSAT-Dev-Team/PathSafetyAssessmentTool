@@ -29,28 +29,28 @@
   z-index: 10;
   width: min(32vw, 560px);
   min-width: 320px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .psat-logo {
   max-width: clamp(160px, 28vw, 440px);
-  max-height: 35vh;
+  max-height: 20vh;
   height: auto;
   object-fit: contain;
   align-self: flex-start;
 }
 
 .psat-logo.name {
-  font: 600 2.9rem/1 'Big Noodle Titling', sans-serif;
+  font: 600 clamp(1.6rem, 2.5vw, 2.9rem)/1 'Big Noodle Titling', sans-serif;
   text-transform: uppercase;
   align-self: flex-start;
 }
 
 .psat-logo.description {
-  font: 500 2rem/1 'Big Noodle Titling', sans-serif;
+  font: 500 clamp(1.1rem, 1.6vw, 2rem)/1.2 'Big Noodle Titling', sans-serif;
   text-transform: uppercase;
   align-self: flex-start;
-
 }
 
 .start-btn {
@@ -79,8 +79,7 @@
 }
 
 .profile-panel {
-  flex: 1;
-  min-height: 0;
+  flex-shrink: 0;
   width: 100%;
   padding: 18px;
   border-radius: 24px;
@@ -171,9 +170,8 @@
 
 .profile-scroll-shell {
   margin-top: 14px;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  height: 180px;
+  overflow-y: auto;
   border-radius: 18px;
   border: 1px solid #b8d8be;
   background: #f5fbf6;
@@ -184,8 +182,6 @@
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  height: 100%;
-  overflow-y: auto;
   padding-right: 8px;
 }
 

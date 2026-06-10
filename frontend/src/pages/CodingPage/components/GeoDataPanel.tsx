@@ -3,6 +3,7 @@ import {
   Card, CardBody, Text, Box, Flex, IconButton, Button,
   Dialog, Portal, Menu
 } from "@chakra-ui/react";
+import { AnalysisSidebar } from "../../../components/visualization/AnalysisSidebar";
 import { FaMousePointer, FaDrawPolygon, FaPlus, FaTrash } from "react-icons/fa";
 import { toaster } from "../../../components/ui/toaster";
 import { Switch } from "../../../components/ui/switch";
@@ -10,8 +11,11 @@ import { AddSegmentsDialog } from "../../PathAnalysisPage/components/AddSegments
 import { MapCursorController } from "../../../components/common/MapCursorController";
 // import { copySegments } from "../../../api"; // Removed unused import
 import type { Feature, FeatureCollection, LineString, Position } from "geojson";
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { RISK_BAND_COLORS } from "../../../components/visualization/scoreband/colorConstants";
+import type { CodingFilterContext } from "../../../api";
+import { CODING_FILTER_CONTEXT_KEY } from "../../../api";
+import { useNavigate } from "react-router-dom";
 
 
 import { MapContainer, CircleMarker, Polyline, Polygon, Tooltip, useMap, useMapEvents, Marker, Circle, Pane } from "react-leaflet";
@@ -33,12 +37,13 @@ type Props = {
   geoFeatures?: Feature<LineString, any>[];  // Optional pre-loaded geofeatures (for multi-project display)
   startIndex?: number;                       // Start index in global segments array (used with geoFeatures for multi-project)
   onDataChange?: () => void;                 // Callback when data is modified (e.g. deleted)
+  filterContext?: CodingFilterContext | null; // From Path Analysis: restricts which segments appear on the map
+  verifiedByProject?: Record<string, number[]>; // project name → verified segment indices (in-memory review state)
   panToBounds?: L.LatLngBounds | null;       // When set, immediately flies map to these bounds (e.g. on project tab switch)
   panKey?: number;                           // Monotonic counter to force PanToBounds effect re-fire
   curvData?: CurvatureVisualizationResponse | null;
   showCurvatureOverlay?: boolean;
   onToggleCurvatureOverlay?: () => void;
-  overlayContent?: React.ReactNode;
   widthM?: number | null;
   grade?: number | null;
   gradientPct?: number | null;
@@ -46,6 +51,10 @@ type Props = {
 };
 
 type GJ = FeatureCollection<LineString, any>;
+
+// Deep emerald used for the "verified" dot halo. Deliberately distinct from the
+// yellow-green LOW risk-band colour (#87C424) so verified state stays legible.
+const VERIFIED_HALO_COLOR = "#16A34A";
 
 type ScoreRow = {
   "Overall Risk Level": number;
@@ -311,7 +320,9 @@ function StatPill({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct, gradientStatus }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, filterContext, verifiedByProject, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, widthM, grade, gradientPct, gradientStatus }: Props) {
+  const navigate = useNavigate();
+
   const decodedName = useMemo(() => {
     if (!projectName) return null;
     try { return decodeURIComponent(projectName); } catch { return projectName; }
@@ -356,14 +367,27 @@ export default function GeoDataPanel({ projectName, index, onJump, containerHeig
   const [showKerbLine, setShowKerbLine] = useState(cachedLayers.showKerbLine ?? false);   // Deep Pink
   const [showBicycleCrossing, setShowBicycleCrossing] = useState(cachedLayers.showBicycleCrossing ?? false); // Orange
   const [showPathDefects, setShowPathDefects] = useState(cachedLayers.showPathDefects ?? false); // Red
+  const [showStateLand, setShowStateLand] = useState(cachedLayers.showStateLand ?? false);
+  const [showStatBoard, setShowStatBoard] = useState(cachedLayers.showStatBoard ?? false);
+  const [showLandPrivate, setShowLandPrivate] = useState(cachedLayers.showLandPrivate ?? false);
+  const [showLandMinistry, setShowLandMinistry] = useState(cachedLayers.showLandMinistry ?? false);
 
   // Update localStorage whenever these toggles change
   useEffect(() => {
     if (!projectName) return;
     localStorage.setItem(`gisLayerToggles_${projectName}`, JSON.stringify({
-      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects
+      showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects,
+      showStateLand, showStatBoard, showLandPrivate, showLandMinistry,
     }));
-  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects, projectName]);
+  }, [showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showPathDefects, showStateLand, showStatBoard, showLandPrivate, showLandMinistry, projectName]);
+
+  // Auto-enable path layers when Analysis Overlay is turned on; never auto-disable them
+  useEffect(() => {
+    if (!showCurvatureOverlay) return;
+    if (!showFootpath) setShowFootpath(true);
+    if (!showCycling) setShowCycling(true);
+    if (!showShared) setShowShared(true);
+  }, [showCurvatureOverlay]); // eslint-disable-line react-hooks/exhaustive-deps
 
 // Sub-component to pan map to current selection.
 // When panKey changes (project tab clicked), MapAutoCenter suppresses its setView
@@ -403,6 +427,9 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
   return null;
 }
 
+
+  // Analysis sidebar open state
+  const [isAnalysisSidebarOpen, setIsAnalysisSidebarOpen] = useState(false);
 
   // Delete Mode State
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -547,6 +574,29 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
 
   const allLatLngs = useMemo(() => points.map(p => p.latlng), [points]);
 
+  // When a filter context is active, only show filtered segments + the current one.
+  // localIdx equals the 0-based position in the project's geo features (= globalIdx when startIndex=0).
+  const currentProjectFilterData = useMemo(
+    () => filterContext?.projects.find(p => p.projectName === decodedName) ?? null,
+    [filterContext, decodedName]
+  );
+
+  const otherProjectsFilterData = useMemo(
+    () => filterContext ? filterContext.projects.filter(p => p.projectName !== decodedName) : [],
+    [filterContext, decodedName]
+  );
+
+  const filterIndexSet = useMemo(
+    () => currentProjectFilterData ? new Set(currentProjectFilterData.filteredIndices) : null,
+    [currentProjectFilterData]
+  );
+
+  // Verified segment indices for the current project — drives the "checked" dot treatment.
+  const verifiedSet = useMemo(
+    () => new Set((decodedName && verifiedByProject?.[decodedName]) || []),
+    [verifiedByProject, decodedName]
+  );
+
   // 当前高亮点 - use globalIdx to match the index prop (global index)
   const current = useMemo(() => points.find(p => p.globalIdx === index) ?? null, [points, index]);
 
@@ -617,7 +667,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
 
     if (!decodedName || activeGisLat === null || activeGisLon === null) return;
 
-    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing;
+    const anyLayerEnabled = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit || showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing || showStateLand || showStatBoard || showLandPrivate || showLandMinistry;
     if (!anyLayerEnabled) {
       setGisLayers(null);
       return;
@@ -640,6 +690,10 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
         if (showBusLane) layers.push('bus_lane');
         if (showParkingLot) layers.push('parking_lot');
         if (showKerbLine) layers.push('kerb_line');
+        if (showStateLand) layers.push('state_land');
+        if (showStatBoard) layers.push('stat_board');
+        if (showLandPrivate) layers.push('land_private');
+        if (showLandMinistry) layers.push('land_ministry');
 
         // Fetch GIS layers near the active query point
         const res = await fetch(`/api/projects/${encodeURIComponent(decodedName)}/gis/layers`, {
@@ -667,7 +721,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
     })();
 
     return () => { controller.abort(); };
-  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, hasExternalGeoFeatures]);
+  }, [decodedName, activeGisLat, activeGisLon, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showStateLand, showStatBoard, showLandPrivate, showLandMinistry, hasExternalGeoFeatures]);
 
   // Fetch Path Defects within the search radius around the active query point.
   // Kept separate from the GIS layers fetch so toggling defects doesn't refetch
@@ -716,6 +770,10 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
     bus_lane: "#EAB308",    // Yellow
     parking_lot: "#D97706", // Amber/Gold
     kerb_line: "#D946EF",   // Fuchsia
+    state_land: "#14B8A6",  // Teal
+    stat_board: "#F59E0B",  // Amber
+    land_private: "#6366F1", // Indigo
+    land_ministry: "#EC4899", // Pink
   };
 
   // Get segment color based on the crash type with the highest score
@@ -935,39 +993,37 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
             - {subtitle}
           </Text>
         )}
-        {onToggleCurvatureOverlay && curvData && (
-          <Flex align="center" gap="1.5" ml="auto">
-            <Flex align="center" gap="3" mr="2" pr="2" borderRight="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
-              <StatPill
-                label="Curv"
-                value={curvData.radius != null ? `${curvData.radius.toFixed(1)} m` : "∞"}
-              />
-              <StatPill
-                label="Width"
-                value={widthM != null ? `${widthM.toFixed(2)} m` : "—"}
-              />
-              <StatPill
-                label="Grade"
-                value={
-                  gradientState.mode === "grade"
-                    ? gradientState.text.replace("Grade 1 (<5°)", "<5°").replace("Grade 2 (≥5°)", "≥5°")
-                    : gradientState.text === GRADIENT_STATUS_NO_LIDAR_RESULT
-                      ? "N/A"
-                      : gradientState.text
-                }
-              />
-            </Flex>
-            <Text fontSize="xs" fontWeight="medium" color={showCurvatureOverlay ? "gray.900" : "gray.400"} _dark={{ color: showCurvatureOverlay ? "gray.100" : "gray.500" }}>
-              Analysis Overlay
-            </Text>
-            <Switch
-              colorPalette="gray"
-              size="sm"
-              checked={showCurvatureOverlay}
-              onCheckedChange={onToggleCurvatureOverlay}
+        <Flex align="center" gap="1.5" ml="auto">
+          <Flex align="center" gap="3" mr="2" pr="2" borderRight="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
+            <StatPill
+              label="Curv"
+              value={curvData?.radius != null ? `${curvData.radius.toFixed(1)} m` : "—"}
+            />
+            <StatPill
+              label="Width"
+              value={widthM != null ? `${widthM.toFixed(2)} m` : "—"}
+            />
+            <StatPill
+              label="Grade"
+              value={
+                gradientState.mode === "grade"
+                  ? gradientState.text.replace("Grade 1 (<5°)", "<5°").replace("Grade 2 (≥5°)", "≥5°")
+                  : gradientState.text === GRADIENT_STATUS_NO_LIDAR_RESULT
+                    ? "N/A"
+                    : gradientState.text
+              }
             />
           </Flex>
-        )}
+          <Text fontSize="xs" fontWeight="medium" color={showCurvatureOverlay ? "gray.900" : "gray.400"} _dark={{ color: showCurvatureOverlay ? "gray.100" : "gray.500" }}>
+            Analysis Overlay
+          </Text>
+          <Switch
+            colorPalette="gray"
+            size="sm"
+            checked={showCurvatureOverlay}
+            onCheckedChange={onToggleCurvatureOverlay}
+          />
+        </Flex>
       </Box>
 
           {/* Tools + GIS layer toggles */}
@@ -1111,141 +1167,6 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
               )}
             </Flex>
 
-            {/* GIS Layer Toggles */}
-            <Flex wrap="wrap" gap="4" onClick={(e) => e.stopPropagation()}>
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showFootpath ? "blue.600" : "gray.500"}>
-                Footpath
-              </Text>
-              <Switch
-                colorPalette="blue"
-                size="sm"
-                checked={showFootpath}
-                onCheckedChange={(e) => setShowFootpath(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showCycling ? "red.700" : "gray.500"}>
-                Cycling Path
-              </Text>
-              <Switch
-                colorPalette="red"
-                size="sm"
-                checked={showCycling}
-                onCheckedChange={(e) => setShowCycling(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showShared ? "purple.600" : "gray.500"}>
-                Shared Path
-              </Text>
-              <Switch
-                colorPalette="purple"
-                size="sm"
-                checked={showShared}
-                onCheckedChange={(e) => setShowShared(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showRoadcrossing ? "green.600" : "gray.500"}>
-                Road Crossing
-              </Text>
-              <Switch
-                colorPalette="green"
-                size="sm"
-                checked={showRoadcrossing}
-                onCheckedChange={(e) => setShowRoadcrossing(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showBicycleCrossing ? "orange.600" : "gray.500"}>
-                Bicycle Crossing
-              </Text>
-              <Switch
-                colorPalette="orange"
-                size="sm"
-                checked={showBicycleCrossing}
-                onCheckedChange={(e) => setShowBicycleCrossing(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showMrtExit ? "cyan.600" : "gray.500"}>
-                MRT Exit
-              </Text>
-              <Switch
-                colorPalette="cyan"
-                size="sm"
-                checked={showMrtExit}
-                onCheckedChange={(e) => setShowMrtExit(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showBusStop ? "purple.600" : "gray.500"}>
-                Bus Stop
-              </Text>
-              <Switch
-                colorPalette="purple"
-                size="sm"
-                checked={showBusStop}
-                onCheckedChange={(e) => setShowBusStop(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showBusLane ? "yellow.600" : "gray.500"}>
-                Bus Lane
-              </Text>
-              <Switch
-                colorPalette="yellow"
-                size="sm"
-                checked={showBusLane}
-                onCheckedChange={(e) => setShowBusLane(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showParkingLot ? "yellow.600" : "gray.500"}>
-                Parking Lot
-              </Text>
-              <Switch
-                colorPalette="yellow"
-                size="sm"
-                checked={showParkingLot}
-                onCheckedChange={(e) => setShowParkingLot(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showKerbLine ? "pink.600" : "gray.500"}>
-                Kerb Line
-              </Text>
-              <Switch
-                colorPalette="pink"
-                size="sm"
-                checked={showKerbLine}
-                onCheckedChange={(e) => setShowKerbLine(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showPathDefects ? "red.600" : "gray.500"}>
-                Path Defects
-              </Text>
-              <Switch
-                colorPalette="red"
-                size="sm"
-                checked={showPathDefects}
-                onCheckedChange={(e) => setShowPathDefects(e.checked)}
-              />
-            </Flex>
-
-          </Flex>
         </Box>
       <CardBody flex="1" minH={0} p={0} position="relative">
         {loading && <Text color="gray.500">Loading map…</Text>}
@@ -1309,6 +1230,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.footpath.map((feature, i) => (
                   <Polyline
                     key={`footpath-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.footpath,
@@ -1323,6 +1245,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.cycling.map((feature, i) => (
                   <Polyline
                     key={`cycling-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.cycling,
@@ -1337,6 +1260,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.shared.map((feature, i) => (
                   <Polyline
                     key={`shared-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.shared,
@@ -1351,6 +1275,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.roadcrossing.map((feature, i) => (
                   <Polyline
                     key={`roadcrossing-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.roadcrossing,
@@ -1366,6 +1291,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.mrt_exit.map((feature, i) => (
                   <CircleMarker
                     key={`mrt_exit-${i}`}
+
                     center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
                     radius={6}
                     pathOptions={{
@@ -1387,6 +1313,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     return (
                       <CircleMarker
                         key={`bus_stop-${i}`}
+    
                         center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
                         radius={6}
                         pathOptions={{
@@ -1403,6 +1330,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     return (
                       <Polyline
                         key={`bus_shelter-${i}`}
+    
                         positions={feature.coordinates.map(c => [c[1], c[0]])}
                         pathOptions={{
                           color: layerColors.bus_stop,
@@ -1429,6 +1357,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     return (coords as any).map((line: any, j: number) => (
                       <Polyline
                         key={`bus_lane-${i}-${j}`}
+    
                         positions={line.map((c: any) => [c[1], c[0]])}
                         pathOptions={{
                           color: layerColors.bus_lane,
@@ -1445,6 +1374,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                   return (
                     <Polyline
                       key={`bus_lane-${i}`}
+  
                       positions={coords.map((c: any) => [c[1], c[0]])}
                       pathOptions={{
                         color: layerColors.bus_lane,
@@ -1467,6 +1397,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     return (
                       <Polygon
                         key={`parking_lot-${i}`}
+    
                         positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
                         pathOptions={{
                           color: layerColors.parking_lot,
@@ -1483,6 +1414,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                   return (
                     <CircleMarker
                       key={`parking_lot-${i}`}
+  
                       center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
                       radius={6}
                       pathOptions={{
@@ -1503,6 +1435,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.kerb_line.map((feature, i) => (
                   <Polyline
                     key={`kerb_line-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.kerb_line,
@@ -1518,6 +1451,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.bicycle_crossing.map((feature, i) => (
                   <CircleMarker
                     key={`bicycle_crossing-${i}`}
+
                     center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
                     radius={6}
                     pathOptions={{
@@ -1529,6 +1463,59 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                   >
                     <Tooltip>Bicycle Crossing</Tooltip>
                   </CircleMarker>
+                ))
+              )}
+
+              {/* Land Ownership - Polygon layers */}
+              {gisLayers && showStateLand && gisLayers.state_land && (
+                gisLayers.state_land.map((feature, i) => (
+                  <Polygon
+                    key={`state_land-${i}`}
+
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color: layerColors.state_land, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
+                  >
+                    <Tooltip>{feature.properties?.OWNRSHP_CL ?? "State Land"}</Tooltip>
+                  </Polygon>
+                ))
+              )}
+
+              {gisLayers && showStatBoard && gisLayers.stat_board && (
+                gisLayers.stat_board.map((feature, i) => (
+                  <Polygon
+                    key={`stat_board-${i}`}
+
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color: layerColors.stat_board, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
+                  >
+                    <Tooltip>{feature.properties?.OWNRSHP_CL ?? "Stat Board"}</Tooltip>
+                  </Polygon>
+                ))
+              )}
+
+              {gisLayers && showLandPrivate && gisLayers.land_private && (
+                gisLayers.land_private.map((feature, i) => (
+                  <Polygon
+                    key={`land_private-${i}`}
+
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color: layerColors.land_private, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
+                  >
+                    <Tooltip>{feature.properties?.OWNRSHP_CL ?? "Private Land"}</Tooltip>
+                  </Polygon>
+                ))
+              )}
+
+              {gisLayers && showLandMinistry && gisLayers.land_ministry && (
+                gisLayers.land_ministry.map((feature, i) => (
+                  <Polygon
+                    key={`land_ministry-${i}`}
+
+                    positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+                    pathOptions={{ color: layerColors.land_ministry, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
+                  >
+                    <Tooltip>{feature.properties?.OWNRSHP_CL ?? "Ministry Land"}</Tooltip>
+                  </Polygon>
                 ))
               )}
 
@@ -1591,23 +1578,38 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
 
               {/* 所有起点 — rendered in a dedicated pane above GIS overlay layers */}
               <Pane name="segmentsPane" style={{ zIndex: 610 }}>
-                {points.map(({ globalIdx, latlng, f }) => {
+                {points.map(({ localIdx, globalIdx, latlng, f }) => {
                   const isActive = globalIdx === index;
+                  // Hide segments outside the filter set (current segment always shown)
+                  if (filterIndexSet && !filterIndexSet.has(localIdx) && !isActive) return null;
                   const baseColor = getSegmentColor(globalIdx);
                   const color = isActive ? "#1E63D8" : baseColor;
                   const radius = isActive ? 9 : 5;
                   // Handle both new and old column names for backward compatibility
+                  const imgRef = f.properties?.["Image Reference"];
+                  const isVerified = verifiedSet.has(localIdx);
                   const scoreValue = activeScores[globalIdx]?.["Overall Risk Level"] ?? activeScores[globalIdx]?.["CycleRAP score"];
-                  const label = `#${globalIdx + 1} ${f.properties?.["Image Reference"] ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}`;
-                  // Include score in key to force re-render when score changes
-                  const keyWithScore = `${globalIdx}-${scoreValue?.toFixed(2) ?? "loading"}`;
+                  const label = `#${globalIdx + 1} ${imgRef ?? ""} - Score: ${scoreValue?.toFixed(2) ?? "N/A"}${isVerified ? " ✓ Verified" : ""}`;
+                  // Include score + verified state in key to force re-render when either changes
+                  const keyWithScore = `${globalIdx}-${scoreValue?.toFixed(2) ?? "loading"}-${isVerified ? "v" : "u"}`;
 
                   return (
+                    <Fragment key={keyWithScore}>
+                    {/* Verified halo — deep-emerald ring behind the dot, distinct from the
+                        yellow-green LOW risk colour so it reads clearly at a glance. */}
+                    {isVerified && (
+                      <CircleMarker
+                        center={latlng}
+                        radius={radius + 5}
+                        pathOptions={{ color: VERIFIED_HALO_COLOR, weight: 3, opacity: 0.95, fillColor: VERIFIED_HALO_COLOR, fillOpacity: 0.25 }}
+                        pane="segmentsPane"
+                        interactive={false}
+                      />
+                    )}
                     <CircleMarker
-                      key={keyWithScore}
                       center={latlng}
                       radius={radius}
-                      pathOptions={{ color, weight: isActive ? 4 : 1, opacity: 0.9, fillOpacity: isActive ? 0.95 : 0.8 }}
+                      pathOptions={{ color, weight: isActive ? 4 : 1, opacity: 0.9, fillOpacity: isVerified ? 0.55 : (isActive ? 0.95 : 0.8) }}
                       pane="segmentsPane"
                       eventHandlers={{
                         click: (e) => {
@@ -1644,9 +1646,53 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     >
                       <Tooltip>{isDeleteMode ? "Click to Delete" : (isPointAddMode ? "Click to Copy" : label)}</Tooltip>
                     </CircleMarker>
+                    </Fragment>
                   );
                 })}
               </Pane>
+
+              {/* Cross-project filtered segments from Path Analysis */}
+              {otherProjectsFilterData.length > 0 && (
+                <Pane name="crossProjectPane" style={{ zIndex: 609 }}>
+                  {otherProjectsFilterData.flatMap(proj => {
+                    const projVerified = new Set(verifiedByProject?.[proj.projectName] ?? []);
+                    return proj.points.map((pt, i) => {
+                      const isVerified = projVerified.has(pt.idx);
+                      return (
+                        <Fragment key={`xp-${proj.projectName}-${i}`}>
+                          {isVerified && (
+                            <CircleMarker
+                              center={pt.latlng}
+                              radius={9}
+                              pathOptions={{ color: VERIFIED_HALO_COLOR, weight: 3, opacity: 0.95, fillColor: VERIFIED_HALO_COLOR, fillOpacity: 0.25 }}
+                              pane="crossProjectPane"
+                              interactive={false}
+                            />
+                          )}
+                          <CircleMarker
+                            center={pt.latlng}
+                            radius={5}
+                            pathOptions={{ color: pt.color, weight: 1, opacity: 0.9, fillOpacity: isVerified ? 0.55 : 0.8 }}
+                            pane="crossProjectPane"
+                            eventHandlers={{
+                              click: () => {
+                                // Navigate to the other project, preserving the full filter context
+                                sessionStorage.setItem(CODING_FILTER_CONTEXT_KEY, JSON.stringify(filterContext));
+                                navigate(
+                                  `/coding/${encodeURIComponent(proj.projectName)}?segment=${pt.idx + 1}`,
+                                  { state: { returnToAnalysis: true, filterContext } }
+                                );
+                              },
+                            }}
+                          >
+                            <Tooltip>#{pt.idx + 1} — {proj.projectName}{isVerified ? " ✓ Verified" : ""}</Tooltip>
+                          </CircleMarker>
+                        </Fragment>
+                      );
+                    });
+                  })}
+                </Pane>
+              )}
 
               <PolygonDrawingTool
                 active={isPolygonMode || isPolygonAddMode}
@@ -1664,7 +1710,40 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
           <Text color="gray.500" mt="2">No geodata to show.</Text>
         )}
 
-        {overlayContent}
+        <AnalysisSidebar
+          isOpen={isAnalysisSidebarOpen}
+          onToggle={() => setIsAnalysisSidebarOpen(v => !v)}
+          showFootpath={showFootpath}
+          setShowFootpath={setShowFootpath}
+          showCycling={showCycling}
+          setShowCycling={setShowCycling}
+          showShared={showShared}
+          setShowShared={setShowShared}
+          showRoadcrossing={showRoadcrossing}
+          setShowRoadcrossing={setShowRoadcrossing}
+          showMrtExit={showMrtExit}
+          setShowMrtExit={setShowMrtExit}
+          showBusStop={showBusStop}
+          setShowBusStop={setShowBusStop}
+          showBusLane={showBusLane}
+          setShowBusLane={setShowBusLane}
+          showParkingLot={showParkingLot}
+          setShowParkingLot={setShowParkingLot}
+          showKerbLine={showKerbLine}
+          setShowKerbLine={setShowKerbLine}
+          showBicycleCrossing={showBicycleCrossing}
+          setShowBicycleCrossing={setShowBicycleCrossing}
+          showPathDefects={showPathDefects}
+          setShowPathDefects={setShowPathDefects}
+          showStateLand={showStateLand}
+          setShowStateLand={setShowStateLand}
+          showStatBoard={showStatBoard}
+          setShowStatBoard={setShowStatBoard}
+          showLandPrivate={showLandPrivate}
+          setShowLandPrivate={setShowLandPrivate}
+          showLandMinistry={showLandMinistry}
+          setShowLandMinistry={setShowLandMinistry}
+        />
       </CardBody>
 
       {/* Delete Confirmation Dialog */}

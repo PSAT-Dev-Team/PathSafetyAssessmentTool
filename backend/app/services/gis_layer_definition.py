@@ -307,6 +307,14 @@ LAYER_DEFINITIONS: Dict[str, LayerDefinition] = {
         description="Road name reference",
         default_buffer_m=10.0,
     ),
+    "Road_network_line": LayerDefinition(
+        name="Road_network_line",
+        geometry_types=["LineString", "MultiLineString"],
+        required_columns=["RD_TYP_CD (1)"],
+        query_type="near",
+        description="Road name reference",
+        default_buffer_m=10.0,
+    ),
 }
 
 

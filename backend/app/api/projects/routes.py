@@ -32,6 +32,7 @@ import geopandas as gpd
 import shutil
 import datetime
 import math
+import time
 import ipaddress
 from app.services.cyclerap_scoring import calculate_cyclerap_score_native
 # ---- init guards (thread-safe & error memo) ----
@@ -380,46 +381,66 @@ def df_to_records(df) -> list:
     return sanitized
 
 # Process-level context (replaces Streamlit's session_state)
-_CTX = {"ready": False, "pm": None}
+_CTX = {"ready": False, "pm": None, "init_error": None}
+_CTX_LOCK = threading.Lock()
 
 
 def invalidate_ctx() -> None:
     """Reset the project context so the next request re-initialises for the active profile."""
-    _CTX["ready"] = False
-    _CTX["pm"] = None
+    with _CTX_LOCK:
+        _CTX["ready"] = False
+        _CTX["pm"] = None
+        _CTX["init_error"] = None
 
 
 def get_ctx():
     """Lazy init: prepare the old-code dependencies the first time and reuse thereafter."""
-    if _CTX["ready"]:
+    with _CTX_LOCK:
+        if _CTX["ready"]:
+            return _CTX
+
+        # Surface a previously memoised init failure immediately.
+        if _CTX["init_error"]:
+            raise RuntimeError(f"Project context failed to initialise: {_CTX['init_error']}")
+
+        print("[Context] Initialising project context...", flush=True)
+        try:
+            pm = project_manager()
+        except Exception as exc:
+            msg = f"project_manager() failed: {exc}\n{traceback.format_exc()}"
+            print(f"[Context] ERROR: {msg}", flush=True)
+            _CTX["init_error"] = msg
+            raise RuntimeError(f"Project context failed to initialise: {msg}") from exc
+
+        try:
+            serializer.data_loader.initialise()
+        except Exception:
+            pass
+
+        try:
+            CRI.cycleRAP_interface.initialise(pm.src_path / "CycleRAP")
+        except Exception as exc:
+            msg = f"cycleRAP_interface.initialise() failed: {exc}\n{traceback.format_exc()}"
+            print(f"[Context] ERROR: {msg}", flush=True)
+            _CTX["init_error"] = msg
+            raise RuntimeError(f"Project context failed to initialise: {msg}") from exc
+
+        # If a profile is active, redirect the project manager to that profile's project root
+        # instead of the legacy ../data directory from config.json.
+        try:
+            from app.services import profile_store as _ps
+            active_id = _ps.get_active_profile_id()
+            if active_id:
+                profile_projects_root = _ps.get_profile_projects_root(active_id)
+                if profile_projects_root.exists():
+                    pm.des_path = profile_projects_root
+                    pm._discover_projects()
+        except Exception as _exc:
+            print(f"[Context] Could not resolve profile projects root: {_exc}", flush=True)
+
+        _CTX.update({"pm": pm, "ready": True, "init_error": None})
+        print("[Context] Project context ready.", flush=True)
         return _CTX
-
-    # === Previously done manually in Streamlit; equivalent init moved to backend ===
-    pm = project_manager()                               # Load config and scan project list
-    # serializer's BaseTable/parse/serialize do not need extra init; if you have data_loader, try/except
-    try:
-        serializer.data_loader.initialise()
-    except Exception:
-        pass
-
-    # CycleRAP resource directory (same as your former src_path/CycleRAP)
-    CRI.cycleRAP_interface.initialise(pm.src_path / "CycleRAP")
-
-    # If a profile is active, redirect the project manager to that profile's project root
-    # instead of the legacy ../data directory from config.json.
-    try:
-        from app.services import profile_store as _ps
-        active_id = _ps.get_active_profile_id()
-        if active_id:
-            profile_projects_root = _ps.get_profile_projects_root(active_id)
-            if profile_projects_root.exists():
-                pm.des_path = profile_projects_root
-                pm._discover_projects()
-    except Exception as _exc:
-        print(f"[Context] Could not resolve profile projects root: {_exc}", flush=True)
-
-    _CTX.update({"pm": pm, "ready": True})
-    return _CTX
 
 _MODELS_READY = {"cv": False}
 
@@ -524,8 +545,9 @@ _warmup_thread.start()
 
 
 # ───────────────────────── Gradient lookup (module-level) ─────────────────────
-# Loaded once and cached for the lifetime of the server process.
+# Catalog is rebuilt automatically when new profiles appear on disk.
 _GRADIENT_PROFILE_CATALOG: "dict[str, dict] | None" = None
+_GRADIENT_CATALOG_LOAD_TIME: float = 0.0
 _PROJECT_GRADIENT_CACHE: dict[str, dict[str, tuple[int, float]]] = {}
 _PROJECT_GRADIENT_CACHE_STATE: dict[str, str] = {}
 
@@ -542,7 +564,7 @@ def _normalize_gradient_token(value: str) -> str:
 
 
 def _strip_survey_suffix(value: str) -> str:
-    return re.sub(r"(?:\d*q\d{2,4})$", "", _normalize_gradient_token(value), flags=re.IGNORECASE)
+    return re.sub(r"(?:\d*q\d{2,4})$", "", _normalize_gradient_token(value), flags=re.IGNORECASE).rstrip("_")
 
 
 def _rect_distance(bounds_a, bounds_b) -> float:
@@ -594,17 +616,37 @@ def _stitch_gradient_centerline(gdf: gpd.GeoDataFrame) -> "LineString | None":
 
 
 def _load_gradient_profile_catalog() -> dict[str, dict]:
-    global _GRADIENT_PROFILE_CATALOG
+    global _GRADIENT_PROFILE_CATALOG, _GRADIENT_CATALOG_LOAD_TIME
+
+    base_dir = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_profiles"
+
+    # Detect new profiles: if any planning-area directory is newer than the last load,
+    # discard the cached catalog and per-project mappings so they are rebuilt fresh.
+    if _GRADIENT_PROFILE_CATALOG is not None and base_dir.exists():
+        try:
+            stale = any(
+                d.stat().st_mtime > _GRADIENT_CATALOG_LOAD_TIME
+                for d in base_dir.iterdir()
+                if d.is_dir()
+            )
+            if stale:
+                print("[Gradient] new profiles detected — rebuilding catalog", flush=True)
+                _GRADIENT_PROFILE_CATALOG = None
+                _PROJECT_GRADIENT_CACHE.clear()
+                _PROJECT_GRADIENT_CACHE_STATE.clear()
+        except OSError:
+            pass
+
     if _GRADIENT_PROFILE_CATALOG is not None:
         return _GRADIENT_PROFILE_CATALOG
 
-    base_dir = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_profiles"
     result: dict[str, dict] = {}
     if not base_dir.exists():
         _GRADIENT_PROFILE_CATALOG = result
+        _GRADIENT_CATALOG_LOAD_TIME = time.time()
         return result
 
-    for meta_path in sorted(base_dir.glob("*/metadata.json")):
+    for meta_path in sorted(base_dir.glob("*/*/metadata.json")):
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             profile_path = meta_path.parent / "gradient_profile.csv"
@@ -638,6 +680,7 @@ def _load_gradient_profile_catalog() -> dict[str, dict]:
             print(f"[Gradient] WARNING: failed to read profile metadata {meta_path}: {exc}")
 
     _GRADIENT_PROFILE_CATALOG = result
+    _GRADIENT_CATALOG_LOAD_TIME = time.time()
     return result
 
 
@@ -648,11 +691,14 @@ def _resolve_gradient_profile_for_project(project_name: str, centerline: LineStr
         return None
 
     project_path_key = None
+    project_dataset = None
     try:
         proj = get_ctx()["pm"].project(project_name)
         project_path_key = getattr(proj.metadata, "path_key", None)
+        project_dataset = getattr(proj.metadata, "dataset", None)
     except Exception:
         project_path_key = None
+        project_dataset = None
 
     if project_path_key:
         direct_match = catalog.get(project_path_key)
@@ -666,6 +712,10 @@ def _resolve_gradient_profile_for_project(project_name: str, centerline: LineStr
                 return meta
 
     project_aliases = {_normalize_gradient_token(project_name), _strip_survey_suffix(project_name)}
+    if project_dataset:
+        project_aliases.add(_normalize_gradient_token(project_dataset))
+        project_aliases.add(_strip_survey_suffix(project_dataset))
+    project_aliases.discard("")
     project_bounds = centerline.bounds
     project_length = float(centerline.length)
 
@@ -914,10 +964,17 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
     try:
         hit = _lookup_project_gradient(project_name, image_ref)
         if not hit:
-            cache_state = _get_project_gradient_cache_state(project_name)
+            # A project's segments are either all "Not Assessed" (no profile exists)
+            # or all "No LiDAR" for unmatched segments (profile exists, segment outside
+            # profiled chainage). Use the mapping content as the primary signal: if any
+            # segment in this project resolved to a gradient value, the profile IS present
+            # and this segment's miss means no LiDAR coverage at that chainage.
+            mapping = _get_project_gradient_mapping(project_name)
+            profile_found = bool(mapping) or (
+                _PROJECT_GRADIENT_CACHE_STATE.get(project_name) == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE
+            )
             gradient_status = (
-                GRADIENT_STATUS_NO_LIDAR_RESULT
-                if cache_state == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE
+                GRADIENT_STATUS_NO_LIDAR_RESULT if profile_found
                 else GRADIENT_STATUS_NOT_ASSESSED
             )
             updates["Grade"] = None
@@ -956,11 +1013,18 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
 @bp.before_request
 def _log_incoming():
     print(f"[Flask] >>> {request.method} {request.path}", flush=True)
+    try:
+        get_ctx()
+    except Exception as exc:
+        return jsonify({"error": f"Backend initialisation failed: {exc}"}), 500
 
 @bp.get("")
 def list_projects():
     """List projects with metadata including tags, date_created, last_updated, and verification segment counts."""
-    ctx = get_ctx()
+    try:
+        ctx = get_ctx()
+    except Exception as exc:
+        return jsonify({"error": f"Backend initialisation failed: {exc}"}), 500
     pm = ctx["pm"]
     names = pm.list_names()
 
@@ -1271,16 +1335,22 @@ def get_latest_attributes(project_name: str):
             for col in available_bands:
                 attrs_df[col] = results_df[col].values
 
-    # Normalise gradient status: within a project "No LiDAR" and "Not Assessed Yet"
-    # must not coexist.  Once a gradient profile is confirmed available, every row
-    # with no grade should show "No LiDAR" regardless of whether it has been
-    # through autocode yet.
-    if _get_project_gradient_cache_state(project_name) == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE:
+    # Normalise gradient status: within a project, "Not assessed yet" and a real
+    # gradient value must never coexist.  If the project has a matched gradient
+    # profile (mapping non-empty), every segment that still has no grade should
+    # display "N/A (no LiDAR result)" — not "Not assessed yet" — regardless of
+    # whether it has been through the coding workflow yet.
+    mapping = _get_project_gradient_mapping(project_name)
+    profile_found = bool(mapping) or (
+        _PROJECT_GRADIENT_CACHE_STATE.get(project_name) == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE
+    )
+    if profile_found:
         has_grade_col = "Grade" in attrs_df.columns
         has_status_col = GRADIENT_STATUS_FIELD in attrs_df.columns
         if has_grade_col or has_status_col:
             if not attrs_copied:
                 attrs_df = attrs_df.copy()
+                attrs_copied = True
             no_grade = attrs_df["Grade"].isna() if has_grade_col else pd.Series(True, index=attrs_df.index)
             if has_status_col:
                 stale_status = attrs_df[GRADIENT_STATUS_FIELD].isna() | (
@@ -1293,12 +1363,159 @@ def get_latest_attributes(project_name: str):
 
     return jsonify({"rows": df_to_records(attrs_df)})
 
+def _rmtree_robust(path: Path) -> bool:
+    """Delete a directory tree, working around Windows file-lock races.
+
+    Tries shutil.rmtree first; on failure deletes files one-by-one then removes
+    the (hopefully now-empty) directory. Returns True when the directory is gone.
+    """
+    if not path.is_dir():
+        return True
+    try:
+        shutil.rmtree(str(path))
+        return not path.exists()
+    except Exception:
+        pass
+    # File-by-file fallback (handles Windows thumbnail/AV lock races)
+    for item in sorted(path.rglob("*"), reverse=True):
+        try:
+            if item.is_file() or item.is_symlink():
+                item.unlink()
+            elif item.is_dir():
+                item.rmdir()
+        except Exception:
+            pass
+    try:
+        path.rmdir()
+    except Exception:
+        pass
+    return not path.exists()
+
+
+def _migrate_legacy_images(pm, project_name: str, proj) -> bool:
+    """Convert a legacy project that stores copies in images/ to reference in/ directly.
+
+    Strips the project-title prefix from every Image Reference in geo_data.gpkg,
+    verifies each stripped name resolves to a file under in/, then deletes images/.
+    Runs quietly — prints to stdout so Flask terminal shows progress.
+    """
+    try:
+        images_dir = proj.project_path / global_var.PROJECT_IMAGES_FOLDER
+        if not images_dir.is_dir():
+            return False
+
+        source_folders = getattr(proj.metadata, "source_folders", None) or []
+        if not source_folders:
+            print(f"[migrate] '{project_name}': no source_folders in metadata — skipping", flush=True)
+            return False
+
+        missing = [sf for sf in source_folders if not (pm.in_path / sf).is_dir()]
+        if missing:
+            print(
+                f"[migrate] '{project_name}': source folder(s) not present in in/ — skipping: {missing}",
+                flush=True,
+            )
+            return False
+
+        geo_df = proj.geo_data.df
+        if geo_df.empty or "Image Reference" not in geo_df.columns:
+            print(f"[migrate] '{project_name}': geo_data missing Image Reference column — skipping", flush=True)
+            return False
+
+        prefix = project_name + "_"
+        ns_map = {make_image_namespace(sf): sf for sf in source_folders}
+
+        def _strip_and_resolve(img_ref: str):
+            """Return (new_canonical_ref, in_path) or None.
+
+            Tries progressively more aggressive prefix stripping:
+            1. Strip project-name prefix (legacy copy convention)
+            2. Strip source-folder namespace prefix (derived from metadata, not project name)
+            For multi-folder projects the returned ref is in namespace__filename form.
+            """
+            working = img_ref[len(prefix):] if img_ref.startswith(prefix) else img_ref
+            # Build candidate bare names in priority order: with namespace, then without.
+            bare_candidates: list[str] = [working]
+            if "__" in working:
+                bare_candidates.append(working.split("__", 1)[1])
+
+            if len(source_folders) == 1:
+                sf = source_folders[0]
+                for bare in bare_candidates:
+                    candidate = pm.in_path / sf / bare
+                    if candidate.is_file():
+                        return bare, candidate
+            else:
+                for bare in bare_candidates:
+                    if "__" in bare:
+                        ns, orig = bare.split("__", 1)
+                        if ns in ns_map:
+                            candidate = pm.in_path / ns_map[ns] / orig
+                            if candidate.is_file():
+                                return f"{ns}__{orig}", candidate
+                    for sf in source_folders:
+                        candidate = pm.in_path / sf / bare
+                        if candidate.is_file():
+                            return f"{make_image_namespace(sf)}__{bare}", candidate
+            return None
+
+        img_refs = [
+            r for r in geo_df["Image Reference"].tolist()
+            if isinstance(r, str) and r.strip()
+        ]
+        if not img_refs:
+            print(f"[migrate] '{project_name}': no image refs in geo_data — skipping", flush=True)
+            return False
+
+        print(f"[migrate] '{project_name}': checking {len(img_refs)} image refs against in/...", flush=True)
+
+        new_ref_map: dict[str, str] = {}
+        for img_ref in img_refs:
+            result = _strip_and_resolve(img_ref)
+            if result is None:
+                print(f"[migrate] '{project_name}': '{img_ref}' not found in in/ — skipping migration", flush=True)
+                return False
+            new_ref_map[img_ref] = result[0]
+
+        # All images confirmed in in/ — rewrite geo_data.gpkg
+        proj.geo_data.df["Image Reference"] = proj.geo_data.df["Image Reference"].apply(
+            lambda r: new_ref_map.get(str(r), r) if pd.notna(r) else r
+        )
+        # Write to a temp file first, then replace, to avoid Windows GDAL file-lock on the
+        # existing geo_data.gpkg (SQLite connections may linger after gpd.read_file).
+        tmp_gpkg = proj.project_path / "_geo_data_migrating.gpkg"
+        try:
+            proj.geo_data.df.to_file(str(tmp_gpkg), driver="GPKG", index=False)
+            gpkg_path = proj.project_path / "geo_data.gpkg"
+            if gpkg_path.exists():
+                gpkg_path.unlink()
+            tmp_gpkg.rename(gpkg_path)
+        except Exception as write_exc:
+            if tmp_gpkg.exists():
+                tmp_gpkg.unlink(missing_ok=True)
+            raise write_exc
+        print(f"[migrate] '{project_name}': geo_data.gpkg updated ({len(new_ref_map)} refs)", flush=True)
+
+        # Delete the now-redundant images/ folder
+        deleted = _rmtree_robust(images_dir)
+        if deleted:
+            print(f"[migrate] '{project_name}': images/ deleted. Migration complete.", flush=True)
+        else:
+            print(f"[migrate] '{project_name}': images/ could not be fully deleted (file lock?). Will retry next open.", flush=True)
+        return True
+
+    except Exception as exc:
+        print(f"[migrate] '{project_name}': migration error: {exc}", flush=True)
+        return False
+
+
 @bp.get("/<project_name>/geodata")
 def get_geodata(project_name: str):
     """Return the project's GeoData (GeoJSON FeatureCollection)."""
     import json
     ctx = get_ctx()  # Reuse the existing init context
     proj = ctx["pm"].project(project_name)
+    _migrate_legacy_images(ctx["pm"], project_name, proj)
     gdf = proj.geo_data.df  # GeoPandas GeoDataFrame
 
     # GeoDataFrame -> GeoJSON string, then to dict for jsonify-friendly output
@@ -1308,37 +1525,33 @@ def get_geodata(project_name: str):
 @bp.get("/<project_name>/images/<path:filename>")
 def get_project_image(project_name: str, filename: str):
     """
-    Return an image file under the project's images directory:
+    Return an image file for the given project.
+    Checks project's local images/ dir first (legacy projects), then falls back
+    to resolving the file directly from in/ (new/migrated projects).
     GET /api/projects/<project_name>/images/<filename>
     """
     ctx = get_ctx()
     pm = ctx["pm"]
 
-    # Compute {data}/{project}/images directory
+    # Try legacy project-local images/ directory first
     images_dir: Path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
+    if images_dir.is_dir():
+        safe_path = safe_join(str(images_dir), filename)
+        if safe_path is not None:
+            file_path = Path(safe_path).resolve()
+            if str(file_path).startswith(str(images_dir)) and file_path.is_file():
+                resp = send_from_directory(images_dir, file_path.name, conditional=True)
+                resp.headers["Cache-Control"] = "public, max-age=86400"
+                return resp
 
-    # Directory existence check
-    if not images_dir.exists() or not images_dir.is_dir():
-        abort(404, description="Images folder not found")
+    # Fall back to in/ for new or migrated projects
+    in_file = _resolve_image_from_in(pm, project_name, filename)
+    if in_file is not None:
+        resp = send_from_directory(str(in_file.parent), in_file.name, conditional=True)
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
 
-    # Use safe_join to prevent directory traversal
-    safe_path = safe_join(str(images_dir), filename)
-    if safe_path is None:
-        abort(400, description="Invalid image path")
-
-    file_path = Path(safe_path).resolve()
-    # Double-check: must be under images_dir
-    if not str(file_path).startswith(str(images_dir)):
-        abort(400, description="Invalid image path")
-
-    if not file_path.exists() or not file_path.is_file():
-        abort(404, description="Image not found")
-
-    # Return via send_from_directory with conditional caching
-    resp = send_from_directory(images_dir, file_path.name, conditional=True)
-    # Optional: add Cache-Control (adjust as needed for your deployment)
-    resp.headers["Cache-Control"] = "public, max-age=86400"
-    return resp
+    abort(404, description="Image not found")
 
 @bp.post("/<project_name>/segments/<int:segment_index>/post-treatment-image")
 def upload_post_treatment_image(project_name: str, segment_index: int):
@@ -1429,25 +1642,25 @@ def download_images():
                 
                 try:
                     images_dir = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER).resolve()
-                    
-                    if not images_dir.exists() or not images_dir.is_dir():
-                        continue
-                        
-                    # Add requested images to zip
+
                     for img_filename in image_files:
-                        img_filename = str(img_filename) # Ensure string
+                        img_filename = str(img_filename)
                         # Basic security check - prevent traversal
                         if ".." in img_filename or "/" in img_filename or "\\" in img_filename:
                             continue
-                            
+
+                        # Try legacy images/ dir first, then fall back to in/
                         img_path = images_dir / img_filename
-                        # Verify file exists
-                        if img_path.exists() and img_path.is_file():
-                            # Path inside zip: "{project_name} images/{img_filename}"
-                            zip_path = f"{project_name} images/{img_filename}"
-                            zf.write(str(img_path), zip_path)
-                            
-                except Exception as e:
+                        if not (img_path.exists() and img_path.is_file()):
+                            in_file = _resolve_image_from_in(pm, project_name, img_filename)
+                            if in_file is None:
+                                continue
+                            img_path = in_file
+
+                        zip_path = f"{project_name} images/{img_filename}"
+                        zf.write(str(img_path), zip_path)
+
+                except Exception:
                     continue
                     
     except Exception as e:
@@ -3096,28 +3309,16 @@ def _build_project_geo_data_from_points(
     gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
     return cycleRAP_VA.convert_points_to_linestrings(gdf)
 
-def copy_project_images(folder_path, filename_df, imagePath, filename_prefix=None):
+def apply_image_namespaces(filename_df, filename_prefix=None):
+    """Apply source-folder namespace prefix to FILENAME for multi-folder projects.
+    Does not copy any files — images remain in in/ and are resolved at serve time.
     """
-    Copy images referenced by FILENAME into the project image folder.
-    When combining multiple source folders, prefix file names to avoid collisions.
-    """
-    if not os.path.isdir(folder_path):
-        raise FileNotFoundError(f"The folder at {folder_path} does not exist or is not a directory.")
-
-    os.makedirs(imagePath, exist_ok=True)
+    if filename_prefix is None:
+        return filename_df
     result_df = filename_df.copy()
-
-    for idx, img_name in result_df['FILENAME'].items():
-        src = os.path.join(folder_path, img_name)
-        dst_name = img_name if not filename_prefix else f"{filename_prefix}__{img_name}"
-        dst = os.path.join(imagePath, dst_name)
-
-        if os.path.isfile(src):
-            shutil.copy2(src, dst)
-            result_df.at[idx, 'FILENAME'] = dst_name
-        else:
-            print(f"Image {img_name} not found in folder {folder_path}.")
-
+    result_df["FILENAME"] = result_df["FILENAME"].apply(
+        lambda f: f"{filename_prefix}__{f}"
+    )
     return result_df
 
 def build_project_geo_data(src_dir: Path, selection_polygon: Polygon | None = None):
@@ -3127,6 +3328,42 @@ def build_project_geo_data(src_dir: Path, selection_polygon: Polygon | None = No
 def make_image_namespace(source_name: str) -> str:
     namespace = "".join(ch if ch.isalnum() else "_" for ch in source_name).strip("_")
     return namespace or "source"
+
+
+def _resolve_image_from_in(pm, project_name: str, filename: str) -> "Path | None":
+    """Resolve an image filename to its physical path under in/.
+
+    For single-folder projects the filename is the bare original name.
+    For multi-folder projects the filename is '{namespace}__{original}'.
+    Namespace is produced by make_image_namespace(source_folder_name).
+    Returns None when the image cannot be located.
+    """
+    try:
+        proj = pm.project(project_name)
+        source_folders = getattr(proj.metadata, "source_folders", None) or []
+        if not source_folders:
+            return None
+
+        if len(source_folders) == 1:
+            candidate = pm.in_path / source_folders[0] / filename
+            if candidate.is_file():
+                return candidate
+        else:
+            if "__" in filename:
+                namespace, original = filename.split("__", 1)
+                ns_map = {make_image_namespace(sf): sf for sf in source_folders}
+                if namespace in ns_map:
+                    candidate = pm.in_path / ns_map[namespace] / original
+                    if candidate.is_file():
+                        return candidate
+            # Fallback: try all source folders with the bare filename
+            for sf in source_folders:
+                candidate = pm.in_path / sf / filename
+                if candidate.is_file():
+                    return candidate
+    except Exception:
+        pass
+    return None
 
 
 def _is_loopback_request() -> bool:
@@ -3441,7 +3678,10 @@ def list_input_folders():
     GET /api/projects/folders
     Response: { items: [ "FolderA", "FolderB", ... ] }
     """
-    ctx = get_ctx()                 # ← Use your existing get_ctx()
+    try:
+        ctx = get_ctx()
+    except Exception as exc:
+        return jsonify({"error": f"Backend initialisation failed: {exc}"}), 500
     pm = ctx["pm"]
     in_path: Path = pm.in_path
 
@@ -3869,6 +4109,59 @@ def roads_in_bounds():
         return fail(f"roads-in-bounds failed: {e}", 500)
 
 
+@bp.get("/roads-by-name")
+def roads_by_name():
+    """
+    Return all road line segments matching the given folder name.
+    The folder name may carry a quarter suffix (_1Q2026) and/or a segment
+    identifier (_NE1) separated by underscores. Singapore road names never
+    contain underscores, so the road name is everything before the first '_'.
+    Query params:
+      name (required) - folder name (raw, with any suffixes)
+    """
+    raw = request.args.get("name", "").strip()
+    if not raw:
+        return fail("Missing 'name' query param", 400)
+
+    # Extract road name: everything before the first underscore, case-normalised
+    road_name = raw.split("_")[0].strip().upper()
+    if not road_name:
+        return fail("Could not extract road name from folder name", 400)
+
+    try:
+        gdf = _get_road_sections_gdf()
+        road_name_col = next(
+            (c for c in ("RD_NAM", "RD_NAME", "ROAD_NAME", "NAME", "RD_CD_DESC") if c in gdf.columns),
+            None,
+        )
+        if road_name_col is None:
+            return ok({"roads": []})
+
+        matched = gdf[gdf[road_name_col].astype(str).str.strip().str.upper() == road_name]
+
+        ctx = get_ctx()
+        pm = ctx["pm"]
+        in_path: Path = pm.in_path
+        exists = in_path.exists() and (in_path / raw).is_dir()
+
+        roads = []
+        for _, row in matched.iterrows():
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+            if geom.geom_type == "LineString":
+                coords = [[lat, lng] for lng, lat in list(geom.coords)]
+                roads.append({"name": road_name, "exists": exists, "coords": coords})
+            elif geom.geom_type == "MultiLineString":
+                for line in geom.geoms:
+                    coords = [[lat, lng] for lng, lat in list(line.coords)]
+                    roads.append({"name": road_name, "exists": exists, "coords": coords})
+
+        return ok({"roads": roads})
+    except Exception as e:
+        return fail(f"roads-by-name failed: {e}", 500)
+
+
 @bp.get("/planning-areas-in-bounds")
 def planning_areas_in_bounds():
     """
@@ -4013,8 +4306,6 @@ def create_project_from_folder():
         return fail(f"folders not found: {', '.join(missing_folders)}", 404)
 
     project_path.mkdir(parents=True, exist_ok=True)
-    images_dir = project_path / global_var.PROJECT_IMAGES_FOLDER
-    images_dir.mkdir(parents=True, exist_ok=True)
 
     extracted_geo_data_parts = []
     use_image_prefix = len(src_dirs) > 1
@@ -4027,7 +4318,7 @@ def create_project_from_folder():
                 skipped_sources.append(selected_folder_name)
                 continue
             filename_prefix = make_image_namespace(selected_folder_name) if use_image_prefix else None
-            extracted_geo_data = copy_project_images(src_dir, extracted_geo_data, images_dir, filename_prefix)
+            extracted_geo_data = apply_image_namespaces(extracted_geo_data, filename_prefix)
             extracted_geo_data_parts.append(extracted_geo_data)
     except Exception as e:
         shutil.rmtree(project_path, ignore_errors=True)
@@ -4286,26 +4577,29 @@ def update_project_metadata(project_name: str):
                     df[col_name] = df[col_name].apply(_update_ref)
                     return True
 
-                try:
-                    # A. Attributes (Latest Version)
-                    latest_ver = proj.latest()
-                    if update_image_ref_in_df(latest_ver.attributes.df, "Image reference"):
-                         latest_ver.attributes.df_dirty = True
-                    
-                    # B. Treatment (Latest Version)
-                    if update_image_ref_in_df(latest_ver.treatment.df, "Image Reference"):
-                        latest_ver.treatment.df_dirty = True
-                    
-                    # C. Geo Data (Project Level)
-                    # Force load geo_data from the new path
-                    if update_image_ref_in_df(proj.geo_data.df, "Image Reference"):
-                        proj.geo_data.df_dirty = True
-                        
-                    # Save all changes
-                    proj.save_all()
-                    
-                except Exception as data_e:
-                    traceback.print_exc()
+                # Only update Image References when a legacy images/ dir exists.
+                # New projects reference in/ directly; their refs carry no project-name
+                # prefix and must not be rewritten.
+                if (new_path / global_var.PROJECT_IMAGES_FOLDER).is_dir():
+                    try:
+                        # A. Attributes (Latest Version)
+                        latest_ver = proj.latest()
+                        if update_image_ref_in_df(latest_ver.attributes.df, "Image reference"):
+                             latest_ver.attributes.df_dirty = True
+
+                        # B. Treatment (Latest Version)
+                        if update_image_ref_in_df(latest_ver.treatment.df, "Image Reference"):
+                            latest_ver.treatment.df_dirty = True
+
+                        # C. Geo Data (Project Level)
+                        if update_image_ref_in_df(proj.geo_data.df, "Image Reference"):
+                            proj.geo_data.df_dirty = True
+
+                        # Save all changes
+                        proj.save_all()
+
+                    except Exception:
+                        traceback.print_exc()
 
                 proj.metadata.last_updated = datetime.datetime.now()
                 proj.metadata.serialize(new_path)
@@ -4344,9 +4638,13 @@ def autocode_image(project_name: str):
         if not image_ref:
             return fail("imageRef is required", 400)
 
-        img_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / image_ref).resolve()
-        if not img_path.exists():
-            return fail(f"image not found: {img_path.name}", 404)
+        legacy_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / image_ref).resolve()
+        if legacy_path.is_file():
+            img_path = legacy_path
+        else:
+            img_path = _resolve_image_from_in(pm, project_name, image_ref)
+        if img_path is None or not img_path.exists():
+            return fail(f"image not found: {image_ref}", 404)
 
         skip_obstacles = bool(payload.get("skipObstacles", False))
         print(f"[Autocode] CV inference: {image_ref} (skip_obstacles={skip_obstacles})", flush=True)
@@ -4798,7 +5096,11 @@ def get_gis_layers(project_name: str):
             "bus_lane": "bus_lane",
             "parking_lot": "parking",
             "kerb_line": "kerb_line",
-            "bicycle_crossing": "bicycle_crossing"
+            "bicycle_crossing": "bicycle_crossing",
+            "state_land": "land_state_land",
+            "stat_board": "land_stat_board",
+            "land_private": "land_private",
+            "land_ministry": "land_ministry",
         }
 
         result_layers = {}
@@ -4935,6 +5237,127 @@ def get_gis_layers(project_name: str):
         traceback.print_exc()
         return fail(f"GIS layers error: {e}", 500)
 
+@bp.route('/gis/viewport', methods=['POST'])
+def get_gis_viewport_layers():
+    """Fetch GIS layers within a map viewport bounding box (used by Path Analysis page)."""
+    try:
+        data = request.get_json(force=True) or {}
+        bbox = data.get('bbox')           # [minLon, minLat, maxLon, maxLat]
+        requested_layers = data.get('layers', [])
+        max_features = min(int(data.get('max_features', 300)), 500)
+
+        if not bbox or len(bbox) != 4:
+            return fail("bbox must be [minLon, minLat, maxLon, maxLat]", 400)
+
+        min_lon, min_lat, max_lon, max_lat = [float(v) for v in bbox]
+
+        _gis = _get_gis()
+
+        # Reproject the bbox from WGS84 to the metric CRS used for spatial indexing
+        bbox_gdf = gpd.GeoDataFrame(geometry=[box(min_lon, min_lat, max_lon, max_lat)], crs="EPSG:4326")
+        bbox_gdf = bbox_gdf.to_crs(_gis.store.metric_crs)
+        buffer_geom = bbox_gdf.geometry.iloc[0]
+
+        layer_names = {
+            "cycling": "cycling_path",
+            "shared": "shared_path",
+            "footpath": "footpath",
+            "roadcrossing": "roadcrossing",
+            "mrt_exit": "mrt",
+            "bus_stop": ["bus_stop", "bus_shelter"],
+            "bus_lane": "bus_lane",
+            "parking_lot": "parking",
+            "kerb_line": "kerb_line",
+            "bicycle_crossing": "bicycle_crossing",
+            "state_land": "land_state_land",
+            "stat_board": "land_stat_board",
+            "land_private": "land_private",
+            "land_ministry": "land_ministry",
+        }
+
+        result_layers = {}
+
+        for layer_key in requested_layers:
+            if layer_key not in layer_names:
+                continue
+
+            layer_targets = layer_names[layer_key]
+            if not isinstance(layer_targets, list):
+                layer_targets = [layer_targets]
+
+            all_features = []
+            for layer_name in layer_targets:
+                if len(all_features) >= max_features:
+                    break
+                try:
+                    gdf = _gis.store.get(layer_name)
+                    if gdf is None or gdf.empty:
+                        continue
+
+                    candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
+                    if not candidate_indices:
+                        continue
+
+                    candidates = gdf.iloc[candidate_indices]
+                    intersecting = candidates[candidates.geometry.notna() & candidates.intersects(buffer_geom)]
+                    if intersecting.empty:
+                        continue
+
+                    remaining = max_features - len(all_features)
+                    if len(intersecting) > remaining:
+                        intersecting = intersecting.iloc[:remaining]
+
+                    intersecting_wgs84 = intersecting.copy().to_crs("EPSG:4326")
+
+                    for _, feature in intersecting_wgs84.iterrows():
+                        geom = feature.geometry
+                        if geom is None or geom.is_empty:
+                            continue
+
+                        if geom.has_z:
+                            try:
+                                geom = gis.GIS._remove_z_coordinate(geom)
+                            except Exception:
+                                pass
+
+                        props = {}
+                        for col in feature.index:
+                            if col != "geometry":
+                                val = feature[col]
+                                if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                                    props[col] = str(val)
+
+                        if geom.geom_type == "LineString":
+                            all_features.append({"coordinates": [[float(x), float(y)] for x, y in geom.coords], "geometry_type": "line", "properties": props})
+                        elif geom.geom_type == "MultiLineString":
+                            for line in geom.geoms:
+                                all_features.append({"coordinates": [[float(x), float(y)] for x, y in line.coords], "geometry_type": "line", "properties": props})
+                        elif geom.geom_type == "Point":
+                            all_features.append({"coordinates": [[float(geom.x), float(geom.y)]], "geometry_type": "point", "properties": props})
+                        elif geom.geom_type == "MultiPoint":
+                            for pt_geom in geom.geoms:
+                                all_features.append({"coordinates": [[float(pt_geom.x), float(pt_geom.y)]], "geometry_type": "point", "properties": props})
+                        elif geom.geom_type == "Polygon":
+                            all_features.append({"coordinates": [[float(x), float(y)] for x, y in geom.exterior.coords], "geometry_type": "polygon", "properties": props})
+                        elif geom.geom_type == "MultiPolygon":
+                            for poly in geom.geoms:
+                                all_features.append({"coordinates": [[float(x), float(y)] for x, y in poly.exterior.coords], "geometry_type": "polygon", "properties": props})
+
+                except Exception as e:
+                    traceback.print_exc()
+                    print(f"[GIS Viewport] Error processing layer '{layer_name}': {e}")
+
+            result_layers[layer_key] = all_features
+
+        layer_summary = {k: len(v) for k, v in result_layers.items()}
+        print(f"[GIS Viewport] Response: {layer_summary}")
+        return ok({"ok": True, "layers": result_layers})
+
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"GIS viewport layers error: {e}", 500)
+
+
 @bp.route("/<projectName>/gis/detect", methods=["POST"])
 def detect_nearby_gis(projectName):
     """
@@ -5044,17 +5467,20 @@ def autocode_all(project_name: str):
             Returns:
                 str: Image filename if found and exists, None otherwise
             """
+            def _image_ref_exists(img_ref: str) -> bool:
+                """Check images/ dir first, then in/ (for new/migrated projects)."""
+                legacy = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / img_ref).resolve()
+                if legacy.is_file():
+                    return True
+                return _resolve_image_from_in(pm, project_name, img_ref) is not None
+
             # Primary source: geo_data (where image references are stored during project creation)
-            # See project_manager.py:453 where image_ref is stored in geo_tbl
             if 0 <= idx < len(proj.geo_data.df):
                 geo_row = proj.geo_data.df.iloc[idx]
-                # Try multiple possible column names for compatibility
                 for key in ("Image Reference", "Image_Reference", "image", "img", "FILENAME"):
                     if key in geo_row and pd.notna(geo_row[key]) and str(geo_row[key]).strip():
                         img_ref = str(geo_row[key]).strip()
-                        # Verify file exists before returning
-                        img_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / img_ref).resolve()
-                        if img_path.exists():
+                        if _image_ref_exists(img_ref):
                             return img_ref
 
             # Fallback: attributes table (in case it was copied there)
@@ -5063,9 +5489,7 @@ def autocode_all(project_name: str):
                 for key in ("Image Reference", "Image_Reference", "image", "img", "FILENAME"):
                     if key in attr_row and pd.notna(attr_row[key]) and str(attr_row[key]).strip():
                         img_ref = str(attr_row[key]).strip()
-                        # Verify file exists before returning
-                        img_path = (pm.des_path / project_name / global_var.PROJECT_IMAGES_FOLDER / img_ref).resolve()
-                        if img_path.exists():
+                        if _image_ref_exists(img_ref):
                             return img_ref
             return None
 
