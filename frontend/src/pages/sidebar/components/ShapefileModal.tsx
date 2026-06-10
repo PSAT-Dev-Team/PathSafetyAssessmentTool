@@ -656,8 +656,16 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
                           <Text fontSize="xs" color="red.600">{previewError}</Text>
                         </Box>
                       )}
-                      <MapContainer center={[1.3521, 103.8198]} zoom={11}
-                        style={{ width: "100%", height: "100%" }} scrollWheelZoom>
+                      <MapContainer
+                        center={[1.3521, 103.8198]}
+                        zoom={11}
+                        minZoom={10}
+                        maxZoom={18}
+                        maxBounds={[[1.05, 103.49], [1.57, 104.21]]}
+                        maxBoundsViscosity={1.0}
+                        style={{ width: "100%", height: "100%" }}
+                        scrollWheelZoom
+                      >
                         <ThemeAwareTileLayer />
                         {previewGeoJSON && !previewLoading && (
                           <>
