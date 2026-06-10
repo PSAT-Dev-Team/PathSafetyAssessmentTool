@@ -857,6 +857,8 @@ export type ShapefileInfo = {
   required_columns?: string;
   affects?: string;
   geom_type?: string;
+  original_name?: string;
+  is_renamed?: boolean;
 };
 
 export type ShapefileCategoryInfo = {
@@ -969,8 +971,34 @@ export async function replaceShapefiles(
  * @param shapefilePath - Relative path to shapefile (e.g., "area_type/Central.shp")
  */
 export async function deleteShapefile(shapefilePath: string): Promise<{ message: string; deleted_files: string[] }> {
-  const res = await fetch(`/api/shapefiles/${encodeURIComponent(shapefilePath)}`, {
+  const res = await fetch(`/api/shapefiles/${shapefilePath}`, {
     method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Rename a shapefile and all companion files to a new stem
+ */
+export async function renameShapefile(shapefilePath: string, newName: string): Promise<{ message: string; new_path: string }> {
+  const res = await fetch(`/api/shapefiles/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: shapefilePath, new_name: newName }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/**
+ * Revert a renamed shapefile back to its original name
+ */
+export async function revertShapefile(shapefilePath: string): Promise<{ message: string; new_path: string }> {
+  const res = await fetch(`/api/shapefiles/revert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: shapefilePath }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

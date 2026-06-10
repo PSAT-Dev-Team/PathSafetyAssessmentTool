@@ -134,6 +134,22 @@ def _companion_extensions() -> List[str]:
             ".xml", ".qmd"]
 
 
+def _originals_path() -> Path:
+    return _shp_root() / ".psat_originals.json"
+
+def _load_originals() -> dict:
+    p = _originals_path()
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+def _save_originals(data: dict) -> None:
+    _originals_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def _file_info(shp_path: Path, root: Path) -> dict:
     """Build a ShapefileInfo dict for one .shp file."""
     rel = shp_path.relative_to(root)
@@ -211,12 +227,28 @@ def list_shapefiles():
     if not root.exists():
         return jsonify([])
 
-    results = [
-        _file_info(p, root)
-        for p in sorted(root.rglob("*.shp"))
-        if not any(part.startswith("temp") for part in p.parts)
-        and not p.name.startswith("._")   # macOS AppleDouble metadata files
-    ]
+    originals = _load_originals()
+    changed = False
+    results = []
+
+    for p in sorted(root.rglob("*.shp")):
+        if any(part.startswith("temp") for part in p.parts):
+            continue
+        if p.name.startswith("._"):
+            continue
+        info = _file_info(p, root)
+        rel_posix = info["path"]
+        if rel_posix not in originals:
+            originals[rel_posix] = p.stem
+            changed = True
+        orig_stem = originals[rel_posix]
+        info["original_name"] = orig_stem.replace("_", " ").title()
+        info["is_renamed"] = (orig_stem != p.stem)
+        results.append(info)
+
+    if changed:
+        _save_originals(originals)
+
     return jsonify(results)
 
 
@@ -584,4 +616,110 @@ def delete_shapefile(shapefile_path: str):
             companion.unlink()
             deleted.append(companion.name)
 
+    originals = _load_originals()
+    if shapefile_path in originals:
+        originals.pop(shapefile_path)
+        _save_originals(originals)
+
     return jsonify({"message": f"Deleted {len(deleted)} file(s)", "deleted_files": deleted})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shapefiles/rename
+# ---------------------------------------------------------------------------
+
+@bp.post("/rename")
+def rename_shapefile():
+    """
+    Rename a shapefile and all its companion files to a new stem.
+
+    Body: {"path": "category/file.shp", "new_name": "NewName"}
+    """
+    import re
+
+    body = request.get_json(force=True, silent=True) or {}
+    shapefile_path = (body.get("path") or "").strip()
+    new_name = (body.get("new_name") or "").strip()
+
+    if not shapefile_path:
+        return jsonify({"error": "path is required"}), 400
+    if not new_name:
+        return jsonify({"error": "new_name is required"}), 400
+
+    safe_name = re.sub(r"[^\w\s\-.]", "", new_name).strip()
+    if not safe_name:
+        return jsonify({"error": "Invalid name — use letters, numbers, spaces, hyphens or dots"}), 400
+
+    abs_path = _safe_relative(shapefile_path)
+    if abs_path is None or not abs_path.exists():
+        return jsonify({"error": f"Shapefile not found: {shapefile_path}"}), 404
+
+    # Load originals before rename so we can preserve the original stem
+    originals = _load_originals()
+    orig_stem = originals.get(shapefile_path, abs_path.stem)
+
+    parent = abs_path.parent
+    renamed = []
+    for ext in _companion_extensions():
+        companion = abs_path.with_suffix(ext)
+        if companion.exists():
+            new_file = parent / (safe_name + ext)
+            companion.rename(new_file)
+            renamed.append(new_file.name)
+
+    new_rel = (parent / (safe_name + ".shp")).relative_to(_shp_root()).as_posix()
+
+    # Update originals registry: remap old path -> new path, keep original stem
+    originals.pop(shapefile_path, None)
+    if orig_stem != safe_name:
+        originals[new_rel] = orig_stem
+    _save_originals(originals)
+
+    return jsonify({"message": f"Renamed {len(renamed)} file(s)", "new_path": new_rel, "renamed_files": renamed})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/shapefiles/revert
+# ---------------------------------------------------------------------------
+
+@bp.post("/revert")
+def revert_shapefile():
+    """
+    Revert a renamed shapefile back to its original stem.
+
+    Body: {"path": "category/current_file.shp"}
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    shapefile_path = (body.get("path") or "").strip()
+
+    if not shapefile_path:
+        return jsonify({"error": "path is required"}), 400
+
+    originals = _load_originals()
+    if shapefile_path not in originals:
+        return jsonify({"error": "No original name record found for this shapefile"}), 404
+
+    original_stem = originals[shapefile_path]
+    abs_path = _safe_relative(shapefile_path)
+    if abs_path is None or not abs_path.exists():
+        return jsonify({"error": f"Shapefile not found: {shapefile_path}"}), 404
+
+    if abs_path.stem == original_stem:
+        originals.pop(shapefile_path, None)
+        _save_originals(originals)
+        return jsonify({"message": "Already at original name", "new_path": shapefile_path})
+
+    parent = abs_path.parent
+    renamed = []
+    for ext in _companion_extensions():
+        companion = abs_path.with_suffix(ext)
+        if companion.exists():
+            new_file = parent / (original_stem + ext)
+            companion.rename(new_file)
+            renamed.append(new_file.name)
+
+    new_rel = (parent / (original_stem + ".shp")).relative_to(_shp_root()).as_posix()
+    originals.pop(shapefile_path, None)
+    _save_originals(originals)
+
+    return jsonify({"message": f"Reverted {len(renamed)} file(s)", "new_path": new_rel, "renamed_files": renamed})
