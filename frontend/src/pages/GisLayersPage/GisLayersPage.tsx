@@ -374,7 +374,7 @@ export default function GisLayersPage() {
             <Text fontWeight="600" color={titleColor}>Available Shapefiles</Text>
           </Box>
           {actionError && (
-            <Box px={3} py={2} bg="red.50" _dark={{ bg: "red.950" }} borderBottom="1px solid" borderColor="red.200" _dark_borderColor="red.700">
+            <Box px={3} py={2} bg="red.50" _dark={{ bg: "red.950", borderColor: "red.700" }} borderBottom="1px solid" borderColor="red.200">
               <Flex align="center" justify="space-between" gap="2">
                 <Text fontSize="xs" color="red.700" _dark={{ color: "red.300" }}>{actionError}</Text>
                 <Button size="xs" variant="ghost" colorPalette="red" onClick={() => setActionError(null)}>✕</Button>

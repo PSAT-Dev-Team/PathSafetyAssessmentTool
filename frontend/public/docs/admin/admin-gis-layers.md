@@ -45,7 +45,7 @@ If the column check fails, the upload is rejected and the existing layer is left
 
 ### 3.4 Column Mapping Requirements
 
-Each layer has required column indices documented in the **GIS Layers** dashboard. For example:
+Each layer has required column indices documented in the [GIS Layers dashboard](#32-updating-via-the-ui). For example:
 
 | Layer | Required column | Index |
 |---|---|---|
@@ -53,3 +53,5 @@ Each layer has required column indices documented in the **GIS Layers** dashboar
 | Bus stop | `BUS_STOP_N` | varies |
 
 Always cross-check against the layer definition shown in the GIS Layers dashboard before uploading a replacement file. Mismatched columns will cause auto-code to produce incorrect results for attributes derived from that layer.
+
+> For full GIS layer management instructions available to users, see [User Guide → 8. GIS Layer Management](../user/user-gis-management.md). For scoring algorithm updates, see the [Developer Guide → 6.8 Updating the CycleRAP Algorithm](../developer/scoring.md).

@@ -1,4 +1,4 @@
-# Installation Guide
+# 2. Installation Guide
 
 This guide covers local setup for PSAT on Windows. Docker is the standard path, but a non-Docker developer workflow is also supported.
 

@@ -1,4 +1,4 @@
-## Finer Filtering in Path Analysis
+## 5.6 Finer Filtering in Path Analysis
 
 Finer filtering lets you narrow a segment filter down to a specific **sub-type** within a parent category. When an attribute supports it, selecting a top-level value reveals a second dropdown — and the map immediately updates to colour only the segments that match your exact sub-type.
 

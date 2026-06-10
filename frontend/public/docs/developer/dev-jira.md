@@ -1,8 +1,21 @@
-# Jira — Bug Tracking & Task Management
+# 10. Jira — Bug Tracking & Task Management
 
 We use **Jira** to log bug fixes, feature updates, and outstanding tasks for PSAT.
 
 🔗 [Open Jira Board](https://home.atlassian.com/o/99e7c896-5c8b-4caa-862f-7748a1d371a2/?cloudId=2c0f6e4f-e77f-4186-a61e-3ac305382a3f)
+
+---
+
+## Table of Contents
+
+- [10.1 How to Log In](#101-how-to-log-in)
+- [10.2 Viewing the Board & Outstanding Tasks](#102-viewing-the-board--outstanding-tasks)
+- [10.3 Viewing Bugs Specifically](#103-viewing-bugs-specifically)
+- [10.4 Creating a New Ticket](#104-creating-a-new-ticket-bug-task-or-feature)
+- [10.5 Editing an Existing Ticket](#105-editing-an-existing-ticket)
+- [10.6 Moving a Ticket Through the Workflow](#106-moving-a-ticket-through-the-workflow)
+- [10.7 Closing / Resolving a Ticket](#107-closing--resolving-a-ticket)
+- [10.8 Tips](#108-tips)
 
 ---
 

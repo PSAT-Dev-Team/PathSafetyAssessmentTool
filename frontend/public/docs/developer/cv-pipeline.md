@@ -1,4 +1,4 @@
-# CV / ML Pipeline
+# 5. CV / ML Pipeline
 
 PSAT uses YOLO-based computer-vision models to automatically infer CycleRAP attribute values from street-level photographs. This process is called **auto-coding**.
 

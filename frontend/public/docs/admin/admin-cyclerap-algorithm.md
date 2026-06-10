@@ -40,4 +40,4 @@ Algorithm updates require changes to the backend scoring logic and are not self-
 | Risk band thresholds | Same file, band definitions section |
 | Treatment effect mappings | `backend/app/api/projects/routes.py` (treatment triggers) |
 
-> For full implementation details, testing procedures, and the scoring formula reference, see the **Developer Guide → Scoring Logic** section.
+> For full implementation details, testing procedures, and the scoring formula reference, see the [Developer Guide → 6. Scoring Logic](../developer/scoring.md).

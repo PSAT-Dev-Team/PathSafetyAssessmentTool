@@ -48,3 +48,5 @@ docker compose logs --since 1h backend
 | `/api/health` returns 500 | Backend crashed on startup | Run `docker compose logs backend` immediately after startup for the traceback |
 | Frontend shows blank page | Build error or API unreachable | Check browser console; verify backend container is running |
 | Segments not loading in Coding | Project metadata corrupt | Check `profiles/<slug>/projects/<name>/project_metadata.json` for invalid JSON |
+
+> For a full troubleshooting reference covering Docker startup, model loading, `in/` folder setup, polygon road selection, and scoring issues, see the [Developer Guide → 8. Common Issues](../developer/common-issues.md).

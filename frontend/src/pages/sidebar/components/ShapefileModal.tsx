@@ -33,7 +33,6 @@ type WorkflowStep = "choice" | "add" | "replace" | "success";
 
 export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
   const [step, setStep] = useState<WorkflowStep>("choice");
-  const [categories, setCategories] = useState<api.ShapefileCategoryInfo[]>([]);
   const [allShapefiles, setAllShapefiles] = useState<api.ShapefileInfo[]>([]);
 
   // Add Shapefile State
@@ -47,16 +46,12 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
 
   // Replace Shapefile State
   const [replaceFiles, setReplaceFiles] = useState<File[]>([]);
-  const [selectedReplaceCategory, setSelectedReplaceCategory] = useState<string>("");
   const [selectedTargetShapefile, setSelectedTargetShapefile] = useState<string>("");
   const [replacing, setReplacing] = useState(false);
   const [replaceDragActive, setReplaceDragActive] = useState(false);
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
-  const [replaceCategorySearch, setReplaceCategorySearch] = useState("");
   const [targetShapefileSearch, setTargetShapefileSearch] = useState("");
-  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const [isTargetDropdownOpen, setIsTargetDropdownOpen] = useState(false);
-  const categorySearchRef = useRef<HTMLDivElement>(null);
   const targetSearchRef = useRef<HTMLDivElement>(null);
   const previewRequestIdRef = useRef(0);
 
@@ -74,18 +69,9 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
 
   useEffect(() => {
     if (open) {
-      loadCategories();
       loadAllShapefiles();
     }
   }, [open]);
-
-  async function loadCategories() {
-    try {
-      const data = await api.listShapefileCategories();
-      setCategories(data);
-    } catch (error) {
-    }
-  }
 
   async function loadAllShapefiles() {
     try {
@@ -287,7 +273,6 @@ export default function ShapefileModal({ open, onClose }: ShapefileModalProps) {
       // Clear files and reload data
       setUploadFiles([]);
   resetPreviewState();
-      await loadCategories();
       await loadAllShapefiles();
       setStep("success");
     } catch (error) {

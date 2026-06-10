@@ -46,7 +46,7 @@ export default function UserGuide() {
                 w="100%"
                 textAlign="left"
                 px="2"
-                pl={doc.isSubItem ? "6" : "2"}
+                pl="2"
                 py="2"
                 borderRadius="md"
                 fontSize="sm"

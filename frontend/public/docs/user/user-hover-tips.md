@@ -1,4 +1,4 @@
-# Hover Tips — Safety Scores & Attributes
+## 3.9 Hover Tips — Safety Scores & Attributes
 
 PSAT surfaces contextual help through hover tooltips throughout the interface. This guide explains what each tooltip type shows and where to find them.
 
