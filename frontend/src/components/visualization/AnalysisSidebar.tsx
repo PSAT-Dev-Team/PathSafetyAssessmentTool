@@ -1,5 +1,7 @@
-import { Box, IconButton, Text, Flex } from '@chakra-ui/react';
+import { useRef } from 'react';
+import { Box, Button, IconButton, Text, Flex } from '@chakra-ui/react';
 import { FiChevronsLeft, FiChevronsRight } from 'react-icons/fi';
+import { FaFileImport, FaTrash } from 'react-icons/fa';
 import { Switch } from '../ui/switch';
 import './AnalysisPanel.css';
 
@@ -45,6 +47,12 @@ interface AnalysisSidebarProps {
   setShowLandPrivate: (v: boolean) => void;
   showLandMinistry: boolean;
   setShowLandMinistry: (v: boolean) => void;
+  onFilesSelected: (files: File[]) => void;
+  importedShapefileHasData: boolean;
+  importedShapefileLoading: boolean;
+  importedShapefileError: string | null;
+  importedShapefileName: string | null;
+  onClearImportedShapefile: () => void;
 }
 
 export function AnalysisSidebar({
@@ -65,7 +73,14 @@ export function AnalysisSidebar({
   showStatBoard, setShowStatBoard,
   showLandPrivate, setShowLandPrivate,
   showLandMinistry, setShowLandMinistry,
+  onFilesSelected,
+  importedShapefileHasData,
+  importedShapefileLoading,
+  importedShapefileError,
+  importedShapefileName,
+  onClearImportedShapefile,
 }: AnalysisSidebarProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const layers: GISLayerToggle[] = [
     { key: 'footpath',          label: 'Footpath',          color: '#1E90FF', colorPalette: 'blue',   value: showFootpath,          onChange: setShowFootpath },
     { key: 'cycling',           label: 'Cycling Path',      color: '#B91C1C', colorPalette: 'red',    value: showCycling,           onChange: setShowCycling },
@@ -152,6 +167,58 @@ export function AnalysisSidebar({
               />
             </Flex>
           ))}
+
+          {/* Import Shapefile */}
+          <Box mt={3}>
+            <Box borderBottom="1px solid" borderColor="gray.100" _dark={{ borderColor: "gray.700" }} mb={3} />
+            <Text
+              fontWeight="semibold"
+              mb={2}
+              fontSize="xs"
+              color="gray.500"
+              _dark={{ color: "gray.400" }}
+              textTransform="uppercase"
+              letterSpacing="wider"
+            >
+              Import
+            </Text>
+            <Button
+              size="xs"
+              variant={importedShapefileHasData ? "solid" : "outline"}
+              colorPalette={importedShapefileHasData ? "orange" : "gray"}
+              loading={importedShapefileLoading}
+              w="full"
+              mb={importedShapefileHasData ? 1 : 0}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <FaFileImport />
+              <Text ml={1}>{importedShapefileHasData ? "Replace Shapefile" : "Import Shapefile"}</Text>
+            </Button>
+            {importedShapefileHasData && (
+              <Button size="xs" variant="outline" colorPalette="orange" w="full" mb={2} onClick={onClearImportedShapefile}>
+                <FaTrash />
+                <Text ml={1}>Clear Imported</Text>
+              </Button>
+            )}
+            {!importedShapefileLoading && importedShapefileError && (
+              <Text fontSize="xs" color="red.500" mt={1}>{importedShapefileError}</Text>
+            )}
+            {!importedShapefileLoading && !importedShapefileError && importedShapefileName && (
+              <Text fontSize="xs" color="blue.600" mt={1} truncate>Imported: {importedShapefileName}</Text>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".zip,.shp,.shx,.dbf,.prj,.cpg,.sbn,.sbx"
+              multiple
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                if (files.length > 0) onFilesSelected(files);
+              }}
+              style={{ display: "none" }}
+            />
+          </Box>
         </Box>
       </Box>
 

@@ -5189,6 +5189,127 @@ def get_gis_layers(project_name: str):
         traceback.print_exc()
         return fail(f"GIS layers error: {e}", 500)
 
+@bp.route('/gis/viewport', methods=['POST'])
+def get_gis_viewport_layers():
+    """Fetch GIS layers within a map viewport bounding box (used by Path Analysis page)."""
+    try:
+        data = request.get_json(force=True) or {}
+        bbox = data.get('bbox')           # [minLon, minLat, maxLon, maxLat]
+        requested_layers = data.get('layers', [])
+        max_features = min(int(data.get('max_features', 300)), 500)
+
+        if not bbox or len(bbox) != 4:
+            return fail("bbox must be [minLon, minLat, maxLon, maxLat]", 400)
+
+        min_lon, min_lat, max_lon, max_lat = [float(v) for v in bbox]
+
+        _gis = _get_gis()
+
+        # Reproject the bbox from WGS84 to the metric CRS used for spatial indexing
+        bbox_gdf = gpd.GeoDataFrame(geometry=[box(min_lon, min_lat, max_lon, max_lat)], crs="EPSG:4326")
+        bbox_gdf = bbox_gdf.to_crs(_gis.store.metric_crs)
+        buffer_geom = bbox_gdf.geometry.iloc[0]
+
+        layer_names = {
+            "cycling": "cycling_path",
+            "shared": "shared_path",
+            "footpath": "footpath",
+            "roadcrossing": "roadcrossing",
+            "mrt_exit": "mrt",
+            "bus_stop": ["bus_stop", "bus_shelter"],
+            "bus_lane": "bus_lane",
+            "parking_lot": "parking",
+            "kerb_line": "kerb_line",
+            "bicycle_crossing": "bicycle_crossing",
+            "state_land": "land_state_land",
+            "stat_board": "land_stat_board",
+            "land_private": "land_private",
+            "land_ministry": "land_ministry",
+        }
+
+        result_layers = {}
+
+        for layer_key in requested_layers:
+            if layer_key not in layer_names:
+                continue
+
+            layer_targets = layer_names[layer_key]
+            if not isinstance(layer_targets, list):
+                layer_targets = [layer_targets]
+
+            all_features = []
+            for layer_name in layer_targets:
+                if len(all_features) >= max_features:
+                    break
+                try:
+                    gdf = _gis.store.get(layer_name)
+                    if gdf is None or gdf.empty:
+                        continue
+
+                    candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
+                    if not candidate_indices:
+                        continue
+
+                    candidates = gdf.iloc[candidate_indices]
+                    intersecting = candidates[candidates.geometry.notna() & candidates.intersects(buffer_geom)]
+                    if intersecting.empty:
+                        continue
+
+                    remaining = max_features - len(all_features)
+                    if len(intersecting) > remaining:
+                        intersecting = intersecting.iloc[:remaining]
+
+                    intersecting_wgs84 = intersecting.copy().to_crs("EPSG:4326")
+
+                    for _, feature in intersecting_wgs84.iterrows():
+                        geom = feature.geometry
+                        if geom is None or geom.is_empty:
+                            continue
+
+                        if geom.has_z:
+                            try:
+                                geom = gis.GIS._remove_z_coordinate(geom)
+                            except Exception:
+                                pass
+
+                        props = {}
+                        for col in feature.index:
+                            if col != "geometry":
+                                val = feature[col]
+                                if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                                    props[col] = str(val)
+
+                        if geom.geom_type == "LineString":
+                            all_features.append({"coordinates": [[float(x), float(y)] for x, y in geom.coords], "geometry_type": "line", "properties": props})
+                        elif geom.geom_type == "MultiLineString":
+                            for line in geom.geoms:
+                                all_features.append({"coordinates": [[float(x), float(y)] for x, y in line.coords], "geometry_type": "line", "properties": props})
+                        elif geom.geom_type == "Point":
+                            all_features.append({"coordinates": [[float(geom.x), float(geom.y)]], "geometry_type": "point", "properties": props})
+                        elif geom.geom_type == "MultiPoint":
+                            for pt_geom in geom.geoms:
+                                all_features.append({"coordinates": [[float(pt_geom.x), float(pt_geom.y)]], "geometry_type": "point", "properties": props})
+                        elif geom.geom_type == "Polygon":
+                            all_features.append({"coordinates": [[float(x), float(y)] for x, y in geom.exterior.coords], "geometry_type": "polygon", "properties": props})
+                        elif geom.geom_type == "MultiPolygon":
+                            for poly in geom.geoms:
+                                all_features.append({"coordinates": [[float(x), float(y)] for x, y in poly.exterior.coords], "geometry_type": "polygon", "properties": props})
+
+                except Exception as e:
+                    traceback.print_exc()
+                    print(f"[GIS Viewport] Error processing layer '{layer_name}': {e}")
+
+            result_layers[layer_key] = all_features
+
+        layer_summary = {k: len(v) for k, v in result_layers.items()}
+        print(f"[GIS Viewport] Response: {layer_summary}")
+        return ok({"ok": True, "layers": result_layers})
+
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"GIS viewport layers error: {e}", 500)
+
+
 @bp.route("/<projectName>/gis/detect", methods=["POST"])
 def detect_nearby_gis(projectName):
     """

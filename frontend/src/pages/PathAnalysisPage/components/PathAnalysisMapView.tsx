@@ -9,12 +9,13 @@ import { NUMERIC_FILTER_ATTRIBUTES, ATTRIBUTE_OPTIONS, ATTRIBUTE_LABELS, getCate
 import { AddSegmentsDialog } from "./AddSegmentsDialog";
 import { Menu } from "@chakra-ui/react";
 import { MapCursorController } from "../../../components/common/MapCursorController";
+import { AnalysisSidebar } from "../../../components/visualization/AnalysisSidebar";
 
 import "leaflet/dist/leaflet.css";
 import L, { divIcon } from "leaflet";
 import proj4 from "proj4";
-import type { Feature, LineString, Position } from "geojson";
-import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchProjectResults, downloadFilteredImages, exportShapefile, deleteSegment, deleteSegmentsBatch, type AttributeRow, type CodingFilterContext, type FilteredProjectData, CODING_FILTER_CONTEXT_KEY } from "../../../api";
+import type { Feature, FeatureCollection, GeoJsonProperties, LineString, MultiLineString, MultiPolygon, Polygon, Position } from "geojson";
+import { fetchProjectAttributes, fetchProjectGeoJSON, fetchAttributeMappings, calculateScore, fetchProjectResults, downloadFilteredImages, exportShapefile, deleteSegment, deleteSegmentsBatch, previewUploadedShapefiles, type AttributeRow, type CodingFilterContext, type FilteredProjectData, CODING_FILTER_CONTEXT_KEY } from "../../../api";
 import { getSegmentRiskBandColor } from "../../../components/visualization/scoreband/colorConstants";
 
 const SAFETY_FOCUS_ATTRIBUTES = new Set(["VB Band", "BB Band", "SB Band", "BP Band", "Overall Risk Level"]);
@@ -26,6 +27,85 @@ const SAFETY_FOCUS_ATTRIBUTES = new Set(["VB Band", "BB Band", "SB Band", "BP Ba
 // segments that were never explicitly coded (null in attributes.csv) get dropped
 // from visibleSegments and never appear even when "Adequate" is toggled on.
 const ADEQUACY_DEFAULT_ATTRS = new Set(["Line of Sight", "Facility access"]);
+interface UploadedBoundaryFeature {
+  key: string;
+  label: string;
+  kind: "polygon" | "line";
+  coords?: [number, number][];
+  lineCoordsSets?: [number, number][][];
+}
+
+const FEATURE_LABEL_KEYS = [
+  "name", "Name", "NAME", "label", "Label", "LABEL",
+  "pln_area_n", "PLN_AREA_N", "subzone_n", "SUBZONE_N",
+  "region_n", "REGION_N", "id", "ID", "OBJECTID", "FID",
+];
+
+function getUploadedBoundaryLabel(properties: GeoJsonProperties | null | undefined, featureIndex: number): string {
+  if (properties) {
+    for (const key of FEATURE_LABEL_KEYS) {
+      const value = properties[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+      if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    }
+  }
+  return `Feature ${featureIndex + 1}`;
+}
+
+function toShapefileLeafletCoords(ring: number[][]): [number, number][] {
+  return ring
+    .filter((coord) => coord.length >= 2 && Number.isFinite(coord[0]) && Number.isFinite(coord[1]))
+    .map(([lng, lat]) => [lat, lng]);
+}
+
+function extractUploadedBoundaryFeatures(collection: FeatureCollection): UploadedBoundaryFeature[] {
+  const boundaries: UploadedBoundaryFeature[] = [];
+  const aggregatedLineCoords: number[][][] = [];
+  const aggregatedLineLabels: string[] = [];
+
+  collection.features.forEach((feature, featureIndex) => {
+    const baseLabel = getUploadedBoundaryLabel(feature.properties, featureIndex);
+    const geometry = feature.geometry;
+    if (!geometry) return;
+
+    if (geometry.type === "Polygon") {
+      const coords = toShapefileLeafletCoords((geometry as Polygon).coordinates[0] as number[][]);
+      if (coords.length >= 3) boundaries.push({ key: `${featureIndex}-0`, label: baseLabel, kind: "polygon", coords });
+    } else if (geometry.type === "MultiPolygon") {
+      const multi = geometry as MultiPolygon;
+      multi.coordinates.forEach((polygonCoords, partIndex) => {
+        const coords = toShapefileLeafletCoords(polygonCoords[0] as number[][]);
+        if (coords.length >= 3) boundaries.push({
+          key: `${featureIndex}-${partIndex}`,
+          label: multi.coordinates.length > 1 ? `${baseLabel} (part ${partIndex + 1})` : baseLabel,
+          kind: "polygon", coords,
+        });
+      });
+    } else if (geometry.type === "LineString") {
+      const lineCoords = (geometry as LineString).coordinates as number[][];
+      const coords = toShapefileLeafletCoords(lineCoords);
+      if (coords.length >= 2) { aggregatedLineCoords.push(lineCoords); aggregatedLineLabels.push(baseLabel); }
+    } else if (geometry.type === "MultiLineString") {
+      (geometry as MultiLineString).coordinates.forEach((lineCoords) => {
+        const coords = toShapefileLeafletCoords(lineCoords as number[][]);
+        if (coords.length >= 2) { aggregatedLineCoords.push(lineCoords as number[][]); aggregatedLineLabels.push(baseLabel); }
+      });
+    }
+  });
+
+  if (aggregatedLineCoords.length > 0) {
+    const lineCoordsSets = aggregatedLineCoords.map((lc) => toShapefileLeafletCoords(lc)).filter((c) => c.length >= 2);
+    boundaries.push({
+      key: "uploaded-lines",
+      label: aggregatedLineLabels.length === 1 ? aggregatedLineLabels[0] : `Imported Lines (${aggregatedLineCoords.length} features)`,
+      kind: "line",
+      lineCoordsSets,
+    });
+  }
+
+  return boundaries;
+}
+
 type GradeBucket = {
   label: string;
   aliases: string[];
@@ -439,6 +519,170 @@ export default function AttributeAnalysisMapView({
       setPrimaryFocusAttribute("Project");
     }
   }, [selectedAttributes]);
+
+  // GIS layer toggles
+  const [isGisSidebarOpen, setIsGisSidebarOpen] = useState(false);
+  const [gisLayers, setGisLayers] = useState<Record<string, any[]> | null>(null);
+  const [pathDefects, setPathDefects] = useState<{ lat: number; lon: number; type_of_defect?: string; location?: string; date_of_inspection?: string }[] | null>(null);
+  const [showFootpath, setShowFootpath] = useState(false);
+  const [showCycling, setShowCycling] = useState(false);
+  const [showShared, setShowShared] = useState(false);
+  const [showRoadcrossing, setShowRoadcrossing] = useState(false);
+  const [showMrtExit, setShowMrtExit] = useState(false);
+  const [showBusStop, setShowBusStop] = useState(false);
+  const [showBusLane, setShowBusLane] = useState(false);
+  const [showParkingLot, setShowParkingLot] = useState(false);
+  const [showKerbLine, setShowKerbLine] = useState(false);
+  const [showBicycleCrossing, setShowBicycleCrossing] = useState(false);
+  const [showPathDefects, setShowPathDefects] = useState(false);
+  const [showStateLand, setShowStateLand] = useState(false);
+  const [showStatBoard, setShowStatBoard] = useState(false);
+  const [showLandPrivate, setShowLandPrivate] = useState(false);
+  const [showLandMinistry, setShowLandMinistry] = useState(false);
+  const gisAbortRef = useRef<AbortController | null>(null);
+  const gisTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const defectsAbortRef = useRef<AbortController | null>(null);
+  const defectsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Imported shapefile overlay
+  const [importedBoundaries, setImportedBoundaries] = useState<UploadedBoundaryFeature[]>([]);
+  const [importedBoundaryName, setImportedBoundaryName] = useState<string | null>(null);
+  const [importedBoundaryLoading, setImportedBoundaryLoading] = useState(false);
+  const [importedBoundaryError, setImportedBoundaryError] = useState<string | null>(null);
+
+  const handleImportFiles = useCallback(async (files: File[]) => {
+    const sourceFile = files.find((f) => f.name.toLowerCase().endsWith(".shp") || f.name.toLowerCase().endsWith(".zip"));
+    if (!sourceFile) {
+      const message = "Upload a .zip shapefile or a .shp file with its companion files (.dbf, .shx, .prj).";
+      setImportedBoundaryError(message);
+      toaster.create({ title: "Import failed", description: message, type: "warning" });
+      return;
+    }
+    setImportedBoundaryLoading(true);
+    setImportedBoundaryError(null);
+    try {
+      const geojson = await previewUploadedShapefiles(files);
+      const boundaries = extractUploadedBoundaryFeatures(geojson);
+      if (boundaries.length === 0) {
+        throw new Error("No polygon or line features were found in the uploaded shapefile.");
+      }
+      setImportedBoundaryName(sourceFile.name);
+      setImportedBoundaries(boundaries);
+      toaster.create({ title: "Shapefile imported", description: `Loaded ${boundaries.length} feature(s) from ${sourceFile.name}.`, type: "success" });
+    } catch (err: any) {
+      const message = err?.message ?? "Failed to import shapefile.";
+      setImportedBoundaryError(message);
+      toaster.create({ title: "Import failed", description: message, type: "error" });
+    } finally {
+      setImportedBoundaryLoading(false);
+    }
+  }, []);
+
+  const handleClearImportedShapefile = useCallback(() => {
+    setImportedBoundaries([]);
+    setImportedBoundaryName(null);
+    setImportedBoundaryError(null);
+  }, []);
+
+  const gisLayerColors = {
+    footpath: "#1E90FF", cycling: "#B91C1C", shared: "#A855F7",
+    roadcrossing: "#10B981", mrt_exit: "#06B6D4", bicycle_crossing: "#F97316",
+    bus_stop: "#8B5CF6", bus_lane: "#EAB308", parking_lot: "#D97706",
+    kerb_line: "#D946EF", state_land: "#14B8A6", stat_board: "#F59E0B",
+    land_private: "#6366F1", land_ministry: "#EC4899",
+  } as const;
+
+  // Viewport-based GIS layer fetch — re-fires (debounced) on pan/zoom or toggle change
+  useEffect(() => {
+    const anyOn = showFootpath || showCycling || showShared || showRoadcrossing || showMrtExit ||
+      showBusStop || showBusLane || showParkingLot || showKerbLine || showBicycleCrossing ||
+      showStateLand || showStatBoard || showLandPrivate || showLandMinistry;
+
+    if (!anyOn || !mapViewportBounds) {
+      setGisLayers(null);
+      return;
+    }
+
+    if (gisTimerRef.current) clearTimeout(gisTimerRef.current);
+    gisTimerRef.current = setTimeout(async () => {
+      if (gisAbortRef.current) gisAbortRef.current.abort();
+      const controller = new AbortController();
+      gisAbortRef.current = controller;
+
+      try {
+        const sw = mapViewportBounds.getSouthWest();
+        const ne = mapViewportBounds.getNorthEast();
+        const layers: string[] = [];
+        if (showCycling) layers.push('cycling');
+        if (showShared) layers.push('shared');
+        if (showFootpath) layers.push('footpath');
+        if (showRoadcrossing) layers.push('roadcrossing');
+        if (showMrtExit) layers.push('mrt_exit');
+        if (showBicycleCrossing) layers.push('bicycle_crossing');
+        if (showBusStop) layers.push('bus_stop');
+        if (showBusLane) layers.push('bus_lane');
+        if (showParkingLot) layers.push('parking_lot');
+        if (showKerbLine) layers.push('kerb_line');
+        if (showStateLand) layers.push('state_land');
+        if (showStatBoard) layers.push('stat_board');
+        if (showLandPrivate) layers.push('land_private');
+        if (showLandMinistry) layers.push('land_ministry');
+
+        const res = await fetch('/api/projects/gis/viewport', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bbox: [sw.lng, sw.lat, ne.lng, ne.lat], layers }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+        const data = await res.json();
+        if (data.ok) setGisLayers(data.layers);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') console.error('[GIS Viewport] Fetch error:', e);
+      }
+    }, 500);
+
+    return () => { if (gisTimerRef.current) clearTimeout(gisTimerRef.current); };
+  }, [mapViewportBounds, showFootpath, showCycling, showShared, showRoadcrossing, showMrtExit, showBusStop, showBusLane, showParkingLot, showKerbLine, showBicycleCrossing, showStateLand, showStatBoard, showLandPrivate, showLandMinistry]);
+
+  // Viewport-center-based path defects fetch
+  useEffect(() => {
+    if (!showPathDefects || !mapViewportBounds) {
+      setPathDefects(null);
+      return;
+    }
+
+    if (defectsTimerRef.current) clearTimeout(defectsTimerRef.current);
+    defectsTimerRef.current = setTimeout(async () => {
+      if (defectsAbortRef.current) defectsAbortRef.current.abort();
+      const controller = new AbortController();
+      defectsAbortRef.current = controller;
+
+      try {
+        const sw = mapViewportBounds.getSouthWest();
+        const ne = mapViewportBounds.getNorthEast();
+        const centerLat = (sw.lat + ne.lat) / 2;
+        const centerLon = (sw.lng + ne.lng) / 2;
+        // Radius: half the viewport diagonal in metres (rough WGS84 → metres)
+        const diagDeg = Math.sqrt((ne.lat - sw.lat) ** 2 + (ne.lng - sw.lng) ** 2);
+        const radius = Math.min(Math.round((diagDeg / 2) * 111_000), 3000);
+
+        const res = await fetch('/api/defects/nearby', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ point: [centerLon, centerLat], radius }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+        const data = await res.json();
+        if (data.ok) setPathDefects(data.defects ?? []);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') console.error('[Defects Viewport] Fetch error:', e);
+      }
+    }, 500);
+
+    return () => { if (defectsTimerRef.current) clearTimeout(defectsTimerRef.current); };
+  }, [mapViewportBounds, showPathDefects]);
 
   // Mode states (Single Point & Polygon)
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -2652,7 +2896,7 @@ export default function AttributeAnalysisMapView({
             </Box>
           )}
 
-          <Box h="650px">
+          <Box h="650px" position="relative">
             {loading && (
               <Box p="6">
                 <Text color="gray.500">Loading map…</Text>
@@ -2666,6 +2910,31 @@ export default function AttributeAnalysisMapView({
 
             {!loading && !err && (
               <>
+                <AnalysisSidebar
+                  isOpen={isGisSidebarOpen}
+                  onToggle={() => setIsGisSidebarOpen(v => !v)}
+                  showFootpath={showFootpath} setShowFootpath={setShowFootpath}
+                  showCycling={showCycling} setShowCycling={setShowCycling}
+                  showShared={showShared} setShowShared={setShowShared}
+                  showRoadcrossing={showRoadcrossing} setShowRoadcrossing={setShowRoadcrossing}
+                  showMrtExit={showMrtExit} setShowMrtExit={setShowMrtExit}
+                  showBusStop={showBusStop} setShowBusStop={setShowBusStop}
+                  showBusLane={showBusLane} setShowBusLane={setShowBusLane}
+                  showParkingLot={showParkingLot} setShowParkingLot={setShowParkingLot}
+                  showKerbLine={showKerbLine} setShowKerbLine={setShowKerbLine}
+                  showBicycleCrossing={showBicycleCrossing} setShowBicycleCrossing={setShowBicycleCrossing}
+                  showPathDefects={showPathDefects} setShowPathDefects={setShowPathDefects}
+                  showStateLand={showStateLand} setShowStateLand={setShowStateLand}
+                  showStatBoard={showStatBoard} setShowStatBoard={setShowStatBoard}
+                  showLandPrivate={showLandPrivate} setShowLandPrivate={setShowLandPrivate}
+                  showLandMinistry={showLandMinistry} setShowLandMinistry={setShowLandMinistry}
+                  onFilesSelected={handleImportFiles}
+                  importedShapefileHasData={importedBoundaries.length > 0}
+                  importedShapefileLoading={importedBoundaryLoading}
+                  importedShapefileError={importedBoundaryError}
+                  importedShapefileName={importedBoundaryName}
+                  onClearImportedShapefile={handleClearImportedShapefile}
+                />
                 <MapContainer
                   center={initialCenter.current}
                   zoom={13}
@@ -2802,6 +3071,84 @@ export default function AttributeAnalysisMapView({
                       );
                     })}
                   </Pane>
+
+                  {/* GIS Layers — rendered below segments pane (zIndex < 450) */}
+                  {gisLayers && showFootpath && gisLayers.footpath?.map((f, i) => (
+                    <LeafletPolyline key={`fp-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.footpath, weight: 3, opacity: 0.8 }} />
+                  ))}
+                  {gisLayers && showCycling && gisLayers.cycling?.map((f, i) => (
+                    <LeafletPolyline key={`cy-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.cycling, weight: 3, opacity: 0.8 }} />
+                  ))}
+                  {gisLayers && showShared && gisLayers.shared?.map((f, i) => (
+                    <LeafletPolyline key={`sh-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.shared, weight: 3, opacity: 0.8 }} />
+                  ))}
+                  {gisLayers && showRoadcrossing && gisLayers.roadcrossing?.map((f, i) => (
+                    <LeafletPolyline key={`rc-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.roadcrossing, weight: 3, opacity: 0.8 }} />
+                  ))}
+                  {gisLayers && showKerbLine && gisLayers.kerb_line?.map((f, i) => (
+                    <LeafletPolyline key={`kl-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.kerb_line, weight: 2, opacity: 0.8 }} />
+                  ))}
+                  {gisLayers && showBusLane && gisLayers.bus_lane?.map((f, i) => {
+                    const isMulti = Array.isArray(f.coordinates[0]) && Array.isArray(f.coordinates[0][0]);
+                    if (isMulti) return (f.coordinates as any).map((line: any, j: number) => (
+                      <LeafletPolyline key={`bl-${i}-${j}`} positions={line.map((c: any) => [c[1], c[0]])} pathOptions={{ color: gisLayerColors.bus_lane, weight: 4, opacity: 0.8, dashArray: "5, 10" }}><Tooltip>Bus Lane</Tooltip></LeafletPolyline>
+                    ));
+                    return <LeafletPolyline key={`bl-${i}`} positions={f.coordinates.map((c: any) => [c[1], c[0]])} pathOptions={{ color: gisLayerColors.bus_lane, weight: 4, opacity: 0.8, dashArray: "5, 10" }}><Tooltip>Bus Lane</Tooltip></LeafletPolyline>;
+                  })}
+                  {gisLayers && showMrtExit && gisLayers.mrt_exit?.map((f, i) => (
+                    <CircleMarker key={`mrt-${i}`} center={[f.coordinates[0][1], f.coordinates[0][0]]} radius={6} pathOptions={{ color: gisLayerColors.mrt_exit, weight: 2, opacity: 0.9, fillOpacity: 0.7 }}><Tooltip>MRT Exit</Tooltip></CircleMarker>
+                  ))}
+                  {gisLayers && showBicycleCrossing && gisLayers.bicycle_crossing?.map((f, i) => (
+                    <CircleMarker key={`bc-${i}`} center={[f.coordinates[0][1], f.coordinates[0][0]]} radius={6} pathOptions={{ color: gisLayerColors.bicycle_crossing, weight: 2, opacity: 0.9, fillOpacity: 0.7 }}><Tooltip>Bicycle Crossing</Tooltip></CircleMarker>
+                  ))}
+                  {gisLayers && showBusStop && gisLayers.bus_stop?.map((f, i) =>
+                    f.geometry_type === "point"
+                      ? <CircleMarker key={`bs-${i}`} center={[f.coordinates[0][1], f.coordinates[0][0]]} radius={6} pathOptions={{ color: gisLayerColors.bus_stop, weight: 2, opacity: 0.9, fillOpacity: 0.7 }}><Tooltip>Bus Stop</Tooltip></CircleMarker>
+                      : <LeafletPolyline key={`bs-${i}`} positions={f.coordinates.map((c: any) => [c[1], c[0]])} pathOptions={{ color: gisLayerColors.bus_stop, weight: 4, opacity: 0.8 }}><Tooltip>Bus Shelter</Tooltip></LeafletPolyline>
+                  )}
+                  {gisLayers && showParkingLot && gisLayers.parking_lot?.map((f, i) =>
+                    f.geometry_type === "polygon"
+                      ? <LeafletPolygon key={`pk-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.parking_lot, weight: 2, opacity: 0.8, fillOpacity: 0.3 }}><Tooltip>Parking Lot</Tooltip></LeafletPolygon>
+                      : <CircleMarker key={`pk-${i}`} center={[f.coordinates[0][1], f.coordinates[0][0]]} radius={6} pathOptions={{ color: gisLayerColors.parking_lot, weight: 2, opacity: 0.9, fillOpacity: 0.7 }}><Tooltip>Parking Lot</Tooltip></CircleMarker>
+                  )}
+                  {gisLayers && showStateLand && gisLayers.state_land?.map((f, i) => (
+                    <LeafletPolygon key={`sl-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.state_land, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}><Tooltip>{f.properties?.OWNRSHP_CL ?? "State Land"}</Tooltip></LeafletPolygon>
+                  ))}
+                  {gisLayers && showStatBoard && gisLayers.stat_board?.map((f, i) => (
+                    <LeafletPolygon key={`sb-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.stat_board, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}><Tooltip>{f.properties?.OWNRSHP_CL ?? "Stat Board"}</Tooltip></LeafletPolygon>
+                  ))}
+                  {gisLayers && showLandPrivate && gisLayers.land_private?.map((f, i) => (
+                    <LeafletPolygon key={`lp-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.land_private, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}><Tooltip>{f.properties?.OWNRSHP_CL ?? "Private Land"}</Tooltip></LeafletPolygon>
+                  ))}
+                  {gisLayers && showLandMinistry && gisLayers.land_ministry?.map((f, i) => (
+                    <LeafletPolygon key={`lm-${i}`} positions={f.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])} pathOptions={{ color: gisLayerColors.land_ministry, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}><Tooltip>{f.properties?.OWNRSHP_CL ?? "Ministry Land"}</Tooltip></LeafletPolygon>
+                  ))}
+                  {showPathDefects && pathDefects?.map((d, i) => (
+                    <CircleMarker key={`def-${i}`} center={[d.lat, d.lon]} radius={7} pathOptions={{ color: "#EF4444", weight: 2, opacity: 1, fillOpacity: 0.8 }}>
+                      <Tooltip>{`${d.type_of_defect || "Defect"} — ${d.location || "Unknown"}${d.date_of_inspection ? ` (${d.date_of_inspection})` : ""}`}</Tooltip>
+                    </CircleMarker>
+                  ))}
+
+                  {/* Imported shapefile overlay — non-interactive so hover doesn't interfere with segment nodes */}
+                  {importedBoundaries.map((boundary) =>
+                    boundary.kind === "polygon" && boundary.coords ? (
+                      <LeafletPolygon
+                        key={boundary.key}
+                        positions={boundary.coords}
+                        pathOptions={{ color: "#EA580C", weight: 2, opacity: 0.95, fillColor: "#FDBA74", fillOpacity: 0.2, interactive: false }}
+                      />
+                    ) : (
+                      <>
+                        {(boundary.lineCoordsSets ?? []).map((lineCoords, partIndex) => (
+                          <LeafletPolyline
+                            key={`${boundary.key}-${partIndex}`}
+                            positions={lineCoords}
+                            pathOptions={{ color: "#EA580C", weight: 2.5, opacity: 0.95, interactive: false }}
+                          />
+                        ))}
+                      </>
+                    )
+                  )}
                 </MapContainer>
               </>
             )}

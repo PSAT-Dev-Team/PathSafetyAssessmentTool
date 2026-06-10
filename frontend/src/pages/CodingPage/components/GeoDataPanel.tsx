@@ -1230,6 +1230,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.footpath.map((feature, i) => (
                   <Polyline
                     key={`footpath-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.footpath,
@@ -1244,6 +1245,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.cycling.map((feature, i) => (
                   <Polyline
                     key={`cycling-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.cycling,
@@ -1258,6 +1260,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.shared.map((feature, i) => (
                   <Polyline
                     key={`shared-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.shared,
@@ -1272,6 +1275,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.roadcrossing.map((feature, i) => (
                   <Polyline
                     key={`roadcrossing-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.roadcrossing,
@@ -1287,6 +1291,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.mrt_exit.map((feature, i) => (
                   <CircleMarker
                     key={`mrt_exit-${i}`}
+
                     center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
                     radius={6}
                     pathOptions={{
@@ -1308,6 +1313,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     return (
                       <CircleMarker
                         key={`bus_stop-${i}`}
+    
                         center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
                         radius={6}
                         pathOptions={{
@@ -1324,6 +1330,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     return (
                       <Polyline
                         key={`bus_shelter-${i}`}
+    
                         positions={feature.coordinates.map(c => [c[1], c[0]])}
                         pathOptions={{
                           color: layerColors.bus_stop,
@@ -1350,6 +1357,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     return (coords as any).map((line: any, j: number) => (
                       <Polyline
                         key={`bus_lane-${i}-${j}`}
+    
                         positions={line.map((c: any) => [c[1], c[0]])}
                         pathOptions={{
                           color: layerColors.bus_lane,
@@ -1366,6 +1374,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                   return (
                     <Polyline
                       key={`bus_lane-${i}`}
+  
                       positions={coords.map((c: any) => [c[1], c[0]])}
                       pathOptions={{
                         color: layerColors.bus_lane,
@@ -1388,6 +1397,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                     return (
                       <Polygon
                         key={`parking_lot-${i}`}
+    
                         positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
                         pathOptions={{
                           color: layerColors.parking_lot,
@@ -1404,6 +1414,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                   return (
                     <CircleMarker
                       key={`parking_lot-${i}`}
+  
                       center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
                       radius={6}
                       pathOptions={{
@@ -1424,6 +1435,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.kerb_line.map((feature, i) => (
                   <Polyline
                     key={`kerb_line-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon])}
                     pathOptions={{
                       color: layerColors.kerb_line,
@@ -1439,6 +1451,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.bicycle_crossing.map((feature, i) => (
                   <CircleMarker
                     key={`bicycle_crossing-${i}`}
+
                     center={[feature.coordinates[0][1], feature.coordinates[0][0]]}
                     radius={6}
                     pathOptions={{
@@ -1458,6 +1471,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.state_land.map((feature, i) => (
                   <Polygon
                     key={`state_land-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
                     pathOptions={{ color: layerColors.state_land, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
                   >
@@ -1470,6 +1484,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.stat_board.map((feature, i) => (
                   <Polygon
                     key={`stat_board-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
                     pathOptions={{ color: layerColors.stat_board, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
                   >
@@ -1482,6 +1497,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.land_private.map((feature, i) => (
                   <Polygon
                     key={`land_private-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
                     pathOptions={{ color: layerColors.land_private, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
                   >
@@ -1494,6 +1510,7 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
                 gisLayers.land_ministry.map((feature, i) => (
                   <Polygon
                     key={`land_ministry-${i}`}
+
                     positions={feature.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
                     pathOptions={{ color: layerColors.land_ministry, weight: 2, opacity: 0.8, fillOpacity: 0.2 }}
                   >
