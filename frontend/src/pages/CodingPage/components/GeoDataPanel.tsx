@@ -3,6 +3,7 @@ import {
   Card, CardBody, Text, Box, Flex, IconButton, Button,
   Dialog, Portal, Menu
 } from "@chakra-ui/react";
+import { AnalysisSidebar } from "../../../components/visualization/AnalysisSidebar";
 import { FaMousePointer, FaDrawPolygon, FaPlus, FaTrash } from "react-icons/fa";
 import { toaster } from "../../../components/ui/toaster";
 import { Switch } from "../../../components/ui/switch";
@@ -43,7 +44,6 @@ type Props = {
   curvData?: CurvatureVisualizationResponse | null;
   showCurvatureOverlay?: boolean;
   onToggleCurvatureOverlay?: () => void;
-  overlayContent?: React.ReactNode;
   widthM?: number | null;
   grade?: number | null;
   gradientPct?: number | null;
@@ -320,7 +320,7 @@ function StatPill({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, filterContext, verifiedByProject, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, overlayContent, widthM, grade, gradientPct, gradientStatus }: Props) {
+export default function GeoDataPanel({ projectName, index, onJump, containerHeight = 650, scores: externalScores, subtitle, geoFeatures: externalGeoFeatures, startIndex = 0, onDataChange, filterContext, verifiedByProject, panToBounds, panKey = 0, curvData, showCurvatureOverlay, onToggleCurvatureOverlay, widthM, grade, gradientPct, gradientStatus }: Props) {
   const navigate = useNavigate();
 
   const decodedName = useMemo(() => {
@@ -422,6 +422,9 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
   return null;
 }
 
+
+  // Analysis sidebar open state
+  const [isAnalysisSidebarOpen, setIsAnalysisSidebarOpen] = useState(false);
 
   // Delete Mode State
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -977,39 +980,37 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
             - {subtitle}
           </Text>
         )}
-        {onToggleCurvatureOverlay && curvData && (
-          <Flex align="center" gap="1.5" ml="auto">
-            <Flex align="center" gap="3" mr="2" pr="2" borderRight="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
-              <StatPill
-                label="Curv"
-                value={curvData.radius != null ? `${curvData.radius.toFixed(1)} m` : "∞"}
-              />
-              <StatPill
-                label="Width"
-                value={widthM != null ? `${widthM.toFixed(2)} m` : "—"}
-              />
-              <StatPill
-                label="Grade"
-                value={
-                  gradientState.mode === "grade"
-                    ? gradientState.text.replace("Grade 1 (<5°)", "<5°").replace("Grade 2 (≥5°)", "≥5°")
-                    : gradientState.text === GRADIENT_STATUS_NO_LIDAR_RESULT
-                      ? "N/A"
-                      : gradientState.text
-                }
-              />
-            </Flex>
-            <Text fontSize="xs" fontWeight="medium" color={showCurvatureOverlay ? "gray.900" : "gray.400"} _dark={{ color: showCurvatureOverlay ? "gray.100" : "gray.500" }}>
-              Analysis Overlay
-            </Text>
-            <Switch
-              colorPalette="gray"
-              size="sm"
-              checked={showCurvatureOverlay}
-              onCheckedChange={onToggleCurvatureOverlay}
+        <Flex align="center" gap="1.5" ml="auto">
+          <Flex align="center" gap="3" mr="2" pr="2" borderRight="1px solid" borderColor="gray.200" _dark={{ borderColor: "gray.600" }}>
+            <StatPill
+              label="Curv"
+              value={curvData?.radius != null ? `${curvData.radius.toFixed(1)} m` : "—"}
+            />
+            <StatPill
+              label="Width"
+              value={widthM != null ? `${widthM.toFixed(2)} m` : "—"}
+            />
+            <StatPill
+              label="Grade"
+              value={
+                gradientState.mode === "grade"
+                  ? gradientState.text.replace("Grade 1 (<5°)", "<5°").replace("Grade 2 (≥5°)", "≥5°")
+                  : gradientState.text === GRADIENT_STATUS_NO_LIDAR_RESULT
+                    ? "N/A"
+                    : gradientState.text
+              }
             />
           </Flex>
-        )}
+          <Text fontSize="xs" fontWeight="medium" color={showCurvatureOverlay ? "gray.900" : "gray.400"} _dark={{ color: showCurvatureOverlay ? "gray.100" : "gray.500" }}>
+            Analysis Overlay
+          </Text>
+          <Switch
+            colorPalette="gray"
+            size="sm"
+            checked={showCurvatureOverlay}
+            onCheckedChange={onToggleCurvatureOverlay}
+          />
+        </Flex>
       </Box>
 
           {/* Tools + GIS layer toggles */}
@@ -1153,141 +1154,6 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
               )}
             </Flex>
 
-            {/* GIS Layer Toggles */}
-            <Flex wrap="wrap" gap="4" onClick={(e) => e.stopPropagation()}>
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showFootpath ? "blue.600" : "gray.500"}>
-                Footpath
-              </Text>
-              <Switch
-                colorPalette="blue"
-                size="sm"
-                checked={showFootpath}
-                onCheckedChange={(e) => setShowFootpath(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showCycling ? "red.700" : "gray.500"}>
-                Cycling Path
-              </Text>
-              <Switch
-                colorPalette="red"
-                size="sm"
-                checked={showCycling}
-                onCheckedChange={(e) => setShowCycling(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showShared ? "purple.600" : "gray.500"}>
-                Shared Path
-              </Text>
-              <Switch
-                colorPalette="purple"
-                size="sm"
-                checked={showShared}
-                onCheckedChange={(e) => setShowShared(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showRoadcrossing ? "green.600" : "gray.500"}>
-                Road Crossing
-              </Text>
-              <Switch
-                colorPalette="green"
-                size="sm"
-                checked={showRoadcrossing}
-                onCheckedChange={(e) => setShowRoadcrossing(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showBicycleCrossing ? "orange.600" : "gray.500"}>
-                Bicycle Crossing
-              </Text>
-              <Switch
-                colorPalette="orange"
-                size="sm"
-                checked={showBicycleCrossing}
-                onCheckedChange={(e) => setShowBicycleCrossing(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showMrtExit ? "cyan.600" : "gray.500"}>
-                MRT Exit
-              </Text>
-              <Switch
-                colorPalette="cyan"
-                size="sm"
-                checked={showMrtExit}
-                onCheckedChange={(e) => setShowMrtExit(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showBusStop ? "purple.600" : "gray.500"}>
-                Bus Stop
-              </Text>
-              <Switch
-                colorPalette="purple"
-                size="sm"
-                checked={showBusStop}
-                onCheckedChange={(e) => setShowBusStop(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showBusLane ? "yellow.600" : "gray.500"}>
-                Bus Lane
-              </Text>
-              <Switch
-                colorPalette="yellow"
-                size="sm"
-                checked={showBusLane}
-                onCheckedChange={(e) => setShowBusLane(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showParkingLot ? "yellow.600" : "gray.500"}>
-                Parking Lot
-              </Text>
-              <Switch
-                colorPalette="yellow"
-                size="sm"
-                checked={showParkingLot}
-                onCheckedChange={(e) => setShowParkingLot(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showKerbLine ? "pink.600" : "gray.500"}>
-                Kerb Line
-              </Text>
-              <Switch
-                colorPalette="pink"
-                size="sm"
-                checked={showKerbLine}
-                onCheckedChange={(e) => setShowKerbLine(e.checked)}
-              />
-            </Flex>
-
-            <Flex align="center" gap="2">
-              <Text fontSize="sm" fontWeight="medium" color={showPathDefects ? "red.600" : "gray.500"}>
-                Path Defects
-              </Text>
-              <Switch
-                colorPalette="red"
-                size="sm"
-                checked={showPathDefects}
-                onCheckedChange={(e) => setShowPathDefects(e.checked)}
-              />
-            </Flex>
-
-          </Flex>
         </Box>
       <CardBody flex="1" minH={0} p={0} position="relative">
         {loading && <Text color="gray.500">Loading map…</Text>}
@@ -1765,7 +1631,32 @@ function MapAutoCenter({ center, anyLayerOn, panKey }: { center: [number, number
           <Text color="gray.500" mt="2">No geodata to show.</Text>
         )}
 
-        {overlayContent}
+        <AnalysisSidebar
+          isOpen={isAnalysisSidebarOpen}
+          onToggle={() => setIsAnalysisSidebarOpen(v => !v)}
+          showFootpath={showFootpath}
+          setShowFootpath={setShowFootpath}
+          showCycling={showCycling}
+          setShowCycling={setShowCycling}
+          showShared={showShared}
+          setShowShared={setShowShared}
+          showRoadcrossing={showRoadcrossing}
+          setShowRoadcrossing={setShowRoadcrossing}
+          showMrtExit={showMrtExit}
+          setShowMrtExit={setShowMrtExit}
+          showBusStop={showBusStop}
+          setShowBusStop={setShowBusStop}
+          showBusLane={showBusLane}
+          setShowBusLane={setShowBusLane}
+          showParkingLot={showParkingLot}
+          setShowParkingLot={setShowParkingLot}
+          showKerbLine={showKerbLine}
+          setShowKerbLine={setShowKerbLine}
+          showBicycleCrossing={showBicycleCrossing}
+          setShowBicycleCrossing={setShowBicycleCrossing}
+          showPathDefects={showPathDefects}
+          setShowPathDefects={setShowPathDefects}
+        />
       </CardBody>
 
       {/* Delete Confirmation Dialog */}

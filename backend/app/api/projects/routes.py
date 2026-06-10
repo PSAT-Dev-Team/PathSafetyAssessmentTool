@@ -32,6 +32,7 @@ import geopandas as gpd
 import shutil
 import datetime
 import math
+import time
 import ipaddress
 from app.services.cyclerap_scoring import calculate_cyclerap_score_native
 # ---- init guards (thread-safe & error memo) ----
@@ -544,8 +545,9 @@ _warmup_thread.start()
 
 
 # ───────────────────────── Gradient lookup (module-level) ─────────────────────
-# Loaded once and cached for the lifetime of the server process.
+# Catalog is rebuilt automatically when new profiles appear on disk.
 _GRADIENT_PROFILE_CATALOG: "dict[str, dict] | None" = None
+_GRADIENT_CATALOG_LOAD_TIME: float = 0.0
 _PROJECT_GRADIENT_CACHE: dict[str, dict[str, tuple[int, float]]] = {}
 _PROJECT_GRADIENT_CACHE_STATE: dict[str, str] = {}
 
@@ -562,7 +564,7 @@ def _normalize_gradient_token(value: str) -> str:
 
 
 def _strip_survey_suffix(value: str) -> str:
-    return re.sub(r"(?:\d*q\d{2,4})$", "", _normalize_gradient_token(value), flags=re.IGNORECASE)
+    return re.sub(r"(?:\d*q\d{2,4})$", "", _normalize_gradient_token(value), flags=re.IGNORECASE).rstrip("_")
 
 
 def _rect_distance(bounds_a, bounds_b) -> float:
@@ -614,17 +616,37 @@ def _stitch_gradient_centerline(gdf: gpd.GeoDataFrame) -> "LineString | None":
 
 
 def _load_gradient_profile_catalog() -> dict[str, dict]:
-    global _GRADIENT_PROFILE_CATALOG
+    global _GRADIENT_PROFILE_CATALOG, _GRADIENT_CATALOG_LOAD_TIME
+
+    base_dir = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_profiles"
+
+    # Detect new profiles: if any planning-area directory is newer than the last load,
+    # discard the cached catalog and per-project mappings so they are rebuilt fresh.
+    if _GRADIENT_PROFILE_CATALOG is not None and base_dir.exists():
+        try:
+            stale = any(
+                d.stat().st_mtime > _GRADIENT_CATALOG_LOAD_TIME
+                for d in base_dir.iterdir()
+                if d.is_dir()
+            )
+            if stale:
+                print("[Gradient] new profiles detected — rebuilding catalog", flush=True)
+                _GRADIENT_PROFILE_CATALOG = None
+                _PROJECT_GRADIENT_CACHE.clear()
+                _PROJECT_GRADIENT_CACHE_STATE.clear()
+        except OSError:
+            pass
+
     if _GRADIENT_PROFILE_CATALOG is not None:
         return _GRADIENT_PROFILE_CATALOG
 
-    base_dir = Path(__file__).resolve().parents[3] / "shapefiles" / "gradient_profiles"
     result: dict[str, dict] = {}
     if not base_dir.exists():
         _GRADIENT_PROFILE_CATALOG = result
+        _GRADIENT_CATALOG_LOAD_TIME = time.time()
         return result
 
-    for meta_path in sorted(base_dir.glob("*/metadata.json")):
+    for meta_path in sorted(base_dir.glob("*/*/metadata.json")):
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             profile_path = meta_path.parent / "gradient_profile.csv"
@@ -658,6 +680,7 @@ def _load_gradient_profile_catalog() -> dict[str, dict]:
             print(f"[Gradient] WARNING: failed to read profile metadata {meta_path}: {exc}")
 
     _GRADIENT_PROFILE_CATALOG = result
+    _GRADIENT_CATALOG_LOAD_TIME = time.time()
     return result
 
 
@@ -668,11 +691,14 @@ def _resolve_gradient_profile_for_project(project_name: str, centerline: LineStr
         return None
 
     project_path_key = None
+    project_dataset = None
     try:
         proj = get_ctx()["pm"].project(project_name)
         project_path_key = getattr(proj.metadata, "path_key", None)
+        project_dataset = getattr(proj.metadata, "dataset", None)
     except Exception:
         project_path_key = None
+        project_dataset = None
 
     if project_path_key:
         direct_match = catalog.get(project_path_key)
@@ -686,6 +712,10 @@ def _resolve_gradient_profile_for_project(project_name: str, centerline: LineStr
                 return meta
 
     project_aliases = {_normalize_gradient_token(project_name), _strip_survey_suffix(project_name)}
+    if project_dataset:
+        project_aliases.add(_normalize_gradient_token(project_dataset))
+        project_aliases.add(_strip_survey_suffix(project_dataset))
+    project_aliases.discard("")
     project_bounds = centerline.bounds
     project_length = float(centerline.length)
 
@@ -934,10 +964,17 @@ def _inject_grade(image_ref: str, updates: dict, sources: "dict | None" = None,
     try:
         hit = _lookup_project_gradient(project_name, image_ref)
         if not hit:
-            cache_state = _get_project_gradient_cache_state(project_name)
+            # A project's segments are either all "Not Assessed" (no profile exists)
+            # or all "No LiDAR" for unmatched segments (profile exists, segment outside
+            # profiled chainage). Use the mapping content as the primary signal: if any
+            # segment in this project resolved to a gradient value, the profile IS present
+            # and this segment's miss means no LiDAR coverage at that chainage.
+            mapping = _get_project_gradient_mapping(project_name)
+            profile_found = bool(mapping) or (
+                _PROJECT_GRADIENT_CACHE_STATE.get(project_name) == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE
+            )
             gradient_status = (
-                GRADIENT_STATUS_NO_LIDAR_RESULT
-                if cache_state == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE
+                GRADIENT_STATUS_NO_LIDAR_RESULT if profile_found
                 else GRADIENT_STATUS_NOT_ASSESSED
             )
             updates["Grade"] = None
@@ -1298,16 +1335,22 @@ def get_latest_attributes(project_name: str):
             for col in available_bands:
                 attrs_df[col] = results_df[col].values
 
-    # Normalise gradient status: within a project "No LiDAR" and "Not Assessed Yet"
-    # must not coexist.  Once a gradient profile is confirmed available, every row
-    # with no grade should show "No LiDAR" regardless of whether it has been
-    # through autocode yet.
-    if _get_project_gradient_cache_state(project_name) == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE:
+    # Normalise gradient status: within a project, "Not assessed yet" and a real
+    # gradient value must never coexist.  If the project has a matched gradient
+    # profile (mapping non-empty), every segment that still has no grade should
+    # display "N/A (no LiDAR result)" — not "Not assessed yet" — regardless of
+    # whether it has been through the coding workflow yet.
+    mapping = _get_project_gradient_mapping(project_name)
+    profile_found = bool(mapping) or (
+        _PROJECT_GRADIENT_CACHE_STATE.get(project_name) == _GRADIENT_CACHE_STATE_PROFILE_AVAILABLE
+    )
+    if profile_found:
         has_grade_col = "Grade" in attrs_df.columns
         has_status_col = GRADIENT_STATUS_FIELD in attrs_df.columns
         if has_grade_col or has_status_col:
             if not attrs_copied:
                 attrs_df = attrs_df.copy()
+                attrs_copied = True
             no_grade = attrs_df["Grade"].isna() if has_grade_col else pd.Series(True, index=attrs_df.index)
             if has_status_col:
                 stale_status = attrs_df[GRADIENT_STATUS_FIELD].isna() | (

@@ -42,7 +42,6 @@ import AttributesPanel, { resolveContributorTabGroup } from "./components/Attrib
 import AttributeOptionsDialog from "./components/AttributeOptionsDialog";
 import GeoDataPanel from "./components/GeoDataPanel";
 import { saveAttributes } from "../../api";
-import { AnalysisSidebar } from "../../components/visualization/AnalysisSidebar";
 import "../../components/visualization/AnalysisPanel.css";
 import { fetchWidthVisualization } from "../../api/widthVisualization";
 import type { WidthVisualizationResponse } from "../../api/widthVisualization";
@@ -531,12 +530,7 @@ export default function CodingPage() {
 
   // Analysis sidebar state (lifted from AnalysisPanel)
   const [widthData, setWidthData] = useState<WidthVisualizationResponse | null>(null);
-  const [widthLoading, setWidthLoading] = useState(false);
-  const [widthError, setWidthError] = useState<string | null>(null);
   const [curvData, setCurvData] = useState<CurvatureVisualizationResponse | null>(null);
-  const [curvLoading, setCurvLoading] = useState(false);
-  const [curvError, setCurvError] = useState<string | null>(null);
-  const [isAnalysisSidebarOpen, setIsAnalysisSidebarOpen] = useState(false);
   const [showCurvatureOverlay, setShowCurvatureOverlay] = useState(false);
 
   const handleContributorClick = useCallback((name: string) => {
@@ -1698,44 +1692,20 @@ export default function CodingPage() {
     setWidthData(null);
     setCurvData(null);
 
-    setWidthLoading(true);
-    setWidthError(null);
     fetchWidthVisualization(currentProjectName, coords, currentIndex, widthController.signal)
       .then((data) => {
-        if (!widthController.signal.aborted) {
-          setWidthData(data);
-        }
+        if (!widthController.signal.aborted) setWidthData(data);
       })
       .catch((e) => {
-        if (widthController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
-          return;
-        }
-        setWidthError(e instanceof Error ? e.message : 'Failed');
-      })
-      .finally(() => {
-        if (!widthController.signal.aborted) {
-          setWidthLoading(false);
-        }
+        if (widthController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) return;
       });
 
-    setCurvLoading(true);
-    setCurvError(null);
     fetchCurvatureVisualization(currentProjectName, coords, currentIndex, curvController.signal)
       .then((data) => {
-        if (!curvController.signal.aborted) {
-          setCurvData(data);
-        }
+        if (!curvController.signal.aborted) setCurvData(data);
       })
       .catch((e) => {
-        if (curvController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
-          return;
-        }
-        setCurvError(e instanceof Error ? e.message : 'Failed');
-      })
-      .finally(() => {
-        if (!curvController.signal.aborted) {
-          setCurvLoading(false);
-        }
+        if (curvController.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) return;
       });
 
     return () => {
@@ -2754,21 +2724,6 @@ export default function CodingPage() {
             gradientStatus={(currentAttr?.["Gradient Status"] as string | null) ?? null}
             showCurvatureOverlay={showCurvatureOverlay}
             onToggleCurvatureOverlay={() => setShowCurvatureOverlay(v => !v)}
-            overlayContent={
-              <AnalysisSidebar
-                isOpen={isAnalysisSidebarOpen}
-                onToggle={() => setIsAnalysisSidebarOpen(v => !v)}
-                widthData={widthData}
-                widthLoading={widthLoading}
-                widthError={widthError}
-                curvData={curvData}
-                curvLoading={curvLoading}
-                curvError={curvError}
-                grade={currentAttr?.["Grade"] as number | null}
-                gradientPct={currentAttr?.["Gradient %"] as number | null}
-                gradientStatus={(currentAttr?.["Gradient Status"] as string | null) ?? null}
-              />
-            }
           />
         </GridItem>
 
