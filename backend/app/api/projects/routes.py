@@ -5237,6 +5237,114 @@ def get_gis_layers(project_name: str):
         traceback.print_exc()
         return fail(f"GIS layers error: {e}", 500)
 
+# Shared GIS layer-key → store layer name(s) mapping for the map overlay endpoints.
+_GIS_OVERLAY_LAYER_NAMES = {
+    "cycling": "cycling_path",
+    "shared": "shared_path",
+    "footpath": "footpath",
+    "roadcrossing": "roadcrossing",
+    "mrt_exit": "mrt",
+    "bus_stop": ["bus_stop", "bus_shelter"],
+    "bus_lane": "bus_lane",
+    "parking_lot": "parking",
+    "kerb_line": "kerb_line",
+    "bicycle_crossing": "bicycle_crossing",
+    "state_land": "land_state_land",
+    "stat_board": "land_stat_board",
+    "land_private": "land_private",
+    "land_ministry": "land_ministry",
+}
+
+
+def _extract_gis_overlay_layers(_gis, buffer_geom, requested_layers, simplify_tol=0.0, max_features=12000):
+    """Collect GIS overlay features intersecting ``buffer_geom`` for the map overlays.
+
+    ``buffer_geom`` must already be in ``_gis.store.metric_crs``. Returns a dict of
+    ``{layer_key: [{coordinates, geometry_type, properties}, ...]}`` with coordinates in
+    WGS84. Shared by the viewport and near-segments endpoints so they stay in lock-step.
+    """
+    result_layers = {}
+    for layer_key in requested_layers:
+        if layer_key not in _GIS_OVERLAY_LAYER_NAMES:
+            continue
+
+        layer_targets = _GIS_OVERLAY_LAYER_NAMES[layer_key]
+        if not isinstance(layer_targets, list):
+            layer_targets = [layer_targets]
+
+        all_features = []
+        for layer_name in layer_targets:
+            if len(all_features) >= max_features:
+                break
+            try:
+                gdf = _gis.store.get(layer_name)
+                if gdf is None or gdf.empty:
+                    continue
+
+                candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
+                if not candidate_indices:
+                    continue
+
+                candidates = gdf.iloc[candidate_indices]
+                intersecting = candidates[candidates.geometry.notna() & candidates.intersects(buffer_geom)]
+                if intersecting.empty:
+                    continue
+
+                remaining = max_features - len(all_features)
+                if len(intersecting) > remaining:
+                    intersecting = intersecting.iloc[:remaining]
+
+                intersecting = intersecting.copy()
+                # Simplify in the metric CRS (tolerance is in metres) before reprojecting,
+                # to cut vertex count without a visible change at the requested scale.
+                if simplify_tol > 0:
+                    intersecting["geometry"] = intersecting.geometry.simplify(simplify_tol, preserve_topology=False)
+
+                intersecting_wgs84 = intersecting.to_crs("EPSG:4326")
+
+                for _, feature in intersecting_wgs84.iterrows():
+                    geom = feature.geometry
+                    if geom is None or geom.is_empty:
+                        continue
+
+                    if geom.has_z:
+                        try:
+                            geom = gis.GIS._remove_z_coordinate(geom)
+                        except Exception:
+                            pass
+
+                    props = {}
+                    for col in feature.index:
+                        if col != "geometry":
+                            val = feature[col]
+                            if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                                props[col] = str(val)
+
+                    if geom.geom_type == "LineString":
+                        all_features.append({"coordinates": [[float(x), float(y)] for x, y in geom.coords], "geometry_type": "line", "properties": props})
+                    elif geom.geom_type == "MultiLineString":
+                        for line in geom.geoms:
+                            all_features.append({"coordinates": [[float(x), float(y)] for x, y in line.coords], "geometry_type": "line", "properties": props})
+                    elif geom.geom_type == "Point":
+                        all_features.append({"coordinates": [[float(geom.x), float(geom.y)]], "geometry_type": "point", "properties": props})
+                    elif geom.geom_type == "MultiPoint":
+                        for pt_geom in geom.geoms:
+                            all_features.append({"coordinates": [[float(pt_geom.x), float(pt_geom.y)]], "geometry_type": "point", "properties": props})
+                    elif geom.geom_type == "Polygon":
+                        all_features.append({"coordinates": [[float(x), float(y)] for x, y in geom.exterior.coords], "geometry_type": "polygon", "properties": props})
+                    elif geom.geom_type == "MultiPolygon":
+                        for poly in geom.geoms:
+                            all_features.append({"coordinates": [[float(x), float(y)] for x, y in poly.exterior.coords], "geometry_type": "polygon", "properties": props})
+
+            except Exception as e:
+                traceback.print_exc()
+                print(f"[GIS Overlay] Error processing layer '{layer_name}': {e}")
+
+        result_layers[layer_key] = all_features
+
+    return result_layers
+
+
 @bp.route('/gis/viewport', methods=['POST'])
 def get_gis_viewport_layers():
     """Fetch GIS layers within a map viewport bounding box (used by Path Analysis page)."""
@@ -5244,7 +5352,14 @@ def get_gis_viewport_layers():
         data = request.get_json(force=True) or {}
         bbox = data.get('bbox')           # [minLon, minLat, maxLon, maxLat]
         requested_layers = data.get('layers', [])
-        max_features = min(int(data.get('max_features', 300)), 500)
+        # A footpath/kerb network for a single project at fit-bounds zoom easily runs to
+        # several thousand line segments; a low cap silently truncates them in dataframe
+        # order, leaving the visible viewport mostly empty. Keep the ceiling high and lean
+        # on geometry simplification (below) to keep the payload small instead.
+        max_features = min(int(data.get('max_features', 6000)), 12000)
+        # Optional Douglas-Peucker tolerance in metres (metric CRS). Scaled by the client
+        # to the current zoom so zoomed-out views send fewer vertices per feature.
+        simplify_tol = float(data.get('simplify_tol', 0) or 0)
 
         if not bbox or len(bbox) != 4:
             return fail("bbox must be [minLon, minLat, maxLon, maxLat]", 400)
@@ -5258,96 +5373,7 @@ def get_gis_viewport_layers():
         bbox_gdf = bbox_gdf.to_crs(_gis.store.metric_crs)
         buffer_geom = bbox_gdf.geometry.iloc[0]
 
-        layer_names = {
-            "cycling": "cycling_path",
-            "shared": "shared_path",
-            "footpath": "footpath",
-            "roadcrossing": "roadcrossing",
-            "mrt_exit": "mrt",
-            "bus_stop": ["bus_stop", "bus_shelter"],
-            "bus_lane": "bus_lane",
-            "parking_lot": "parking",
-            "kerb_line": "kerb_line",
-            "bicycle_crossing": "bicycle_crossing",
-            "state_land": "land_state_land",
-            "stat_board": "land_stat_board",
-            "land_private": "land_private",
-            "land_ministry": "land_ministry",
-        }
-
-        result_layers = {}
-
-        for layer_key in requested_layers:
-            if layer_key not in layer_names:
-                continue
-
-            layer_targets = layer_names[layer_key]
-            if not isinstance(layer_targets, list):
-                layer_targets = [layer_targets]
-
-            all_features = []
-            for layer_name in layer_targets:
-                if len(all_features) >= max_features:
-                    break
-                try:
-                    gdf = _gis.store.get(layer_name)
-                    if gdf is None or gdf.empty:
-                        continue
-
-                    candidate_indices = list(gdf.sindex.intersection(buffer_geom.bounds))
-                    if not candidate_indices:
-                        continue
-
-                    candidates = gdf.iloc[candidate_indices]
-                    intersecting = candidates[candidates.geometry.notna() & candidates.intersects(buffer_geom)]
-                    if intersecting.empty:
-                        continue
-
-                    remaining = max_features - len(all_features)
-                    if len(intersecting) > remaining:
-                        intersecting = intersecting.iloc[:remaining]
-
-                    intersecting_wgs84 = intersecting.copy().to_crs("EPSG:4326")
-
-                    for _, feature in intersecting_wgs84.iterrows():
-                        geom = feature.geometry
-                        if geom is None or geom.is_empty:
-                            continue
-
-                        if geom.has_z:
-                            try:
-                                geom = gis.GIS._remove_z_coordinate(geom)
-                            except Exception:
-                                pass
-
-                        props = {}
-                        for col in feature.index:
-                            if col != "geometry":
-                                val = feature[col]
-                                if val is not None and not (isinstance(val, float) and math.isnan(val)):
-                                    props[col] = str(val)
-
-                        if geom.geom_type == "LineString":
-                            all_features.append({"coordinates": [[float(x), float(y)] for x, y in geom.coords], "geometry_type": "line", "properties": props})
-                        elif geom.geom_type == "MultiLineString":
-                            for line in geom.geoms:
-                                all_features.append({"coordinates": [[float(x), float(y)] for x, y in line.coords], "geometry_type": "line", "properties": props})
-                        elif geom.geom_type == "Point":
-                            all_features.append({"coordinates": [[float(geom.x), float(geom.y)]], "geometry_type": "point", "properties": props})
-                        elif geom.geom_type == "MultiPoint":
-                            for pt_geom in geom.geoms:
-                                all_features.append({"coordinates": [[float(pt_geom.x), float(pt_geom.y)]], "geometry_type": "point", "properties": props})
-                        elif geom.geom_type == "Polygon":
-                            all_features.append({"coordinates": [[float(x), float(y)] for x, y in geom.exterior.coords], "geometry_type": "polygon", "properties": props})
-                        elif geom.geom_type == "MultiPolygon":
-                            for poly in geom.geoms:
-                                all_features.append({"coordinates": [[float(x), float(y)] for x, y in poly.exterior.coords], "geometry_type": "polygon", "properties": props})
-
-                except Exception as e:
-                    traceback.print_exc()
-                    print(f"[GIS Viewport] Error processing layer '{layer_name}': {e}")
-
-            result_layers[layer_key] = all_features
+        result_layers = _extract_gis_overlay_layers(_gis, buffer_geom, requested_layers, simplify_tol, max_features)
 
         layer_summary = {k: len(v) for k, v in result_layers.items()}
         print(f"[GIS Viewport] Response: {layer_summary}")
@@ -5356,6 +5382,54 @@ def get_gis_viewport_layers():
     except Exception as e:
         traceback.print_exc()
         return fail(f"GIS viewport layers error: {e}", 500)
+
+
+@bp.route('/gis/near-segments', methods=['POST'])
+def get_gis_near_segments():
+    """Fetch GIS overlay features within ``radius`` metres of any provided segment point.
+
+    Data-driven alternative to ``/gis/viewport`` used by the Path Analysis map: a single
+    request covers every loaded segment, so the overlays are fetched once and never reload
+    on pan/zoom (Leaflet's canvas renderer culls off-screen geometry for free).
+
+    Request body:
+        {
+            "points": [[lon, lat], ...],   # segment coordinates (WGS84)
+            "radius": 200,                  # metres around each point (default 200)
+            "layers": ["footpath", ...],
+            "simplify_tol": 1.0             # optional metric Douglas-Peucker tolerance
+        }
+    """
+    try:
+        from shapely.geometry import MultiPoint
+
+        data = request.get_json(force=True) or {}
+        points = data.get('points', [])
+        radius = float(data.get('radius', 200) or 200)
+        requested_layers = data.get('layers', [])
+        simplify_tol = float(data.get('simplify_tol', 0) or 0)
+        max_features = min(int(data.get('max_features', 20000)), 40000)
+
+        coords = [(float(p[0]), float(p[1])) for p in points if p and len(p) >= 2]
+        if not coords:
+            return fail("points [[lon, lat], ...] is required", 400)
+
+        _gis = _get_gis()
+
+        # Union of a buffer around every segment, built in the metric CRS. Coarse circles
+        # (resolution=4) keep the unioned geometry cheap to intersect against.
+        mp_gdf = gpd.GeoDataFrame(geometry=[MultiPoint(coords)], crs="EPSG:4326").to_crs(_gis.store.metric_crs)
+        buffer_geom = mp_gdf.geometry.iloc[0].buffer(radius, resolution=4)
+
+        result_layers = _extract_gis_overlay_layers(_gis, buffer_geom, requested_layers, simplify_tol, max_features)
+
+        layer_summary = {k: len(v) for k, v in result_layers.items()}
+        print(f"[GIS NearSegments] {len(coords)} pts r={radius}m → {layer_summary}")
+        return ok({"ok": True, "layers": result_layers})
+
+    except Exception as e:
+        traceback.print_exc()
+        return fail(f"GIS near-segments error: {e}", 500)
 
 
 @bp.route("/<projectName>/gis/detect", methods=["POST"])
