@@ -123,6 +123,14 @@ interface TopRiskRow {
 interface EnrichedDetail {
   imageUrl?: string;
   topAttributes: { name: string; multiplier: number }[];
+  postImageUrl?: string;
+  postScores?: {
+    VB: number; VB_Band: number;
+    BB: number; BB_Band: number;
+    SB: number; SB_Band: number;
+    BP: number; BP_Band: number;
+    Overall: number; Overall_Band: number;
+  };
 }
 interface ProjectTreatmentSummary {
   project: string;
@@ -723,8 +731,13 @@ export default function ReportBuilderPage() {
         const data = await res.json();
         if (data.ok && Array.isArray(data.details)) {
           const map = new Map<string, EnrichedDetail>();
-          data.details.forEach((d: { project: string; segIndex: number; imageUrl?: string; topAttributes?: { name: string; multiplier: number }[] }) => {
-            map.set(`${d.project}_${d.segIndex}`, { imageUrl: d.imageUrl ?? undefined, topAttributes: d.topAttributes || [] });
+          data.details.forEach((d: { project: string; segIndex: number; imageUrl?: string; topAttributes?: { name: string; multiplier: number }[]; postImageUrl?: string; postScores?: any }) => {
+            map.set(`${d.project}_${d.segIndex}`, { 
+                imageUrl: d.imageUrl ?? undefined, 
+                topAttributes: d.topAttributes || [],
+                postImageUrl: d.postImageUrl ?? undefined,
+                postScores: d.postScores ?? undefined,
+            });
           });
           setEnrichedMap(map);
         }
@@ -940,6 +953,8 @@ export default function ReportBuilderPage() {
     return {
       imageUrl: fromMap?.imageUrl,
       topAttributes: topAttributes.length > 0 ? topAttributes : (fromMap?.topAttributes ?? []),
+      postImageUrl: fromMap?.postImageUrl,
+      postScores: fromMap?.postScores,
     };
   };
   const getSegmentTreatments = (row: TopRiskRow): number[] =>
@@ -1341,12 +1356,32 @@ export default function ReportBuilderPage() {
 
             <div style={{ flex: 1, background: "#fff", border: `2px solid ${RISK_COLORS[row._maxBand] || "#ddd"}`, borderRadius: 8, margin: "0 14px", display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
               {/* Image Section */}
-              <div style={{ height: 360, position: "relative", flexShrink: 0 }}>
-                <SegmentImage src={e.imageUrl} width="100%" height="100%" />
-                {/* Ranking Badge */}
-                <div style={{ position: "absolute", top: 16, left: 16, background: RISK_COLORS[row._maxBand] || "#333", color: "#fff", width: 48, height: 48, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: "bold", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
-                  {i + 1}
+              <div style={{ height: 360, position: "relative", flexShrink: 0, display: "flex" }}>
+                <div style={{ flex: 1, position: "relative", borderRight: t.length > 0 ? "1px solid #ddd" : "none" }}>
+                  {t.length > 0 && <div style={{ position: "absolute", top: 16, right: 16, background: "rgba(0,0,0,0.6)", color: "#fff", padding: "4px 12px", borderRadius: 16, fontSize: 12, zIndex: 10 }}>Original</div>}
+                  <SegmentImage src={e.imageUrl} width="100%" height="100%" />
+                  {/* Ranking Badge */}
+                  <div style={{ position: "absolute", top: 16, left: 16, background: RISK_COLORS[row._maxBand] || "#333", color: "#fff", width: 48, height: 48, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: "bold", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", zIndex: 10 }}>
+                    {i + 1}
+                  </div>
                 </div>
+                {t.length > 0 && (
+                  <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", background: "#f9f9f9" }}>
+                    {e.postImageUrl ? (
+                      <>
+                        <div style={{ position: "absolute", top: 16, right: 16, background: "rgba(0,0,0,0.6)", color: "#fff", padding: "4px 12px", borderRadius: 16, fontSize: 12, zIndex: 10 }}>Post Treatment</div>
+                        <SegmentImage src={e.postImageUrl} width="100%" height="100%" />
+                      </>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#888", gap: 12 }}>
+                        <div style={{ fontSize: 14 }}>Post treatment photo missing</div>
+                        <button onClick={() => window.open(`/treatment/${encodeURIComponent(row._project)}?segment=${row._segIndex}`, "_blank")} style={{ padding: "8px 16px", background: "#a020d0", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
+                          Add Photo in Treatment App
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Content Section */}
@@ -1357,8 +1392,17 @@ export default function ReportBuilderPage() {
                     <div style={{ fontSize: 24, fontWeight: 700, color: "#1a1a2e", marginBottom: 4 }}>{dispName(row._project)}</div>
                     <div style={{ fontSize: 16, color: "#666" }}>Segment {row._segIndex}</div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 36, fontWeight: 800, color: RISK_COLORS[row._maxBand] || "#222", lineHeight: 1 }}>{row._sumScore.toFixed(1)}</div>
+                  <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {t.length > 0 && <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase" }}>Orig</div>}
+                      <div style={{ fontSize: 36, fontWeight: 800, color: RISK_COLORS[row._maxBand] || "#222", lineHeight: 1 }}>{row._sumScore.toFixed(1)}</div>
+                    </div>
+                    {t.length > 0 && e.postScores && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: "1px solid #eee", paddingTop: 8 }}>
+                        <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase" }}>Post</div>
+                        <div style={{ fontSize: 36, fontWeight: 800, color: RISK_COLORS[e.postScores.Overall_Band] || "#222", lineHeight: 1 }}>{e.postScores.Overall.toFixed(1)}</div>
+                      </div>
+                    )}
                     <div style={{ fontSize: 12, color: "#888", textTransform: "uppercase", letterSpacing: 1, marginTop: 4 }}>Risk Score</div>
                   </div>
                 </div>
@@ -1412,9 +1456,28 @@ export default function ReportBuilderPage() {
                     return (
                       <div key={ct} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>{CRASH_TYPE_LABELS[ct] || ct}</div>
-                        <div style={{ fontSize: 24, fontWeight: 700, color: RISK_COLORS[band] || "#333" }}>{score.toFixed(1)}</div>
-                        <div style={{ padding: "4px 12px", borderRadius: 12, background: RISK_COLORS[band] || "#eee", color: band === 2 ? "#333" : "#fff", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
-                          {RISK_LABELS[band] || "None"}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", alignItems: "center" }}>
+                          {/* Original Score */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", justifyContent: "center" }}>
+                            {t.length > 0 && <div style={{ fontSize: 10, color: "#999", width: 40, textAlign: "right" }}>Orig</div>}
+                            <div style={{ fontSize: 24, fontWeight: 700, color: RISK_COLORS[band] || "#333", width: 40, textAlign: "center" }}>{score.toFixed(1)}</div>
+                            <div style={{ padding: "4px 12px", borderRadius: 12, background: RISK_COLORS[band] || "#eee", color: band === 2 ? "#333" : "#fff", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", width: 80, textAlign: "center" }}>
+                              {RISK_LABELS[band] || "None"}
+                            </div>
+                          </div>
+                          
+                          {/* Post Treatment Score */}
+                          {t.length > 0 && e.postScores && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", justifyContent: "center", borderTop: "1px solid #eee", paddingTop: 8 }}>
+                              <div style={{ fontSize: 10, color: "#999", width: 40, textAlign: "right" }}>Post</div>
+                              <div style={{ fontSize: 24, fontWeight: 700, color: RISK_COLORS[e.postScores[`${ct}_Band` as keyof typeof e.postScores]] || "#333", width: 40, textAlign: "center" }}>
+                                {e.postScores[ct as keyof typeof e.postScores].toFixed(1)}
+                              </div>
+                              <div style={{ padding: "4px 12px", borderRadius: 12, background: RISK_COLORS[e.postScores[`${ct}_Band` as keyof typeof e.postScores]] || "#eee", color: e.postScores[`${ct}_Band` as keyof typeof e.postScores] === 2 ? "#333" : "#fff", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", width: 80, textAlign: "center" }}>
+                                {RISK_LABELS[e.postScores[`${ct}_Band` as keyof typeof e.postScores]] || "None"}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
