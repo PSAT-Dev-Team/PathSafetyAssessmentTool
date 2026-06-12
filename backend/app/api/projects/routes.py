@@ -1307,6 +1307,24 @@ def get_project_metadata(project_name: str):
         "last_updated": proj.metadata.last_updated.isoformat() if hasattr(proj.metadata, 'last_updated') and proj.metadata.last_updated else None
     })
 
+# Retired FO Type finer-attribute labels → current names. Applied at read time so
+# existing projects (including those created before the rename, on any device) always
+# serve the current labels to every front-end surface without needing a re-save.
+_FO_TYPE_RENAMES = {
+    "Pillar": "Covered Linkway Pole",
+    "Fence": "Railing",
+}
+
+
+def _normalize_fo_type(value):
+    """Rewrite legacy FO Type labels. FO Type is a comma-separated multi-select,
+    so each token is migrated independently. Non-string/empty values pass through."""
+    if not isinstance(value, str) or not value.strip():
+        return value
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    return ", ".join(_FO_TYPE_RENAMES.get(p, p) for p in parts)
+
+
 @bp.get("/<project_name>/versions/latest/attributes")
 def get_latest_attributes(project_name: str):
     """Return the latest attributes.csv (converted to JSON for front-end table rendering).
@@ -1360,6 +1378,13 @@ def get_latest_attributes(project_name: str):
                 attrs_df[GRADIENT_STATUS_FIELD] = None
                 stale_status = pd.Series(True, index=attrs_df.index)
             attrs_df.loc[no_grade & stale_status, GRADIENT_STATUS_FIELD] = GRADIENT_STATUS_NO_LIDAR_RESULT
+
+    # Migrate retired FO Type labels (e.g. "Pillar" → "Covered Linkway Pole") for all consumers.
+    if "FO Type" in attrs_df.columns:
+        if not attrs_copied:
+            attrs_df = attrs_df.copy()
+            attrs_copied = True
+        attrs_df["FO Type"] = attrs_df["FO Type"].map(_normalize_fo_type)
 
     return jsonify({"rows": df_to_records(attrs_df)})
 
