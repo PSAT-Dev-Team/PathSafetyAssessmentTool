@@ -847,7 +847,7 @@ export default function ReportBuilderPage() {
           // Since the section itself includes a header (about 60px), we reserve n full pages.
           return n * PAGE_H;
         }
-        if (!el.viewMode || el.viewMode === "tabular") return H + header + thead + n * 52 + 24;
+        if (el.viewMode === "tabular") return H + header + thead + n * 52 + 24;
         return H + header + Math.ceil(n / 3) * 240 + 24; // grid
       }
       case "treatmentSummary": {
@@ -1346,22 +1346,8 @@ export default function ReportBuilderPage() {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px 8px", borderTop: "1px dashed #e0d8f0", background: "transparent" }} onPointerDown={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 10, color: "#aaa", marginRight: 2, width: 30 }}>View:</span>
-          {(["grid", "tabular", "full-page"] as ViewMode[]).map((mode) => {
-            const active = (el.viewMode || "tabular") === mode;
-            return (
-              <button key={mode}
-                style={{ padding: "2px 9px", borderRadius: 10, border: `1px solid ${active ? "#a020d0" : "#ddd"}`, background: active ? "#f0e4f8" : "#fff", color: active ? "#a020d0" : "#777", cursor: "pointer", fontSize: 10, fontWeight: active ? 700 : 400 }}
-                onClick={(e) => { e.stopPropagation(); updateElement(el.id, { viewMode: mode }); setTimeout(autoFitElements, 50); }}
-                onMouseDown={(e) => e.stopPropagation()}>
-                {mode === "grid" ? "Grid" : mode === "tabular" ? "Tabular" : "Full Page"}
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
           <span style={{ fontSize: 10, color: "#aaa", marginRight: 2, width: 30 }}>Top:</span>
-          {[3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+          {[3, 5, 10].map((n) => {
             const active = topN === n;
             return (
               <button key={n}
@@ -2007,7 +1993,7 @@ export default function ReportBuilderPage() {
 
       // ── Top Risk Stretches ─────────────────────────────────────────────────
       case "topRisk": {
-        const viewMode = el.viewMode || "tabular";
+        const viewMode = el.viewMode || "full-page";
         const displayRows = topRiskRows.slice(0, el.topN ?? 10);
 
         if (viewMode === "full-page") {
