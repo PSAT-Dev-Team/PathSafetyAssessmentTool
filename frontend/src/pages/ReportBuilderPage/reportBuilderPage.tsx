@@ -1425,9 +1425,6 @@ export default function ReportBuilderPage() {
                       <button onClick={() => handleUploadTreatmentImageClick(row._project, row._segIndex)} style={{ padding: "8px 16px", background: "#a020d0", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
                         Upload Treatment Image
                       </button>
-                      <button onClick={() => window.open(`/treatment/${encodeURIComponent(row._project)}?segment=${row._segIndex}`, "_blank")} style={{ padding: "6px 14px", background: "transparent", color: "#a020d0", border: "1px solid #a020d0", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                        Add Photo in Treatment App
-                      </button>
                     </div>
                   )}
                 </div>
