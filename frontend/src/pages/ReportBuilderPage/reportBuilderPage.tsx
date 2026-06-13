@@ -513,6 +513,7 @@ export default function ReportBuilderPage() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const hasAutoFit = useRef(false);
+  const postTreatmentUploadRef = useRef<HTMLInputElement>(null);
 
   // ── State: auto-restored from localStorage if a saved layout exists ──────
   const [elements, setElements] = useState<ElementState[]>(() => {
@@ -576,6 +577,7 @@ export default function ReportBuilderPage() {
   // ── Treatment data ────────────────────────────────────────────────────────
   const [treatmentSummaries, setTreatmentSummaries] = useState<ProjectTreatmentSummary[]>([]);
   const [segmentTreatmentMap, setSegmentTreatmentMap] = useState<Map<string, number[]>>(new Map());
+  const [uploadingSegment, setUploadingSegment] = useState<{ project: string; segIndex: number } | null>(null);
 
   // ── Project metadata (name, dates, length) ────────────────────────────────
   const [projectMeta, setProjectMeta] = useState<Record<string, { dateCreated?: string; lastUpdated?: string; lengthKm?: number }>>({});
@@ -959,6 +961,52 @@ export default function ReportBuilderPage() {
   };
   const getSegmentTreatments = (row: TopRiskRow): number[] =>
     segmentTreatmentMap.get(`${row._project}_${row._segIndex}`) ?? [];
+
+  // ── Post-treatment image upload ───────────────────────────────────────────
+  const handleUploadTreatmentImageClick = (project: string, segIndex: number) => {
+    setUploadingSegment({ project, segIndex });
+    postTreatmentUploadRef.current?.click();
+  };
+
+  const handlePostTreatmentFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingSegment) return;
+    e.target.value = "";
+    const { project, segIndex } = uploadingSegment;
+    setUploadingSegment(null);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(project)}/segments/${segIndex}/post-treatment-image`,
+        { method: "POST", body: formData }
+      );
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      // Refresh enriched map for this segment so the new image appears immediately
+      const detailsRes = await fetch("/api/report/segment-details", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segments: [{ project, segIndex }] }),
+      });
+      const detailsData = await detailsRes.json();
+      if (detailsData.ok && Array.isArray(detailsData.details)) {
+        setEnrichedMap((prev) => {
+          const next = new Map(prev);
+          detailsData.details.forEach((d: { project: string; segIndex: number; imageUrl?: string; topAttributes?: { name: string; multiplier: number }[]; postImageUrl?: string; postScores?: any }) => {
+            next.set(`${d.project}_${d.segIndex}`, {
+              imageUrl: d.imageUrl ?? undefined,
+              topAttributes: d.topAttributes || [],
+              postImageUrl: d.postImageUrl ?? undefined,
+              postScores: d.postScores ?? undefined,
+            });
+          });
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error("Post-treatment image upload failed:", err);
+      alert("Upload failed. Please try again.");
+    }
+  };
 
   // ── Display-name helpers ──────────────────────────────────────────────────
   const dispName = useCallback(
@@ -1357,31 +1405,32 @@ export default function ReportBuilderPage() {
             <div style={{ flex: 1, background: "#fff", border: `2px solid ${RISK_COLORS[row._maxBand] || "#ddd"}`, borderRadius: 8, margin: "0 14px", display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
               {/* Image Section */}
               <div style={{ height: 360, position: "relative", flexShrink: 0, display: "flex" }}>
-                <div style={{ flex: 1, position: "relative", borderRight: t.length > 0 ? "1px solid #ddd" : "none" }}>
-                  {t.length > 0 && <div style={{ position: "absolute", top: 16, right: 16, background: "rgba(0,0,0,0.6)", color: "#fff", padding: "4px 12px", borderRadius: 16, fontSize: 12, zIndex: 10 }}>Original</div>}
+                <div style={{ flex: 1, position: "relative", borderRight: "1px solid #ddd" }}>
+                  <div style={{ position: "absolute", top: 16, right: 16, background: "rgba(0,0,0,0.6)", color: "#fff", padding: "4px 12px", borderRadius: 16, fontSize: 12, zIndex: 10 }}>Original</div>
                   <SegmentImage src={e.imageUrl} width="100%" height="100%" />
                   {/* Ranking Badge */}
                   <div style={{ position: "absolute", top: 16, left: 16, background: RISK_COLORS[row._maxBand] || "#333", color: "#fff", width: 48, height: 48, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: "bold", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", zIndex: 10 }}>
                     {i + 1}
                   </div>
                 </div>
-                {t.length > 0 && (
-                  <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", background: "#f9f9f9" }}>
-                    {e.postImageUrl ? (
-                      <>
-                        <div style={{ position: "absolute", top: 16, right: 16, background: "rgba(0,0,0,0.6)", color: "#fff", padding: "4px 12px", borderRadius: 16, fontSize: 12, zIndex: 10 }}>Post Treatment</div>
-                        <SegmentImage src={e.postImageUrl} width="100%" height="100%" />
-                      </>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#888", gap: 12 }}>
-                        <div style={{ fontSize: 14 }}>Post treatment photo missing</div>
-                        <button onClick={() => window.open(`/treatment/${encodeURIComponent(row._project)}?segment=${row._segIndex}`, "_blank")} style={{ padding: "8px 16px", background: "#a020d0", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
-                          Add Photo in Treatment App
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", background: "#f9f9f9" }}>
+                  {e.postImageUrl ? (
+                    <>
+                      <div style={{ position: "absolute", top: 16, right: 16, background: "rgba(0,0,0,0.6)", color: "#fff", padding: "4px 12px", borderRadius: 16, fontSize: 12, zIndex: 10 }}>Post Treatment</div>
+                      <SegmentImage src={e.postImageUrl} width="100%" height="100%" />
+                    </>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#888", gap: 12 }}>
+                      <div style={{ fontSize: 14 }}>Post treatment photo missing</div>
+                      <button onClick={() => handleUploadTreatmentImageClick(row._project, row._segIndex)} style={{ padding: "8px 16px", background: "#a020d0", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
+                        Upload Treatment Image
+                      </button>
+                      <button onClick={() => window.open(`/treatment/${encodeURIComponent(row._project)}?segment=${row._segIndex}`, "_blank")} style={{ padding: "6px 14px", background: "transparent", color: "#a020d0", border: "1px solid #a020d0", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+                        Add Photo in Treatment App
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Content Section */}
@@ -2367,6 +2416,13 @@ export default function ReportBuilderPage() {
   // ── Page ──────────────────────────────────────────────────────────────────
   return (
     <div className="rb-page">
+      <input
+        ref={postTreatmentUploadRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handlePostTreatmentFileChange}
+      />
       <div className="rb-toolbar">
         <button className="rb-btn rb-btn-secondary" onClick={() => navigate(-1)}>← Back</button>
         <button className="rb-btn rb-btn-secondary" onClick={() => navigate("/analysis/path")} title="Go to Path Analysis to download table or image exports">↗ Path Analysis</button>
