@@ -1392,20 +1392,35 @@ export default function ReportBuilderPage() {
         return (
           <div key={i} style={{ height, boxSizing: "border-box", paddingBottom: isLast ? 0 : PAGE_GAP, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             {isFirst ? (
-              <div style={{ padding: "8px 12px 12px", flexShrink: 0 }}>
-                <EditableText value={secTitle(elId, "Top Risk Stretches")} onChange={(val) => setSecTitle(elId, val)} style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e" }} />
-                <div style={{ fontSize: 10, color: "#999" }}>Ranked highest to lowest · Before risk factors & after treatments applied</div>
+              <div style={{ padding: "8px 12px 12px", flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+                    <EditableText value={secTitle(elId, "Top Risk Stretches")} onChange={(val) => setSecTitle(elId, val)} style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e" }} />
+                    <div style={{ color: "#ddd", fontSize: 20 }}>|</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: "#1a1a2e" }}>
+                      {dispName(row._project)} <span style={{ color: "#666", fontWeight: 400, fontSize: 18 }}>Segment {row._segIndex}</span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 10, color: "#999" }}>Ranked highest to lowest · Before risk factors & after treatments applied</div>
+                </div>
               </div>
             ) : (
-              <div style={{ padding: "10px 14px 12px", flexShrink: 0, fontSize: 20, fontWeight: 600, color: "#1a1a2e" }}>
-                {secTitle(elId, "Top Risk Stretches")} <span style={{ color: "#aaa", fontWeight: 500 }}>(#{i + 1})</span>
+              <div style={{ padding: "10px 14px 12px", flexShrink: 0, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: "#1a1a2e" }}>
+                  {secTitle(elId, "Top Risk Stretches")} <span style={{ color: "#aaa", fontWeight: 500 }}>(#{i + 1})</span>
+                </div>
+                <div style={{ color: "#ddd", fontSize: 20 }}>|</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#1a1a2e" }}>
+                  {dispName(row._project)} <span style={{ color: "#666", fontWeight: 400, fontSize: 18 }}>Segment {row._segIndex}</span>
+                </div>
               </div>
             )}
 
             <div style={{ flex: 1, background: "#fff", border: `2px solid ${RISK_COLORS[row._maxBand] || "#ddd"}`, borderRadius: 8, margin: "0 14px", display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
-              {/* Image Section */}
-              <div style={{ height: 360, position: "relative", flexShrink: 0, display: "flex" }}>
-                <div style={{ flex: 1, position: "relative", borderRight: "1px solid #ddd" }}>
+              {/* Top Row: Original */}
+              <div style={{ flex: "1 1 50%", borderBottom: "1px solid #ddd", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                {/* Image Section */}
+                <div style={{ flex: 1, position: "relative", flexShrink: 1, minHeight: 0 }}>
                   <div style={{ position: "absolute", top: 16, right: 16, background: "rgba(0,0,0,0.6)", color: "#fff", padding: "4px 12px", borderRadius: 16, fontSize: 12, zIndex: 10 }}>Original</div>
                   <SegmentImage src={e.imageUrl} width="100%" height="100%" />
                   {/* Ranking Badge */}
@@ -1413,121 +1428,145 @@ export default function ReportBuilderPage() {
                     {i + 1}
                   </div>
                 </div>
-                <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", background: "#f9f9f9" }}>
+
+                {/* Content Section */}
+                <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12, overflow: "hidden", flexShrink: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24 }}>
+                    {/* Main Factors */}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#a020d0", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 6 }}>Top Contributing Attribute</div>
+                      {e.topAttributes.length > 0 ? (
+                        <div style={{ fontSize: 16, color: "#333", fontWeight: 500, display: "flex", alignItems: "center" }}>
+                          <span style={{ marginRight: 8, color: "#cc2200" }}>⚠️</span>
+                          {e.topAttributes[0].name}
+                          <span style={{ marginLeft: 12, fontSize: 12, color: "#cc2200", fontWeight: 700, background: "#fdeded", padding: "2px 8px", borderRadius: 12 }}>+{e.topAttributes[0].multiplier.toFixed(1)}</span>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 14, color: "#bbb", fontStyle: "italic" }}>No contributing factors identified</div>
+                      )}
+
+                      {e.topAttributes.length > 1 && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>Other significant factors:</div>
+                          <ul style={{ margin: 0, paddingLeft: 18, color: "#555", fontSize: 12, lineHeight: 1.4 }}>
+                            {e.topAttributes.slice(1).map((a, j) => (
+                              <li key={j}>{a.name} <span style={{ color: "#cc2200", fontWeight: 600 }}>(+{a.multiplier.toFixed(1)})</span></li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                    {/* Header: Score */}
+                    <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontSize: 32, fontWeight: 800, color: RISK_COLORS[row._maxBand] || "#222", lineHeight: 1 }}>{row._sumScore.toFixed(1)}</div>
+                      </div>
+                      <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 1, marginTop: 4 }}>Original Risk Score</div>
+                    </div>
+                  </div>
+
+                  <div style={{ flex: 1, minHeight: 8 }} /> {/* Spacer */}
+
+                  {/* Crash Type Scores */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, background: "#faf8fd", padding: "8px 12px", borderRadius: 8, border: "1px solid #ede8f5", flexShrink: 0 }}>
+                    {(["VB", "BB", "SB", "BP"] as const).map((ct) => {
+                      const band = row[`${ct} Band` as keyof TopRiskRow] as number;
+                      const score = row[ct as keyof TopRiskRow] as number;
+                      return (
+                        <div key={ct} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#555", whiteSpace: "nowrap" }}>{CRASH_TYPE_LABELS[ct] || ct}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, width: "100%", justifyContent: "center" }}>
+                            <div style={{ fontSize: 18, fontWeight: 700, color: RISK_COLORS[band] || "#333", minWidth: 32, textAlign: "right" }}>{score.toFixed(1)}</div>
+                            <div style={{ padding: "2px 6px", borderRadius: 8, background: RISK_COLORS[band] || "#eee", color: band === 2 ? "#333" : "#fff", fontSize: 9, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", minWidth: 50, textAlign: "center", whiteSpace: "nowrap" }}>
+                              {RISK_LABELS[band] || "None"}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Row: Post Treatment */}
+              <div style={{ flex: "1 1 50%", display: "flex", flexDirection: "column", background: "#fcfcfc", overflow: "hidden" }}>
+                {/* Image Section */}
+                <div style={{ flex: 1, position: "relative", flexShrink: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#f9f9f9" }}>
                   {e.postImageUrl ? (
                     <>
                       <div style={{ position: "absolute", top: 16, right: 16, background: "rgba(0,0,0,0.6)", color: "#fff", padding: "4px 12px", borderRadius: 16, fontSize: 12, zIndex: 10 }}>Post Treatment</div>
                       <SegmentImage src={e.postImageUrl} width="100%" height="100%" />
+                      <button 
+                        data-html2canvas-ignore="true"
+                        onClick={() => handleUploadTreatmentImageClick(row._project, row._segIndex)} 
+                        style={{ position: "absolute", bottom: 16, right: 16, background: "rgba(160, 32, 208, 0.9)", color: "#fff", border: "none", padding: "6px 12px", borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: "pointer", zIndex: 10, boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}
+                      >
+                        Change Image
+                      </button>
                     </>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", color: "#888", gap: 12 }}>
                       <div style={{ fontSize: 14 }}>Post treatment photo missing</div>
-                      <button onClick={() => handleUploadTreatmentImageClick(row._project, row._segIndex)} style={{ padding: "8px 16px", background: "#a020d0", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
+                      <button data-html2canvas-ignore="true" onClick={() => handleUploadTreatmentImageClick(row._project, row._segIndex)} style={{ padding: "8px 16px", background: "#a020d0", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
                         Upload Treatment Image
                       </button>
                     </div>
                   )}
                 </div>
-              </div>
 
-              {/* Content Section */}
-              <div style={{ flex: 1, padding: "24px 32px", display: "flex", flexDirection: "column", gap: 20, overflow: "auto" }}>
-                {/* Header: Project & Segment & Score */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #eee", paddingBottom: 16 }}>
-                  <div>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: "#1a1a2e", marginBottom: 4 }}>{dispName(row._project)}</div>
-                    <div style={{ fontSize: 16, color: "#666" }}>Segment {row._segIndex}</div>
-                  </div>
-                  <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {t.length > 0 && <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase" }}>Orig</div>}
-                      <div style={{ fontSize: 36, fontWeight: 800, color: RISK_COLORS[row._maxBand] || "#222", lineHeight: 1 }}>{row._sumScore.toFixed(1)}</div>
-                    </div>
-                    {t.length > 0 && e.postScores && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: "1px solid #eee", paddingTop: 8 }}>
-                        <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase" }}>Post</div>
-                        <div style={{ fontSize: 36, fontWeight: 800, color: RISK_COLORS[e.postScores.Overall_Band] || "#222", lineHeight: 1 }}>{e.postScores.Overall.toFixed(1)}</div>
-                      </div>
-                    )}
-                    <div style={{ fontSize: 12, color: "#888", textTransform: "uppercase", letterSpacing: 1, marginTop: 4 }}>Risk Score</div>
-                  </div>
-                </div>
-
-                {/* Main Factors */}
-                <div style={{ display: "flex", gap: 40 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#a020d0", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 12 }}>Top Contributing Attribute</div>
-                    {e.topAttributes.length > 0 ? (
-                      <div style={{ fontSize: 18, color: "#333", fontWeight: 500, display: "flex", alignItems: "center" }}>
-                        <span style={{ marginRight: 8, color: "#cc2200" }}>⚠️</span>
-                        {e.topAttributes[0].name}
-                        <span style={{ marginLeft: 12, fontSize: 14, color: "#cc2200", fontWeight: 700, background: "#fdeded", padding: "2px 8px", borderRadius: 12 }}>+{e.topAttributes[0].multiplier.toFixed(1)}</span>
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 16, color: "#bbb", fontStyle: "italic" }}>No contributing factors identified</div>
-                    )}
-
-                    {e.topAttributes.length > 1 && (
-                      <div style={{ marginTop: 16 }}>
-                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>Other significant factors:</div>
-                        <ul style={{ margin: 0, paddingLeft: 18, color: "#555", fontSize: 13, lineHeight: 1.6 }}>
-                          {e.topAttributes.slice(1).map((a, j) => (
-                            <li key={j}>{a.name} <span style={{ color: "#cc2200", fontWeight: 600 }}>(+{a.multiplier.toFixed(1)})</span></li>
-                          ))}
+                {/* Content Section */}
+                <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12, overflow: "hidden", flexShrink: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24 }}>
+                    {/* Applied Treatments */}
+                    <div style={{ flex: 1, background: "#f5fbf6", padding: "10px 14px", borderRadius: 8, border: "1px solid #c8e8d0" }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#27ae60", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>Applied Treatments</div>
+                      {t.length > 0 ? (
+                        <ul style={{ margin: 0, paddingLeft: 16, color: "#226633", fontSize: 11, lineHeight: 1.4 }}>
+                          {t.map(id => <li key={id}>{TREATMENT_NAMES[id] ?? `Treatment ${id}`}</li>)}
                         </ul>
+                      ) : (
+                        <div style={{ fontSize: 11, color: "#88ca99", fontStyle: "italic" }}>No treatments applied</div>
+                      )}
+                    </div>
+                    {/* Header: Score */}
+                    <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {t.length > 0 && e.postScores ? (
+                          <div style={{ fontSize: 32, fontWeight: 800, color: RISK_COLORS[e.postScores.Overall_Band] || "#222", lineHeight: 1 }}>{e.postScores.Overall.toFixed(1)}</div>
+                        ) : (
+                          <div style={{ fontSize: 32, fontWeight: 800, color: "#ccc", lineHeight: 1 }}>—</div>
+                        )}
                       </div>
-                    )}
+                      <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 1, marginTop: 4 }}>Post Treatment Score</div>
+                    </div>
                   </div>
 
-                  {/* Applied Treatments */}
-                  <div style={{ width: 280, flexShrink: 0, background: "#f5fbf6", padding: 16, borderRadius: 8, border: "1px solid #c8e8d0" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#27ae60", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 10 }}>Applied Treatments</div>
-                    {t.length > 0 ? (
-                      <ul style={{ margin: 0, paddingLeft: 16, color: "#226633", fontSize: 12, lineHeight: 1.5 }}>
-                        {t.map(id => <li key={id}>{TREATMENT_NAMES[id] ?? `Treatment ${id}`}</li>)}
-                      </ul>
-                    ) : (
-                      <div style={{ fontSize: 12, color: "#88ca99", fontStyle: "italic" }}>No treatments applied</div>
-                    )}
-                  </div>
-                </div>
+                  <div style={{ flex: 1, minHeight: 8 }} /> {/* Spacer */}
 
-                <div style={{ flex: 1, minHeight: 20 }} /> {/* Spacer */}
-
-                {/* Crash Type Scores */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, background: "#faf8fd", padding: 16, borderRadius: 8, border: "1px solid #ede8f5", flexShrink: 0 }}>
-                  {(["VB", "BB", "SB", "BP"] as const).map((ct) => {
-                    const band = row[`${ct} Band` as keyof TopRiskRow] as number;
-                    const score = row[ct as keyof TopRiskRow] as number;
-                    return (
-                      <div key={ct} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>{CRASH_TYPE_LABELS[ct] || ct}</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", alignItems: "center" }}>
-                          {/* Original Score */}
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", justifyContent: "center" }}>
-                            {t.length > 0 && <div style={{ fontSize: 10, color: "#999", width: 40, textAlign: "right" }}>Orig</div>}
-                            <div style={{ fontSize: 24, fontWeight: 700, color: RISK_COLORS[band] || "#333", width: 40, textAlign: "center" }}>{score.toFixed(1)}</div>
-                            <div style={{ padding: "4px 12px", borderRadius: 12, background: RISK_COLORS[band] || "#eee", color: band === 2 ? "#333" : "#fff", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", width: 80, textAlign: "center" }}>
-                              {RISK_LABELS[band] || "None"}
+                  {/* Crash Type Scores */}
+                  {t.length > 0 && e.postScores ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, background: "#faf8fd", padding: "8px 12px", borderRadius: 8, border: "1px solid #ede8f5", flexShrink: 0 }}>
+                      {(["VB", "BB", "SB", "BP"] as const).map((ct) => {
+                        const band = e.postScores![`${ct}_Band` as keyof typeof e.postScores] as number;
+                        const score = e.postScores![ct as keyof typeof e.postScores] as number;
+                        return (
+                          <div key={ct} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "#555", whiteSpace: "nowrap" }}>{CRASH_TYPE_LABELS[ct] || ct}</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, width: "100%", justifyContent: "center" }}>
+                              <div style={{ fontSize: 18, fontWeight: 700, color: RISK_COLORS[band] || "#333", minWidth: 32, textAlign: "right" }}>{score.toFixed(1)}</div>
+                              <div style={{ padding: "2px 6px", borderRadius: 8, background: RISK_COLORS[band] || "#eee", color: band === 2 ? "#333" : "#fff", fontSize: 9, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", minWidth: 50, textAlign: "center", whiteSpace: "nowrap" }}>
+                                {RISK_LABELS[band] || "None"}
+                              </div>
                             </div>
                           </div>
-                          
-                          {/* Post Treatment Score */}
-                          {t.length > 0 && e.postScores && (
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", justifyContent: "center", borderTop: "1px solid #eee", paddingTop: 8 }}>
-                              <div style={{ fontSize: 10, color: "#999", width: 40, textAlign: "right" }}>Post</div>
-                              <div style={{ fontSize: 24, fontWeight: 700, color: RISK_COLORS[e.postScores[`${ct}_Band` as keyof typeof e.postScores]] || "#333", width: 40, textAlign: "center" }}>
-                                {e.postScores[ct as keyof typeof e.postScores].toFixed(1)}
-                              </div>
-                              <div style={{ padding: "4px 12px", borderRadius: 12, background: RISK_COLORS[e.postScores[`${ct}_Band` as keyof typeof e.postScores]] || "#eee", color: e.postScores[`${ct}_Band` as keyof typeof e.postScores] === 2 ? "#333" : "#fff", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", width: 80, textAlign: "center" }}>
-                                {RISK_LABELS[e.postScores[`${ct}_Band` as keyof typeof e.postScores]] || "None"}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#fcfcfc", padding: 16, borderRadius: 8, border: "1px dashed #e0e0e0", flexShrink: 0, height: 104 }}>
+                      <div style={{ fontSize: 14, color: "#aaa" }}>No post-treatment scores available</div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
